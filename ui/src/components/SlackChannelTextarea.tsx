@@ -123,7 +123,14 @@ export function SlackChannelTextarea({
       <Textarea
         autoResize={!bare}
         variant={bare ? "plain" : "default"}
-        className={bare ? undefined : className}
+        className={
+          bare
+            ? undefined
+            : cn(
+                "[&>div]:border-strong/70 [&>div:hover:not(:focus-within)]:border-strong",
+                className
+              )
+        }
         inputClassName={bare ? className : undefined}
         size="md"
         {...field}

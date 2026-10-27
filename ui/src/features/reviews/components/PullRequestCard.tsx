@@ -152,7 +152,7 @@ export function PullRequestCard({
               className="block h-auto max-w-full border-0 px-0 text-left whitespace-normal hover:underline"
               onClick={onSelect}
             >
-              <Text as="span" variant="h5" weight="medium">
+              <Text as="span" variant="h5" weight="medium" color="primary">
                 {pr.title}
               </Text>
             </Button>

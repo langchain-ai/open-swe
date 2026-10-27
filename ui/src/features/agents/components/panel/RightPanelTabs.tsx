@@ -560,7 +560,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         variant="plain"
                         size="sm"
                         type="button"
-                        className="group/close relative size-4 shrink-0 cursor-pointer justify-center p-0 hover:bg-surface-level-2"
+                        className="group/close relative size-4 shrink-0 cursor-pointer justify-center p-0 text-inherit hover:bg-surface-level-2"
                         aria-label={`Close ${title}`}
                         onClick={() => props.onCloseSurface(surface)}
                       >
@@ -587,7 +587,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           type="button"
                           role="tab"
                           aria-selected={active}
-                          className="min-w-0 shrink cursor-pointer"
+                          className="h-auto min-w-0 shrink cursor-pointer px-0 text-inherit hover:bg-transparent dark:hover:bg-transparent"
                           onClick={() => props.onActivate(surface)}
                         >
                           <span className="truncate">{title}</span>

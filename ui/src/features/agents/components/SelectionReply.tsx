@@ -355,6 +355,7 @@ export function SelectionReply({
       </p>
       <div className="flex items-center gap-space-1">
         <Input
+          inputContainerClassName="border-strong/70 [&:hover:not(:focus-within)]:border-strong"
           size="sm"
           debounceMs={0}
           ref={inputRef}

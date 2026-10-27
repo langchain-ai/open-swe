@@ -154,7 +154,7 @@ function ReviewChatActionList({
         <Button
           color="secondary"
           variant="plain"
-          size="xs"
+          size="sm"
           aria-label={`${action.range.file}:${rangeLabel(action.range)}`}
           type="button"
           onClick={() => review.showInDiff(action.range)}

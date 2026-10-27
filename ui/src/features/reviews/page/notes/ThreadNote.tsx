@@ -159,7 +159,8 @@ export function ThreadSummary({
       color="secondary"
       variant="plain"
       size="sm"
-      aria-label={`${location ? `${location}: ` : ""}${displayName(first.author)}: ${plainFirstLine(first.body)}`}
+      aria-label={`${location ? `${location}: ` : ""}${displayName(first.author)}: ${plainFirstLine(first.body)}${thread.comments.length > 1 ? `, ${thread.comments.length} comments` : ""}${thread.resolved ? ", Resolved" : thread.outdated ? ", Outdated" : ""}`}
+      aria-expanded={false}
       type="button"
       onClick={onOpen}
       className="h-auto w-full min-w-0 flex-col justify-start gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover"

@@ -385,7 +385,7 @@ function Conversation({
         <Button
           color="secondary"
           variant="plain"
-          size="xs"
+          size="sm"
           aria-label={
             open
               ? "Show less"

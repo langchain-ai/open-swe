@@ -35,7 +35,7 @@ export function TurnFoldRow({
       <Button
         color="secondary"
         variant="plain"
-        size="xs"
+        size="sm"
         aria-label={label}
         type="button"
         aria-expanded={expanded}

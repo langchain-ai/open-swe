@@ -66,7 +66,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
               <Button
                 color="secondary"
                 variant="plain"
-                size="xs"
+                size="sm"
                 aria-label={`${linesLeft.toLocaleString()} lines left`}
                 type="button"
                 title="Go to the next file you haven't viewed"

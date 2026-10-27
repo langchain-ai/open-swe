@@ -411,7 +411,7 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
       <Button
         color="secondary"
         variant="plain"
-        size="xs"
+        size="sm"
         aria-label={`${authors.join(", ")} pushed ${plural(commits.length, "commit")}`}
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -617,7 +617,7 @@ function ItemBlock({
           <Button
             color="secondary"
             variant="plain"
-            size="xs"
+            size="sm"
             aria-label={plainFirstLine(item.body)}
             type="button"
             onClick={() => setOpen(true)}

@@ -152,6 +152,7 @@ export function RepoSelector({
               variant="plain"
               size="sm"
               aria-label={emptySelectionLabel}
+              aria-pressed={selectedRepo === null}
               type="button"
               onClick={() => {
                 onRepoChange(null)
@@ -187,6 +188,7 @@ export function RepoSelector({
                     variant="plain"
                     size="sm"
                     aria-label={`${repo.full_name}${repo.private === undefined ? "" : ` ${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`}`}
+                    aria-pressed={selected}
                     key={repo.full_name}
                     type="button"
                     title={repo.full_name}

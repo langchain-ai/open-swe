@@ -172,6 +172,7 @@ export function SkillsPage() {
                 variant="plain"
                 size="sm"
                 aria-label={`${skill.name} ${skill.description}`}
+                aria-pressed={selectedName === skill.name}
                 key={skill.name}
                 type="button"
                 onClick={() => select(skill)}
@@ -179,7 +180,7 @@ export function SkillsPage() {
                   "h-auto flex-col items-start justify-start gap-0 whitespace-normal [&>span]:max-w-full",
                   "w-full px-space-2 py-space-2 text-left",
                   selectedName === skill.name
-                    ? "bg-selected"
+                    ? "bg-selected hover:bg-selected dark:hover:bg-selected"
                     : "hover:bg-surface-level-1-hover"
                 )}
               >

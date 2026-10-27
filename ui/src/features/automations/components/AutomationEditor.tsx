@@ -409,7 +409,7 @@ export function AutomationEditor({
           placeholder="Untitled automation"
           aria-label="Automation name"
           className="w-full"
-          inputContainerClassName="text-base font-medium"
+          inputContainerClassName="text-base font-medium border-strong/70 [&:hover:not(:focus-within)]:border-strong"
         />
 
         <div className="mt-space-3 flex items-center gap-space-3 text-xs">
@@ -488,7 +488,7 @@ export function AutomationEditor({
                       placeholder="0 9 * * 1-5"
                       aria-label="Cron schedule"
                       className="w-full"
-                      inputContainerClassName="font-mono"
+                      inputContainerClassName="font-mono border-strong/70 [&:hover:not(:focus-within)]:border-strong"
                     />
                   ) : (
                     <p className="text-sm text-primary">

@@ -147,7 +147,7 @@ function StandardUserMessage({ message }: { message: Message }) {
             <Button
               color="secondary"
               variant="plain"
-              size="xs"
+              size="sm"
               aria-label={expanded ? "Show less" : "Show more"}
               type="button"
               onClick={() => setExpanded((value) => !value)}

@@ -268,7 +268,7 @@ export function Header({
               <Button
                 color="secondary"
                 variant="plain"
-                size="xs"
+                size="sm"
                 aria-label={`${current.standing.headline}. Back to top`}
                 type="button"
                 inert={!carrying}

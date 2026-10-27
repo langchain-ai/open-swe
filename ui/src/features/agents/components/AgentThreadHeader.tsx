@@ -235,7 +235,7 @@ export function AgentThreadHeader({
                   aria-label="Thread title"
                   data-no-drag=""
                   className="min-w-0"
-                  inputContainerClassName="bg-surface-level-2"
+                  inputContainerClassName="bg-surface-level-2 border-strong/70 [&:hover:not(:focus-within)]:border-strong"
                   value={draft}
                   onChange={setDraft}
                   onBlur={() => void saveTitle()}

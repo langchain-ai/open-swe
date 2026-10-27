@@ -51,7 +51,7 @@ export function ReasoningBlock({
       <Button
         color="secondary"
         variant="plain"
-        size="xs"
+        size="sm"
         aria-label={isLive ? "Thinking..." : reasoningLabel(elapsedMs)}
         type="button"
         onClick={() => {

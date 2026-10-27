@@ -185,7 +185,7 @@ function Description({
         <Button
           color="secondary"
           variant="plain"
-          size="xs"
+          size="sm"
           aria-label={expanded ? "Show less" : "Show the whole description"}
           type="button"
           onClick={() => setExpanded((value) => !value)}

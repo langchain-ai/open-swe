@@ -1077,12 +1077,12 @@ function RepoGroup({
         <Button
           color="secondary"
           variant="plain"
-          size="sm"
+          size="md"
           aria-label={group.label}
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="h-auto min-w-0 flex-1 justify-start gap-space-2 py-space-1 text-left whitespace-normal"
+          className="h-auto min-w-0 flex-1 justify-start gap-space-2 py-space-1 text-left whitespace-normal text-primary hover:bg-transparent dark:hover:bg-transparent"
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>

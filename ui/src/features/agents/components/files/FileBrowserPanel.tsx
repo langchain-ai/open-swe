@@ -204,6 +204,7 @@ export function FileBrowserPanel({
           }}
         />
         <Input
+          inputContainerClassName="border-strong/70 [&:hover:not(:focus-within)]:border-strong"
           size="sm"
           debounceMs={0}
           type="text"

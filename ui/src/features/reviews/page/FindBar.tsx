@@ -100,6 +100,7 @@ export function FindBar() {
       className="absolute right-4 z-floating-bar flex items-center gap-space-1 rounded-lg border border-default bg-surface-level-1 py-space-1 pr-space-1 pl-space-3 shadow-md"
     >
       <Input
+        inputContainerClassName="border-strong/70 [&:hover:not(:focus-within)]:border-strong"
         size="sm"
         debounceMs={0}
         id={FIND_INPUT_ID}

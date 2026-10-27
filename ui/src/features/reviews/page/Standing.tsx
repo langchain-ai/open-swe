@@ -9,7 +9,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCircleText"
@@ -292,15 +292,23 @@ function Row({
   expanded?: boolean
   onToggle?: () => void
 }) {
+  const labelId = useId()
+  const summaryId = useId()
   const body = (
     <>
       <span className="flex size-4 shrink-0 items-center justify-center">
         {icon}
       </span>
-      <span className="w-[5.5rem] shrink-0 text-xs font-medium text-primary">
+      <span
+        id={labelId}
+        className="w-[5.5rem] shrink-0 text-xs font-medium text-primary"
+      >
         {label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-xs text-secondary">
+      <span
+        id={summaryId}
+        className="min-w-0 flex-1 truncate text-xs text-secondary"
+      >
         {children}
       </span>
     </>
@@ -312,11 +320,11 @@ function Row({
           color="secondary"
           variant="plain"
           size="sm"
-          aria-label={label}
+          aria-labelledby={`${labelId} ${summaryId}`}
           type="button"
           aria-expanded={expanded}
           onClick={onToggle}
-          className="-my-space-1 h-auto min-w-0 flex-1 justify-start gap-space-3 self-stretch py-space-1 text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="-my-space-1 h-auto min-w-0 flex-1 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
         >
           {body}
         </Button>
@@ -493,7 +501,7 @@ function ChecksRow({
                 <Button
                   color="secondary"
                   variant="plain"
-                  size="xs"
+                  size="sm"
                   aria-label="Ask why"
                   type="button"
                   onClick={() =>
@@ -568,7 +576,7 @@ function ReviewsRow({
               <Button
                 color="secondary"
                 variant="plain"
-                size="xs"
+                size="sm"
                 aria-label={`${unresolved} unresolved`}
                 type="button"
                 onClick={showOpenConversations}

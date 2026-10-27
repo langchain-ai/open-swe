@@ -880,7 +880,7 @@ function OutcomeCell({
       <Button
         color="secondary"
         variant="plain"
-        size="xs"
+        size="sm"
         aria-label={`${count} (${outcomePercent(group, outcome)}%)`}
         type="button"
         // A click pins the breakdown open instead of toggling it shut.
@@ -1045,7 +1045,7 @@ function PROutcomeCells({
               <Button
                 color="secondary"
                 variant="plain"
-                size="xs"
+                size="sm"
                 aria-label={
                   value == null ? "—" : `${(value / 100).toFixed(1)}%`
                 }
