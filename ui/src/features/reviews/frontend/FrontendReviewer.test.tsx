@@ -11,7 +11,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { FrontendReportView, FrontendReviewer } from "./FrontendReviewer"
-import { frontendReviewApi, type FrontendReviewRun } from "./api"
+import {
+  frontendReviewApi,
+  type FrontendReviewRun,
+  type FrontendScenario,
+} from "./api"
 
 const run: FrontendReviewRun = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -105,6 +109,127 @@ it("warns when a saved report covers a different PR commit and retains the repor
   rerender(<FrontendReportView run={completed} currentHeadSha={run.head_sha} />)
   expect(screen.queryByText("New PR changes have not been reviewed")).toBeNull()
   expect(screen.getByText("Review evidence")).toBeTruthy()
+})
+
+it("filters unchanged routes while preserving incomplete evidence and a sensible selection", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(null, { status: 404 })
+  )
+  const unchanged: FrontendScenario = {
+    id: "unchanged",
+    title: "Unchanged route",
+    path: "/unchanged",
+    status: "complete",
+    before_url:
+      "/dashboard/api/reviews/acme/app/7/frontend-reviews/run/media/before.png",
+    after_url:
+      "/dashboard/api/reviews/acme/app/7/frontend-reviews/run/media/after.png",
+    diff_url: null,
+    mask_url: null,
+    before_video_url: null,
+    after_video_url: null,
+    width: 100,
+    height: 100,
+    metrics: {
+      changed_pixels: 0,
+      total_pixels: 10_000,
+      changed_ratio: 0,
+      threshold: 18,
+    },
+    regions: [],
+    mask_rects: [],
+    tile_size: 24,
+    min_region_pixels: 4,
+    annotations: [],
+    error: null,
+  }
+  const scenarios: FrontendScenario[] = [
+    unchanged,
+    {
+      ...unchanged,
+      id: "changed",
+      title: "Changed route",
+      metrics: {
+        ...unchanged.metrics!,
+        changed_pixels: 500,
+        changed_ratio: 0.05,
+      },
+    },
+    { ...unchanged, id: "unknown", title: "Unknown route", metrics: null },
+    {
+      ...unchanged,
+      id: "blocked",
+      title: "Blocked route",
+      status: "blocked",
+      before_url: null,
+      after_url: null,
+      metrics: null,
+    },
+    {
+      ...unchanged,
+      id: "failed",
+      title: "Failed route",
+      status: "failed",
+      before_url: null,
+      after_url: null,
+      metrics: null,
+    },
+  ]
+  const captured: FrontendReviewRun = {
+    ...run,
+    status: "complete",
+    auth_mode: "none",
+    paths: scenarios.map((scenario) => scenario.path),
+    error: null,
+    report: { ...run.report!, summary: "Saved review", scenarios },
+  }
+  const { rerender } = render(<FrontendReportView run={captured} />)
+  expect(screen.getByRole("heading", { name: "Unchanged route" })).toBeTruthy()
+  expect(
+    screen.getByRole("button", {
+      name: "Changed route · complete · 5.00% recorded change",
+    })
+  ).toBeTruthy()
+
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Changes and incomplete" })
+  )
+  expect(screen.queryByRole("button", { name: /^Unchanged route/ })).toBeNull()
+  expect(screen.getByText("Showing 4/5 routes")).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "Changed route" })).toBeTruthy()
+  for (const title of ["Unknown route", "Blocked route", "Failed route"])
+    expect(
+      screen.getByRole("button", { name: new RegExp(`^${title}`) })
+    ).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: /^Failed route/ }))
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Changes and incomplete" })
+  )
+  expect(screen.getByRole("heading", { name: "Failed route" })).toBeTruthy()
+  expect(screen.getByText("Showing 5/5 routes")).toBeTruthy()
+
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Changes and incomplete" })
+  )
+  rerender(
+    <FrontendReportView
+      run={{
+        ...captured,
+        report: {
+          ...captured.report!,
+          scenarios: [unchanged],
+        },
+      }}
+    />
+  )
+  expect(screen.getByText("Showing 0/1 routes")).toBeTruthy()
+  expect(screen.getByText(/No recorded changes. Clear the filter/)).toBeTruthy()
+  expect(screen.queryByRole("region", { name: "Failed route" })).toBeNull()
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Changes and incomplete" })
+  )
+  expect(screen.getByRole("region", { name: "Unchanged route" })).toBeTruthy()
 })
 
 it("keeps an in-flight start disabled after remount and never navigates from its unmounted form", async () => {

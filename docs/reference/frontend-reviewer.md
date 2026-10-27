@@ -20,11 +20,23 @@ Each run freezes the current PR base and head SHAs from GitHub and stores screen
 
 Reports from an older PR commit stay available as historical evidence, with an explicit warning that the latest changes have not been reviewed. Authentication and deployment error pages do not count as completed capture coverage.
 
-The viewer computes an exact changed-pixel mask from the original before/after screenshots. Pink pixels, optional region outlines, and review annotations are independent layers. It supports side-by-side, wipe, and difference views, adjustable highlight opacity and difference threshold, and corresponding before/after/diff crops. The comparison uses maximum RGBA channel distance rather than a perceptual antialiasing model; unstable data and font rendering can create noise.
+The viewer computes an exact changed-pixel mask from the original before/after screenshots. Pink pixels, optional region outlines, and review annotations are independent layers. It supports side-by-side, wipe, difference, and manual before/after blink views, adjustable highlight opacity and difference threshold, and corresponding before/after/diff crops. The comparison uses maximum RGBA channel distance rather than a perceptual antialiasing model; unstable data and font rendering can create noise.
+
+Use **Fit**, **100%**, **200%**, or **400%** to inspect screenshots, and drag to pan. Side-by-side panes stay synchronized. **Previous change**, **Next change**, and **Focus change** center and magnify individual regions. While the comparison is focused, **H** switches between the original screenshots, **D** toggles pixel highlights, and **J/K** navigate changes. A focused screenshot pane also supports **+/-** for zoom and **0** for Fit. Blink is manual; the viewer does not flash automatically.
+
+Expand **Ignore noisy areas** to draw up to twenty local exclusion rectangles, or exclude the selected change without dragging. Dashed overlays distinguish recorded and local exclusions. **Include ignored pixels** reveals all excluded differences; local exclusions can be removed, undone, or cleared. These controls affect only the open viewer. They never modify screenshots, recorded metrics, capture rules, or AI findings. An entirely excluded image is labeled **All pixels ignored**, rather than reported as unchanged.
+
+The route list shows recorded change percentages, independent of viewer adjustments. **Changes and incomplete** hides completed paired captures with recorded zero differences, while retaining blocked, failed, missing, and fully excluded comparisons.
 
 After a successful dashboard capture, Open SWE starts an MDA assessment of the saved before/after images. The model receives each scenario's screenshots, original dimensions, and pixel metrics. Its summary and annotations are saved alongside the immutable capture. The dedicated assessment run can only read that report and submit an assessment; it cannot edit source, recapture pages, publish a code review, or post GitHub comments. Its screenshot-bearing thread is private to the initiating person under the app's existing private-thread policy and stays out of general thread lists.
 
 Capture status, AI assessment, build verification, and video availability are separate report fields. The interface links to the assessment thread and shows when the model is running or fails. An assessment failure retains all screenshots and pixel evidence. Missing recordings or a review that has not run are shown explicitly. The viewer can render paired recordings when a capture adapter supplies them; the current browser adapter does not record video.
+
+## Comparison workflow references
+
+The inspection controls adapt established patterns from [Percy's visible ignored regions](https://www.browserstack.com/docs/percy/set-regions/define-regions#region-settings), [Argos's synchronized comparison viewer](https://argos-ci.com/docs/learn/review-workflow/review-a-build), and [Chromatic's Diff Inspector](https://www.chromatic.com/docs/diff-inspector). They use existing saved evidence and require no vendor account.
+
+[Browserbase session replay](https://docs.browserbase.com/platform/browser/observability/session-replay) and [live view](https://docs.browserbase.com/platform/browser/observability/session-live-view) are useful future capture integrations. Replay, console/network inspection, live takeover, persisted review decisions, and repeat-capture stability are not implemented by these viewer controls. A provider switch alone does not satisfy the network-isolation gate.
 
 ## Application integration
 

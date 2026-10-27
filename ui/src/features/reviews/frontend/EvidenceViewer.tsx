@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import { evidenceMediaUrl, type FrontendScenario } from "./api"
+import { ComparisonViewport } from "./ComparisonViewport"
 import {
   comparePixels,
   cropRegion,
@@ -15,7 +16,7 @@ import {
   type PixelRect,
 } from "./pixels"
 
-type ViewMode = "overlay" | "split" | "wipe" | "diff"
+type ViewMode = "overlay" | "split" | "wipe" | "diff" | "toggle"
 interface LoadedPair {
   before: HTMLImageElement
   after: HTMLImageElement
@@ -189,6 +190,11 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
   const [showRegions, setShowRegions] = useState(false)
   const [showAnnotations, setShowAnnotations] = useState(true)
   const [regionIndex, setRegionIndex] = useState(0)
+  const [focus, setFocus] = useState<PixelRect | null>(null)
+  const [singleImage, setSingleImage] = useState<"before" | "after">("after")
+  const [localMasks, setLocalMasks] = useState<PixelRect[]>([])
+  const [drawingMask, setDrawingMask] = useState(false)
+  const [includeIgnored, setIncludeIgnored] = useState(false)
   const [state, setState] = useState<{
     source: string
     loaded?: LoadedPair
@@ -245,6 +251,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
     return () => controller.abort()
   }, [beforeUrl, afterUrl, source])
 
+  const masks = [...scenario.mask_rects, ...localMasks]
   const comparison = loaded
     ? comparePixels(
         loaded.beforeData,
@@ -253,7 +260,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
         loaded.height,
         {
           threshold,
-          maskRects: scenario.mask_rects,
+          maskRects: includeIgnored ? [] : masks,
           tileSize: scenario.tile_size,
           minRegionPixels: scenario.min_region_pixels,
         }
@@ -276,6 +283,23 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
     width: `${(rect.width / (loaded?.width ?? 1)) * 100}%`,
     height: `${(rect.height / (loaded?.height ?? 1)) * 100}%`,
   })
+  const updateLocalMasks = (next: PixelRect[]) => {
+    setLocalMasks(next)
+    setRegionIndex(0)
+    setFocus(null)
+    setIncludeIgnored(false)
+  }
+  const addMask = (rect: PixelRect) => {
+    if (localMasks.length >= 20) return
+    updateLocalMasks([...localMasks, rect])
+    setDrawingMask(false)
+  }
+  const selectRegion = (index: number) => {
+    const region = regions[index]
+    if (!region) return
+    setRegionIndex(index)
+    setFocus({ ...region })
+  }
 
   if (error)
     return (
@@ -297,9 +321,30 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
       </p>
     )
 
+  const exclusions = masks.map((rect, index) => (
+    <div
+      key={`${index}:${rect.x}:${rect.y}`}
+      className={cn(
+        "border-info pointer-events-none absolute overflow-hidden border-2 border-dashed",
+        !includeIgnored && "bg-surface-level-1/50"
+      )}
+      style={rectStyle(rect)}
+      title={
+        index < scenario.mask_rects.length
+          ? "Recorded ignore region"
+          : "Local ignore region"
+      }
+    >
+      <span className="bg-surface-level-1 px-space-1 text-xxs text-primary">
+        {index < scenario.mask_rects.length
+          ? "Recorded ignore"
+          : `Local ignore ${index - scenario.mask_rects.length + 1}`}
+      </span>
+    </div>
+  ))
   const overlays = (
     <>
-      {showPixels && mode !== "diff" && (
+      {showPixels && mode !== "diff" && mode !== "toggle" && (
         <PixelCanvas
           data={comparison.mask}
           width={loaded.width}
@@ -316,7 +361,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             type="button"
             aria-label={`Inspect changed region ${index + 1}`}
             aria-pressed={index === selectedIndex}
-            onClick={() => setRegionIndex(index)}
+            onClick={() => selectRegion(index)}
             className={cn(
               "absolute rounded-sm border-2 border-warning bg-transparent",
               index === selectedIndex &&
@@ -338,11 +383,84 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             </span>
           </div>
         ))}
+      {exclusions}
     </>
   )
 
+  const currentImage = singleImage === "before" ? loaded.before : loaded.after
+  const imageContent = (
+    <div className="relative isolate">
+      {mode === "diff" ? (
+        <PixelCanvas
+          data={comparison.diff}
+          width={loaded.width}
+          height={loaded.height}
+          label="Pixel difference image"
+          className="block h-auto w-full"
+        />
+      ) : (
+        <ScreenshotCanvas
+          image={mode === "toggle" ? currentImage : loaded.after}
+          label={
+            mode === "toggle" && singleImage === "before"
+              ? "Before screenshot"
+              : "After screenshot"
+          }
+        />
+      )}
+      {mode === "wipe" && (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ clipPath: `inset(0 ${100 - wipe}% 0 0)` }}
+        >
+          <ScreenshotCanvas image={loaded.before} label="Before screenshot" />
+        </div>
+      )}
+      {mode === "toggle" ? exclusions : overlays}
+      {mode === "wipe" && (
+        <div
+          className="pointer-events-none absolute inset-y-0 w-px bg-surface-level-1 shadow-md"
+          style={{ left: `${wipe}%` }}
+        />
+      )}
+    </div>
+  )
+
   return (
-    <div className="flex min-w-0 flex-col gap-space-4">
+    <div
+      className="flex min-w-0 flex-col gap-space-4 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      role="region"
+      aria-label="Visual comparison"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.repeat ||
+          (event.target instanceof HTMLElement &&
+            event.target.closest(
+              "input,textarea,select,[contenteditable=true],[role=slider]"
+            ))
+        )
+          return
+        const key = event.key.toLowerCase()
+        if (key === "h") {
+          event.preventDefault()
+          setMode("toggle")
+          setSingleImage((image) => (image === "before" ? "after" : "before"))
+        } else if (key === "d") {
+          event.preventDefault()
+          setShowPixels((shown) => !shown)
+        } else if ((key === "j" || key === "k") && regions.length > 0) {
+          event.preventDefault()
+          selectRegion(
+            (selectedIndex + regions.length + (key === "j" ? 1 : -1)) %
+              regions.length
+          )
+        }
+      }}
+    >
       <div className="flex flex-wrap items-center justify-between gap-space-3">
         <GroupedTabs
           size="sm"
@@ -353,11 +471,14 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             { value: "split", display: "Side by side" },
             { value: "wipe", display: "Wipe" },
             { value: "diff", display: "Pixel diff" },
+            { value: "toggle", display: "Blink" },
           ]}
         />
         <div className="flex items-center gap-space-2 text-xs text-secondary">
           <Badge color="secondary" size="sm">
-            {`${(ratio * 100).toFixed(2)}% changed`}
+            {comparison.totalPixels === 0
+              ? "All pixels ignored"
+              : `${(ratio * 100).toFixed(2)}% changed`}
           </Badge>
           <span>
             {comparison.changedPixels.toLocaleString()} pixels ·{" "}
@@ -403,77 +524,199 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             onChange={(value) => {
               setThreshold(Array.isArray(value) ? (value[0] ?? 18) : value)
               setRegionIndex(0)
+              setFocus(null)
             }}
           />
         </label>
       </Card>
-      <div className="overflow-hidden rounded-md border border-default bg-surface-level-2">
-        {mode === "split" ? (
-          <div className="grid grid-cols-2 divide-x divide-default">
-            <div>
-              <ImageLabel>Before</ImageLabel>
-              <ScreenshotCanvas
-                image={loaded.before}
-                label="Before screenshot"
-              />
-            </div>
-            <div>
-              <ImageLabel>After</ImageLabel>
-              <div className="relative">
-                <ScreenshotCanvas
-                  image={loaded.after}
-                  label="After screenshot"
-                />
-                {overlays}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <ImageLabel>
-              {mode === "diff"
-                ? "Changed pixels"
-                : mode === "wipe"
-                  ? "Before ← → After"
-                  : "After with changed pixels"}
-            </ImageLabel>
-            <div className="relative isolate">
-              {mode === "diff" ? (
-                <PixelCanvas
-                  data={comparison.diff}
-                  width={loaded.width}
-                  height={loaded.height}
-                  label="Pixel difference image"
-                  className="block h-auto w-full"
-                />
-              ) : (
-                <ScreenshotCanvas
-                  image={loaded.after}
-                  label="After screenshot"
-                />
-              )}
-              {mode === "wipe" && (
-                <div
-                  className="absolute inset-0"
-                  style={{ clipPath: `inset(0 ${100 - wipe}% 0 0)` }}
-                >
-                  <ScreenshotCanvas
-                    image={loaded.before}
-                    label="Before screenshot"
-                  />
-                </div>
-              )}
-              {overlays}
-              {mode === "wipe" && (
-                <div
-                  className="pointer-events-none absolute inset-y-0 w-px bg-surface-level-1 shadow-md"
-                  style={{ left: `${wipe}%` }}
-                />
-              )}
-            </div>
-          </>
-        )}
+      <div className="flex flex-wrap items-center gap-space-2">
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          disabled={regions.length < 2}
+          onClick={() =>
+            selectRegion((selectedIndex + regions.length - 1) % regions.length)
+          }
+        >
+          Previous change
+        </Button>
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          disabled={regions.length < 2}
+          onClick={() => selectRegion((selectedIndex + 1) % regions.length)}
+        >
+          Next change
+        </Button>
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          disabled={!selected}
+          onClick={() => selectRegion(selectedIndex)}
+        >
+          {selected ? `Focus change ${selectedIndex + 1}` : "Focus change"}
+        </Button>
+        <span className="text-xs text-secondary" aria-live="polite">
+          {regions.length > 0
+            ? `${selectedIndex + 1} of ${regions.length} changes`
+            : "No change regions"}
+        </span>
       </div>
+      <Card className="p-0">
+        <details
+          onToggle={(event) => {
+            if (!event.currentTarget.open) setDrawingMask(false)
+          }}
+        >
+          <summary className="cursor-pointer px-space-3 py-space-2 text-xs font-medium text-secondary">
+            Ignore noisy areas
+            {masks.length > 0
+              ? ` · ${masks.length} ${masks.length === 1 ? "region" : "regions"}`
+              : ""}
+          </summary>
+          <div className="flex flex-col gap-space-3 border-t border-default p-space-3">
+            <div className="flex flex-wrap items-center gap-space-2">
+              <Button
+                size="sm"
+                color="secondary"
+                variant={drawingMask ? "normal" : "outlined"}
+                aria-pressed={drawingMask}
+                disabled={localMasks.length >= 20}
+                onClick={() => setDrawingMask(!drawingMask)}
+              >
+                {drawingMask ? "Cancel drawing" : "Draw ignore region"}
+              </Button>
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                disabled={!selected || localMasks.length >= 20}
+                onClick={() => selected && addMask(selected)}
+              >
+                Ignore selected change
+              </Button>
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                disabled={localMasks.length === 0}
+                onClick={() => updateLocalMasks(localMasks.slice(0, -1))}
+              >
+                Undo ignore
+              </Button>
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                disabled={localMasks.length === 0}
+                onClick={() => updateLocalMasks([])}
+              >
+                Clear local ignores
+              </Button>
+            </div>
+            <p role="status" className="text-xs text-secondary">
+              {drawingMask
+                ? "Drag a rectangle on either screenshot to exclude noisy content from this view."
+                : "Ignore regions adjust this view only. Saved screenshots, recorded metrics, and AI findings stay unchanged."}
+            </p>
+            {masks.length > 0 && (
+              <>
+                <Checkbox
+                  label="Include ignored pixels"
+                  checked={includeIgnored}
+                  onCheckedChange={(checked) => {
+                    setIncludeIgnored(checked === true)
+                    setRegionIndex(0)
+                    setFocus(null)
+                  }}
+                />
+                <div className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
+                  <span>
+                    {scenario.mask_rects.length} recorded · {localMasks.length}{" "}
+                    local ignore regions
+                  </span>
+                  {localMasks.map((_, index) => (
+                    <Button
+                      key={index}
+                      size="xs"
+                      color="secondary"
+                      variant="outlined"
+                      onClick={() =>
+                        updateLocalMasks(
+                          localMasks.filter((_rect, item) => item !== index)
+                        )
+                      }
+                    >
+                      {`Remove local ignore ${index + 1}`}
+                    </Button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </details>
+      </Card>
+      {mode === "toggle" && (
+        <div className="flex flex-wrap items-center gap-space-3">
+          <GroupedTabs
+            size="sm"
+            value={singleImage}
+            onChange={setSingleImage}
+            options={[
+              { value: "before", display: "Before" },
+              { value: "after", display: "After" },
+            ]}
+          />
+          <span className="text-xs text-secondary">
+            Press H to blink between the original screenshots.
+          </span>
+        </div>
+      )}
+      <ComparisonViewport
+        width={loaded.width}
+        height={loaded.height}
+        focus={focus}
+        interaction={drawingMask ? "select" : "pan"}
+        onSelect={addMask}
+        panes={
+          mode === "split"
+            ? [
+                {
+                  id: "before",
+                  label: "Before",
+                  content: (
+                    <div className="relative">
+                      <ScreenshotCanvas
+                        image={loaded.before}
+                        label="Before screenshot"
+                      />
+                      {exclusions}
+                    </div>
+                  ),
+                },
+                { id: "after", label: "After", content: imageContent },
+              ]
+            : [
+                {
+                  id: "comparison",
+                  label:
+                    mode === "diff"
+                      ? "Changed pixels"
+                      : mode === "wipe"
+                        ? "Before ← → After"
+                        : mode === "toggle"
+                          ? singleImage === "before"
+                            ? "Before"
+                            : "After"
+                          : "After with changed pixels",
+                  content: imageContent,
+                },
+              ]
+        }
+      />
       {mode === "wipe" && (
         <label className="mx-auto flex w-full max-w-sm flex-col gap-space-2 text-xs text-secondary">
           Before / after divider
@@ -491,6 +734,9 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
       <p className="text-xs text-secondary">
         Pink marks the actual changed pixels. Outlines group nearby changes.
         Pixel differences measure change; they do not determine correctness.
+        These totals reflect the current threshold and ignore settings. Focus
+        the comparison for shortcuts: H blink, D highlights, J/K next/previous
+        change.
       </p>
       <Card className="min-w-0 overflow-hidden p-0">
         <div className="flex items-center justify-between gap-space-3 border-b border-default p-space-3">
@@ -501,32 +747,6 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
                 ? `Region ${selectedIndex + 1} of ${regions.length} · ${selected.changedPixels.toLocaleString()} changed pixels`
                 : "No regions at this threshold."}
             </p>
-          </div>
-          <div className="flex gap-space-1">
-            <Button
-              size="xs"
-              color="secondary"
-              variant="outlined"
-              disabled={regions.length < 2}
-              onClick={() =>
-                setRegionIndex(
-                  (selectedIndex + regions.length - 1) % regions.length
-                )
-              }
-            >
-              Previous
-            </Button>
-            <Button
-              size="xs"
-              color="secondary"
-              variant="outlined"
-              disabled={regions.length < 2}
-              onClick={() =>
-                setRegionIndex((selectedIndex + 1) % regions.length)
-              }
-            >
-              Next
-            </Button>
           </div>
         </div>
         {crop && (

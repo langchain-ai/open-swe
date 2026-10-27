@@ -1,6 +1,7 @@
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
 import {
@@ -326,10 +327,22 @@ export function FrontendReportView({
   currentHeadSha?: string | null
 }) {
   const [scenarioId, setScenarioId] = useState(run.report?.scenarios[0]?.id)
+  const [changesOnly, setChangesOnly] = useState(false)
   const report = run.report
+  const scenarios = report?.scenarios ?? []
+  const changesAndIncomplete = scenarios.filter(
+    (item) =>
+      item.status !== "complete" ||
+      !item.before_url ||
+      !item.after_url ||
+      !item.metrics ||
+      item.metrics.total_pixels === 0 ||
+      item.metrics.changed_pixels > 0
+  )
+  const visibleScenarios = changesOnly ? changesAndIncomplete : scenarios
   const scenario =
-    report?.scenarios.find((item) => item.id === scenarioId) ??
-    report?.scenarios[0]
+    visibleScenarios.find((item) => item.id === scenarioId) ??
+    visibleScenarios[0]
   const complete =
     report?.scenarios.filter(
       (item) => item.status === "complete" && item.before_url && item.after_url
@@ -460,24 +473,51 @@ export function FrontendReportView({
           captured evidence, not verified PR/base coverage.
         </p>
       )}
-      {report && report.scenarios.length > 1 && (
-        <div
-          className="flex flex-wrap gap-space-2"
-          aria-label="Captured routes"
-        >
-          {report.scenarios.map((item) => (
-            <Button
-              key={item.id}
-              color="secondary"
-              variant={item.id === scenario?.id ? "outlined" : "plain"}
-              size="sm"
-              onClick={() => setScenarioId(item.id)}
-              aria-pressed={item.id === scenario?.id}
-              aria-label={`${item.title} · ${item.status}`}
-            >
-              {item.title} · {item.status}
-            </Button>
-          ))}
+      {report && (report.scenarios.length > 1 || changesOnly) && (
+        <div className="flex flex-col gap-space-3">
+          <div className="flex flex-wrap items-center gap-space-3">
+            <Checkbox
+              label="Changes and incomplete"
+              checked={changesOnly}
+              onCheckedChange={(checked) => setChangesOnly(checked === true)}
+            />
+            <p role="status" className="text-xs text-secondary">
+              Showing {visibleScenarios.length}/{scenarios.length} routes
+            </p>
+          </div>
+          <div
+            className="flex flex-wrap gap-space-2"
+            aria-label="Captured routes"
+          >
+            {visibleScenarios.map((item) => {
+              const recordedChange =
+                item.metrics && item.metrics.total_pixels > 0
+                  ? `${(item.metrics.changed_ratio * 100).toFixed(2)}% recorded change`
+                  : "Not compared"
+              return (
+                <Button
+                  key={item.id}
+                  color="secondary"
+                  variant={item.id === scenario?.id ? "outlined" : "plain"}
+                  size="sm"
+                  onClick={() => setScenarioId(item.id)}
+                  aria-pressed={item.id === scenario?.id}
+                  aria-label={`${item.title} · ${item.status} · ${recordedChange}`}
+                >
+                  {item.title} · {item.status} · {recordedChange}
+                </Button>
+              )
+            })}
+          </div>
+          <p className="text-xs text-secondary">
+            Route percentages use the saved capture settings. Viewer settings
+            apply only to the open screenshot comparison.
+          </p>
+          {visibleScenarios.length === 0 && (
+            <Card role="status" className="p-space-4 text-sm text-secondary">
+              No recorded changes. Clear the filter to inspect unchanged routes.
+            </Card>
+          )}
         </div>
       )}
       {scenario && (
