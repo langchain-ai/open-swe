@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
@@ -15,6 +15,14 @@ logger = logging.getLogger(__name__)
 
 # Baggage that describes the span itself rather than where its children belong.
 _SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
+# Turns whose trace is still being reconciled after their run ended.
+_ENDING: Final[set[asyncio.Task[None]]] = set()
+
+
+def _ended(task: asyncio.Task[None]) -> None:
+    _ENDING.discard(task)
+    if task.cancelled():
+        logger.warning("A turn's trace was not reconciled before the runtime stopped")
 
 
 class TurnTrace:
@@ -22,6 +30,7 @@ class TurnTrace:
 
     def __init__(self) -> None:
         self.root: RunTree | None = None
+        self._ending: asyncio.Task[None] | None = None
 
     @staticmethod
     def current_root() -> RunTree | None:
@@ -89,17 +98,47 @@ class TurnTrace:
             logger.warning("Could not read the running span's trace headers", exc_info=True)
         return {}
 
-    async def reconcile(self, metadata: Mapping[str, JsonValue]) -> None:
+    def end(
+        self,
+        metadata: Mapping[str, JsonValue],
+        evidence: Callable[[], Awaitable[Mapping[str, JsonValue]]],
+    ) -> None:
+        """Reconcile the turn's trace with ``metadata`` and what ``evidence`` finds, in the
+        background: the run ends, and its thread takes the next message, without waiting."""
         if self.root is None:
             return
+        self._ending = asyncio.ensure_future(self._end(self.root, metadata, evidence))
+        _ENDING.add(self._ending)
+        self._ending.add_done_callback(_ended)
+
+    async def ended(self) -> None:
+        """Wait for the turn's trace to be reconciled."""
+        if self._ending is not None:
+            await asyncio.shield(self._ending)
+
+    @staticmethod
+    async def _end(
+        root: RunTree,
+        metadata: Mapping[str, JsonValue],
+        evidence: Callable[[], Awaitable[Mapping[str, JsonValue]]],
+    ) -> None:
         try:
-            pending = [self.root]
+            found = await evidence()
+        except Exception:
+            logger.warning("Could not gather the turn's trace metadata", exc_info=True)
+            found = {}
+        await TurnTrace._reconcile(root, {**metadata, **found})
+
+    @staticmethod
+    async def _reconcile(root: RunTree, metadata: Mapping[str, JsonValue]) -> None:
+        try:
+            pending = [root]
             runs: list[RunTree] = []
             while pending:
                 run = pending.pop()
-                if run.trace_id != self.root.trace_id or run.metadata.get(
+                if run.trace_id != root.trace_id or run.metadata.get(
                     "invocation_id"
-                ) != self.root.metadata.get("invocation_id"):
+                ) != root.metadata.get("invocation_id"):
                     continue
                 run.metadata.update(metadata)
                 runs.append(run)

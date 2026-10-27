@@ -101,7 +101,7 @@ async def test_the_script_sees_more_edits_to_an_already_dirty_checkout(
         _git("init", str(tmp_path / name))
     _git("-C", str(tmp_path / "b-unborn"), "remote", "add", "origin", "https://github.com/o/u.git")
     repo = _checkout(tmp_path, "repo", "git@github.com:org/actual.git")
-    script = BoxScript("git_trace.py", str(tmp_path / "scripts"))
+    script = BoxScript("git_trace.py")
 
     async def fingerprint() -> GitSnapshot:
         return GitSnapshot.model_validate(await script.run(box, {"root": str(tmp_path)}))

@@ -58,8 +58,8 @@ from rt.backend import (
     RunContext,
 )
 from rt.file_tools import FileToolsMiddleware
-from rt.git_evidence import turn_git
-from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
+from rt.git_evidence import TurnGit, turn_git
+from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
 from rt.model_calls import model_call_guards
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
@@ -845,6 +845,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         await graph.ainvoke(
             {"messages": [("user", "hello")], "open_swe_state": {"kept": True}}, config
         )
+    await turn_trace(backend.run).ended()
     saved = await graph.aget_state(config)
     assert saved.values["open_swe_state"] == {"kept": True}
     assert "ls_git_repo" not in parent.metadata
@@ -884,6 +885,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
             {"messages": [("user", "next turn")]},
             {**config, "metadata": {"invocation_id": "turn"}},
         )
+    await turn_trace(backend.run).ended()
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
 
 
@@ -920,7 +922,12 @@ async def test_backfill_preserves_destination_timing_and_outputs(
         child.end(outputs={"answer": "done"}, end_time=ended)
         trace = TurnTrace()
         trace.root = root
-        await trace.reconcile({"ls_git_repo": "org/repo", "ls_git_branch": "feature"})
+
+        async def git() -> dict[str, JsonValue]:
+            return {"ls_git_branch": "feature"}
+
+        trace.end({"ls_git_repo": "org/repo"}, git)
+        await trace.ended()
     child_patch = next(patch for patch in patches if patch["id"] == child.id)
     for patch in patches:
         assert patch["end_time"] == ended.isoformat()
@@ -939,7 +946,7 @@ async def test_backfill_preserves_destination_timing_and_outputs(
     assert root.metadata["ls_git_repo"] == child.metadata["ls_git_repo"] == "org/repo"
 
 
-@pytest.mark.parametrize("failure", ["lookup", "export"])
+@pytest.mark.parametrize("failure", ["lookup", "export", "fingerprint"])
 async def test_optional_trace_failures_do_not_change_successful_turn_output(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -950,8 +957,15 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     def unavailable_trace() -> None:
         raise RuntimeError("trace lookup unavailable")
 
+    async def stuck_fingerprint(self: TurnGit) -> dict[str, JsonValue]:
+        await asyncio.Event().wait()
+        return {}
+
     if failure == "lookup":
         monkeypatch.setattr(TurnTrace, "current_root", staticmethod(unavailable_trace))
+    if failure == "fingerprint":
+        # The run's end never waits for the turn's last fingerprint.
+        monkeypatch.setattr(TurnGit, "metadata", stuck_fingerprint)
 
     git = turn_git(backend.run)
 
@@ -982,12 +996,15 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
         middleware=[BackendRunMiddleware(backend)],
     )
     with tracing_context(enabled=True):
-        result = await graph.ainvoke(
-            {"messages": [("user", "hello")]},
-            {
-                "callbacks": [LangChainTracer(client=client, project_name="test")],
-                "metadata": {"invocation_id": "turn"},
-            },
+        result = await asyncio.wait_for(
+            graph.ainvoke(
+                {"messages": [("user", "hello")]},
+                {
+                    "callbacks": [LangChainTracer(client=client, project_name="test")],
+                    "metadata": {"invocation_id": "turn"},
+                },
+            ),
+            5,
         )
     assert result["messages"][-1].content == "done"
     assert export_failed == (failure == "export")
