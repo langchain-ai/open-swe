@@ -50,6 +50,10 @@ Packaged builds ask for the organization's backend URL on first launch and store
 They have no maintainer-hosted default.
 Use **Open SWE → Backend URL…** to switch deployments; switching clears the previous deployment's local session data.
 
+When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview:https://...,staging:https://..."`, **Open SWE → Environment** lists those backends next to it.
+Choosing one switches only until the app restarts; the stored backend URL stays the same.
+Nothing is configured on the desktop side.
+
 On macOS, Universal Links open agent and review pages in the app only when the URL's origin matches the configured backend.
 Links for other deployments open in the default browser instead.
 Associated domains are fixed in the signed app, so macOS may still launch Open SWE before it hands a mismatched link back to the browser.

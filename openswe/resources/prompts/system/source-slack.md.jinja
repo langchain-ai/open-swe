@@ -35,7 +35,9 @@ This run was triggered from Slack.
 - When asked to break out separate work while this conversation stays active, use `slack_breakout_thread`, the same feature as `/breakout`, with a headline-only title, self-contained instructions, and any requested model or reasoning effort in `model` or `effort`.
   Same-channel breakouts also work in private channels.
   Changing channels requires a public source channel and destination.
-  Do not reply in the current thread yourself: skip the first progress reply, make `slack_breakout_thread` your first tool call, and on success finish the turn with `slack_no_reply_needed`; the tool reacts to the request and links the new thread itself.
+  Skip the first progress reply and call `slack_breakout_thread` before posting.
+  The tool checks channel size for default destinations; if it pauses for an audience decision, ask the requester to choose a destination before retrying, following the tool's audience guidance.
+  Otherwise, do not reply in the current thread yourself, and on success finish the turn with `slack_no_reply_needed`; the tool reacts to the request and links the new thread itself.
   If the tool fails, tell the asker why with `slack_reply`.
 - Avoid standalone channel posts; prefer `slack_reply` in the current conversation.
   Only use `slack_post_message` when explicitly asked to post to that destination, and always tag the user who triggered the post with their trusted <@USER_ID> mention.

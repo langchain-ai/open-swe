@@ -45,6 +45,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
 - Keep comments minimal and only explain non-obvious reasons.
+- Before asking a clarifying question about Open SWE's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
+  Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions.
   Typed and slash commands are optional shortcuts, never the only way.
 - User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast.

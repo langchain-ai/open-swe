@@ -6,7 +6,7 @@
 
 ## What
 
-A public method returning the name of the LangSmith browser a run's browser tools use, from the same key and deployment prefix `_call` uses. It neither creates nor opens the browser.
+A public method returning the name of the LangSmith browser a run's browser tools use, from the same key and deployment prefix `_call` uses. It neither creates nor opens the browser. It names the key's first browser: `_call` moves to a later one only when that one is being deleted or broke, and `_share` then reports the name it opened.
 
 ## Why
 
