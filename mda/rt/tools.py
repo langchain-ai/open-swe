@@ -212,19 +212,19 @@ async def run_operation(
     report = tool_report(
         runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
     )
-    backend.reports.started(report)
+    backend.outbox.started(report)
     try:
         result = await _operate(backend, spec, arguments, runtime, tool_call_id)
     except Exception as exc:
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.reports.finished(report, failure)
+        backend.outbox.finished(report, failure)
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
     if cites_evidence:
         message = await cited(backend, spec.name, arguments, message)
-    backend.reports.finished(report, message)
+    backend.outbox.finished(report, message)
     if isinstance(result, ToolMessage):
         return message
     return Command(update={**_update(result), "messages": [message]})

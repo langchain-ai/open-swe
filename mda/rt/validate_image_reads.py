@@ -18,6 +18,8 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
 _IMAGE_SIGNATURES: tuple[tuple[bytes, ...], ...] = (
     (b"\x89PNG\r\n\x1a\n",),
     (b"\xff\xd8\xff",),
@@ -74,6 +76,8 @@ def validate_read_file_message(message: ToolMessage) -> ToolMessage:
 
 
 class ValidateImageReadsMiddleware(AgentMiddleware):
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     state_schema = AgentState
 
     async def awrap_tool_call(

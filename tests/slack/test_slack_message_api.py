@@ -1,5 +1,6 @@
 """Slack message behavior exercised through the SDK's real HTTP requests."""
 
+import importlib
 import json
 import logging
 from unittest.mock import AsyncMock, patch
@@ -267,6 +268,39 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
     assert blocks[0]["text"] == text
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_direct_github_reply_override_is_scoped_to_one_delivery(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, fail: bool
+) -> None:
+    reply = importlib.import_module("openswe.slack.tools.reply")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
+    monkeypatch.setattr(
+        User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
+    )
+    url = "https://github.com/acme/app/pull/7"
+    blocks = block_payload([markdown(f"[GitHub]({url})"), section(f"<{url}|GitHub>")])
+
+    async def send(message: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+        await slack_utils.post_slack_top_level_message_with_ts("C1", message, blocks=blocks)
+        if fail:
+            raise RuntimeError("delivery failed")
+        return {"success": True}
+
+    monkeypatch.setattr(reply, "send_slack_reply", send)
+    if fail:
+        with pytest.raises(RuntimeError, match="delivery failed"):
+            await reply.slack_reply(url, "final", preserve_github_links=True)
+    else:
+        assert await reply.slack_reply(url, "final", preserve_github_links=True) == {
+            "success": True
+        }
+    assert slack_api.calls[-1][1]["text"] == url
+    assert slack_api.calls[-1][1]["blocks"] == blocks
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
 
 
 @pytest.mark.usefixtures("registry_db")

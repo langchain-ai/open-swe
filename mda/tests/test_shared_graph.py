@@ -35,6 +35,7 @@ from runtime_api.catalog import (
     SandboxSpec,
     SubagentSpec,
 )
+from runtime_api.reports import Reports
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
@@ -125,6 +126,9 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
+        if hook == "reports":
+            taken = {"replies": [{} for _ in Reports.model_validate(json).items]}
+            return httpx2.Response(200, request=request, json=taken)
         return httpx2.Response(200, request=request, json={"files": []} if hook == "skills" else {})
 
     client = MagicMock(is_closed=False)
