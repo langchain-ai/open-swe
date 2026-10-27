@@ -1,0 +1,16 @@
+{
+  "source_commit": "5366090e4a9457462f3b8c9afdbf464b93f49a6a",
+  "product_screenshots": "Local production build with disposable API fixtures; no authenticated backend or Monaco editor QA.",
+  "component_screenshots": "Local fixtures rendering actual dashboard components.",
+  "contrast": "Sampled enabled visible text >= 4.5:1; sampled field borders >= 3:1 in light and dark themes. Disabled controls, SVGs and gradient avatar initials excluded.",
+  "files": [
+    "automation-light-desktop.png",
+    "automation-dark-mobile.png",
+    "pull-request-card-dark-desktop.png",
+    "review-light-desktop.png",
+    "review-dark-mobile.png",
+    "controls-light-desktop.png",
+    "controls-dark-desktop.png",
+    "repositories-dark-desktop.png"
+  ]
+}
