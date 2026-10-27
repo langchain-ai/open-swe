@@ -12,7 +12,7 @@ dependencies = [
     "langchain-fireworks>=1.7.1,<2.0.0",
     "langchain-openai>=1.7.2,<2.0.0",
     "langchain-quickjs>=0.3.9,<0.4.0",
-    "langsmith>=0.14.12",
+    "langsmith>=0.14.13",
     "httpx2>=2.12.0",
     # The vendored SDK's browser installs its extension from this package, so this
     # matches managed_deepagents.browser.STAGEHAND_VERSION.
