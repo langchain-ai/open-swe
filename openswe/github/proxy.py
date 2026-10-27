@@ -19,11 +19,7 @@ from openswe.github.app import (
     normalize_permissions,
 )
 from openswe.github.sandbox_access import workspace_token
-from openswe.sandboxes.state import (
-    SANDBOX_BACKENDS,
-    get_sandbox_metadata,
-    unwrap_sandbox_backend,
-)
+from openswe.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
@@ -141,14 +137,12 @@ async def refresh_proxy_token(
     if ENV.SANDBOX_TYPE.get() != "langsmith" or not thread_id:
         return False
 
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    if sandbox_backend is None:
+        return False
+
     record = _PROXY_TOKEN_EXPIRY.get(thread_id)
     if record is None:
-        return False
-    # A box MDA keeps is configured by name: this replica need not have connected to it.
-    connected = SANDBOX_BACKENDS.get(thread_id)
-    bound = (await get_sandbox_metadata(thread_id)).get("sandbox_id") if connected is None else None
-    sandbox_id = unwrap_sandbox_backend(connected).id if connected is not None else bound
-    if not isinstance(sandbox_id, str):
         return False
     _expires, _recorded, recorded_repositories, recorded_permissions = _unpack_proxy_token_record(
         record
@@ -173,16 +167,17 @@ async def refresh_proxy_token(
 
     from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy
 
+    current_backend = unwrap_sandbox_backend(sandbox_backend)
     base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)
     if base_proxy_config is not None:
         await configure_sandbox_proxy(
-            sandbox_id,
+            current_backend.id,
             access.token,
             base_proxy_config=base_proxy_config,
             thread_id=thread_id,
         )
     else:
-        await configure_sandbox_proxy(sandbox_id, access.token, thread_id=thread_id)
+        await configure_sandbox_proxy(current_backend.id, access.token, thread_id=thread_id)
     record_proxy_token_expiry(
         thread_id,
         access.expires_at,

@@ -123,9 +123,9 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         raise AssertionError("A call around a model call never plans the run")
 
     classify = AsyncMock(return_value="fast")
-    refresh = AsyncMock(return_value=False)
+    refresh = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
-    monkeypatch.setattr(graph_module, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
     run = RUN.model_copy(update={"assistant_id": "agent"})
@@ -149,8 +149,8 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     )
     # A thread in no task gets no task context.
     assert context == {"instructions": "", "message": None}
-    assert refreshed == {}
-    refresh.assert_awaited_once_with(run.thread_id)
+    assert refreshed == {"expires_at": None}
+    refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
 
 
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
@@ -178,11 +178,9 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
 
     bound = AsyncMock()
     updated = AsyncMock()
-    proxied = AsyncMock()
     usage = AsyncMock()
     prompts: list[dict[str, object]] = []
     monkeypatch.setattr(graph_module, "bind_mda_sandbox", bound)
-    monkeypatch.setattr(agent, "refresh_mda_box_proxy", proxied)
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "client", MagicMock(threads=MagicMock(update=updated)))
@@ -240,7 +238,6 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert metadata["model"] == "openai:gpt-6.1-sol"
     assert metadata["model_route"] == "default"
     assert usage.await_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
-    proxied.assert_awaited_once_with("thread-1", workspace_slug=None)
 
 
 @pytest.mark.usefixtures("registry_db")

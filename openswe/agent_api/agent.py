@@ -1,6 +1,5 @@
 """The coding agent, as Managed Deep Agents runs play it."""
 
-import asyncio
 import logging
 from typing import Final, cast
 
@@ -21,7 +20,6 @@ from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.run_config import RunConfig
-from openswe.sandboxes.lifecycle import refresh_mda_box_proxy
 from openswe.server import (
     PrepareAgentRunMiddleware,
     ThreadFiles,
@@ -82,26 +80,21 @@ class AgentParts(RunParts):
         cfg = RunConfig.from_config(config)
         if settings.agent is None or cfg.thread_id is None:
             return
-        recorded = await asyncio.gather(
-            record_agent_run(
+        try:
+            await record_agent_run(
                 config,
                 settings.agent,
                 model_id=started.model_id,
                 effort=started.effort,
                 route=started.model_route,
-            ),
-            refresh_mda_box_proxy(cfg.thread_id, workspace_slug=cfg.workspace_slug),
-            return_exceptions=True,
-        )
-        for failure in recorded:
-            if isinstance(failure, BaseException):
-                # The turn goes on: the thread's model and usage are bookkeeping, and the
-                # box's next GitHub call says so if its proxy token went stale.
-                logger.warning(
-                    "Recording an agent turn's start failed",
-                    extra={"agent_thread_id": cfg.thread_id},
-                    exc_info=failure,
-                )
+            )
+        except Exception:
+            # Bookkeeping: the turn goes on, and the reports behind this one with it.
+            logger.warning(
+                "Recording an agent turn's start failed",
+                extra={"agent_thread_id": cfg.thread_id},
+                exc_info=True,
+            )
 
     async def credentials(self, config: RunnableConfig) -> None:
         thread_id = RunConfig.from_config(config).thread_id

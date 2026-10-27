@@ -10,6 +10,7 @@ import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -51,6 +52,7 @@ from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
+from openswe.utils.time import parse_iso
 from openswe.workspaces.refresh import is_snapshot_stale, maybe_start_update
 from openswe.workspaces.store import (
     SandboxResources,
@@ -297,6 +299,34 @@ async def _refresh_github_proxy_or_fail(
         )
         raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
+
+
+async def refresh_thread_github_proxy(
+    thread_id: str, *, workspace_slug: str | None = None
+) -> datetime | None:
+    """Give the thread's box a freshly minted GitHub token; when it expires, if it has a proxy.
+
+    Everything it needs is read from the thread: the box, its proxy rules, the scope
+    its token is limited to. So it works on whichever replica gets the call, whatever
+    that replica has connected to before.
+    """
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        return None
+    metadata = await get_sandbox_metadata(thread_id)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is not None:
+        return None
+    repositories, permissions = await _thread_proxy_scope(thread_id, metadata)
+    access = await _proxy_token(thread_id, workspace_slug, repositories, permissions)
+    base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    async with aphase(thread_id, "sandbox.proxy_refresh"):
+        await _configure_proxy(
+            sandbox_id,
+            access,
+            base_proxy_config if isinstance(base_proxy_config, dict) else None,
+            thread_id=thread_id,
+        )
+    return parse_iso(access.expires_at)
 
 
 _WORK_DIR_READY = "__open_swe_work_dir_ready__"
@@ -712,34 +742,6 @@ async def bind_mda_sandbox(
         _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     async with aphase(thread_id, "sandbox.bind_thread"):
         await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
-
-
-async def refresh_mda_box_proxy(thread_id: str, *, workspace_slug: str | None = None) -> None:
-    """Give the GitHub proxy of the box MDA keeps for ``thread_id`` a fresh token.
-
-    MDA leaves its boxes' proxy config to the backend, which holds the credentials. Only
-    the box's proxy settings change: nothing connects to the box.
-    """
-    if ENV.SANDBOX_TYPE.get() != "langsmith":
-        return
-    metadata = await get_sandbox_metadata(thread_id)
-    sandbox_id = metadata.get("sandbox_id")
-    if metadata.get("sandbox_owner") != "mda" or not isinstance(sandbox_id, str):
-        return
-    configured = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
-    base_proxy_config = configured if isinstance(configured, dict) else None
-    repositories, permissions = await _thread_proxy_scope(thread_id, metadata)
-    access = await _proxy_token(thread_id, workspace_slug, repositories, permissions)
-    async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(sandbox_id, access, base_proxy_config, thread_id=thread_id)
-    record_proxy_token_expiry(
-        thread_id,
-        access.expires_at,
-        repositories=repositories,
-        permissions=permissions,
-        workspace_slug=workspace_slug,
-        base_proxy_config=base_proxy_config,
-    )
 
 
 # The replacement ``recreate_sandbox`` authorized for an MDA box: its workspace and source.

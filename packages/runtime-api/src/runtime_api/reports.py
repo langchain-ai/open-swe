@@ -23,7 +23,6 @@ from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
     INBOX_RECEIVED,
     MODEL_RESULT,
-    REFRESH_GITHUB_PROXY,
     RUN_ENDED,
     RUN_STARTED,
     SANDBOX_UNREACHABLE,
@@ -73,7 +72,7 @@ class Received(Sent):
 
 
 class Noticed(Sent):
-    endpoint: Literal["refresh_github_proxy", "step_limit_reached", "settle_review_check"]
+    endpoint: Literal["step_limit_reached", "settle_review_check"]
     request: RunRequest
 
 
@@ -120,7 +119,6 @@ REPORTED: Final[Mapping[str, Delivery]] = {
         TOOL_RESULT,
         MODEL_RESULT,
         INBOX_RECEIVED,
-        REFRESH_GITHUB_PROXY,
         SANDBOX_UNREACHABLE,
         STEP_LIMIT_REACHED,
         SETTLE_REVIEW_CHECK,

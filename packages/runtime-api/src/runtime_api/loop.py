@@ -18,6 +18,7 @@ how its catalog says to read the inbox; the backend keeps what each thread is ow
 until a run receives it.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
@@ -175,6 +176,13 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
+class GitHubProxyRefreshed(BaseModel):
+    """The box's GitHub proxy was given a fresh token."""
+
+    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    expires_at: datetime | None = None
+
+
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
@@ -235,13 +243,17 @@ MODEL_CHOICE = Endpoint(
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# Refreshes only a token near its expiry, so it is safe to send again.
+# Mints a token and sets it on the box, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(
-    "refresh_github_proxy", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+    "refresh_github_proxy",
+    RunRequest,
+    GitHubProxyRefreshed,
+    seconds=LOOP_CALL_SECONDS,
+    delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
-# The run's turn began: the transcript opens it, the thread and usage record what it
-# runs as, and the box's GitHub proxy gets a fresh token.
+# The run's turn began: the transcript opens it, and the thread and usage record what
+# it runs as.
 RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn and usage is finalized.
 RUN_ENDED = Endpoint("run_ended", RunEnded, Done, seconds=LOOP_CALL_SECONDS)
