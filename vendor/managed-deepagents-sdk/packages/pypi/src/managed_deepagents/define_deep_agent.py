@@ -7,6 +7,7 @@ LangChain / deepagents types the underlying harness uses.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Never, NotRequired, TypedDict
@@ -119,6 +120,7 @@ def define_deep_agent(
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
     replicate_traces: bool = True,
+    _openswe_graph_inputs: Mapping[str, object] | None = None,
     **kwargs: Never,
 ) -> DeepAgentDefinition:
     """Define a Managed Deep Agent.
@@ -150,6 +152,14 @@ def define_deep_agent(
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
     keys such as prompt provenance land on the **root** LangSmith run.
+
+    ``_openswe_graph_inputs`` is Open SWE's, not MDA's API (see Open SWE's
+    ``vendor/mda-changes``). From a factory entry, it is a JSON object naming
+    everything the factory built this definition from. The factory then promises
+    that the same inputs build the same agent for every run, thread and caller,
+    with nothing that belongs to one of them in the tools, middleware or sandbox it
+    returns: those read what they need from the run per call. MDA compiles the
+    definition once per process for those inputs and shares the graph.
     """
     if not isinstance(name, str) or not name.strip():
         raise TypeError(
@@ -186,6 +196,7 @@ def define_deep_agent(
                 ("response_format", response_format),
                 ("context_schema", context_schema),
                 ("cache", cache),
+                ("_openswe_graph_inputs", _snapshot_graph_inputs(_openswe_graph_inputs)),
             )
             if value is not None
         },
@@ -202,6 +213,18 @@ def define_deep_agent(
     config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory))
 
     return DeepAgentDefinition(config)
+
+
+def _snapshot_graph_inputs(graph_inputs: Mapping[str, object] | None) -> dict[str, object] | None:
+    """A JSON copy of ``graph_inputs``, as MDA keeps and digests it."""
+    if graph_inputs is None:
+        return None
+    if not isinstance(graph_inputs, Mapping):
+        raise TypeError("_openswe_graph_inputs must be a mapping")
+    try:
+        return json.loads(json.dumps(graph_inputs))
+    except (TypeError, ValueError):
+        raise TypeError("_openswe_graph_inputs must be JSON") from None
 
 
 _ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")

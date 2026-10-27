@@ -76,7 +76,7 @@ class CodeOnlyToolsMiddleware(AgentMiddleware):
     Place it inside code mode, which reads the request's tools before this drops them.
     """
 
-    def __init__(self, names: Sequence[str], searchable: SearchableTools) -> None:
+    def __init__(self, names: Sequence[str], searchable: Callable[[], SearchableTools]) -> None:
         self._names = frozenset(names)
         self._searchable = searchable
 
@@ -90,6 +90,6 @@ class CodeOnlyToolsMiddleware(AgentMiddleware):
             for tool in request.tools
             if isinstance(tool, BaseTool) and tool.name in self._names
         ]
-        self._searchable.add(loaded)
+        self._searchable().add(loaded)
         offered = [tool for tool in request.tools if getattr(tool, "name", None) not in self._names]
         return await handler(request.override(tools=offered))

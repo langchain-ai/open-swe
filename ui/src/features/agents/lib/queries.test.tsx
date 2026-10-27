@@ -27,6 +27,7 @@ import {
   useThreadsPage,
   useUpdateAgentSchedule,
   useWorkflowApprovalDecision,
+  useWorkflowApprovals,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
 import type {
@@ -938,6 +939,36 @@ describe("useUpdateAgentSchedule", () => {
 
     act(() => request.reject(new Error("request failed")))
     await waitFor(() => expect(enabled()).toEqual([true, true]))
+  })
+})
+
+describe("useWorkflowApprovals", () => {
+  it("fetches approvals created after the last poll when the run stops", async () => {
+    const client = testClient()
+    const approval = {
+      fingerprint: "late-approval",
+      status: "pending",
+    } as WorkflowPushApproval
+    vi.spyOn(agentsApi, "listWorkflowApprovals")
+      .mockResolvedValueOnce({ threadId: "thread-1", approvals: [] })
+      .mockResolvedValue({ threadId: "thread-1", approvals: [approval] })
+    const { result, rerender } = renderHook(
+      ({ active }) =>
+        useWorkflowApprovals("thread-1", { pollWhileActive: active }),
+      {
+        initialProps: { active: true },
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.data?.approvals).toEqual([]))
+
+    rerender({ active: false })
+
+    await waitFor(() =>
+      expect(result.current.data?.approvals).toEqual([approval])
+    )
   })
 })
 

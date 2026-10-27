@@ -27,6 +27,7 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
+const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
@@ -65,6 +66,7 @@ const {
   readWorkspacePath,
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { DesktopLinks } = require("./desktop-links.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -75,7 +77,6 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
-  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -84,7 +85,6 @@ const {
   localCallbackUrl,
   resolveBackendUrl,
   resolveAppRuntime,
-  staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
 const {
@@ -124,6 +124,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendUrl = null;
+let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
@@ -1074,12 +1075,6 @@ function iconPath() {
     : path.resolve(__dirname, "../resources/icon.png");
 }
 
-function bundledUiPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "ui")
-    : path.resolve(__dirname, "../../ui/.output/public");
-}
-
 function errorPage(error) {
   const message = String(error?.message || error);
   const html = `<!doctype html>
@@ -1214,7 +1209,7 @@ async function clearBackendCookies(url) {
   }
 }
 
-async function serveBundledUi(request) {
+async function serveDesktopUi(request: Request) {
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);
@@ -1223,24 +1218,23 @@ async function serveBundledUi(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
-
-  const root = bundledUiPath();
-  let filePath = staticFilePath(root, request.url);
-  if (
-    !filePath ||
-    !fs.existsSync(filePath) ||
-    !fs.statSync(filePath).isFile()
-  ) {
-    if (path.extname(url.pathname))
-      return new Response("Not found", { status: 404 });
-    filePath = path.join(root, "_shell.html");
+  if (desktopUi?.backendUrl !== backendUrl) {
+    desktopUi = new DesktopUi(
+      backendUrl,
+      fetch,
+      path.join(app.getPath("userData"), "ui-cache"),
+      (filename: string) => net.fetch(pathToFileURL(filename).toString()),
+      process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
+      () =>
+        void dialog.showMessageBox({
+          type: "warning",
+          message: "Open SWE needs an update",
+          detail:
+            "Your backend has a newer UI than this version of Open SWE can run. You are still on the previous UI; update the desktop app to get the new one.",
+        }),
+    );
   }
-  if (!fs.existsSync(filePath)) {
-    return new Response("Bundled UI is missing. Run pnpm run build:ui.", {
-      status: 500,
-    });
-  }
-  return net.fetch(pathToFileURL(filePath).toString());
+  return desktopUi.serve(request);
 }
 
 const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
@@ -1726,10 +1720,7 @@ function createSetupWindow() {
         await clearBackendCookies(previousUrl);
         await session.defaultSession.clearStorageData({ origin: APP_URL });
       }
-      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-        pendingDeepLink = null;
-      else if (mainWindow && !mainWindow.isDestroyed())
-        await loadApp(mainWindow);
+      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
       window.close();
     } catch (error) {
@@ -1762,11 +1753,13 @@ function configurePermissions() {
   );
 }
 
-let pendingDeepLink = null;
+const desktopLinks = new DesktopLinks({
+  backendUrl: () => backendUrl,
+  openApp: openDesktopLink,
+  openExternal: (url: string) => shell.openExternal(url),
+});
 
-function openDesktopLink(url) {
-  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-  if (!target) return false;
+function openDesktopLink(target: string) {
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const window = existingWindow || createWindow(target);
@@ -1783,10 +1776,8 @@ app.on("will-continue-activity", (event, type) => {
 
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
-  if (!backendUrl) pendingDeepLink = details.webpageURL;
-  else if (!desktopDeepLinkUrl(details.webpageURL, backendUrl)) return;
   event.preventDefault();
-  if (backendUrl) openDesktopLink(details.webpageURL);
+  desktopLinks.receive(details.webpageURL);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1844,13 +1835,11 @@ if (!hasSingleInstanceLock) {
           ? console.warn(message)
           : console.warn(message, error),
     });
-    protocol.handle("open-swe", serveBundledUi);
+    protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-      pendingDeepLink = null;
-    else createWindow();
+    if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

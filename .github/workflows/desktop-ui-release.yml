@@ -1,0 +1,40 @@
+name: Release Desktop UI
+
+on:
+  push:
+    branches: [main, preview]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-ui-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "24"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter open-swe-dashboard...
+      - run: pnpm --filter open-swe-dashboard run build
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+      - name: Publish immutable UI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="desktop-ui-${GITHUB_SHA}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release view "$tag" --json assets --jq '[.assets[].name] | sort' > "$RUNNER_TEMP/assets.json"
+            node -e 'const a=require(process.argv[1]); if (!a.includes("descriptor.json") || !a.includes("ui.json.gz")) process.exit(1)' "$RUNNER_TEMP/assets.json"
+          else
+            gh release create "$tag" ui/.output/desktop/ui.json.gz ui/.output/desktop/descriptor.json \
+              --target "$GITHUB_SHA" --prerelease --title "Desktop UI ${GITHUB_SHA}" \
+              --notes "Standalone desktop UI for backend commit ${GITHUB_SHA}."
+          fi
