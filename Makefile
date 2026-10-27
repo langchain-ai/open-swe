@@ -170,7 +170,7 @@ help:
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
-	@echo 'hooks                         - install the prek git hooks (pre-commit and pre-push)'
+	@echo 'hooks                         - install the prek pre-commit hook'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on openswe/ and tests/'

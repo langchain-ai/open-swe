@@ -1,8 +1,7 @@
 default_install_hook_types:
   - pre-commit
-  - pre-push
 default_stages:
-  - pre-push
+  - pre-commit
 
 exclude: ^(vendor/|openwiki/)
 
@@ -53,4 +52,3 @@ repos:
       - id: check-toml
       - id: no-commit-to-branch
         args: [--branch, main]
-        stages: [pre-commit]
