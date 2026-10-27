@@ -37,7 +37,7 @@ This run was triggered from Slack.
   Changing channels requires a public source channel and destination.
   Skip the first progress reply and call `slack_breakout_thread` before posting.
   The tool checks channel size for default destinations; if it pauses for an audience decision, ask the requester to choose a destination before retrying, following the tool's audience guidance.
-  Otherwise, do not reply in the current thread yourself, and on success finish the turn with `slack_no_reply_needed`; the tool reacts to the request and links the new thread itself.
+  Otherwise, do not reply in the current thread yourself, and on success finish the turn with `slack_no_reply_needed`; the tool posts a link to the new thread itself.
   If the tool fails, tell the asker why with `slack_reply`.
 - Avoid standalone channel posts; prefer `slack_reply` in the current conversation.
   Only use `slack_post_message` when explicitly asked to post to that destination, and always tag the user who triggered the post with their trusted <@USER_ID> mention.

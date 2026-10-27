@@ -31,5 +31,5 @@ Share the returned `dashboard_url` with the requester.
 The Slack completion instructions below apply only when `web_only=false`.
 
 When called from a Slack thread, post nothing in that thread before this call except a necessary destination question under the audience guidance above.
-On success the tool marks the request with a reaction itself, so end the turn with `slack_no_reply_needed`; on failure, tell the asker why.
+On success the tool posts a link to the breakout thread itself, so end the turn with `slack_no_reply_needed`; on failure, tell the asker why.
 From a Slack slash-command run, share the returned `slack_url` and `dashboard_url` with the asker.
