@@ -24,6 +24,8 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial
 from typing import Final
 
+from deepagents.backends import StateBackend
+from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
@@ -82,6 +84,8 @@ class FileToolsMiddleware(AgentMiddleware):
     run, so each call reads them from the run in progress.
     """
 
+    state_schema = FilesystemState
+
     def __init__(
         self,
         backend: OpenSweBackend,
@@ -101,6 +105,9 @@ class FileToolsMiddleware(AgentMiddleware):
         )
         # The run's skills, which this runtime keeps itself (``rt.skills``).
         self._skills = dict(skills or {})
+        self._state = {
+            tool.name: tool for tool in FilesystemMiddleware(backend=StateBackend()).tools
+        }
         # The box's own tools, as the model is offered them; code mode runs them from here.
         self._box: dict[str, BaseTool] = {}
         self._execute_timeout = execute_timeout
@@ -165,6 +172,8 @@ class FileToolsMiddleware(AgentMiddleware):
         spec = self._spec
         if _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
             run: Handler = self._run_skill
+        elif not self._in_box and _under(["/large_tool_results/"], call_["name"], call_["args"]):
+            run = self._run_state
         elif not self._in_box or _under(spec.backend_paths, call_["name"], call_["args"]):
             run = self._run_remote
         else:
@@ -212,6 +221,10 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the backend's files, as the box's own tool would run it."""
         return await _invoked(self._remote[request.tool_call["name"]], request)
+
+    async def _run_state(self, request: ToolCallRequest) -> ToolMessage | Command:
+        """Read offloaded results from the same state backend that evicted them."""
+        return await _invoked(self._state[request.tool_call["name"]], request)
 
     async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the run's skills, as the box's own tool would run it."""

@@ -3,12 +3,13 @@ import gc
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
 import httpx2
 import pytest
-from deepagents.backends import StateBackend
+from deepagents.backends import FilesystemBackend, StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
@@ -93,9 +94,15 @@ def prepared() -> Prepared:
 
 
 @pytest.fixture
-def backend_calls(monkeypatch: pytest.MonkeyPatch, prepared: Prepared) -> BackendCalls:
-    """Every call the runs make on the backend: its endpoint, its bearer and, for an
-    operation, the name and grant it was called with."""
+def operation_results() -> dict[str, str]:
+    return {}
+
+
+@pytest.fixture
+def backend_calls(
+    monkeypatch: pytest.MonkeyPatch, prepared: Prepared, operation_results: dict[str, str]
+) -> BackendCalls:
+    """Record backend calls with each run's bearer, operation name and grant."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr(mda_runtime._SharedGraphs, "_built", OrderedDict())
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
@@ -111,7 +118,11 @@ def backend_calls(monkeypatch: pytest.MonkeyPatch, prepared: Prepared) -> Backen
         if hook == "prepare":
             prepared.append(json.get("sandbox_id"))
         if hook == "operation":
-            return httpx2.Response(200, request=request, json={"content": "found"})
+            return httpx2.Response(
+                200,
+                request=request,
+                json={"content": operation_results.get(str(operation), "found")},
+            )
         return httpx2.Response(200, request=request, json={"files": []} if hook == "skills" else {})
 
     client = MagicMock(is_closed=False)
@@ -225,6 +236,76 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     assert second.nodes["model"] is first.nodes["model"]
     assert prepared == ["box-thread-1", "box-thread-2"]
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
+
+
+@pytest.mark.parametrize("snapshot", [None, "selected-box"])
+async def test_large_tool_results_remain_readable_with_or_without_a_box(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    operation_results: dict[str, str],
+    tmp_path: Path,
+    snapshot: str | None,
+) -> None:
+    content = "\n".join(f"result line {i}: " + "x" * 100 for i in range(2000))
+    operation_results["lookup:grant"] = content
+    disk = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    box = MagicMock(spec=StateBackend)
+    box.id = "selected-box"
+    box.awrite = disk.awrite
+    box.aread = disk.aread
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", lambda *args, **kwargs: box)
+    results: dict[str, ToolMessage] = {}
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        results.update(
+            (message.tool_call_id, message)
+            for message in messages
+            if isinstance(message, ToolMessage)
+        )
+        if "lookup" not in results:
+            reply = AIMessage(
+                content="", tool_calls=[ToolCall(name="lookup", args={}, id="lookup")]
+            )
+        elif "read" not in results:
+            assert "/large_tool_results/lookup" in results["lookup"].text
+            assert len(results["lookup"].text) < len(content)
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="read_file",
+                        args={
+                            "file_path": "/large_tool_results/lookup",
+                            "offset": 1000,
+                            "limit": 1,
+                        },
+                        id="read",
+                    )
+                ],
+            )
+        else:
+            assert results["read"].status == "success"
+            assert content.splitlines()[1000] in results["read"].text
+            reply = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    await _run(
+        InMemoryStore(),
+        "large-result",
+        _context("reviewer", "token", _catalog("lookup", "grant", snapshot=snapshot)),
+    )
+
+    assert "read" in results
+    saved = tmp_path / "large_tool_results" / "lookup"
+    if snapshot is None:
+        assert not saved.exists()
+    else:
+        assert saved.read_text() == content
+    assert not any(hook.startswith("files.") for hook, _, _ in backend_calls)
 
 
 @pytest.mark.parametrize("code_mode", [False, True])

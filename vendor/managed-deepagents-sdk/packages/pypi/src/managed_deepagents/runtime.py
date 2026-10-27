@@ -2052,6 +2052,14 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         return self._call(lambda backend: backend.write(file_path, content))
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
+        from managed_deepagents.sandbox import selected_for  # noqa: PLC0415
+
+        runtime = self._runtime if self._runtime is not None else _ambient_runtime()
+        if (
+            file_path.startswith("/large_tool_results/")
+            and selected_for(self._source.sandbox, runtime) is None
+        ):
+            return await StateBackend().awrite(file_path, content)
         return await self._acall(lambda backend: backend.awrite(file_path, content))
 
     def edit(
