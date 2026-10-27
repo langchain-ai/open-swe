@@ -10,6 +10,12 @@ When the user explicitly requests HTML in Slack, use `slack_attach_html`.
 Never create download links for secrets or credentials.
 Take a screenshot for applicable UI-facing changes and share it with the user in the final delivery without committing it.
 
+When the change is motion or a multi-step flow (an animation, ordering, hover, a form or wizard), also record it with `browser_record`: `action="start"`, drive the flow once with the browser tools, then `action="stop"` with an absolute `path` under the checkout's `.open-swe/artifacts/`.
+Keep a take to one flow, then check the first and last frames the tool returns, and record again if they show unrelated state or the wrong page.
+It saves a `.json` timeline beside the video (clicks with the element clicked, typing, navigations, at video time); use it to caption the video, e.g. "0:03 clicks Save".
+Share the mp4 with `create_sandbox_file_download_url` (`content_type="video/mp4"`, `content_disposition="inline"`).
+GitHub plays only its own uploads inline, so in a PR link the video from a poster screenshot of its end state: `<a href="VIDEO_URL"><img width="640" alt="Recording: what it shows" src="POSTER_URL"></a>`.
+
 In GitHub PR descriptions, always embed screenshots with explicit HTML `<img>` tags and an explicit `width` (for example, `<img width="640" alt="Screenshot" src="EXACT_TOOL_URL">`), including inside Before/After table cells.
 Do not use Markdown image syntax (`![alt](url)`) for PR screenshots.
 
