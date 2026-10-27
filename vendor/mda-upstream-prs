@@ -1,1 +1,2 @@
 1059 f1906351c3b26275bd698819171fbcc9824ed51e fix(channels): verify the Slack actor against the signed principal
+1061 df08ea6a0d3aee010d19f662b124b42511741cb7 feat(channels): map channel senders to app users with resolveUser

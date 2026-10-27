@@ -15,6 +15,7 @@ from managed_deepagents._channels.reactions import (
     ReactionChoice,
     is_emoji_name,
 )
+from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.slack_connections import SLACK_BOT_TOKEN_SLUG
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
+    from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
@@ -97,8 +99,10 @@ class TriggerSlackChannel(Channel):
         multitask_strategy: MultitaskStrategy = "enqueue",
         reply: ChannelReply = "auto",
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
+        resolve_user: ResolveUser | None = None,
     ) -> None:
         self.app = app
+        self.resolve_user = resolve_user
         self.trigger_mode = trigger_mode
         self.allow_bot_triggers = allow_bot_triggers
         self.reactions = reactions
@@ -189,6 +193,7 @@ class TriggerSlackChannel(Channel):
             ),
             multitask_strategy=self.multitask_strategy,
             on_finish=on_finish,
+            resolve_user=context.get("resolve_user"),
         )
 
     def _decided_events(self) -> DecidedSlackEvents | None:
@@ -425,6 +430,7 @@ def slack_channel(
     multitask_strategy: MultitaskStrategy = "enqueue",
     reply: ChannelReply = "auto",
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
+    resolve_user: ResolveUser | None = None,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
 
@@ -489,6 +495,8 @@ def slack_channel(
             agent, through ``runtime.channel.post`` or its own tools. The
             status, reactions and ``on_finish`` stay as they are. ``"none"``
             needs an ``mda`` CLI that deploys it.
+        resolve_user: Map the Slack user to one of your users; overrides the
+            identity's ``resolve_user``.
         on_finish: Called once when a message or interaction is done, with the
             ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
             ``SlackChannelThread``, and how it finished: ``run`` (its run
@@ -562,6 +570,7 @@ def slack_channel(
         multitask_strategy=multitask_strategy,
         reply=reply,
         on_finish=on_finish,
+        resolve_user=checked_resolve_user("channels.slack", resolve_user),
     )
 
 

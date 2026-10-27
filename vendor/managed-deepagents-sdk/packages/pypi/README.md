@@ -844,11 +844,12 @@ a project that declares it.
 
 A run acts for the GitHub user who sent the event, as `github:<id>`: GitHub
 signs each delivery, and the numeric ID outlives login renames. Events from
-bots and organizations run as the channel. A GitHub sender cannot be mapped to a
-user of the agent's identity, the principal `identity.py` resolves from LangSmith,
-Supabase or another provider. So MCP servers and tools that act on a user's
-behalf or need a user connection are left out of those runs, with a warning,
-and the run goes on without them. An issue or pull request is a shared
+bots and organizations run as the channel. Unless `resolve_user` maps it to one of
+your users (see [Mapping channel senders to your users](#mapping-channel-senders-to-your-users)),
+a GitHub sender is not a user of the agent's identity, the principal `identity.py`
+resolves from LangSmith, Supabase or another provider. So MCP servers and tools
+that act on a user's behalf or need a user connection are left out of those
+runs, with a warning, and the run goes on without them. An issue or pull request is a shared
 conversation, so the sender gets user memory only where the user memory
 layer's `allow` opts in. See [Setting up the GitHub App](#setting-up-the-github-app)
 for what the first deploy asks.
@@ -1223,6 +1224,60 @@ can't be deployed with `--no-wait`, because setup needs the live deployment.
 `mda delete` removes the credentials; delete the app itself in Linear.
 Deployments set up by an earlier `mda` keep the app as workspace connections,
 which only a LangSmith workspace admin can delete.
+
+## Mapping channel senders to your users
+
+Each channel gives a person its own principal: a Slack user, a GitHub sender
+and a Linear user are three different callers. When your app already keeps one
+users table, `resolve_user` maps every verified sender to one of your users:
+
+```python
+# identity.py
+async def resolve_user(request: ResolveUserRequest) -> ResolveUserResult:
+    actor = request["actor"]
+    if actor is None:
+        return {"type": "ignore"}
+    user = await db.user_for_identity(actor.provider, actor.id)
+    if user is None:
+        return {
+            "type": "reply",
+            "message": {
+                "type": "content",
+                "content": "Link your account at https://app.example.com/link first.",
+            },
+        }
+    return {"type": "user", "id": user.id}
+
+
+identity = define_identity(auth="backend", resolve_user=resolve_user)
+```
+
+MDA calls it before every run or resume a channel starts, with the verified
+`actor` and the channel's name. `actor` is `None` when the channel could not
+verify who sent the delivery, such as a Slack actor that failed its check or a
+Linear event that names no one. It returns:
+
+- `{"type": "user", "id": ...}`: run as one of your users, with the principal
+  a backend call with `auth="backend"` gets for that `id`. Channels and your
+  backend then share connections and memory.
+- `{"type": "identity", "provider": ..., "issuer": ..., "subject": ...}`: run
+  as an exact Agent Auth identity, such as the IdP `sub` your web users sign in
+  with.
+- `{"type": "reply", "message": ...}`: start nothing, and post `message` where
+  the event came from, as `runtime.channel.post` does, but only when the event
+  would start or resume a run. `message` is a `ChannelMessage`. Slack and Linear send text only. A GitHub channel can't
+  post, so it only starts nothing.
+- `{"type": "ignore"}`: start nothing. This also stops a stranger from
+  answering an interrupt.
+- `None`: keep the channel's own principal.
+
+A channel's own `resolve_user`, such as `channels.github(resolve_user=...)`,
+overrides the identity's. If `resolve_user` raises, MDA starts nothing. Key on
+`provider` and `id` (and `team_id` for Slack), never on `name` or `email`.
+
+Your app links accounts: a `reply` can point to a page where the person signs
+in and connects their Slack or GitHub account. The reply can be public, so its
+link must not carry anything that proves who the sender is.
 
 ## HTTP channels
 

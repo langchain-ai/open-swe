@@ -39,6 +39,7 @@ from managed_deepagents._channels.reactions import (
     ReactionChoice,
     resolve_reaction_emoji,
 )
+from managed_deepagents._channels.resolve_user import post_reply, resolve_channel_user
 from managed_deepagents._channels.run_input import run_start_options
 from managed_deepagents._channels.trigger.client import (
     LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV,
@@ -64,6 +65,7 @@ from managed_deepagents._channels.trigger.ingress import (
     start_ingress_agent,
 )
 from managed_deepagents._channels.trigger.tracing_project import tracer_session_id
+from managed_deepagents._channels.trigger.transport import TriggerTransport
 from managed_deepagents._channels.trigger.types import (
     TRIGGER_SERVICE_KEY_HEADER,
     TriggerChannelAddress,
@@ -99,6 +101,7 @@ if TYPE_CHECKING:
         HttpOnFinish,
         HttpSkipReason,
     )
+    from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import NormalizedRunInput
     from managed_deepagents._channels.trigger.ingress import (
         ObservedIngressRun,
@@ -507,6 +510,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
     identity_context_issuer: str | None = None,
+    resolve_user: ResolveUser | None = None,
     resolve_principal: Callable[[ResolvePrincipalIdentity], str] | None = None,
 ) -> object:
     """Validate a Trigger message and enqueue its Agent Server run."""
@@ -571,10 +575,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             conversation_thread=conversation_thread,
         )
 
+    resolve_principal = resolve_principal or resolve_external_principal_id
     # Who the delivery came from; never logged.
-    actor = await _verified_event_actor(
-        event, user_id, resolve_principal or resolve_external_principal_id
-    )
+    actor = await _verified_event_actor(event, user_id, resolve_principal)
 
     try:
         client = (
@@ -604,6 +607,28 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     except RuntimeError:
         logger.error("%s is not configured", ASSISTANT_ID_ENV)
         return _json_response({"error": "channel runtime is not configured"}, status_code=500)
+
+    try:
+        user = await resolve_channel_user(resolve_user, actor, channel_name, resolve_principal)
+    except Exception as error:  # noqa: BLE001 - the app's hook may raise anything
+        logger.error("channel resolve_user failed (%s)", logger.safe_error_label(error))
+        return _json_response({"error": "channel user resolution failed"}, status_code=500)
+    if user is not None and user["type"] == "principal":
+        user_id = user["id"]
+    # resolve_user's answer when it holds back the run the delivery would start.
+    withheld = None if user is None or user["type"] == "principal" else user
+
+    async def withhold() -> None:
+        """Post resolve_user's reply, if any, instead of that run."""
+        if withheld is not None and withheld["type"] == "reply":
+            await post_reply(
+                withheld["message"],
+                name=channel_name,
+                provider=source_provider,
+                target=_trigger_target(event),
+                transport=TriggerTransport(client, action_id=event["delivery_id"]),
+            )
+        _log_no_run(event, TriggerMessageDecision("skipped"))
 
     try:
         thread_id = await (conversation_thread or conversation_thread_id)(
@@ -755,6 +780,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                 _log_no_run(event, decided)
                 await finish(_skipped("ignored"))
                 return
+            if withheld is not None:
+                await withhold()
+                await finish(_skipped("ignored"))
+                return
             try:
                 started = await start(decided.input)
             except Exception as error:  # noqa: BLE001 - never log Agent Server details
@@ -777,6 +806,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     # Trigger Server may deliver it again, which finishes on its own.
     if decision is not None and decision.type == "failed":
         return _start_failed_response()
+    if withheld is not None:
+        await withhold()
+        finish_later(_skipped("ignored"))
+        return _accepted_response(event)
 
     try:
         started = await start(decision.input if decision is not None else None)
