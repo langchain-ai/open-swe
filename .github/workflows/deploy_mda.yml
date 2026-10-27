@@ -156,7 +156,8 @@ jobs:
           fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # the gateway key it calls models with, and the secret it signs its calls to the backend with.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          # The backend acts on the channels' threads with the same secret, as MDA's ingress secret.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nMDA_INGRESS_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$MDA_SERVICE_SECRET" >mda/.env
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"

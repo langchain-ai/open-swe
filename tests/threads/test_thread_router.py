@@ -16,6 +16,16 @@ from openswe.threads.index import Runtime, ThreadStatus
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 THREAD = "00000000-0000-4000-8000-000000000001"
+# The conversation MDA's Linear channel keeps the thread for: its owner there.
+CHANNEL_OWNER = "mda:source-thread:linear:org/ISS-1"
+SERVICE_SECRET = "whsec_a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="
+# What the backend sends to act in that conversation: MDA's trusted-backend ingress.
+AS_THE_CONVERSATION = {
+    "x-mda-ingress-secret": SERVICE_SECRET,
+    "x-mda-user-id": "openswe:backend",
+    "x-mda-source-provider": "linear",
+    "x-mda-source-thread-id": "org/ISS-1",
+}
 
 
 class _Http:
@@ -95,6 +105,8 @@ class _Runtimes:
 class _Harness:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.forwarded: list[tuple[str, dict[str, JsonValue]]] = []
+        # The conversation each forwarded write acted in, by its MDA headers.
+        self.acted_as: list[dict[str, str]] = []
         # Calls that reached MDA through its read client, as (method, path).
         self.read: list[tuple[str, str]] = []
         self.reached_here: list[str] = []
@@ -103,6 +115,9 @@ class _Harness:
 
         def mda(request: httpx.Request) -> httpx.Response:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
+            self.acted_as.append(
+                {k: v for k, v in request.headers.items() if k in AS_THE_CONVERSATION}
+            )
             return httpx.Response(
                 200,
                 json={"run_id": "remote-run"},
@@ -116,6 +131,8 @@ class _Harness:
 
         def mda_reads(request: httpx.Request) -> httpx.Response:
             self.read.append((request.method, request.url.path))
+            if (request.method, request.url.path) == ("GET", f"/threads/{THREAD}"):
+                return httpx.Response(200, json={"metadata": {"owner": CHANNEL_OWNER}})
             return httpx.Response(200, json={})
 
         mda_runtime._read_http = httpx.AsyncClient(
@@ -449,55 +466,119 @@ async def _channel_thread(harness: _Harness) -> None:
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "body"),
+    ("path", "body"),
     [
-        ("POST", "/runs", {"assistant_id": "agent", "input": {}}),
-        ("POST", "/runs/stream", {"assistant_id": "agent", "input": {}}),
-        ("POST", "/state", {"values": {}}),
-        ("POST", "/copy", {}),
-        ("POST", "/runs/run-1/cancel", None),
-        ("POST", "/commands", {"id": 1, "method": "input.respond", "params": {}}),
+        ("/runs", {"assistant_id": "agent", "input": {}}),
+        ("/runs/run-1/cancel", None),
+        ("/commands", {"id": 1, "method": "input.respond", "params": {}}),
     ],
 )
-async def test_a_channel_thread_refuses_writes(
-    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+async def test_a_channel_thread_takes_runs_stops_and_answers_as_its_conversation(
+    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: JsonValue
 ) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
 
-    status, reply = await harness.request(method, f"/threads/{THREAD}{path}", body)
+    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
 
-    # The channel starts its threads' runs; the backend can't, and says so.
-    assert status == 409
-    assert isinstance(reply, dict) and "linear channel" in str(reply["detail"])
-    assert harness.forwarded == [] and harness.read == []
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.runtime == "mda"
+    assert status == 200
+    assert [forwarded for forwarded, _ in harness.forwarded] == [f"/threads/{THREAD}{path}"]
+    # The conversation that owns the thread on MDA, read there; the thread stays its.
+    assert harness.acted_as == [AS_THE_CONVERSATION]
+    assert harness.read == [("GET", f"/threads/{THREAD}")]
+    assert THREAD not in harness.runtimes.mda_runtime._mda_threads
 
 
-async def test_a_channel_thread_refuses_a_run_started_by_command(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_channel_thread_takes_a_run_started_by_command(
+    monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
     command = {"id": 7, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
 
     status, reply = await harness.request("POST", f"/threads/{THREAD}/commands", command)
 
-    assert status == 200
-    assert isinstance(reply, dict) and (reply["type"], reply["id"]) == ("error", 7)
-    assert harness.forwarded == []
+    assert (status, reply) == (
+        200,
+        {"type": "success", "id": 7, "result": {"run_id": "remote-run"}},
+    )
+    assert harness.acted_as == [AS_THE_CONVERSATION]
+    indexed = await index.get(THREAD)
+    assert indexed is not None and indexed.status == "busy"
 
 
-async def test_a_cancel_of_every_run_on_a_channel_thread_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [("/copy", {}), ("/runs/crons", {"assistant_id": "agent", "schedule": "* * * * *"})],
+)
+async def test_a_channel_thread_is_neither_copied_nor_scheduled_here(
+    monkeypatch: pytest.MonkeyPatch, path: str, body: JsonValue
 ) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
 
-    status, _ = await harness.request("POST", "/runs/cancel", {"thread_id": THREAD})
+    status, reply = await harness.request("POST", f"/threads/{THREAD}{path}", body)
 
     assert status == 409
+    assert isinstance(reply, dict) and "linear channel" in str(reply["detail"])
+    assert harness.forwarded == []
+
+
+async def test_stopping_every_run_on_a_channel_thread_acts_as_its_conversation(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, _ = await harness.request(
+        "POST", "/runs/cancel", {"thread_id": THREAD, "run_ids": ["run-1"]}
+    )
+
+    assert status == 200
+    assert [forwarded for forwarded, _ in harness.forwarded] == ["/runs/cancel"]
+    assert harness.acted_as == [AS_THE_CONVERSATION]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/state", {"values": {"messages": []}}),
+        ("DELETE", "/runs/run-1", None),
+        ("POST", "/commands", {"id": 1, "method": "input.inject", "params": {}}),
+        ("POST", "/commands", {"id": 1, "method": "state.fork", "params": {}}),
+    ],
+)
+async def test_a_channel_thread_refuses_other_writes_without_acting_as_its_conversation(
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, reply = await harness.request(method, f"/threads/{THREAD}{path}", body)
+
+    assert status == 409
+    assert isinstance(reply, dict) and "linear channel" in str(reply["detail"])
+    assert harness.forwarded == [] and harness.acted_as == [] and harness.read == []
+
+
+async def test_without_the_service_secret_a_channel_thread_refuses_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MDA_SERVICE_SECRET", raising=False)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    status, reply = await harness.request(
+        "POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent", "input": {}}
+    )
+
+    assert status == 409
+    assert isinstance(reply, dict) and "linear channel" in str(reply["detail"])
     assert harness.forwarded == []
 
 

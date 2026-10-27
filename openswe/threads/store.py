@@ -4,8 +4,9 @@ The index answers every thread read; each runtime that keeps a thread holds a co
 of its metadata for its runs and traces, and runs its state and commands. Backend
 code calls this directly; the thread router serves the Agent Server's thread API
 from it for every other client. A thread an MDA channel owns is read there as
-LangSmith Studio reads it and never written: its metadata is copied only here, and
-a command that would add to it is refused.
+LangSmith Studio reads it, and changed only as the backend acting in its
+conversation: its metadata is copied only here, and a command that adds to it
+reaches MDA through MDA's trusted-backend ingress.
 """
 
 import asyncio
@@ -14,13 +15,14 @@ import logging
 from collections.abc import Mapping
 from typing import Final, NamedTuple
 
+import httpx
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.agent_api.client import MDA_GRAPH_ID, mda_graph_for
 from openswe.dispatch import channel_of
 from openswe.threads import index
 from openswe.threads.index import IndexedThread
-from openswe.threads.runtimes import RUNTIMES
+from openswe.threads.runtimes import RUNTIMES, ChannelThreadError
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,8 @@ READ_COMMANDS: Final = frozenset(
         "subscription.reconnect",
     }
 )
+# Commands the backend sends in a channel's conversation; it refuses the others there.
+ACTING_COMMANDS: Final = frozenset({"run.start", "input.respond"})
 READ_ONLY: Final = (
     "This thread predates Managed Deep Agents and is read-only. Start a new thread to continue."
 )
@@ -197,18 +201,28 @@ class ThreadStore:
                 # Not 409, which callers read as "a run is already going" and retry or skip.
                 return _json_reply(410, {"detail": READ_ONLY})
         refusal = channel_write_refusal(thread) if thread is not None else None
-        if refusal is not None and method == "run.start":
-            return _json_reply(
-                200,
-                {
-                    "type": "error",
-                    "id": command.get("id", 0),
-                    "error": "invalid_argument",
-                    "message": refusal,
-                },
-            )
-        if refusal is not None and method not in READ_COMMANDS:
+        acting: dict[str, str] = {}
+        if refusal is not None and method not in READ_COMMANDS | ACTING_COMMANDS:
             return _json_reply(409, {"detail": refusal})
+        if refusal is not None and method in ACTING_COMMANDS:
+            # A run or an answer on a channel's thread: as the backend acting in its conversation.
+            try:
+                acting = await RUNTIMES.mda_runtime.channel_write_headers(thread_id)
+            except ChannelThreadError, httpx.HTTPError:
+                logger.warning(
+                    "Can't act on an MDA channel's thread", extra={"thread_id": thread_id}
+                )
+                if method == "run.start":
+                    return _json_reply(
+                        200,
+                        {
+                            "type": "error",
+                            "id": command.get("id", 0),
+                            "error": "invalid_argument",
+                            "message": refusal,
+                        },
+                    )
+                return _json_reply(409, {"detail": refusal})
         if thread is not None and method == "run.start" and isinstance(params, dict):
             reply = await RUNTIMES.mda_runtime.start_command_run(
                 thread_id,
@@ -216,6 +230,7 @@ class ThreadStore:
                 params,
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
+                channel=bool(acting),
             )
             if reply.get("type") == "success":
                 try:
@@ -231,8 +246,8 @@ class ThreadStore:
         if thread is not None and thread.runtime == "mda":
             mda = RUNTIMES.mda_runtime
             if refusal is not None:
-                # A channel's thread: only read, as Studio reads it.
-                http = mda.read_http
+                # A channel's thread: read as Studio reads it, written as its conversation.
+                http = mda.http if acting else mda.read_http
             else:
                 await mda.ensure_remote_thread(thread_id)
                 http = mda.http
@@ -241,7 +256,7 @@ class ThreadStore:
         response = await http.post(
             f"/threads/{thread_id}/commands",
             content=body,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **acting},
         )
         return CommandReply(
             response.status_code, response.content, response.headers.get("content-type")
