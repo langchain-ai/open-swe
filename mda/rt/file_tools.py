@@ -44,6 +44,7 @@ from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 from rt.validate_image_reads import ValidateImageReadsMiddleware
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,8 @@ class FileToolsMiddleware(AgentMiddleware):
     Where they are, and which checks apply, is the run's: the graph is shared by every
     run, so each call reads them from the run in progress.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(
         self,

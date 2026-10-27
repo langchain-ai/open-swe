@@ -20,12 +20,15 @@ from runtime_api.loop import BROWSER, BrowserReport
 
 from rt.backend import OpenSweBackend
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
 
 class ReportedBrowserMiddleware(BrowserMiddleware):
     """MDA's browser per thread: the backend hears its name once per process, its use once per run."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend, *, enabled: bool = True) -> None:
         super().__init__()
