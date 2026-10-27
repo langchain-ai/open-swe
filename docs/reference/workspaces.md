@@ -163,6 +163,14 @@ Workspace image builders use the workspace's same explicit creation settings.
 Saving or removing a profile does not modify existing sandboxes: start a new thread or explicitly recreate its sandbox to apply changes.
 Recreation discards the old sandbox's filesystem, so preserve work first; removing cloud trust or the governed tag in LangSmith is the separate revocation mechanism for existing sandboxes.
 
+### Sandbox LangSmith access
+
+**LangSmith Access** in the same section lists LangSmith permissions (for example `projects:read, datasets:read`) that code in new sandboxes may use against the LangSmith API.
+Open SWE saves them as an explicit `access_delegation` grant; the sandbox proxy injects a short-lived credential, so no key enters the sandbox.
+The delegator is Open SWE's own sandbox-creating LangSmith key, not the person running the thread, so every thread in the workspace gets the same access, capped by what that key holds.
+`INHERIT` grants and tenant administration (`workspaces:manage*`, `organization:manage*`, `organization:pats:*`) are refused.
+Like cloud identity, the grant is fixed when a sandbox is created.
+
 ### Access
 
 Every signed-in user may view and use every workspace, and every configured admin may administer

@@ -61,7 +61,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
-from openswe.workspaces.cloud_identity import validate_cloud_identity
+from openswe.workspaces.cloud_identity import validate_access_delegation, validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -407,6 +407,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
     if _has_sensitive_create_param(params):
         raise ValueError("create_params must not contain secrets or authentication credentials")
     validate_cloud_identity(params)
+    validate_access_delegation(params)
     return params
 
 

@@ -1,9 +1,9 @@
-"""Validate nonsecret sandbox federation settings before persisting or using them."""
+"""Validate nonsecret sandbox identity settings (cloud federation, LangSmith delegation)."""
 
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 _GUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
@@ -44,6 +44,29 @@ class AzureIdentity(CloudIdentity):
         ]
         | None
     ) = Field(default=None, min_length=1)
+
+
+# LangSmith never delegates tenant administration; refusing it here fails at save, not boot.
+_UNDELEGATABLE = ("workspaces:manage", "organization:manage", "organization:pats:")
+
+
+class AccessDelegation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The delegator is Open SWE's own sandbox-creating key, not the person running the
+    # thread, so a workspace grants a fixed list rather than everything that key holds.
+    mode: Literal["EXPLICIT"]
+    permissions: list[str] = Field(min_length=1)
+
+    @field_validator("permissions")
+    @classmethod
+    def _check_permissions(cls, permissions: list[str]) -> list[str]:
+        for permission in permissions:
+            if not re.fullmatch(r"[a-z0-9_-]+(:[a-z0-9_-]+)+", permission):
+                raise ValueError(f"invalid LangSmith permission {permission!r}")
+            if permission.startswith(_UNDELEGATABLE):
+                raise ValueError(f"LangSmith does not delegate {permission!r}")
+        return permissions
 
 
 _CLOUDS = {"aws": AWSIdentity, "gcp": GCPIdentity, "azure": AzureIdentity}
@@ -111,3 +134,9 @@ def validate_cloud_identity(params: dict[str, JsonValue]) -> None:
             or name in _MANAGED_NAMES
         ):
             raise ValueError("cloud identity rules need a valid, non-managed rule name")
+
+
+def validate_access_delegation(params: dict[str, JsonValue]) -> None:
+    grant = params.get("access_delegation")
+    if grant is not None:
+        AccessDelegation.model_validate(grant)

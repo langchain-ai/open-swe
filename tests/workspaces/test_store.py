@@ -109,6 +109,9 @@ _AWS_RULE: dict[str, JsonValue] = {
                 ]
             }
         },
+        {"access_delegation": {"mode": "INHERIT"}},
+        {"access_delegation": {"mode": "EXPLICIT", "permissions": []}},
+        {"access_delegation": {"mode": "EXPLICIT", "permissions": ["workspaces:manage"]}},
     ],
 )
 def test_cloud_authority_rejects_invalid_or_unassigned_scopes(params: dict[str, JsonValue]) -> None:
@@ -143,6 +146,10 @@ def test_cloud_authority_round_trips_without_changing_federated_rules() -> None:
                     },
                 },
             ]
+        },
+        "access_delegation": {
+            "mode": "EXPLICIT",
+            "permissions": ["sandboxes:create", "projects:read"],
         },
     }
     assert WorkspaceCreate(name="cloud", create_params=params).create_params == params

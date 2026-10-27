@@ -79,7 +79,19 @@ export function WorkspaceProxySection({
     ? record.create_params.tag_value_ids.join(", ")
     : ""
   const [tags, setTags] = useState(originalTags)
-  const dirty = draft !== original || tags !== originalTags
+  const grant = record.create_params?.access_delegation
+  const originalPermissions =
+    grant &&
+    typeof grant === "object" &&
+    !Array.isArray(grant) &&
+    Array.isArray(grant.permissions)
+      ? grant.permissions.join(", ")
+      : ""
+  const [permissions, setPermissions] = useState(originalPermissions)
+  const dirty =
+    draft !== original ||
+    tags !== originalTags ||
+    permissions !== originalPermissions
   let config: Record<string, JsonValue> | null = null
   let parseError: string | null = null
   try {
@@ -121,6 +133,16 @@ export function WorkspaceProxySection({
         .filter(Boolean)
       if (tagValueIds.length > 0) createParams.tag_value_ids = tagValueIds
       else delete createParams.tag_value_ids
+      const delegated = permissions
+        .split(",")
+        .map((permission) => permission.trim())
+        .filter(Boolean)
+      if (delegated.length > 0)
+        createParams.access_delegation = {
+          mode: "EXPLICIT",
+          permissions: delegated,
+        }
+      else delete createParams.access_delegation
       return api.updateWorkspace(record.slug, { create_params: createParams })
     },
     onSuccess: onSaved,
@@ -129,7 +151,7 @@ export function WorkspaceProxySection({
   return (
     <SettingsSection
       title="Sandbox Proxy"
-      description="Configure cloud workload identity, host-matched headers, and environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged; recreate explicitly to apply changes."
+      description="Configure cloud workload identity, LangSmith access, host-matched headers, and environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged; recreate explicitly to apply changes."
     >
       <div className="space-y-space-3 px-space-4 py-space-3 text-primary">
         <div
@@ -534,6 +556,15 @@ export function WorkspaceProxySection({
           hintText="Assign existing governed tags from the LangSmith workspace used by this deployment. These are not Open SWE workspace IDs. LangSmith checks ownership and assignment permissions at sandbox creation."
           value={tags}
           onChange={setTags}
+          disabled={!canEdit || save.isPending}
+        />
+        <Input
+          label="LangSmith Access"
+          size="sm"
+          placeholder="Comma-separated LangSmith permissions, e.g. projects:read, datasets:read"
+          hintText="Lets code in the sandbox call the LangSmith API with these permissions, delegated from Open SWE's own LangSmith key (not the person running the thread). The credential is injected by the sandbox proxy and never enters the sandbox. Leave empty for no LangSmith access."
+          value={permissions}
+          onChange={setPermissions}
           disabled={!canEdit || save.isPending}
         />
         <p className="text-xs text-secondary">
