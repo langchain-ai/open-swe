@@ -269,7 +269,7 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
     await breakout.process_slack_web(_request(), Command("fix it"), None)
 
     if started:
-        text = "<@U_ALICE> continued in a <https://dashboard/agents/new|private web breakout>."
+        text = "<@U_ALICE> continued in a <https://dashboard/agents/new|workspace web breakout>."
         reply.assert_awaited_once_with(
             "C1",
             "100.0",
