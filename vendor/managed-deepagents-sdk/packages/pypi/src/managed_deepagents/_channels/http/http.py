@@ -23,7 +23,11 @@ from managed_deepagents._channels.http.types import (
     HttpChannelParseResult,
     HttpChannelRequest,
 )
-from managed_deepagents._channels.resolve_user import post_reply, resolve_channel_user
+from managed_deepagents._channels.resolve_user import (
+    post_reply,
+    resolve_channel_user,
+    sender_principal_id,
+)
 from managed_deepagents._channels.run_input import (
     InvalidRunInput,
     NormalizedRunInput,
@@ -35,6 +39,7 @@ from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
     from managed_deepagents._channel import ChannelEventsContext
+    from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http import HttpChannel
     from managed_deepagents._channels.http.ingress import PrepareInput, SkippedIngressRun
@@ -131,6 +136,15 @@ async def _verified_parse(
     return result
 
 
+async def _channel_user(
+    ctx: ChannelEventsContext, actor: ChannelActor | None, delivery_id: str
+) -> tuple[ChannelUser | None, str | None]:
+    """What ``resolve_user`` answers about the sender, and the sender's own
+    principal when it keeps the channel default."""
+    user = await resolve_channel_user(ctx.get("resolve_user"), actor, ctx["name"], delivery_id)
+    return user, (await sender_principal_id(actor) if user is None else None)
+
+
 async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -> Response:
     raw = ctx.get("raw_body")
     if isinstance(raw, str):
@@ -159,14 +173,12 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
     message = _copied_message(result["message"])
     delivery_id = str(uuid.uuid4())
     try:
-        user = await resolve_channel_user(
-            ctx.get("resolve_user"), result.get("actor"), ctx["name"], delivery_id
-        )
+        user, sender_id = await _channel_user(ctx, result.get("actor"), delivery_id)
     except Exception as error:  # noqa: BLE001 - the app's hook may raise anything
         logger.error("channel resolve_user failed (%s)", logger.safe_error_label(error))
         return _error(500, "channel user resolution failed")
     principal_id = user["id"] if user is not None and user["type"] == "principal" else None
-    user_id = principal_id or message["user_id"]
+    user_id = principal_id or sender_id or message["user_id"]
     content = message.get("content")
     thread_id = message["thread_id"].lower()
     source_thread_key = _source_thread_key(ctx["name"], thread_id)

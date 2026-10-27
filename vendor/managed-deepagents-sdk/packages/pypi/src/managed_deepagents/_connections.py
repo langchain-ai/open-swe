@@ -500,12 +500,12 @@ def outside_caller_on_channel_thread(identity: RuntimeIdentity | None) -> bool:
     return not (isinstance(provider, str) and is_trusted_source_provider(provider))
 
 
-_UNMAPPED_SENDER_PROVIDERS = frozenset({"github"})
-"""Channels whose senders a delivery verifies but who cannot be mapped to a
-user of the agent's identity: the principal ``identity.py`` resolves, from
-LangSmith, Supabase or another provider. They cannot use tools that act on a
-user's behalf or own user grants, and asking them to connect an account would
-mean posting the link where everyone sees it."""
+_UNMAPPED_SENDER_PROVIDERS = frozenset({"github", "linear"})
+"""Channels whose senders a delivery verifies, but who run as their own
+provider principal unless ``resolve_user`` maps them to a user of the agent's
+identity. Unmapped, they cannot use tools that act on a user's behalf or own
+user grants: asking them to connect an account would mean posting the link
+where everyone sees it."""
 
 
 def unmapped_channel_provider(identity: RuntimeIdentity | None) -> str | None:
@@ -564,8 +564,8 @@ def resolve_credential_principal_id(
     unmapped = unmapped_channel_provider(identity)
     if unmapped is not None:
         raise CredentialStoreError(
-            f"user-owned connections are unavailable to {unmapped} senders: a "
-            f"{unmapped} account cannot be mapped to a user of this agent's identity"
+            f"user-owned connections are unavailable to {unmapped} senders that "
+            "resolve_user does not map to a user of this agent's identity"
         )
     kind = user.get("kind") if isinstance(user, Mapping) else None
     if kind == "service":

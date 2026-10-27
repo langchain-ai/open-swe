@@ -842,9 +842,10 @@ Acting on GitHub as the person running the agent is not supported yet:
 `connections.get("mda/github-token", {"type": "user"})` throws, and deploy refuses
 a project that declares it.
 
-A run acts for the GitHub user who sent the event, as `github:<id>`: GitHub
-signs each delivery, and the numeric ID outlives login renames. Events from
-bots and organizations run as the channel. Unless `resolve_user` maps it to one of
+A run acts for the GitHub user who sent the event, as their Agent Auth
+principal for `(github, github.com, <id>)`: GitHub signs each delivery, and the
+numeric ID outlives login renames. Events from bots and organizations run as
+the channel. Unless `resolve_user` maps it to one of
 your users (see [Mapping channel senders to your users](#mapping-channel-senders-to-your-users)),
 a GitHub sender is not a user of the agent's identity, the principal `identity.py`
 resolves from LangSmith, Supabase or another provider. So MCP servers and tools
@@ -1269,7 +1270,13 @@ Linear event that names no one. It returns:
   post, so it only starts nothing.
 - `{"type": "ignore"}`: start nothing. This also stops a stranger from
   answering an interrupt.
-- `None`: keep the channel's own principal.
+- `None`: the channel default. The sender runs as their own Agent Auth
+  principal: a Slack user's for `(slack, <install team>, <user>)`, which
+  Trigger Server resolves; a GitHub user's for `(github, github.com, <id>)`; a
+  Linear user's for `(linear, linear.app, <id>)`. Bots, apps and a sender the
+  channel could not verify run as the channel. A GitHub or Linear sender gets
+  no user connections this way, since a sign-in link would be public; map them
+  to one of your users for that.
 
 A channel's own `resolve_user`, such as `channels.github(resolve_user=...)`,
 overrides the identity's. If `resolve_user` raises, MDA starts nothing. Key on
