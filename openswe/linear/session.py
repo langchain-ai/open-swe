@@ -12,7 +12,7 @@ its failures in the session.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -46,6 +46,35 @@ LINEAR_CHANNEL = "linear"
 SESSION_EVENT_KEYS: frozenset[str] = frozenset(
     {"AgentSessionEvent.created", "AgentSessionEvent.prompted"}
 )
+
+
+class LinearDecline(TypedDict):
+    """An answer that starts nothing and has MDA's Linear channel tell the session why."""
+
+    decline: str
+
+
+NO_REPOSITORY: LinearDecline = {
+    "decline": (
+        "Which repository should I work in? Mention it as `repo:owner/name` or link it on "
+        "GitHub, or set a default repository in Open SWE settings."
+    )
+}
+UNREADABLE_SESSION: LinearDecline = {
+    "decline": (
+        "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
+        "again; if it keeps happening, let your Open SWE admin know."
+    )
+}
+
+
+def _not_allowed(repo: Mapping[str, str]) -> LinearDecline:
+    return {
+        "decline": (
+            f"I'm not allowed to work in `{repo['owner']}/{repo['name']}`. Name a repository "
+            "Open SWE may work in, or ask your Open SWE admin to allow this one."
+        )
+    }
 
 
 _PAYLOADS: dict[str, TypeAdapter[Any]] = {
@@ -129,11 +158,12 @@ class LinearSessionTurn:
             self.author = creator or actor or LinearAuthor()
 
     @classmethod
-    def parse(cls, key: str, payload: object) -> LinearSessionTurn | None:
+    def parse(cls, key: str, payload: object) -> LinearSessionTurn | LinearDecline | None:
         """The session turn an event carries, or None for any other Linear event.
 
         The payload is checked against MDA's schema for the event; a session
-        without its issue has nothing to work on.
+        payload that doesn't match it, or a session without its issue, has
+        nothing to work on, and the session is told so.
         """
         adapter = _PAYLOADS.get(key)
         if adapter is None:
@@ -141,14 +171,18 @@ class LinearSessionTurn:
         try:
             validated = adapter.validate_python(payload)
         except ValidationError:
-            return None
+            common.logger.warning(
+                "Linear session payload doesn't match MDA's schema", extra={"linear_event": key}
+            )
+            return UNREADABLE_SESSION
         issue = validated["agentSession"].get("issue")
-        return cls(validated, issue) if issue else None
+        return cls(validated, issue) if issue else UNREADABLE_SESSION
 
-    async def repository(self, thread_id: str) -> tuple[dict[str, str], str | None] | None:
+    async def repository(self, thread_id: str) -> tuple[dict[str, str], str | None] | LinearDecline:
         """The repository the turn works in, when one is named, preferred or allowed.
 
         With it, the workspace whose personal default chose it, if one did.
+        Otherwise what to tell the session.
         """
         repo = common.extract_repo_from_text(self.body, default_owner=common.DEFAULT_REPO_OWNER)
         workspace: str | None = None
@@ -163,13 +197,13 @@ class LinearSessionTurn:
         if not repo:
             repo = (await common.get_workspace_settings()).default_repo
         if not repo:
-            return None
+            return NO_REPOSITORY
         if not common.is_repo_allowed(repo):
             common.logger.warning(
                 "Linear session names a repository outside the allowlist",
                 extra={"linear_issue": self.issue.id},
             )
-            return None
+            return _not_allowed(repo)
         return repo, workspace
 
     @staticmethod
@@ -188,11 +222,11 @@ class LinearSessionTurn:
             return personal, workspace
         return await user.default_repo(), None
 
-    async def prepare_run(self, thread_id: str) -> EndpointAnswer | None:
-        """Index the session's thread and prepare the run for it, or None to start nothing."""
+    async def prepare_run(self, thread_id: str) -> EndpointAnswer | LinearDecline:
+        """Index the session's thread and prepare the run for it, or say why not."""
         chosen = await self.repository(thread_id)
-        if chosen is None:
-            return None
+        if not isinstance(chosen, tuple):
+            return chosen
         repo, default_workspace = chosen
         repository = f"{repo['owner']}/{repo['name']}"
         title = self.issue.title or self.issue.identifier or "Linear issue"
