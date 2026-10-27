@@ -1,9 +1,10 @@
 # Thread context dump
-Every message the model is handed, turn by turn, recorded by thread_context.spec.ts driving the real server.
-Regenerate with UPDATE_THREAD_CONTEXT_FIXTURE=1.
+Every message the model is handed, turn by turn, recorded by thread_context.spec.ts driving the real server. Regenerate with UPDATE_THREAD_CONTEXT_FIXTURE=1.
 
 ## Turn 1: Alice starts the thread from Slack
-Given: an empty thread; Alice has a linked GitHub account and is a workspace admin When: she mentions the bot: add a greet() helper Then: dispatch introduces the channel, carrying everything that stays true of the thread, then the run adds the one block that describes her
+Given: an empty thread; Alice has a linked GitHub account and is a workspace admin
+When: she mentions the bot: add a greet() helper
+Then: dispatch introduces the channel, carrying everything that stays true of the thread, then the run adds the one block that describes her
 
 ### dispatch appends
 ```xml
@@ -48,7 +49,9 @@ new_prs: as drafts
 ```
 
 ## Turn 2: Alice follows up
-Given: turn 1 has run to completion When: Alice replies in the same Slack thread: also add a docstring Then: her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed
+Given: turn 1 has run to completion
+When: Alice replies in the same Slack thread: also add a docstring
+Then: her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed
 
 ### dispatch appends
 ```xml
@@ -61,7 +64,9 @@ Given: turn 1 has run to completion When: Alice replies in the same Slack thread
 (everyone here is already described; nothing re-sent)
 
 ## Turn 3: Bob joins
-Given: Bob has a linked account too, but is not a workspace admin When: Bob replies: make it return bytes Then: the run adds his block; Alice's is not re-sent, and dispatch does not describe her either
+Given: Bob has a linked account too, but is not a workspace admin
+When: Bob replies: make it return bytes
+Then: the run adds his block; Alice's is not re-sent, and dispatch does not describe her either
 
 ### dispatch appends
 ```xml
@@ -86,7 +91,9 @@ new_prs: as drafts
 ```
 
 ## Turn 4: Alice switches to the web dashboard
-Given: the thread has Alice and Bob When: Alice types in the dashboard: ship it Then: the same user: id on a web envelope, and nothing else — what she is does not depend on where she typed
+Given: the thread has Alice and Bob
+When: Alice types in the dashboard: ship it
+Then: the same user: id on a web envelope, and nothing else — what she is does not depend on where she typed
 
 ### dispatch appends
 ```xml
@@ -112,7 +119,9 @@ ship it
 (everyone here is already described; nothing re-sent)
 
 ## Turn 5: Bob sets standing instructions, then asks for the PR
-Given: Bob saved personal instructions between turns When: Bob replies: open the PR Then: only Bob's block is re-sent, now carrying his instructions
+Given: Bob saved personal instructions between turns
+When: Bob replies: open the PR
+Then: only Bob's block is re-sent, now carrying his instructions
 
 ### dispatch appends
 ```xml
@@ -140,7 +149,8 @@ standing_instructions:
 ```
 
 ## Turn 6: Carol, with no Open SWE account, chimes in
-Given: Carol never signed in to Open SWE, so nothing links her Slack account to a GitHub one When: she replies: can it handle unicode?
+Given: Carol never signed in to Open SWE, so nothing links her Slack account to a GitHub one
+When: she replies: can it handle unicode?
 Then: no run starts and the thread is untouched; Slack gets an account-link prompt instead
 
 ### dispatch appends

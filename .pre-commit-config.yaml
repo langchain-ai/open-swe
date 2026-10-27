@@ -34,6 +34,8 @@ repos:
         language: python
         additional_dependencies: ['rumdl==0.3.0']
         files: \.md(\.jinja)?$
+        # A generated e2e fixture compared byte for byte.
+        exclude: ^tests/e2e/tests/thread_context\.md$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
