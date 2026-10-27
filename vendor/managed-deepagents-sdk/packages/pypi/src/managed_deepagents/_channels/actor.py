@@ -1,9 +1,10 @@
 """Who caused a channel event.
 
 The signed sender of a GitHub or Linear webhook, or the Slack user Trigger
-Server names on a delivery, which MDA can't verify yet. It is personal data:
-MDA neither logs it nor adds it to a run's metadata. Kept free of the agent
-stack and PyJWT, so the package can name these types without loading either.
+Server names on a delivery, which MDA checks against the delivery's signed
+principal. It is personal data: MDA neither logs it nor adds it to a run's
+metadata. Kept free of the agent stack and PyJWT, so the package can name these
+types without loading either.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ from typing_extensions import TypedDict
 class SlackActor:
     """A Slack user, as Trigger Server read them from Slack's signed request.
 
-    MDA doesn't yet verify the delivery's service key, so this is no identity
-    check."""
+    MDA checks ``id`` against the delivery's signed principal, but not a Slack
+    Connect guest's ``team_id``."""
 
     provider: Literal["slack"] = "slack"
     id: str
