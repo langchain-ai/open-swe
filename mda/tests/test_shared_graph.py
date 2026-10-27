@@ -35,6 +35,7 @@ from runtime_api.catalog import (
     SandboxSpec,
     SubagentSpec,
 )
+from runtime_api.mcp import McpHeaders, McpServerSpec
 from runtime_api.reports import Reports
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
@@ -201,6 +202,35 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
     assert set(read.channels) == set(first.channels)
     # Code mode's and the run's skills' state, which every graph has.
     assert {"_quickjs_snapshot_payload", "skills_metadata"} <= set(read.channels)
+
+
+async def test_mcp_credentials_are_not_kept_in_shared_graphs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    headers = AsyncMock(return_value=McpHeaders(servers={"example": {"Authorization": "first"}}))
+    monkeypatch.setattr("rt.mcp.call", headers)
+    catalog = Catalog(
+        mcp_servers=[
+            McpServerSpec(
+                name="example", url="https://mcp.invalid", transport="http", tools=["lookup"]
+            )
+        ]
+    )
+    definitions = []
+    for token in ("first", "second"):
+        headers.return_value = McpHeaders(servers={"example": {"Authorization": token}})
+        definitions.append(
+            await agent.agent(
+                mda_runtime._internal_server_runtime(
+                    _thread(token), _context("agent", token, catalog), True
+                )
+            )
+        )
+    assert headers.await_count == 2
+    for definition in definitions:
+        assert "_openswe_graph_inputs" not in definition.config
+    assert definitions[0].config["mcp"] != definitions[1].config["mcp"]
 
 
 async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(

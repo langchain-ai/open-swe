@@ -48,6 +48,7 @@ from rt.managed_sandbox import (
     ReplaceSandboxMiddleware,
     opened_sandbox,
 )
+from rt.mcp import CodeOnlyToolsMiddleware, mcp_servers, mcp_tool_names
 from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
@@ -121,6 +122,7 @@ class GraphInputs(BaseModel):
     graph: Graph = "agent"
     # Where the Agent Server reports a launched worker's run ending.
     worker_webhook: str | None = None
+    mcp_tools: tuple[str, ...] = ()
 
 
 async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
@@ -130,7 +132,11 @@ async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
         return GraphInputs()
     context = RunContext.model_validate(execution.context or {})
     catalog = await context.run().plan()
-    return GraphInputs(graph=context.graph, worker_webhook=catalog.worker_webhook)
+    return GraphInputs(
+        graph=context.graph,
+        worker_webhook=catalog.worker_webhook,
+        mcp_tools=tuple(mcp_tool_names(catalog.mcp_servers)),
+    )
 
 
 @dataclass(frozen=True)
@@ -143,7 +149,10 @@ class _Parts:
 
 
 def _code_mode(
-    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware
+    graph: Graph,
+    toolsets: RunToolsets,
+    files: FileToolsMiddleware,
+    mcp_tools: tuple[str, ...],
 ) -> RunCodeInterpreter:
     """The graph's code mode, with every tool the run's catalog offers from code callable from it."""
     if graph == "reviewer":
@@ -152,12 +161,17 @@ def _code_mode(
             named=[
                 *(name for name in _REVIEWER_PTC_TOOLS if name not in FILE_TOOLS),
                 *files.code_tools(_REVIEWER_PTC_TOOLS),
+                *mcp_tools,
             ],
         )
     # As the in-process agent's code mode: state per turn, subagents through `task`,
     # for a run that offers tools from code.
     return RunCodeInterpreter(
-        toolsets, active=lambda tools: bool(tools.from_code), subagents=False, mode="turn"
+        toolsets,
+        named=mcp_tools,
+        active=lambda tools: bool(tools.from_code or mcp_tools),
+        subagents=False,
+        mode="turn",
     )
 
 
@@ -218,8 +232,9 @@ def _parts(inputs: GraphInputs) -> _Parts:
             files,
             task_retry(),
             RunToolsMiddleware(toolsets),
-            _code_mode(inputs.graph, toolsets, files),
+            _code_mode(inputs.graph, toolsets, files, inputs.mcp_tools),
             DescribedToolsMiddleware(backend),
+            CodeOnlyToolsMiddleware(inputs.mcp_tools, lambda: toolsets.get().searchable),
             # The coding agent's browser, a LangSmith browser per thread the dashboard
             # shows; the deployment's workspace needs the LangSmith browser beta.
             ReportedBrowserMiddleware(backend, enabled=inputs.graph == "agent"),
@@ -240,6 +255,9 @@ def _parts(inputs: GraphInputs) -> _Parts:
 # stays assignments and one `return define_deep_agent(...)`.
 async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     inputs = await _inputs(runtime)
+    execution = runtime.execution_runtime
+    run = RunContext.model_validate(execution.context or {}).run() if execution else None
+    mcp = await mcp_servers(run.backend, (await run.plan()).mcp_servers) if run else []
     parts = _parts(inputs)
     sync_subagents: list[SubAgent] = parts.subagents
     worker: ManagedAsyncSubAgent = {
@@ -260,7 +278,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         model=_DEFAULT_MODEL,
         context_schema=RunContext,
         # MDA compiles the graph once per inputs and shares it; nothing in it is a run's.
-        _openswe_graph_inputs=inputs.model_dump(mode="json"),
+        _openswe_graph_inputs=None if mcp else inputs.model_dump(mode="json"),
         # The thread's box, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
         # same box. Which box, and whether a run has one, is the run's catalog's: a
@@ -268,5 +286,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         sandbox=BOX,
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
+        mcp=mcp,
         middleware=parts.worker_middleware,
     )

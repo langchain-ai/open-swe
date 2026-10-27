@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
+from runtime_api.mcp import McpServerSpec
 
 from openswe.mcp import MCPConnection, runtime
-from openswe.mcp.models import MCPScope
+from openswe.mcp.models import MCPOAuth, MCPScope
 from openswe.sandboxes.tool_runtime import ToolSurface
 from tests.mcp_helpers import fake_mcp_server
 
@@ -74,6 +75,30 @@ async def test_sources_combine_distinct_connections_and_replace_matching_names(r
     assert [(await tool.ainvoke({}))[0]["text"] for tool in tools] == [
         "https://incident.example/mcp",
         "https://personal.example/mcp",
+    ]
+
+
+async def test_a_run_reaches_header_connections_itself_and_the_backend_keeps_oauth_ones(remote):
+    """Headers alone authenticate a connection MDA can call; OAuth needs the backend per call."""
+    oauth = MCPOAuth(token_url="https://linear.example/token", client_id="client")
+    workspace = source(
+        ("workspace_mcps",),
+        {
+            "linear": record(oauth=oauth),
+            "incident": record("incident"),
+        },
+    )
+
+    tools = await runtime.load_run_mcp_tools(workspace)
+    assert [(await tool.ainvoke({}))[0]["text"] for tool in tools] == ["https://linear.example/mcp"]
+    direct = [c for c in await runtime.resolve_connections(workspace) if c.reached_directly]
+    assert [await c.server_spec() for c in direct] == [
+        McpServerSpec(
+            name="incident",
+            url="https://incident.example/mcp",
+            transport="http",
+            tools=["search"],
+        )
     ]
 
 

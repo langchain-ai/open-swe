@@ -2,8 +2,8 @@
 the run's token alone.
 
 Each graph names its own: the recorders that hear of its replies and tool calls, the
-guards on its shell commands, and how it reaches its tools by name, the thread's
-files, its skills and its GitHub credentials. A run still served from its plan says
+guards on its shell commands, and how it reaches its tools by name, the MCP servers
+it calls itself, the thread's files, its skills and its GitHub credentials. A run still served from its plan says
 so (``legacy``).
 """
 
@@ -14,6 +14,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
+from openswe.mcp import ResolvedConnection
 from openswe.run_config import RunConfig
 from openswe.skill_store.run_skills import RunSkillStores
 
@@ -47,3 +48,7 @@ class RunParts:
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         """The tool behind the operation ``name``."""
         return None
+
+    async def mcp_connections(self, config: RunnableConfig) -> list[ResolvedConnection]:  # noqa: ARG002
+        """The MCP connections the run calls itself, not as operations."""
+        return []

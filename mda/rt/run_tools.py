@@ -27,7 +27,7 @@ from runtime_api.loop import ModelCall
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
 from rt.file_tools import FileToolsMiddleware
 from rt.models import build_model
-from rt.search_tools import search_tools_tool
+from rt.search_tools import SearchableTools, search_tools_tool
 from rt.tools import operation_tool
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -59,8 +59,9 @@ class RunTools:
             operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
             for spec in catalog.operations
         ]
+        self.searchable = SearchableTools(catalog.operations)
         searched = (
-            [search_tools_tool(catalog.operations, catalog.search_tools_description)]
+            [search_tools_tool(self.searchable, catalog.search_tools_description)]
             if catalog.search_tools
             else []
         )

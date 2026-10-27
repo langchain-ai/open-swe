@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, JsonValue
 
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
+from runtime_api.mcp import McpServerSpec
 from runtime_api.operations import RunRequest
 
 # The runtime's own tool that finds the run's operations by what they do.
@@ -210,6 +211,8 @@ class Catalog(BaseModel):
     # What the runtime's middleware does around each model call; None leaves it to the
     # backend's phase calls, for the runs still answered from their plan.
     loop: LoopRules | None = None
+    # The MCP servers the run calls itself, from code mode; their tools are not operations.
+    mcp_servers: list[McpServerSpec] = []
     # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
     search_tools: bool = False
     search_tools_description: str | None = None

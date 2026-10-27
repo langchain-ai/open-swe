@@ -17,6 +17,7 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from runtime_api.mcp import McpServerSpec
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
@@ -287,36 +288,93 @@ async def _load_tools(
         return [], "failed"
 
 
-async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
-    """Combine sources in precedence order; later connections replace earlier names entirely."""
+@dataclass(frozen=True)
+class ResolvedConnection:
+    """The connection a run uses under one name, and the lower tiers it replaced."""
+
+    source: MCPSource
+    record: MCPConnection
+    overridden_scopes: list[MCPScope]
+
+    @property
+    def reached_directly(self) -> bool:
+        """Whether an MDA run calls it itself: stored headers alone authenticate it.
+
+        OAuth and the Managed Tools gateway need the backend for every call.
+        """
+        return self.source.scope != "managed" and self.record.oauth is None
+
+    async def server_spec(self) -> McpServerSpec | None:
+        """The connection as an MDA run declares it: the tools it allows that its server
+        still offers, which MDA requires to exist. None when the server cannot be listed
+        or offers none of them."""
+        try:
+            definitions, _ = await _cached_definitions(self.source, self.record)
+        except Exception:
+            logger.warning("MCP discovery failed", extra={"mcp_name": self.record.name})
+            return None
+        tools = [tool.name for tool in definitions if self.record.allows_tool(tool.name)]
+        if not tools:
+            return None
+        return McpServerSpec(
+            name=self.record.name,
+            url=self.record.url,
+            transport="sse" if self.record.transport == "sse" else "http",
+            tools=tools,
+        )
+
+
+async def resolve_connections(*sources: MCPSource) -> list[ResolvedConnection]:
+    """Each name's connection from the highest tier that has it, if it offers tools.
+
+    Missing scope data resolves nothing, so it cannot silently expose a
+    lower-precedence connection.
+    """
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
-        resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
-        scopes: dict[str, list[MCPScope]] = {}
-        for source, records in zip(sources, catalogs, strict=True):
-            for record in records:
-                resolved[record.name] = (source, record)
-                scopes.setdefault(record.name, []).append(source.scope)
     except Exception:
-        # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
         return []
-    connections = [
-        (source, record)
-        for _, (source, record) in sorted(resolved.items())
-        if record.enabled
-        and record.offers_tools
-        and (connection_name is None or record.name == connection_name)
+    resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
+    scopes: dict[str, list[MCPScope]] = {}
+    for source, records in zip(sources, catalogs, strict=True):
+        for record in records:
+            resolved[record.name] = (source, record)
+            scopes.setdefault(record.name, []).append(source.scope)
+    return [
+        ResolvedConnection(source, record, scopes[name][:-1])
+        for name, (source, record) in sorted(resolved.items())
+        if record.enabled and record.offers_tools
     ]
+
+
+async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
+    """Combine sources in precedence order; later connections replace earlier names entirely."""
+    connections = await resolve_connections(*sources)
+    return await _load_connections(
+        sources,
+        [c for c in connections if connection_name is None or c.record.name == connection_name],
+    )
+
+
+async def load_run_mcp_tools(*sources: MCPSource) -> list[BaseTool]:
+    """The tools an MDA run calls through the backend: those it does not reach directly."""
+    connections = await resolve_connections(*sources)
+    return await _load_connections(sources, [c for c in connections if not c.reached_directly])
+
+
+async def _load_connections(
+    sources: tuple[MCPSource, ...], connections: list[ResolvedConnection]
+) -> list[BaseTool]:
     groups = await asyncio.gather(
         *(
             _load_tools(
-                source,
-                record,
+                connection.source,
+                connection.record,
                 sources,
-                scopes[record.name][:-1],
+                connection.overridden_scopes,
             )
-            for source, record in connections
+            for connection in connections
         )
     )
     outcomes = Counter(outcome for _, outcome in groups)

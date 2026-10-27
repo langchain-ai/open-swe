@@ -2,20 +2,26 @@
 
 Code mode keeps most tools off the model's list, so the model finds them here, with
 the schemas it needs to call them and the name code mode calls them by. The run's
-catalog holds every operation, so the search runs here, over it.
+catalog holds every operation, and MDA loads the MCP tools the run calls itself, so
+the search runs here, over both.
 """
 
 import math
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Final
 
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import JsonValue
+from langchain_core.utils.function_calling import convert_to_openai_tool
+
+# The name code mode exposes each tool under, which nothing public names.
+from langchain_quickjs._ptc import to_camel_case  # noqa: PLC2701
+from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import SEARCH_TOOLS, OperationSpec
 
 _MAX_RESULTS: Final = 20
+_json_object = TypeAdapter(dict[str, JsonValue])
 _WORD: Final = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 
 
@@ -58,19 +64,46 @@ def bm25(
     return scores
 
 
-def search_tools_tool(
-    operations: Sequence[OperationSpec], description: str | None = None
-) -> BaseTool:
-    """``search_tools`` over ``operations``, ranked by BM25 over name, description and parameters."""
-    ranked = sorted(operations, key=lambda operation: operation.name)
-    documents = [_operation_tokens(operation) for operation in ranked]
+class SearchableTools:
+    """What ``search_tools`` searches: the catalog's operations, and the MCP tools MDA
+    loads for the run itself, added as a model call first offers them."""
+
+    def __init__(self, operations: Sequence[OperationSpec]) -> None:
+        self._operations = sorted(operations, key=lambda operation: operation.name)
+        self._documents = [_operation_tokens(operation) for operation in self._operations]
+        self._names = {operation.name for operation in self._operations}
+
+    def add(self, tools: Iterable[BaseTool]) -> None:
+        for tool in tools:
+            if tool.name in self._names:
+                continue
+            operation = OperationSpec(
+                name=tool.name,
+                description=tool.description,
+                parameters=_json_object.validate_python(
+                    convert_to_openai_tool(tool)["function"]["parameters"]
+                ),
+                code_name=to_camel_case(tool.name),
+            )
+            self._names.add(tool.name)
+            self._operations.append(operation)
+            self._documents.append(_operation_tokens(operation))
+
+    def ranked(self, query: str) -> list[OperationSpec]:
+        scores = bm25(_tokens(query), self._documents)
+        return [
+            operation
+            for operation, _ in sorted(
+                (pair for pair in zip(self._operations, scores, strict=True) if pair[1] > 0),
+                key=lambda pair: -pair[1],
+            )
+        ]
+
+
+def search_tools_tool(searchable: SearchableTools, description: str | None = None) -> BaseTool:
+    """``search_tools`` over ``searchable``, ranked by BM25 over name, description and parameters."""
 
     async def search_tools(query: str, limit: int = 5) -> list[dict[str, JsonValue]]:
-        scores = bm25(_tokens(query), documents)
-        best = sorted(
-            (pair for pair in zip(ranked, scores, strict=True) if pair[1] > 0),
-            key=lambda pair: -pair[1],
-        )
         return [
             {
                 "name": operation.name,
@@ -78,7 +111,7 @@ def search_tools_tool(
                 "parameters": operation.parameters,
                 "code_name": operation.code_name,
             }
-            for operation, _ in best[: max(1, min(limit, _MAX_RESULTS))]
+            for operation in searchable.ranked(query)[: max(1, min(limit, _MAX_RESULTS))]
             if operation.name != SEARCH_TOOLS
         ]
 
