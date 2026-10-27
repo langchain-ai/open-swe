@@ -15,6 +15,8 @@ from standardwebhooks import Webhook
 from starlette.datastructures import URL
 from starlette.requests import Request
 
+from openswe import dispatch
+from openswe.agent_api.tokens import verify_runtime_token
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
 from openswe.slack import mda_forwarding
@@ -23,6 +25,7 @@ from openswe.slack import webhook as slack_service
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
+from tests.mda_helpers import mda_starts, stub_mda_runtime
 
 _EVENTS_URL = "https://triggers.example/v1/triggers/webhooks/slack-custom-app/events"
 _MDA_THREAD = str(uuid.uuid4())
@@ -451,6 +454,54 @@ async def test_the_endpoint_logs_why_it_answers_no_run(
     assert answered.json() is None
     [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
     assert record.no_run_reason == "no run prepared"
+
+
+async def test_mda_starts_the_run_a_handed_over_message_prepares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
+    request = SlackRequest(channel_id="C1", thread_ts="1.2", thread_id=_MDA_THREAD)
+    monkeypatch.setattr(mda_forwarding, "recall", AsyncMock(return_value=(request, None)))
+    prepared = slack_service.SlackChannelRun(
+        input={"messages": [{"role": "user", "content": "help"}]},
+        configurable={"source": "slack", "github_login": "ada"},
+        trigger_ts="1.2",
+    )
+    monkeypatch.setattr(
+        slack_service, "prepare_slack_channel_run", AsyncMock(return_value=prepared)
+    )
+    monkeypatch.setattr(slack_channel.index, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_channel, "channel_run_starting", AsyncMock())
+    monkeypatch.setattr(
+        dispatch,
+        "_run_user_metadata",
+        AsyncMock(
+            return_value={
+                "ls_repo_provider": "github",
+                "user_id": "user-1",
+                "ls_attribution_identifier": "ada",
+            }
+        ),
+    )
+    stub_mda_runtime(monkeypatch)
+    app = FastAPI()
+    app.include_router(slack_channel.router)
+
+    answered = await _post_endpoint(app, _CALL, signed=True)
+
+    assert answered.status_code == 200
+    answer = answered.json()
+    # The attribution the run's hooks read rides in its token.
+    token = verify_runtime_token(answer["context"]["__run_token"])
+    assert token.thread_id == _MDA_THREAD
+    assert token.metadata["ls_attribution_identifier"] == "ada"
+    # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
+    metadata = mda_starts(answer)["metadata"]
+    assert metadata == answer["metadata"]
+    assert metadata["channel"] == "slack"
+    assert metadata["slack_trigger_ts"] == "1.2"
+    assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 
 @pytest.mark.parametrize(
