@@ -714,21 +714,38 @@ async def ensure_sandbox_for_thread(
 
 
 async def bind_mda_sandbox(
-    thread_id: str, sandbox_id: str | None, *, workspace_slug: str | None = None
+    thread_id: str,
+    sandbox_id: str | None,
+    *,
+    open_error: str | None = None,
+    workspace_slug: str | None = None,
 ) -> None:
     """Bind a thread to the box Managed Deep Agents opened for it, and mark the thread MDA's.
 
     MDA names, creates and replaces the box; the next connection configures it as it
     does any reused box: proxy credentials, git identity, the tool channel. With no
-    ``sandbox_id`` MDA could not open the box, and the thread stays MDA's, so preparing
-    reports it unreachable rather than creating one here. A task worker attaches to its
-    coordinator's box through the backend, as before.
+    ``sandbox_id`` MDA could not open the box (``open_error`` says why), and the thread
+    stays MDA's: preparing connects to the box it was bound to before, and a thread
+    bound to none is unreachable rather than given one here. A task worker attaches to
+    its coordinator's box through the backend, as before.
     """
     metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
     if metadata.task_id is not None:
         return
-    if metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id):
-        return
+    if not (metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id)):
+        await _bind_mda_sandbox(thread_id, sandbox_id, metadata, workspace_slug)
+    if sandbox_id is None and metadata.sandbox_id is None:
+        raise SandboxUnreachableError(
+            thread_id,
+            None,
+            "Managed Deep Agents could not open this thread's sandbox",
+            reason=open_error,
+        )
+
+
+async def _bind_mda_sandbox(
+    thread_id: str, sandbox_id: str | None, metadata: ThreadMetadata, workspace_slug: str | None
+) -> None:
     bind_metadata: dict[str, Any] = {"sandbox_owner": "mda"}
     config = await SandboxCreateConfig.resolve(workspace_slug)
     if sandbox_id is not None and sandbox_id != metadata.sandbox_id:
