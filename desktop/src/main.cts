@@ -73,6 +73,7 @@ const {
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
+  desktopEnvironmentsUrl,
   desktopExchangeUrl,
   connectExchangeUrl,
   connectLoginUrl,
@@ -83,6 +84,7 @@ const {
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  parseDesktopEnvironments,
   resolveBackendUrl,
   resolveAppRuntime,
   validateBackendUrl,
@@ -124,6 +126,10 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendUrl = null;
+// The backend the app started on; `backendUrl` differs only while switched to
+// one of its alternate environments, which lasts until the app restarts.
+let primaryBackendUrl = null;
+let alternativeEnvironments = [];
 let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
@@ -1014,11 +1020,11 @@ function migrateStoredConfig() {
   }
 }
 
-function isBackendSessionCookie(cookie) {
+function isSessionCookieFor(url, cookie) {
   return (
-    Boolean(backendUrl) &&
+    Boolean(url) &&
     cookie.name === SESSION_COOKIE_NAME &&
-    cookie.domain.replace(/^\./, "") === new URL(backendUrl).hostname
+    cookie.domain.replace(/^\./, "") === new URL(url).hostname
   );
 }
 
@@ -1028,7 +1034,7 @@ async function shareBackendSession() {
   session.defaultSession.cookies.on(
     "changed",
     (_event, cookie, cause, removed) => {
-      if (!isBackendSessionCookie(cookie)) return;
+      if (!isSessionCookieFor(backendUrl, cookie)) return;
       if (removed && cause === "overwrite") return;
       try {
         if (removed) unshareSession(configPath(), backendUrl, cookie.value);
@@ -1067,6 +1073,71 @@ function storeBackendUrl(value) {
     backendUrl: url,
   }));
   return url;
+}
+
+/** Ask the backend the app started on which others it offers to switch to. */
+async function loadAlternativeEnvironments() {
+  const url = primaryBackendUrl;
+  if (!url) return;
+  let environments = [];
+  try {
+    const response = await backendFetch(desktopEnvironmentsUrl(url), {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.ok)
+      environments = parseDesktopEnvironments(await response.json());
+  } catch (error) {
+    console.warn("Could not read the alternate environments", error);
+  }
+  if (url !== primaryBackendUrl) return;
+  alternativeEnvironments = environments;
+  createMenu();
+}
+
+function watchAlternativeEnvironments() {
+  session.defaultSession.cookies.on(
+    "changed",
+    (_event, cookie, cause, removed) => {
+      if (removed && cause === "overwrite") return;
+      if (isSessionCookieFor(primaryBackendUrl, cookie))
+        void loadAlternativeEnvironments();
+    },
+  );
+  void loadAlternativeEnvironments();
+}
+
+/** Point the app at `url` and reload it there, dropping the last backend's page state. */
+async function connectToBackend(url) {
+  const previousUrl = backendUrl;
+  backendUrl = url;
+  if (previousUrl && previousUrl !== url)
+    await session.defaultSession.clearStorageData({ origin: APP_URL });
+  createMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
+  else createWindow();
+}
+
+function environmentMenuItem() {
+  if (
+    !primaryBackendUrl ||
+    (!alternativeEnvironments.length && backendUrl === primaryBackendUrl)
+  )
+    return null;
+  const environments = [
+    { name: "Main", url: primaryBackendUrl },
+    ...alternativeEnvironments,
+  ];
+  return {
+    label: "Environment",
+    submenu: environments.map(({ name, url }) => ({
+      label: `${name} (${new URL(url).host})`,
+      type: "radio",
+      checked: url === backendUrl,
+      click: () => {
+        if (url !== backendUrl) void connectToBackend(url);
+      },
+    })),
+  };
 }
 
 function iconPath() {
@@ -1271,6 +1342,10 @@ function createMenu() {
     label: "Backend URL…",
     click: () => createSetupWindow(),
   };
+  const environmentItem = environmentMenuItem();
+  const backendItems = environmentItem
+    ? [backendSettingsItem, environmentItem]
+    : [backendSettingsItem];
   const settingsItem = {
     id: "open-settings",
     label: "Settings…",
@@ -1291,7 +1366,7 @@ function createMenu() {
               { role: "about" },
               settingsItem,
               checkForUpdatesItem,
-              backendSettingsItem,
+              ...backendItems,
               { type: "separator" },
               { role: "services" },
               { type: "separator" },
@@ -1320,7 +1395,7 @@ function createMenu() {
         },
         ...(process.platform === "darwin"
           ? []
-          : [{ type: "separator" }, settingsItem, backendSettingsItem]),
+          : [{ type: "separator" }, settingsItem, ...backendItems]),
         { type: "separator" },
         { role: process.platform === "darwin" ? "close" : "quit" },
       ],
@@ -1714,14 +1789,13 @@ function createSetupWindow() {
     try {
       const value = new URL(targetUrl).searchParams.get("url");
       if (!value) throw new Error("Enter a backend URL");
-      const previousUrl = backendUrl;
-      backendUrl = storeBackendUrl(value);
-      if (previousUrl && previousUrl !== backendUrl) {
-        await clearBackendCookies(previousUrl);
-        await session.defaultSession.clearStorageData({ origin: APP_URL });
-      }
-      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
-      else createWindow();
+      const url = storeBackendUrl(value);
+      if (backendUrl && backendUrl !== url)
+        await clearBackendCookies(backendUrl);
+      primaryBackendUrl = url;
+      alternativeEnvironments = [];
+      await connectToBackend(url);
+      void loadAlternativeEnvironments();
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1814,6 +1888,7 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
+    primaryBackendUrl = backendUrl;
     void shareBackendSession();
 
     localThreadStore = new LocalThreadStore(
@@ -1839,6 +1914,7 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
+    watchAlternativeEnvironments();
     if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
