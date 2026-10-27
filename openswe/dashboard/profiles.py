@@ -45,6 +45,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "subagent_reasoning_effort",
         "model_routing_enabled",
         "experimental_mcp_ptc",
+        "experimental_assistant_ui",
         "recent_thread_context_enabled",
     }
 )
@@ -90,9 +91,6 @@ class ProfileUpdate(BaseModel):
     pr_failure_reactions: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     experimental_background_callbacks: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -165,11 +163,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
-        "experimental_assistant_ui": (
-            update.experimental_assistant_ui
-            if update.experimental_assistant_ui is not None
-            else existing.get("experimental_assistant_ui")
-        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None

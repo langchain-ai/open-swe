@@ -1,20 +1,23 @@
+use std::collections::BTreeMap;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use console::style;
 use reqwest::Url;
 use serde::Deserialize;
 
+use super::channel_app::{self, is_interactive, SetupUi, WaitTick};
 use super::channel_icon::channel_icon_file;
+use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
 use crate::langsmith::{
-    self, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
+    self, is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
+    ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
+    SlackTriggerMode,
 };
 use crate::project::Language;
 
@@ -107,6 +110,9 @@ struct SlackManifest {
     auto_reply: bool,
     required_permissions: Vec<String>,
     required_env: Vec<String>,
+    /// Read by the connection checks, not by setup.
+    #[serde(default)]
+    agent_connections: Option<serde_json::Value>,
     provider_config: SlackProviderConfig,
 }
 
@@ -180,19 +186,13 @@ impl RequiredAction {
         }
     }
 
-    fn prompt_message(&self) -> &str {
+    /// What the user does with the action's link.
+    fn instruction(&self) -> &'static str {
         match self {
-            Self::Authorize { .. } => {
-                "Authorize LangSmith to set up your Slack app using the link below."
+            Self::Authorize { .. } => "Authorize LangSmith to set up your Slack app.",
+            Self::Approve { .. } => {
+                "Install the Slack app. A workspace admin may need to approve it first."
             }
-            Self::Approve { message, .. } => message,
-        }
-    }
-
-    fn continue_label(&self) -> &'static str {
-        match self {
-            Self::Authorize { .. } => "Press Enter once authorization is complete",
-            Self::Approve { .. } => "Press Enter once workspace approval is complete",
         }
     }
 
@@ -213,44 +213,6 @@ impl RequiredAction {
                 self.message()
             ),
         }
-    }
-}
-
-struct ContinueTheme;
-
-impl cliclack::Theme for ContinueTheme {
-    fn format_header(&self, _state: &cliclack::ThemeState, _prompt: &str) -> String {
-        String::new()
-    }
-
-    fn format_select_item(
-        &self,
-        state: &cliclack::ThemeState,
-        selected: bool,
-        label: &str,
-        _hint: &str,
-    ) -> String {
-        if !selected || !matches!(state, cliclack::ThemeState::Active) {
-            return String::new();
-        }
-
-        format!(
-            "{}  {} {label}\n",
-            style("└").cyan().for_stderr(),
-            style("●").cyan().for_stderr()
-        )
-    }
-
-    fn format_footer_with_message(&self, _state: &cliclack::ThemeState, _message: &str) -> String {
-        String::new()
-    }
-}
-
-struct ResetTheme;
-
-impl Drop for ResetTheme {
-    fn drop(&mut self) {
-        cliclack::reset_theme();
     }
 }
 
@@ -289,17 +251,14 @@ pub(crate) fn prepare(
         name,
         provider: _provider,
         transport: _transport,
-        auto_reply,
+        // Either value deploys: the channel itself posts the run's answer, or
+        // with `reply: "none"` leaves it to the agent; Trigger Server never does.
+        auto_reply: _auto_reply,
         required_permissions,
         required_env,
+        agent_connections: _agent_connections,
         provider_config,
     } = serde_json::from_value(value.clone()).context("Slack channel configuration is invalid.")?;
-    if !auto_reply {
-        bail!(
-            "Slack channel configuration requires {}=true.",
-            language.ident("autoReply", "auto_reply")
-        );
-    }
     if !required_permissions.is_empty() {
         bail!(
             "Slack channel configuration requires {}=[].",
@@ -313,7 +272,7 @@ pub(crate) fn prepare(
         );
     }
     if !wait {
-        bail!("An agent with channels cannot be deployed with --no-wait.");
+        bail!("An agent with a Slack channel cannot be deployed with --no-wait.");
     }
     let trigger_on_all_messages = match provider_config.trigger_mode {
         Some(mode)
@@ -412,6 +371,7 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
             trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
         },
+        customer_app: None,
     }
 }
 
@@ -425,43 +385,276 @@ pub(crate) fn artifact(prepared: &PreparedTriggerChannel) -> serde_json::Value {
     })
 }
 
+const SKIPPED_SETUP: &str = "Continuing without the Slack channel. The deployment is live, but it receives no Slack events until you run `mda deploy` again and finish setting up the Slack app.";
+
+/// Fail before uploading when registering the channel could not finish. The
+/// env credentials are checked always. Without a terminal, a new channel
+/// needs them unless LangSmith can create the Slack app on its own: it
+/// cannot on a self-hosted LangSmith, and first needs the user to authorize
+/// it in Slack when they have not yet.
+pub(crate) fn preflight(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    deployment_id: Option<&str>,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<()> {
+    if slack_app::credentials_env(env_vars)?.is_some() || is_interactive() {
+        return Ok(());
+    }
+    let registered = deployment_id.map(|id| registration(client, id, &prepared.name));
+    unattended_outcome(registered, || unattended_problem(client))
+}
+
+/// Why LangSmith can't create the Slack app without a terminal, if it can't.
+fn unattended_problem(client: &langsmith::Client) -> Option<String> {
+    let self_hosted = client.is_self_hosted();
+    // Not knowing whether LangSmith can create the app leaves it to setup.
+    let manager = if self_hosted {
+        None
+    } else {
+        client.slack_manager().ok().flatten()
+    };
+    slack_app::unattended_problem(self_hosted, manager.as_ref())
+}
+
+/// Whether Trigger Server already has the deployment's channel, so deploy
+/// keeps its Slack app instead of asking for one; an error when it can't say.
+fn registration(
+    client: &langsmith::Client,
+    deployment_id: &str,
+    channel_name: &str,
+) -> Result<bool> {
+    Ok(client
+        .trigger_channels(deployment_id)?
+        .iter()
+        .any(|channel| channel.provider == "slack" && channel.channel_name == channel_name))
+}
+
+/// Whether a deploy without a terminal or the user's own Slack app can set up
+/// the channel: one Trigger Server already has keeps its app, and otherwise
+/// LangSmith has to be able to create one (`problem` says why it can't). A
+/// failed lookup then says so, not that the channel needs an app: it may well
+/// work already.
+fn unattended_outcome(
+    registered: Option<Result<bool>>,
+    problem: impl FnOnce() -> Option<String>,
+) -> Result<()> {
+    if matches!(registered, Some(Ok(true))) {
+        return Ok(());
+    }
+    match (problem(), registered) {
+        (None, _) => Ok(()),
+        (Some(_), Some(Err(error))) => Err(lookup_failed(&error)),
+        (Some(problem), _) => bail!(problem),
+    }
+}
+
+fn lookup_failed(error: &anyhow::Error) -> anyhow::Error {
+    anyhow!(
+        "Could not check whether this agent's Slack channel is already set up ({error:#}). Rerun `mda deploy` to try again, or set MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET to your app's bot token and signing secret."
+    )
+}
+
+/// Register the channel with Trigger Server for the live deployment. As for
+/// the GitHub and Linear channels, a failed attempt offers to try again or to
+/// continue without the channel; without a terminal the error ends setup.
 pub(crate) fn register(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
     agent_server_url: &str,
     deployment_id: &str,
     assistant_id: &str,
+    env_vars: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
-    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    let mut ui = LiveUi {
+        interactive: is_interactive(),
+    };
+    let registered = channel_app::retry_or_skip(
+        &mut ui,
+        (),
+        SKIPPED_SETUP,
+        |ui, ()| {
+            register_once(
+                client,
+                prepared,
+                agent_server_url,
+                deployment_id,
+                assistant_id,
+                env_vars,
+                ui.interactive,
+            )
+        },
+        |_| Ok(()),
+    )?;
+    if registered.is_some() {
+        ui.success(READY)?;
+    }
+    Ok(())
+}
+
+const READY: &str =
+    "Slack channel ready · the Slack app sends its events to this deployment through LangSmith";
+
+/// What Slack setup shows in a terminal.
+struct LiveUi {
+    interactive: bool,
+}
+
+impl SetupUi for LiveUi {
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn retry_or_skip(&mut self, error: &anyhow::Error) -> Result<bool> {
+        channel_app::ask_retry_or_skip("Slack channel setup", "Slack", error)
+    }
+
+    fn success(&mut self, message: &str) -> Result<()> {
+        channel_app::show_success(message)
+    }
+
+    fn info(&mut self, message: &str) -> Result<()> {
+        channel_app::show_info(message)
+    }
+
+    fn warning(&mut self, message: &str) -> Result<()> {
+        channel_app::show_warning(message)
+    }
+}
+
+/// One attempt at registering the channel, choosing its app when Trigger
+/// Server has none for it yet.
+fn register_once(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    agent_server_url: &str,
+    deployment_id: &str,
+    assistant_id: &str,
+    env_vars: &BTreeMap<String, String>,
+    interactive: bool,
+) -> Result<()> {
+    let mut request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
+    let registered = match registration(client, deployment_id, &prepared.name) {
+        Ok(registered) => registered,
+        // Without a terminal, deploy can't ask for an app instead.
+        Err(error)
+            if !interactive
+                && slack_app::credentials_env(env_vars)?.is_none()
+                && unattended_problem(client).is_some() =>
+        {
+            return Err(lookup_failed(&error));
+        }
+        Err(error) => {
+            // Asking again is harmless: Trigger Server keeps a registered app.
+            let _ = cliclack::log::warning(format!(
+                "Could not check whether the Slack channel is already set up: {error}"
+            ));
+            false
+        }
+    };
+    let customer_app = if registered {
+        // Trigger Server keeps the app's credentials; ones in the env must match.
+        slack_app::credentials_env(env_vars)?
+    } else {
+        let mut choice = slack_app::LiveChoice::new(client, &request.slack, env_vars, interactive);
+        match slack_app::choose_app(&mut choice)? {
+            SlackApp::Managed => None,
+            SlackApp::Customer(app) => Some(app),
+        }
+    };
+    if customer_app.is_some() {
+        request.slack.customer_app = customer_app;
+        return register_customer_app(
+            interactive,
+            |move_from| {
+                if let Some(app) = request.slack.customer_app.as_mut() {
+                    app.move_from_deployment = move_from.map(str::to_string);
+                }
+                client.setup_trigger_channel(&request)
+            },
+            confirm_slack_app_move,
+        );
+    }
     run_registration(
-        interactive,
         || client.setup_trigger_channel(&request),
-        wait_for_action,
+        |action| show_action(action, interactive),
+        channel_app::wait,
     )
 }
 
-// This URL must stay unwrapped and selectable inside the interactive flow.
-#[expect(
-    clippy::print_stderr,
-    reason = "unwrapped interactive authorization URL"
-)]
-fn wait_for_action(action: &RequiredAction) -> Result<()> {
-    cliclack::log::step(format!(
-        "{}\n{}",
-        action.heading(),
-        style(action.prompt_message()).dim().for_stderr()
-    ))?;
-    let bar = style("│").dim().for_stderr();
-    if let Some(url) = action.url() {
-        eprintln!("{}", style(url.as_str()).black().bright().for_stderr());
-        eprintln!("{bar}");
+/// Register the user's own app, which Trigger Server activates at once. When
+/// another deployment in the workspace uses the app, offer to move it here.
+fn register_customer_app<S, C>(interactive: bool, mut setup: S, confirm_move: C) -> Result<()>
+where
+    S: FnMut(Option<&str>) -> Result<ChannelSetupResponse>,
+    C: FnOnce(&str) -> Result<bool>,
+{
+    let response = match setup(None) {
+        Err(error) => {
+            let Some(SlackAppInUse { deployment_id }) = error.downcast_ref::<SlackAppInUse>()
+            else {
+                return Err(error);
+            };
+            let deployment_id = deployment_id.clone();
+            if !interactive {
+                bail!(
+                    "Slack app is connected to deployment {deployment_id} and stays there. Rerun `mda deploy` in a terminal to move it to this deployment, or use another Slack app."
+                );
+            }
+            if !confirm_move(&deployment_id)? {
+                bail!(
+                    "Slack app stays connected to deployment {deployment_id}. Use another Slack app for this deployment."
+                );
+            }
+            let response = setup(Some(&deployment_id))?;
+            let _ = cliclack::log::info(format!(
+                "Moved the Slack app from deployment {deployment_id}."
+            ));
+            response
+        }
+        response => response?,
+    };
+    match classify_setup_response(response)? {
+        SetupState::Active => Ok(()),
+        SetupState::ActionRequired(_) => {
+            bail!("Slack channel setup did not finish with your Slack app. Check its bot token and signing secret, then rerun `mda deploy`.")
+        }
     }
-    cliclack::set_theme(ContinueTheme);
-    let _reset_theme = ResetTheme;
-    let _: () = cliclack::select("")
-        .item((), action.continue_label(), "")
-        .interact()?;
+}
+
+fn confirm_slack_app_move(deployment_id: &str) -> Result<bool> {
+    cliclack::confirm(format!(
+        "Slack app is connected to deployment {deployment_id}. Move it to this deployment? That deployment's Slack channel stops receiving events."
+    ))
+    .initial_value(true)
+    .interact()
+    .context("failed to confirm moving the Slack app")
+}
+
+/// Show what the user does in Slack before setup can finish. In a terminal
+/// the link also opens in the browser; without one, whoever runs deploy (a
+/// coding agent, say) hands it to the person who can act on it.
+fn show_action(action: &RequiredAction, interactive: bool) -> Result<()> {
+    let heading = action.heading();
+    let instruction = action.instruction();
+    let message = match (action.url(), interactive) {
+        (Some(url), true) => format!(
+            "{heading}\n{instruction} If your browser does not open, visit:\n{url}\nSetup continues here once Slack reports it. Press Ctrl-C to skip."
+        ),
+        (Some(url), false) => format!(
+            "{heading}\n{instruction} Open this link in a browser signed in to Slack. Deploy waits up to an hour for it to finish.\n{url}"
+        ),
+        (None, true) => format!(
+            "{heading}\nWaiting for a Slack workspace admin to approve the Slack app. Press Ctrl-C to skip."
+        ),
+        (None, false) => format!(
+            "{heading}\nWaiting for a Slack workspace admin to approve the Slack app. Deploy waits up to an hour for it."
+        ),
+    };
+    cliclack::log::step(message)?;
+    if let (Some(url), true) = (action.url(), interactive) {
+        crate::langsmith::login::open_browser(url.as_str());
+    }
     Ok(())
 }
 
@@ -520,17 +713,58 @@ fn classify_setup_response(response: ChannelSetupResponse) -> Result<SetupState>
     }
 }
 
-fn run_registration<S, W>(interactive: bool, mut setup: S, mut wait: W) -> Result<()>
+/// How often setup asks Trigger Server again while it waits for the user.
+/// Each check retries the setup, which calls Slack, so it is not as eager as
+/// the GitHub installation check.
+const ACTION_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// How long setup waits for the user, as GitHub setup does.
+const ACTION_WAIT_LIMIT: Duration = Duration::from_secs(60 * 60);
+
+/// Ask Trigger Server to set the channel up until it is active. While it
+/// waits for the user to authorize LangSmith or to install the app, `show`
+/// shows what to do (again only when that changes), and setup asks again
+/// after each `wait`. Once the user has been shown what to do, a request that
+/// may succeed when made again (a timeout, 5xx or 429) doesn't end the wait,
+/// as the GitHub installation check keeps going; any other error does. Ctrl-C
+/// stops waiting; so does the hour running out.
+fn run_registration<S, A, W>(mut setup: S, mut show: A, mut wait: W) -> Result<()>
 where
     S: FnMut() -> Result<ChannelSetupResponse>,
-    W: FnMut(&RequiredAction) -> Result<()>,
+    A: FnMut(&RequiredAction) -> Result<()>,
+    W: FnMut(Duration) -> WaitTick,
 {
+    let mut shown: Option<(&'static str, bool)> = None;
+    let mut last: Option<RequiredAction> = None;
+    let mut waited = Duration::ZERO;
     loop {
-        match classify_setup_response(setup()?)? {
-            SetupState::Active => return Ok(()),
-            SetupState::ActionRequired(action) if interactive => wait(&action)?,
-            SetupState::ActionRequired(action) => bail!("{}", action.retry_guidance()),
+        match setup() {
+            Ok(response) => {
+                let action = match classify_setup_response(response)? {
+                    SetupState::Active => return Ok(()),
+                    SetupState::ActionRequired(action) => action,
+                };
+                // Every answer carries a fresh link, and the one shown still works.
+                let step = (action.heading(), action.url().is_some());
+                if shown != Some(step) {
+                    show(&action)?;
+                    shown = Some(step);
+                }
+                last = Some(action);
+            }
+            Err(error) if last.is_some() && is_transient_setup_error(&error) => {}
+            Err(error) => return Err(error),
         }
+        if waited >= ACTION_WAIT_LIMIT {
+            let guidance = last.as_ref().map(RequiredAction::retry_guidance);
+            bail!(
+                "Stopped waiting for Slack after an hour. {}",
+                guidance.unwrap_or_default()
+            );
+        }
+        if wait(ACTION_POLL_INTERVAL) == WaitTick::Interrupted {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        }
+        waited += ACTION_POLL_INTERVAL;
     }
 }
 
@@ -562,16 +796,6 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
-
-    fn render_continue_prompt(state: &cliclack::ThemeState, label: &str) -> String {
-        let theme = ContinueTheme;
-        format!(
-            "{}{}{}",
-            cliclack::Theme::format_header(&theme, state, ""),
-            cliclack::Theme::format_select_item(&theme, state, true, label, ""),
-            cliclack::Theme::format_footer_with_message(&theme, state, ""),
-        )
-    }
 
     fn prepare(
         requirements: &ChannelRequirements,
@@ -665,6 +889,124 @@ mod tests {
             authorization_url: None,
             message: None,
         }
+    }
+
+    const HOLDER: &str = "b809e66e-0000-4000-8000-000000000002";
+
+    fn in_use() -> anyhow::Error {
+        SlackAppInUse {
+            deployment_id: HOLDER.into(),
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_slack_app_another_deployment_uses_moves_once_confirmed() {
+        let mut moves = Vec::new();
+        let mut asked = None;
+
+        register_customer_app(
+            true,
+            |move_from| {
+                moves.push(move_from.map(str::to_string));
+                if move_from.is_none() {
+                    Err(in_use())
+                } else {
+                    Ok(active_setup_response())
+                }
+            },
+            |deployment_id| {
+                asked = Some(deployment_id.to_string());
+                Ok(true)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(asked.as_deref(), Some(HOLDER));
+        assert_eq!(moves, vec![None, Some(HOLDER.to_string())]);
+    }
+
+    #[test]
+    fn a_declined_slack_app_move_leaves_it_where_it_is() {
+        let mut calls = 0;
+
+        let error = register_customer_app(
+            true,
+            |_| {
+                calls += 1;
+                Err(in_use())
+            },
+            |_| Ok(false),
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(error
+            .to_string()
+            .contains(&format!("stays connected to deployment {HOLDER}")));
+    }
+
+    #[test]
+    fn unattended_deploys_never_move_a_slack_app() {
+        let mut calls = 0;
+
+        let error = register_customer_app(
+            false,
+            |_| {
+                calls += 1;
+                Err(in_use())
+            },
+            |_| -> Result<bool> { panic!("an unattended deploy must not ask") },
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(error.to_string().contains(HOLDER));
+    }
+
+    #[test]
+    fn other_customer_app_setup_failures_are_not_offered_a_move() {
+        let error = register_customer_app(
+            true,
+            |_| {
+                Err(anyhow!(
+                    "Channel setup failed (HTTP 409): This Slack app is already in use."
+                ))
+            },
+            |_| -> Result<bool> { panic!("only an app another deployment uses is moved") },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("already in use"));
+    }
+
+    #[test]
+    fn unattended_deploys_without_an_app_go_on_only_for_a_registered_channel() {
+        let no_app = || Some(slack_app::unattended_message(true));
+        let failed = || Some(Err(anyhow!("Channel listing failed (HTTP 503).")));
+        assert!(unattended_outcome(Some(Ok(true)), no_app).is_ok());
+        assert_eq!(
+            unattended_outcome(Some(Ok(false)), no_app)
+                .unwrap_err()
+                .to_string(),
+            slack_app::unattended_message(true)
+        );
+        assert_eq!(
+            unattended_outcome(None, no_app).unwrap_err().to_string(),
+            slack_app::unattended_message(true)
+        );
+        // A failed listing names itself, not a missing Slack app.
+        let error = unattended_outcome(failed(), no_app)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Channel listing failed (HTTP 503)."),
+            "{error}"
+        );
+        assert!(error.contains("Could not check"), "{error}");
+        // LangSmith can create the app, so nothing stops the deploy.
+        assert!(unattended_outcome(failed(), || None).is_ok());
+        assert!(unattended_outcome(Some(Ok(false)), || None).is_ok());
     }
 
     #[test]
@@ -1006,7 +1348,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "An agent with channels cannot be deployed with --no-wait."
+            "An agent with a Slack channel cannot be deployed with --no-wait."
         );
     }
 
@@ -1035,14 +1377,14 @@ mod tests {
     }
 
     #[test]
-    fn prepare_rejects_a_trigger_channel_with_auto_reply_disabled() {
+    fn prepare_accepts_a_trigger_channel_that_leaves_replying_to_the_agent() {
         let mut manifest = requirements().remove("slack").unwrap();
         manifest["autoReply"] = json!(false);
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let prepared = prepare(&requirements, true).unwrap().unwrap();
 
-        assert!(error.to_string().contains("autoReply=true"));
+        assert_eq!(prepared.name, "slack");
     }
 
     #[test]
@@ -1366,106 +1708,207 @@ mod tests {
         );
     }
 
-    #[test]
-    fn interactive_registration_retries_once_after_waiting() {
-        let mut responses =
-            vec![authorization_setup_response(), active_setup_response()].into_iter();
-        let mut setup_calls = 0;
-        let mut wait_calls = 0;
-
-        run_registration(
-            true,
+    /// Run [`run_registration`] over `responses`, recording each setup call,
+    /// shown action and wait. `interrupt_at` is the wait that gets Ctrl-C.
+    fn register_with(
+        responses: Vec<ChannelSetupResponse>,
+        interrupt_at: Option<usize>,
+    ) -> (Result<()>, Vec<String>) {
+        let mut responses = responses.into_iter();
+        let log = std::cell::RefCell::new(Vec::new());
+        let mut waits = 0;
+        let result = run_registration(
             || {
-                setup_calls += 1;
-                Ok(responses.next().unwrap())
+                log.borrow_mut().push("setup".to_string());
+                Ok(responses.next().expect("unexpected setup call"))
             },
-            |_| {
-                wait_calls += 1;
+            |action| {
+                log.borrow_mut().push(format!("show {}", action.heading()));
                 Ok(())
             },
-        )
-        .unwrap();
-
-        assert_eq!((setup_calls, wait_calls), (2, 1));
+            |duration| {
+                assert_eq!(duration, ACTION_POLL_INTERVAL);
+                waits += 1;
+                log.borrow_mut().push("wait".to_string());
+                if interrupt_at == Some(waits) {
+                    WaitTick::Interrupted
+                } else {
+                    WaitTick::Elapsed
+                }
+            },
+        );
+        (result, log.into_inner())
     }
 
     #[test]
-    fn interactive_registration_waits_for_each_incomplete_response() {
-        let mut responses = vec![
-            authorization_setup_response(),
-            pending_approval_setup_response(),
-            active_setup_response(),
-        ]
-        .into_iter();
-        let mut setup_calls = 0;
-        let mut wait_calls = 0;
-
-        run_registration(
-            true,
-            || {
-                setup_calls += 1;
-                Ok(responses.next().unwrap())
-            },
+    fn registration_keeps_waiting_through_a_failed_request_once_the_link_is_shown() {
+        let transient = || {
+            Err(anyhow::Error::new(crate::langsmith::TransientSetupError(
+                "Channel setup failed (HTTP 503).".into(),
+            )))
+        };
+        let mut responses: std::collections::VecDeque<Result<ChannelSetupResponse>> =
+            std::collections::VecDeque::from([
+                Ok(authorization_setup_response()),
+                transient(),
+                Ok(active_setup_response()),
+            ]);
+        let mut shows = 0;
+        let result = run_registration(
+            || responses.pop_front().expect("unexpected setup call"),
             |_| {
-                wait_calls += 1;
+                shows += 1;
                 Ok(())
             },
-        )
-        .unwrap();
+            |_| WaitTick::Elapsed,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(shows, 1);
 
-        assert_eq!((setup_calls, wait_calls), (3, 2));
-    }
-
-    #[test]
-    fn unattended_registration_returns_guidance_without_waiting() {
-        let mut setup_calls = 0;
-        let mut wait_calls = 0;
-
+        // Before anything is shown, and for any other error, it ends.
+        for first in [
+            transient(),
+            Err(anyhow!("Channel setup failed (HTTP 400).")),
+        ] {
+            let mut responses = std::collections::VecDeque::from([first]);
+            let result = run_registration(
+                || responses.pop_front().expect("unexpected setup call"),
+                |_| Ok(()),
+                |_| WaitTick::Elapsed,
+            );
+            assert!(result.is_err());
+        }
+        let mut responses: std::collections::VecDeque<Result<ChannelSetupResponse>> =
+            std::collections::VecDeque::from([
+                Ok(authorization_setup_response()),
+                Err(anyhow!("Channel setup failed (HTTP 400).")),
+            ]);
         let error = run_registration(
-            false,
-            || {
-                setup_calls += 1;
-                Ok(authorization_setup_response())
-            },
+            || responses.pop_front().expect("unexpected setup call"),
+            |_| Ok(()),
+            |_| WaitTick::Elapsed,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("HTTP 400"), "{error}");
+    }
+
+    #[test]
+    fn registration_shows_the_link_and_polls_until_active() {
+        let (result, log) = register_with(
+            vec![
+                authorization_setup_response(),
+                authorization_setup_response(),
+                active_setup_response(),
+            ],
+            None,
+        );
+
+        result.unwrap();
+        assert_eq!(
+            log,
+            [
+                "setup",
+                "show Connect Slack",
+                "wait",
+                "setup",
+                "wait",
+                "setup"
+            ]
+        );
+    }
+
+    #[test]
+    fn registration_shows_each_new_step_once() {
+        let (result, log) = register_with(
+            vec![
+                authorization_setup_response(),
+                pending_approval_setup_response(),
+                pending_approval_setup_response(),
+                active_setup_response(),
+            ],
+            None,
+        );
+
+        result.unwrap();
+        assert_eq!(
+            log,
+            [
+                "setup",
+                "show Connect Slack",
+                "wait",
+                "setup",
+                "show Approve Slack",
+                "wait",
+                "setup",
+                "wait",
+                "setup"
+            ]
+        );
+    }
+
+    #[test]
+    fn registration_stops_waiting_on_ctrl_c() {
+        let (result, log) = register_with(
+            vec![
+                authorization_setup_response(),
+                authorization_setup_response(),
+            ],
+            Some(2),
+        );
+
+        assert!(crate::error::is_cancellation(&result.unwrap_err()));
+        assert_eq!(
+            log,
+            ["setup", "show Connect Slack", "wait", "setup", "wait"]
+        );
+    }
+
+    #[test]
+    fn registration_gives_up_after_an_hour_with_guidance() {
+        let polls = (ACTION_WAIT_LIMIT.as_secs() / ACTION_POLL_INTERVAL.as_secs()) as usize;
+        let (result, log) = register_with(
+            (0..=polls)
+                .map(|_| authorization_setup_response())
+                .collect(),
+            None,
+        );
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Stopped waiting for Slack after an hour. Slack channel setup requires authorization. Authorize the Slack app at https://trigger.example/authorize, then rerun `mda deploy`."
+        );
+        assert_eq!(
+            log.iter().filter(|entry| *entry == "setup").count(),
+            polls + 1
+        );
+        assert_eq!(log.iter().filter(|entry| *entry == "wait").count(), polls);
+        assert_eq!(
+            log.iter().filter(|entry| entry.starts_with("show")).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn registration_propagates_a_failed_setup_call_without_waiting() {
+        let mut waits = 0;
+        let error = run_registration(
+            || Err(anyhow!("Channel setup request failed.")),
+            |_| Ok(()),
             |_| {
-                wait_calls += 1;
-                Ok(())
+                waits += 1;
+                WaitTick::Elapsed
             },
         )
         .unwrap_err();
 
         assert_eq!(
-            (setup_calls, wait_calls, error.to_string()),
-            (
-                1,
-                0,
-                "Slack channel setup requires authorization. Authorize the Slack app at https://trigger.example/authorize, then rerun `mda deploy`.".to_string(),
-            )
+            (error.to_string(), waits),
+            ("Channel setup request failed.".to_string(), 0)
         );
     }
 
     #[test]
-    fn interactive_registration_propagates_prompt_interruption_without_retrying() {
-        let mut setup_calls = 0;
-
-        let error = run_registration(
-            true,
-            || {
-                setup_calls += 1;
-                Ok(authorization_setup_response())
-            },
-            |_| Err(anyhow!("prompt interrupted")),
-        )
-        .unwrap_err();
-
-        assert_eq!(
-            (setup_calls, error.to_string()),
-            (1, "prompt interrupted".into())
-        );
-    }
-
-    #[test]
-    fn authorization_action_has_copyable_presentation_values() {
+    fn authorization_action_has_presentation_values() {
         let action = RequiredAction::Authorize {
             message: "Slack channel setup requires authorization.".to_string(),
             url: Url::parse("https://trigger.example/authorize?state=resume-setup").unwrap(),
@@ -1475,22 +1918,20 @@ mod tests {
             (
                 action.heading(),
                 action.message(),
-                action.prompt_message(),
+                action.instruction(),
                 action.url().map(Url::as_str),
-                action.continue_label(),
             ),
             (
                 "Connect Slack",
                 "Slack channel setup requires authorization.",
-                "Authorize LangSmith to set up your Slack app using the link below.",
+                "Authorize LangSmith to set up your Slack app.",
                 Some("https://trigger.example/authorize?state=resume-setup"),
-                "Press Enter once authorization is complete",
             )
         );
     }
 
     #[test]
-    fn approval_action_has_waiting_presentation_values() {
+    fn approval_action_has_presentation_values() {
         let action = RequiredAction::Approve {
             message: "Slack channel setup is pending workspace approval.".to_string(),
             url: None,
@@ -1500,40 +1941,15 @@ mod tests {
             (
                 action.heading(),
                 action.message(),
-                action.prompt_message(),
+                action.instruction(),
                 action.url(),
-                action.continue_label(),
             ),
             (
                 "Approve Slack",
                 "Slack channel setup is pending workspace approval.",
-                "Slack channel setup is pending workspace approval.",
+                "Install the Slack app. A workspace admin may need to approve it first.",
                 None,
-                "Press Enter once workspace approval is complete",
             )
         );
-    }
-
-    #[test]
-    fn continue_prompt_renders_as_one_action_line_while_active() {
-        let rendered = render_continue_prompt(
-            &cliclack::ThemeState::Active,
-            "Press Enter once authorization is complete",
-        );
-
-        assert_eq!(
-            console::strip_ansi_codes(&rendered),
-            "└  ● Press Enter once authorization is complete\n"
-        );
-    }
-
-    #[test]
-    fn continue_prompt_clears_its_action_line_when_submitted() {
-        let rendered = render_continue_prompt(
-            &cliclack::ThemeState::Submit,
-            "Press Enter once authorization is complete",
-        );
-
-        assert!(rendered.is_empty());
     }
 }

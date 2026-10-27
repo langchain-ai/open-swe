@@ -23,6 +23,7 @@ from openswe.mcp.managed import (
     GatewayStatus,
     LangSmithNotConnected,
     ManagedToolsError,
+    disconnect_service,
     gateway_id,
     gateway_status,
     instance_gateway,
@@ -269,6 +270,14 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
     return ManagedToolsView(configured=True, langsmith_connected=True, gateways=statuses)
 
 
+async def _instance_gateway(gateway: str) -> str:
+    """``gateway``, refused unless it is the tool kit this instance uses."""
+    configured = await instance_gateway()
+    if configured is None or gateway_id(gateway) != gateway_id(configured):
+        raise HTTPException(404, "This Open SWE does not use this tool kit")
+    return gateway
+
+
 async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
     """The connect card the agent offered this person in their thread."""
     card = await ConnectCard.load(thread_id, card_id, login, gateway)
@@ -293,13 +302,22 @@ async def api_connect_managed_tool(
         if thread_id and card:
             link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
         else:
-            configured = await instance_gateway()
-            if configured is None or gateway_id(gateway) != gateway_id(configured):
-                raise HTTPException(404, "This Open SWE does not use this tool kit")
-            link = await connect_service(session["sub"], gateway, slug)
+            link = await connect_service(session["sub"], await _instance_gateway(gateway), slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
+
+
+@managed_mcp_router.delete("/my-managed-tools/{gateway}/services/{service}", status_code=204)
+@audit_endpoint
+async def api_disconnect_managed_tool(
+    gateway: str, service: str, session: dict[str, Any] = SESSION_DEP
+) -> None:
+    """Remove the caller's own LangSmith connection to one service in the tool kit."""
+    try:
+        await disconnect_service(session["sub"], await _instance_gateway(gateway), service)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @managed_mcp_router.get("/my-managed-tools/{gateway}/connect/{slug}")

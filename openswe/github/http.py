@@ -35,6 +35,7 @@ from openswe.github.queue import (
     Artifact,
     CommitComparison,
     GitReference,
+    NativeQueueSnapshot,
     ValidationArtifacts,
     ValidationJob,
     ValidationJobs,
@@ -42,6 +43,7 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
+from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -221,11 +223,20 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+def github_reauth_message(login: str | None = None) -> str:
+    person = f" for {login}" if login else ""
+    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
+    return (
+        f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
+        "Then retry the action."
+    )
+
+
 class GitHubSignInRequired(Exception):
     """The person has no usable GitHub authorization and must sign in again."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"GitHub sign-in required for {login}")
+        super().__init__(github_reauth_message(login))
         self.login = login
 
 
@@ -606,6 +617,37 @@ class RepoClient:
             raise ValueError("GitHub answered the repository without an object")
         return payload
 
+    async def native_queue(self, branch: str) -> NativeQueueSnapshot:
+        """Read a bounded, complete queue view; candidate ancestry determines membership."""
+        data = await self.graphql(
+            """query($owner:String!,$repo:String!,$branch:String!,$ref:String!) {
+              repository(owner:$owner,name:$repo) {
+                databaseId nameWithOwner
+                ref(qualifiedName:$ref) { name target { oid } }
+                mergeQueue(branch:$branch) {
+                  id
+                  entries(first:100) {
+                    totalCount pageInfo { hasNextPage }
+                    nodes {
+                      id position state enqueuedAt
+                      baseCommit { oid }
+                      headCommit { oid parents(first:2) { totalCount nodes { oid } } }
+                      pullRequest {
+                        number headRefOid state reviewDecision isDraft baseRefName
+                        headRepository { nameWithOwner }
+                      }
+                    }
+                  }
+                }
+              }
+            }""",
+            {"branch": branch, "ref": f"refs/heads/{branch}"},
+        )
+        snapshot = NativeQueueSnapshot.model_validate(data.get("repository"))
+        if snapshot.repository.lower() != self.full_name.lower() or snapshot.branch != branch:
+            raise ValueError("Native queue repository or target changed")
+        return snapshot
+
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
 
@@ -768,19 +810,6 @@ class RepoClient:
             if len(files) != 1 or files[0].filename != filename or files[0].file_size > 100_000:
                 raise ValueError("Unexpected artifact contents")
             return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
-
-    async def dispatch_validation(self, workflow: str, contract: str) -> None:
-        """Exactly one HTTP attempt; recover ambiguous responses by discovering the run."""
-        if self.github.login is not None:
-            raise ValueError("Validation dispatch requires a controller identity")
-        response = await self.github.http.post(
-            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/workflows/"
-            f"{quote(workflow, safe='')}/dispatches",
-            json={"ref": "main", "inputs": {"contract": contract}},
-            follow_redirects=False,
-        )
-        if response.status_code != 204:
-            raise GitHubError(response)
 
     async def validation_runs(self, workflow: str, since: datetime) -> tuple[ValidationRun, ...]:
         runs: list[ValidationRun] = []

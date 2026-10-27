@@ -12,6 +12,8 @@ import httpx
 from langgraph_sdk.schema import MultitaskStrategy
 
 from managed_deepagents._agent_auth_http import ConnectionsNotConfiguredError
+from managed_deepagents._channels.actor import endpoint_actor
+from managed_deepagents._channels.github_app_setup import github_app_setup
 from managed_deepagents._channels.github_connections import (
     GITHUB_TOKEN_SLUG,
     github_app_connection_slug,
@@ -39,10 +41,9 @@ from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventReceived,
     channel_name,
-    defined_fields,
+    check_event_keys,
     event_snapshot,
     finish_events,
-    handled_event_keys,
     read_deployment_secret,
     receive_events,
     reset_deployment_secrets,
@@ -125,17 +126,9 @@ def github_channel(
         cast("Mapping[str, GitHubEventCallback | EventEndpoint]", on_event or {}),
         _endpoint_fields,
     )
-    if set(handlers) - SUPPORTED_EVENT_KEYS:
-        raise ValueError("unsupported GitHub event key")
-    repositories = _repositories(app)
-    provider_config: dict[str, JsonValue] = {"events": handled_event_keys(handlers)}
-    if app is not None:
-        provider_config["app"] = defined_fields(
-            {
-                "permissions": dict(app["permissions"]) if "permissions" in app else None,
-                "repositories": list(app["repositories"]) if "repositories" in app else None,
-            }
-        )
+    check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS)
+    app_setup = github_app_setup(handlers, app)
+    repositories = frozenset(app_setup["repositories"]) if "repositories" in app_setup else None
 
     def name() -> str:
         return channel_name(channel)
@@ -153,9 +146,10 @@ def github_channel(
         )
 
     async def notify_interrupted(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
-        """Tell the issue or pull request when its thread waits on a decision.
+        """Tell the issue or pull request that a new event found its thread waiting on a decision.
 
-        Only for an event its handler would act on, so the handler's filters,
+        A run that stops on interrupts posts its own notice as it ends. Only
+        for an event its handler would act on, so the handler's filters,
         such as trusted senders or mentions, decide who gets a notice. The
         handler knows it is only asked, so it can skip side effects.
         """
@@ -183,12 +177,24 @@ def github_channel(
             notify_interrupted,
             on_finish,
             _event,
-            lambda thread_id: GitHubChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda delivery: GitHubChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name())
+            ),
         ),
-        provider_config=provider_config,
+        # mda deploy sets up the GitHub App from this.
+        provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
     )
+    channel.paused_notice = _post_paused_notice
+    # Deploy provides the App's token at this name.
+    channel.agent_connections = [GITHUB_TOKEN_SLUG]
     return channel
+
+
+async def _post_paused_notice(target: JsonValue, delivery: HttpDelivery) -> None:
+    """A run stopped on interrupts. The handler already accepted the event that
+    started it, so there is nothing to ask it again."""
+    await _post_interrupted_notice(target, delivery, "interrupted")
 
 
 def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
@@ -207,33 +213,12 @@ def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
             "login": event.sender.login,
             "type": event.sender.type,
         },
+        "actor": endpoint_actor(event.actor),
         "mentions": list(event.mentions),
     }
     if event.action is not None:
         fields["action"] = event.action
     return fields
-
-
-def _repositories(app: GitHubAppOptions | None) -> frozenset[str] | None:
-    """The repositories the channel is limited to, after checking the App options."""
-    # A misspelled option would silently widen what the agent's token reaches.
-    unknown = sorted(set(app or {}) - {"permissions", "repositories"})
-    if unknown:
-        raise ValueError(
-            f"unknown GitHub app option {', '.join(unknown)}; use permissions or repositories"
-        )
-    # GitHub names are case-insensitive; deploy validates the rest.
-    repositories = (
-        None
-        if app is None or "repositories" not in app
-        else frozenset(repository.strip().lower() for repository in app["repositories"])
-    )
-    if repositories is not None and not repositories:
-        raise ValueError(
-            "GitHub app.repositories must list at least one repository; "
-            "omit it to allow every repository"
-        )
-    return repositories
 
 
 async def _github_app_value(env_key: str, suffix: str) -> str | None:

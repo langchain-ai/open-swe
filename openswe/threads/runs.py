@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
@@ -61,6 +61,7 @@ from openswe.threads.access import (
 from openswe.threads.creation import create_thread
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -87,7 +88,10 @@ from openswe.users.repository_defaults import RepositoryDefaults
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
     RELAYED_FROM_KEY,
+    REPLIES_KEY,
+    PassageReply,
     dashboard_input_context,
+    passage_replies,
 )
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
@@ -566,6 +570,19 @@ def _command_message_id(params: dict[str, Any]) -> str | None:
     return message_id if isinstance(message_id, str) and message_id else None
 
 
+def _command_message_replies(params: dict[str, Any]) -> list[PassageReply]:
+    """The passages a ``run.start`` command's newest user message replies to."""
+    run_input = params.get("input")
+    messages = run_input.get("messages") if isinstance(run_input, dict) else None
+    last = messages[-1] if isinstance(messages, list) and messages else None
+    kwargs = last.get("additional_kwargs") if isinstance(last, dict) else None
+    raw = kwargs.get(REPLIES_KEY) if isinstance(kwargs, dict) else None
+    try:
+        return passage_replies(raw)
+    except ValidationError as exc:
+        raise HTTPException(422, f"invalid replies: {exc.errors()[0]['msg']}") from exc
+
+
 def _relayed_from(params: dict[str, Any]) -> str | None:
     """Take the relaying thread's id off a ``run.start`` command's params."""
     relayed_from = params.pop(RELAYED_FROM_KEY, None)
@@ -674,7 +691,7 @@ async def _bind_thread_to_bridge(
     thread_id: str, bridge: Bridge, metadata: dict[str, Any]
 ) -> dict[str, Any]:
     binding = SandboxBridgeBinding.of(bridge).dump()
-    await langgraph_client().threads.update(thread_id=thread_id, metadata=binding)
+    await THREADS.update(thread_id, binding)
     logger.info(
         "Bound a thread to a sandbox bridge",
         extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
@@ -724,9 +741,9 @@ async def _attributed_run_messages(
     content: Any,
     creating: bool,
     email: str | None,
-    client: Any,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
+    replies: Sequence[PassageReply] = (),
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -741,9 +758,9 @@ async def _attributed_run_messages(
     history_read = False
     if not creating:
         try:
-            prior_state = await client.threads.get_state(thread_id)
-            history_read = True
-            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            prior_state = await THREADS.state(thread_id)
+            history_read = prior_state is not None
+            values = prior_state.get("values") if prior_state is not None else None
             if isinstance(values, dict):
                 messages = values.get("messages")
                 if isinstance(messages, list):
@@ -789,7 +806,7 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        dashboard_input_context(sender_id, relayed_from),
+        dashboard_input_context(sender_id, relayed_from, replies),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -817,7 +834,6 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
 
-    client = langgraph_client()
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
@@ -867,6 +883,7 @@ async def _enrich_run_start_command(
             raise HTTPException(502, f"could not move this thread: {exc}") from exc
         metadata = {**metadata, **move.update}
     content = _command_message_content(params)
+    replies = _command_message_replies(params)
     relayed_from = _relayed_from(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
@@ -936,9 +953,9 @@ async def _enrich_run_start_command(
         content=content,
         creating=creating,
         email=email,
-        client=client,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
+        replies=replies,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -984,8 +1001,8 @@ async def _enrich_run_start_command(
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(thread_id):
-            current = await client.threads.get(thread_id)
-            metadata = thread_metadata(current)
+            current = await THREADS.get(thread_id)
+            metadata = dict(current.metadata) if current is not None else metadata
             if _is_thread_resolved(metadata):
                 metadata_update["resolved"] = False
                 metadata_update["resolved_at_ms"] = None
@@ -994,7 +1011,7 @@ async def _enrich_run_start_command(
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await THREADS.update(thread_id, metadata_update)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
@@ -1002,7 +1019,7 @@ async def _enrich_run_start_command(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await THREADS.update(thread_id, metadata_update)
 
     # Offloading starts a run with no human message, so it has no turn to
     # request; the middleware's ``turn.started`` opens that turn instead.
@@ -1043,6 +1060,9 @@ async def _enrich_run_start_command(
         overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
+    review_page_pr_url = client_configurable.get("review_chat_pr_url")
+    if isinstance(review_page_pr_url, str):
+        overrides["review_page_pr_url"] = review_page_pr_url
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )
@@ -1137,9 +1157,10 @@ async def steer_running_thread(
     if not isinstance(params, dict):
         params = {}
     content = _command_message_content(params)
+    replies = _command_message_replies(params)
     relayed_from = _relayed_from(params)
     command_images = _dashboard_images_from_content(content)
-    if not _command_prompt_text(content) and not command_images:
+    if not _command_prompt_text(content) and not command_images and not replies:
         raise HTTPException(422, "a follow-up needs a message")
 
     client = langgraph_client()
@@ -1163,8 +1184,8 @@ async def steer_running_thread(
         content=content,
         creating=False,
         email=email,
-        client=client,
         relayed_from=relayed_from,
+        replies=replies,
     )
     client_message_id = _command_message_id(params)
     message_id = (
@@ -1208,6 +1229,7 @@ async def steer_running_thread(
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,
+        REPLIES_KEY: [reply.model_dump() for reply in replies],
         "surface": "automation" if relayed_from else "web",
         "created_at_ms": _now_ms(),
     }

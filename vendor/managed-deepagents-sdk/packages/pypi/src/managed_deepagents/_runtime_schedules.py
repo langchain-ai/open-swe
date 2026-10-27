@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http import HTTPStatus
-from typing import Annotated, Literal, NotRequired
+from typing import TYPE_CHECKING, Annotated, Literal, NotRequired
 from uuid import UUID, uuid4
 
 import httpx
@@ -25,8 +24,15 @@ from pydantic import (
 )
 from typing_extensions import TypedDict
 
-from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
-from managed_deepagents._connections import resolve_agent_auth_context, resolve_owner_id
+from managed_deepagents._channels.schedule_delivery import (
+    get_deployment_id,
+    read_schedule_deliver_to,
+)
+from managed_deepagents._connections import (
+    CredentialStoreError,
+    resolve_agent_auth_context,
+    resolve_owner_id,
+)
 from managed_deepagents._identity_runtime import (
     _field,
     build_runtime_identity,
@@ -37,15 +43,30 @@ from managed_deepagents._schedule_auth import (
     SCHEDULE_LIMIT_PREFIX,
     ExecutionUser,
     ScheduleAccess,
+    ScheduleRunAs,
     schedule_request_config,
 )
-from managed_deepagents._schedule_channel import capture_schedule_channel
+from managed_deepagents._schedule_channel import schedule_thread
 from managed_deepagents._schedule_time import schedule_timing
+from managed_deepagents._thread_record import (
+    THREAD_RECORD_METADATA_PREFIX,
+    ThreadRecord,
+    is_person_principal,
+    origin_from_binding,
+    parse_thread_record,
+    target_from_origin,
+    thread_record_metadata,
+)
 from managed_deepagents.run_context import ChannelContext, is_managed_key
 from managed_deepagents.schedules import (
     ScheduleDeliveryTarget,
     ScheduleThreadConfig,
 )
+
+if TYPE_CHECKING:
+    from managed_deepagents._channels.binding import ChannelBinding
+    from managed_deepagents._managed_thread import RunThread, ThreadParticipant
+    from managed_deepagents.identity import RuntimeIdentity
 
 _MAX_INPUT_BYTES = 1_048_576
 _MAX_RESPONSE_BYTES = 4_194_304
@@ -98,8 +119,12 @@ class ScheduleRecord(TypedDict):
     input: NotRequired[ScheduleInput]
     thread: ScheduleThreadConfig
     new_thread: bool
+    #: The channel a new-thread schedule posts to; ``None`` for a same-thread
+    #: schedule, which posts to its thread's origin when it fires.
     channel: str | None
     target: JsonValue
+    #: Who the schedule runs as, when not its owner.
+    run_as: ScheduleRunAs | None
     deliver_to: NotRequired[ScheduleDeliveryTarget]
     context: NotRequired[dict[str, JsonValue]]
     paused: bool
@@ -122,6 +147,7 @@ class _Spec(BaseModel):
     deliver_to: ScheduleDeliveryTarget | None = None
     paused: bool | None = None
     new_thread: bool | None = None
+    run_as: ScheduleRunAs | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict, exclude=True)
     context: dict[str, JsonValue] | None = Field(default=None, exclude=True)
 
@@ -189,10 +215,7 @@ async def _context(owner: ScheduleOwner, configurable: Mapping[str, object]) -> 
     identity = build_runtime_identity(configurable)
     assistant = str(configurable.get("assistant_id", ""))
     UUID(assistant)
-    deployment = (
-        os.environ.get("LANGSMITH_HOST_PROJECT_ID", "").strip()
-        or os.environ.get("LANGGRAPH_CLOUD_ID", "").strip()
-    )
+    deployment = get_deployment_id()
     if not deployment:
         raise ValueError("Schedules require a deployment ID")
     if identity is None:
@@ -332,11 +355,15 @@ def _record(wire: _Wire, ctx: _Context, *, now: datetime | None = None) -> Sched
             "type": "agent" if ctx.access["owner"] == "agent" else "user",
             "id": ctx.deployment
             if ctx.access["owner"] == "agent"
-            else ctx.access["execution"]["mda_user_id"],
+            else ctx.access["owner"].removeprefix("user:"),
         },
         "managed_by": source,
         "metadata": _METADATA_ADAPTER.validate_python(
-            {key: value for key, value in wire.metadata.items() if not key.startswith("mda_")},
+            {
+                key: value
+                for key, value in wire.metadata.items()
+                if not key.startswith(("mda_", THREAD_RECORD_METADATA_PREFIX))
+            },
             strict=True,
         ),
         "timezone": spec.timezone or wire.timezone or "UTC",
@@ -344,8 +371,8 @@ def _record(wire: _Wire, ctx: _Context, *, now: datetime | None = None) -> Sched
         if wire.thread_id
         else {"mode": "ephemeral"},
         "new_thread": spec.new_thread if spec.new_thread is not None else not bool(wire.thread_id),
-        "channel": None,
-        "target": None,
+        **_destination(wire),
+        "run_as": spec.run_as,
         "paused": not wire.enabled,
         "expired": wire.end_time is not None
         and datetime.fromisoformat(wire.end_time) < (now or datetime.now(UTC)),
@@ -367,21 +394,44 @@ def _record(wire: _Wire, ctx: _Context, *, now: datetime | None = None) -> Sched
     delivery = spec.deliver_to or read_schedule_deliver_to(
         _field(_field(routing, "mda_schedule"), "deliver_to")
     )
-    channel = _field(routing, "mda_channel")
-    if channel is None and wire.payload.context is None:
-        channel = _field(routing, "channel")
     if wire.payload.context is not None:
         result["context"] = _METADATA_ADAPTER.validate_python(
             {key: value for key, value in wire.payload.context.items() if not is_managed_key(key)},
             strict=True,
         )
-    if channel is not None:
-        parsed_channel = _CHANNEL_ADAPTER.validate_python(channel, strict=True)
-        result["channel"] = parsed_channel["name"]
-        result["target"] = parsed_channel["target"]
     if delivery:
         result["deliver_to"] = _DELIVERY_ADAPTER.validate_python(delivery, strict=True)
     return result
+
+
+class _Destination(TypedDict):
+    channel: str | None
+    target: JsonValue
+
+
+def _destination(wire: _Wire) -> _Destination:
+    """Where a schedule posts: a new-thread schedule's stored origin, or the
+    channel a cron made before the thread record captured.
+
+    A same-thread schedule has none: it posts to its thread's origin when it fires.
+    """
+    record = parse_thread_record(wire.metadata)
+    if record is not None and record.origin is not None:
+        return {
+            "channel": record.origin.channel.name,
+            "target": target_from_origin(record.origin.channel),
+        }
+    routing = wire.payload.context
+    # Crons created before context support keep their routing in configurable.
+    if routing is None:
+        routing = (wire.payload.config or {}).get("configurable")
+    channel = _field(routing, "mda_channel")
+    if channel is None and wire.payload.context is None:
+        channel = _field(routing, "channel")
+    if channel is None:
+        return {"channel": None, "target": None}
+    parsed = _CHANNEL_ADAPTER.validate_python(channel, strict=True)
+    return {"channel": parsed["name"], "target": parsed["target"]}
 
 
 def _run_input(spec: _Spec) -> ScheduleInput:
@@ -443,6 +493,66 @@ def _input_patch(next_spec: _Spec, value: _Spec, patch: SchedulePatch) -> dict[s
     return body
 
 
+def _new_thread_record(
+    origin: ChannelBinding, thread: RunThread, execution: ExecutionUser
+) -> dict[str, JsonValue]:
+    """The record of the thread a new-thread schedule creates each time it fires.
+
+    The Agent Server copies a cron's metadata into the thread it creates. The
+    execution, when it is a person, owns that thread.
+    """
+    sender = thread.thread.origin.sender if thread.thread.origin is not None else None
+    person = execution["mda_user_id"]
+    owned = execution.get("mda_user_kind") != "service" and is_person_principal(person)
+    record = ThreadRecord(
+        origin=origin_from_binding(origin, sender.id if sender is not None else None),
+        participants={person: "owner"} if owned else {},
+    )
+    return thread_record_metadata(record)
+
+
+async def _run_as(
+    ctx: _Context, owner: ScheduleOwner, thread: RunThread, participant: ThreadParticipant
+) -> ScheduleRunAs:
+    """Run the schedule as a participant of the current thread, with their Agent Auth principal."""
+    if owner["type"] != "user":
+        raise ValueError("run_as requires owner={'type': 'user'}")
+    if participant not in thread.thread.participants:
+        raise ValueError("run_as must be a participant of the current thread")
+    origin = thread.origin
+    if origin is None:
+        raise ValueError("run_as requires a thread with a channel origin")
+    ctx.access["execution"] = {
+        "identity": participant.id,
+        "permissions": [],
+        "mda_user_id": participant.id,
+        "mda_agent_auth_principal_id": await _participant_principal(participant, origin),
+        "mda_source_provider": "schedule",
+        "mda_scheduled_run": True,
+    }
+    run_as: ScheduleRunAs = {"id": participant.id, "role": participant.role}
+    # The handoff accepts an execution that is neither the owner nor this participant.
+    ctx.access["run_as"] = run_as
+    return run_as
+
+
+async def _participant_principal(participant: ThreadParticipant, origin: ChannelBinding) -> str:
+    """A participant's Agent Auth principal: a Trigger sender's id already is one."""
+    if origin["transport"] == "trigger_server":
+        return participant.id
+    identity: RuntimeIdentity = {
+        "user": {"kind": "person", "id": participant.id},
+        "source": {"provider": origin["provider"]},
+    }
+    try:
+        context = await asyncio.to_thread(resolve_agent_auth_context, identity)
+    except CredentialStoreError as error:
+        raise ValueError(
+            f"run_as participant has no Agent Auth principal ({type(error).__name__})"
+        ) from None
+    return context.principal_id
+
+
 def _context_patch(
     existing: _Wire, value: _Spec, patch: SchedulePatch, ctx: _Context
 ) -> dict[str, object]:
@@ -451,6 +561,7 @@ def _context_patch(
     saved = existing.payload.context
     if saved is None:
         raise ValueError("Schedules created before context support cannot take one")
+    # Crons created before the thread record replay the channel they captured.
     channel = saved.get("mda_channel")
     if channel is not None:
         binding = _CHANNEL_ADAPTER.validate_python(channel, strict=True)
@@ -490,7 +601,13 @@ class RuntimeSchedules:
         paused: bool = False,
         metadata: dict[str, JsonValue] | None = None,
         context: dict[str, JsonValue] | None = None,
+        run_as: ThreadParticipant | None = None,
     ) -> ScheduleRecord:
+        """Create a schedule that posts to the current thread's origin.
+
+        ``run_as`` runs a user-owned schedule as another participant of the
+        thread; its owner (who lists, changes and deletes it) stays the caller.
+        """
         configurable = _run_configurable(self._runtime)
         spec = _Spec(
             cron=cron,
@@ -506,11 +623,14 @@ class RuntimeSchedules:
         run_input = _run_input(spec)
         timing = schedule_timing(cron=cron, at=at, timezone=timezone)
         resolved_new_thread = bool(spec.new_thread)
-        channel = capture_schedule_channel(configurable, new_thread=resolved_new_thread)
+        thread = schedule_thread(configurable)
+        channel = thread.origin
         thread_id = configurable.get("thread_id")
         if not resolved_new_thread and not thread_id:
             raise ValueError("Same-thread schedules require a current thread; use new_thread=True")
         ctx = await _context(owner, configurable)
+        if run_as is not None:
+            spec.run_as = await _run_as(ctx, owner, thread, run_as)
         if channel is not None:
             ctx.access["execution"]["mda_source_provider"] = channel["provider"]
             ctx.access["execution"]["mda_source_thread_id"] = channel["source_thread_key"]
@@ -552,13 +672,15 @@ class RuntimeSchedules:
                     "input": run_input,
                     "enabled": not paused,
                     "on_run_completed": on_run_completed,
-                    "context": {
-                        "mda_schedule": {"name": name},
-                        **({"mda_channel": channel} if channel else {}),
-                        **(spec.context or {}),
-                    },
+                    "context": {"mda_schedule": {"name": name}, **(spec.context or {})},
                     "metadata": {
                         **spec.metadata,
+                        # A same-thread schedule posts to its thread's origin when it fires.
+                        **(
+                            _new_thread_record(channel, thread, ctx.access["execution"])
+                            if channel is not None and resolved_new_thread
+                            else {}
+                        ),
                         "mda_managed": True,
                         "mda_managed_by": "runtime",
                         "mda_schedule": name,

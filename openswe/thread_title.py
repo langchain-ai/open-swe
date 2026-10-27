@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
 from openswe.prompts import prompt
+from openswe.slack.blocks import block_payload
+from openswe.slack.breakout_links import breakout_root_blocks
 from openswe.slack.client import append_slack_web_link_footer, update_slack_message
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from openswe.slack.http import SlackRequestError
@@ -138,11 +140,12 @@ async def generate_and_store_thread_title(
                 and ref.breakout_root_suffix is not None
             ):
                 try:
+                    root_text = f"`/breakout`: {title}{ref.breakout_root_suffix}"
                     await update_slack_message(
                         *ref.location,
-                        append_slack_web_link_footer(
-                            f"`/breakout`: {title}{ref.breakout_root_suffix}",
-                            dashboard_thread_url(thread_id),
+                        append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),
+                        blocks=block_payload(
+                            breakout_root_blocks(root_text, dashboard_thread_url(thread_id))
                         ),
                         unfurl_links=False,
                         unfurl_media=False,

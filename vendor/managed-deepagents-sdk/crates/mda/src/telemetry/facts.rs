@@ -1,28 +1,112 @@
+//! What is reported about this invocation, held in one process-wide store so
+//! any module can read or extend it without threading it through calls.
+//!
+//! - main calls [`ReportableFacts::detect`] then [`init_facts`] once, before
+//!   the command runs and only when telemetry is on. `detect` finds the
+//!   LangSmith key the command would use, without prompting, and asks
+//!   LangSmith who it belongs to.
+//! - Commands call [`update_facts`] as they learn more, such as the deployment
+//!   they act on, and [`refresh_identity`] after a sign-in.
+//! - Readers call [`facts`]: the `command_completed` event at exit and the OTel
+//!   logger for every record. While telemetry is off it returns `None`, so
+//!   updates and lookups do nothing.
+
+use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
+use clap::{ArgMatches, Command};
 use serde::Serialize;
 
-use crate::deploy::{env_file, helpers};
-use crate::langsmith::{self, Client, Credential, Login};
+// TODO: move LangSmith URL and key resolution out of `deploy` so telemetry
+// does not depend on a command module.
+use crate::deploy::langsmith_context::LangSmithEndpoints;
+use crate::deploy::{client_without_prompt, env_file};
+use crate::langsmith::{AuthIdentity, Client};
 
-use super::command::CommandContext;
+use super::command::CommandInvocation;
+use super::metadata::InvocationMetadata;
+use super::stage::CurrentStage;
 
-const LOOKUP_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long an identity lookup for telemetry may take before it is skipped.
+const IDENTITY_LOOKUP_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Attribution facts reported with `command_completed`. Collected before
-/// dispatch; handlers overwrite fields they learn while running.
-#[derive(Default, Serialize)]
+/// Everything reported about this invocation.
+#[derive(Clone, Default, Serialize)]
 pub struct ReportableFacts {
-    /// Set only by `collect`, so opted-out runs make no telemetry lookups.
-    #[serde(skip)]
-    enabled: bool,
+    #[serde(flatten)]
+    pub run: InvocationMetadata,
+    #[serde(flatten)]
+    pub command: CommandInvocation,
     #[serde(flatten)]
     pub auth: AuthInfo,
     #[serde(flatten)]
     pub deployment: DeploymentInfo,
+    /// The command stage running now. Never serialized, so PostHog never sees
+    /// it; the OTel logger adds it to each record itself.
+    #[serde(skip)]
+    pub stage: Option<CurrentStage>,
 }
 
-#[derive(Default, Serialize)]
+impl ReportableFacts {
+    /// What is known before the command runs, and a client for the key the
+    /// command would use without prompting, which the OTel logger sends with.
+    /// The key's identity is looked up within [`IDENTITY_LOOKUP_TIMEOUT`]. The
+    /// command fills in deployment facts.
+    pub fn detect(command: &Command, matches: &ArgMatches) -> (Self, Option<Client>) {
+        let (platform_url, client) = langsmith_target(matches);
+        let identity = client
+            .as_ref()
+            .and_then(|client| client.auth_identity_within(IDENTITY_LOOKUP_TIMEOUT));
+        let facts = Self {
+            run: InvocationMetadata::detect(),
+            command: CommandInvocation::from_matches(command, matches).unwrap_or_default(),
+            auth: AuthInfo::new(identity, &platform_url),
+            deployment: DeploymentInfo::default(),
+            stage: None,
+        };
+        (facts, client)
+    }
+}
+
+/// The LangSmith platform URL the command targets, and a client for the key it
+/// would use there, from `--path`, `--host-url` and `--workspace-id` at any
+/// subcommand level and the project's env file.
+fn langsmith_target(matches: &ArgMatches) -> (String, Option<Client>) {
+    fn arg<T: Clone + Send + Sync + 'static>(args: &ArgMatches, name: &str) -> Option<T> {
+        args.try_get_one::<T>(name).ok().flatten().cloned()
+    }
+    let mut project_dir = PathBuf::from(".");
+    let (mut host_url, mut workspace_id) = (None::<String>, None::<String>);
+    let mut args = matches;
+    loop {
+        project_dir = arg(args, "path").unwrap_or(project_dir);
+        host_url = arg(args, "host_url").or(host_url);
+        workspace_id = arg(args, "workspace_id").or(workspace_id);
+        let Some((_, child)) = args.subcommand() else {
+            break;
+        };
+        args = child;
+    }
+    // `dev` and `chat` fall back to `.env.local` when there is no `.env`.
+    let env_path = if matches!(matches.subcommand_name(), Some("dev" | "chat")) {
+        env_file::project_env_persist_path(&project_dir)
+    } else {
+        project_dir.join(".env")
+    };
+    let env = env_file::parse_env_file(&env_path);
+    let endpoints = LangSmithEndpoints::resolve(&env, host_url.as_deref());
+    let client = client_without_prompt(
+        &env,
+        &endpoints.host_url,
+        &endpoints.platform_api_url,
+        workspace_id.as_deref(),
+    );
+    (endpoints.platform_api_url, client)
+}
+
+/// Who is running the command, as verified by LangSmith.
+#[derive(Clone, Default, Serialize)]
 pub struct AuthInfo {
     pub user_id: Option<String>,
     pub org_id: Option<String>,
@@ -30,108 +114,97 @@ pub struct AuthInfo {
     pub langsmith_host_url: Option<String>,
 }
 
-#[derive(Default, Serialize)]
+/// The deployment the command acts on, set by the command once it knows.
+#[derive(Clone, Default, Serialize)]
 pub struct DeploymentInfo {
     pub deployment_id: Option<String>,
     pub deployment_name: Option<String>,
 }
 
-impl ReportableFacts {
-    /// Best-effort; every failure leaves fields `None`.
-    pub fn collect(context: CommandContext) -> Self {
-        let env = env_file::parse_env_file(&context.env_path);
-        let (default_host, _) = helpers::resolve_langsmith_api_bases(&env);
-        let host = context
-            .host_url
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(&default_host);
-        let platform = helpers::resolve_platform_api_url(host, &env);
-        let mut facts = Self {
-            enabled: true,
-            auth: AuthInfo {
-                langsmith_host_url: normalized_origin(&platform),
-                ..AuthInfo::default()
-            },
-            deployment: DeploymentInfo {
-                deployment_id: context.deployment_id.clone(),
-                deployment_name: context.deployment_name.clone(),
-            },
+/// The process's facts. Empty while telemetry is off.
+struct FactsStore(Mutex<Option<ReportableFacts>>);
+
+impl FactsStore {
+    const fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    fn init(&self, facts: ReportableFacts) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(facts);
+    }
+
+    fn get(&self) -> Option<ReportableFacts> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// `change` runs without the store locked, so it may log.
+    fn update(&self, change: impl FnOnce(&mut ReportableFacts)) {
+        let Some(mut updated) = self.get() else {
+            return;
         };
-        let Some(client) = client(&context, &env, host, &platform) else {
-            return facts;
-        };
-        // Run both lookups concurrently; the scope joins before dispatch.
-        let needs_lookup = facts.deployment.deployment_id.is_none();
-        let deployment_id = std::thread::scope(|scope| {
-            let lookup =
-                needs_lookup.then(|| scope.spawn(|| lookup_deployment_id(&client, &context)));
-            facts.refresh_identity(&client);
-            lookup.and_then(|handle| handle.join().ok().flatten())
+        change(&mut updated);
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(updated);
+    }
+}
+
+static FACTS: FactsStore = FactsStore::new();
+
+/// Store the facts for this invocation. Call once, before dispatch.
+pub fn init_facts(facts: ReportableFacts) {
+    FACTS.init(facts);
+}
+
+/// A copy of the current facts, or `None` when telemetry is off.
+pub fn facts() -> Option<ReportableFacts> {
+    FACTS.get()
+}
+
+/// Change the current facts. Does nothing when telemetry is off.
+pub fn update_facts(change: impl FnOnce(&mut ReportableFacts)) {
+    FACTS.update(change);
+}
+
+/// Re-read identity after the credential may have changed, such as a sign-in
+/// during deploy. Makes no request when telemetry is off.
+pub fn refresh_identity(client: &Client) {
+    if facts().is_none() {
+        return;
+    }
+    if let Some(identity) = client.auth_identity_within(IDENTITY_LOOKUP_TIMEOUT) {
+        update_facts(|facts| {
+            facts.auth = AuthInfo {
+                langsmith_host_url: facts.auth.langsmith_host_url.take(),
+                ..AuthInfo::from(identity)
+            };
         });
-        if deployment_id.is_some() {
-            facts.deployment.deployment_id = deployment_id;
-        }
-        facts
     }
+}
 
-    /// Overwrite identity fields from the client's credential, when verified.
-    pub fn refresh_identity(&mut self, client: &Client) {
-        if !self.enabled {
-            return;
-        }
-        let Ok(client) = client.clone().with_timeout(LOOKUP_TIMEOUT) else {
-            return;
-        };
-        if let Some(identity) = client.auth_identity() {
-            self.auth.user_id = identity.user_id;
-            self.auth.org_id = identity.org_id;
-            self.auth.workspace_id = identity.workspace_id;
+impl AuthInfo {
+    /// The verified identity, when known, and the LangSmith origin either way.
+    fn new(identity: Option<AuthIdentity>, platform_url: &str) -> Self {
+        Self {
+            langsmith_host_url: normalized_origin(platform_url),
+            ..identity.map(Self::from).unwrap_or_default()
         }
     }
 }
 
-fn lookup_deployment_id(client: &Client, context: &CommandContext) -> Option<String> {
-    let deployment = crate::deploy::find_target_deployment(
-        client,
-        context.deployment_name.as_deref()?,
-        context.deployment_agent.as_ref(),
-    )
-    .ok()??;
-    deployment.get("id")?.as_str().map(str::to_string)
+impl From<AuthIdentity> for AuthInfo {
+    fn from(identity: AuthIdentity) -> Self {
+        Self {
+            user_id: identity.user_id,
+            org_id: identity.org_id,
+            workspace_id: identity.workspace_id,
+            langsmith_host_url: None,
+        }
+    }
 }
 
-fn client(
-    context: &CommandContext,
-    env: &std::collections::BTreeMap<String, String>,
-    host: &str,
-    platform: &str,
-) -> Option<Client> {
-    let key = langsmith::resolve_preferred_env(
-        langsmith::API_KEY_ENV,
-        langsmith::REMOVED_API_KEY_ENVS,
-        None,
-        env,
-        |key| std::env::var(key).ok(),
-        "",
-    )
-    .ok()?
-    .or_else(|| Login::for_api_url(platform).cached_api_key())?;
-    let workspace = langsmith::resolve_preferred_env(
-        helpers::WORKSPACE_ID_ENV,
-        helpers::REMOVED_WORKSPACE_ID_ENVS,
-        context.workspace_id.as_deref(),
-        env,
-        |key| std::env::var(key).ok(),
-        "",
-    )
-    .ok()?;
-    Client::with_credential_and_platform(host, Some(platform), Credential::ApiKey(key), workspace)
-        .and_then(|client| client.with_timeout(LOOKUP_TIMEOUT))
-        .ok()
-}
-
-pub(super) fn normalized_origin(raw: &str) -> Option<String> {
+fn normalized_origin(raw: &str) -> Option<String> {
     let url = reqwest::Url::parse(raw.trim()).ok()?;
     matches!(url.scheme(), "http" | "https").then(|| url.origin().ascii_serialization())
 }
@@ -149,14 +222,34 @@ mod tests {
     }
 
     #[test]
-    fn opted_out_facts_make_no_identity_request() {
+    fn updates_apply_only_after_init() {
+        let store = FactsStore::new();
+        let name = |facts: &mut ReportableFacts| {
+            facts.deployment.deployment_name = Some("agent".to_string());
+        };
+
+        store.update(name);
+        assert!(store.get().is_none());
+
+        store.init(ReportableFacts::default());
+        store.update(name);
+        assert_eq!(
+            store.get().unwrap().deployment.deployment_name.as_deref(),
+            Some("agent")
+        );
+    }
+
+    // No test in this crate calls `init_facts`, so the store stays `None`.
+    #[test]
+    fn opted_out_runs_make_no_identity_request() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let client = Client::new_with_platform(&base, Some(&base), "test-key", None).unwrap();
-        let mut facts = ReportableFacts::default();
-        facts.refresh_identity(&client);
+        let client = Client::for_test(&base);
+
+        refresh_identity(&client);
+
         assert!(listener.accept().is_err());
-        assert!(facts.auth.user_id.is_none());
+        assert!(facts().is_none());
     }
 }

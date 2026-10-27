@@ -7,9 +7,7 @@
 //! `requirements_from_connectors`), not this extractor.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
-use std::process::Stdio;
 
 use anyhow::{anyhow, bail, Context, Result};
 use oxc::allocator::Allocator;
@@ -19,6 +17,8 @@ use oxc::ast::ast::{
 };
 use serde_json::{Map, Number, Value};
 
+use crate::child;
+use crate::error::child_failed;
 use crate::toolchain;
 use crate::typescript::{parse_typescript, statement_variable_declaration};
 
@@ -141,38 +141,25 @@ fn extract_python_config(
         .transpose()
         .context("failed to serialize selected static config keys")?
         .unwrap_or_default();
-    let mut child = toolchain::python3()
-        .arg("-c")
-        .arg(PYTHON_KEYWORD_EXTRACTOR)
-        .arg(export_name)
-        .arg(selected_json)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to run {} for static config extraction",
-                toolchain::python3_program()
-            )
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(source.as_bytes()).with_context(|| {
-            format!(
-                "failed to send {} to {}",
-                rel.display(),
-                toolchain::python3_program()
-            )
-        })?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .context("failed to read python static extractor output")?;
+    let output = child::output_with_stdin(
+        toolchain::python3()
+            .arg("-c")
+            .arg(PYTHON_KEYWORD_EXTRACTOR)
+            .arg(export_name)
+            .arg(selected_json),
+        source.as_bytes(),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for static config extraction",
+            toolchain::python3_program()
+        )
+    })?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("failed to parse {}: {stderr}", rel.display());
+        return Err(child_failed(
+            &output,
+            format!("failed to parse {}", rel.display()),
+        ));
     }
 
     let stdout = String::from_utf8(output.stdout).context("static extractor returned UTF-8")?;

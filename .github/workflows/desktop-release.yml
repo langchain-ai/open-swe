@@ -252,6 +252,7 @@ jobs:
           fi
 
       - name: Create GitHub release
+        id: publish
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.release.outputs.tag }}
@@ -266,6 +267,25 @@ jobs:
             ${{ steps.assets.outputs.update_metadata }}
             ${{ steps.assets.outputs.update_blockmap }}
             ${{ steps.cli.outputs.dir }}/oswe-*
+
+      - name: Summarize desktop release
+        env:
+          RELEASE_URL: ${{ steps.publish.outputs.url }}
+          VERSION: ${{ steps.release.outputs.version }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          channel=stable
+          if [[ "$PRERELEASE" == "true" ]]; then channel=nightly; fi
+          sha="$(git rev-parse HEAD)"
+          {
+            printf '## Desktop and CLI release\n\n'
+            printf -- '- [Open SWE %s (%s)](%s)\n' "$VERSION" "$channel" "$RELEASE_URL"
+            printf -- '- Downloads: signed macOS app and DMG; CLI archives for macOS and Linux (arm64/x64), with checksums\n'
+            printf -- '- Release commit: [%s](%s/%s/commit/%s)\n' "${sha:0:12}" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$sha"
+            if [[ "$PRERELEASE" == "true" ]]; then
+              printf -- '- Homebrew cask update: skipped for nightly releases\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate tap token
         if: steps.release.outputs.prerelease == 'false'
