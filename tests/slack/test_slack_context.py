@@ -378,6 +378,15 @@ async def test_web_question_keeps_context_without_slack_delivery(
     monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", persisted)
     monkeypatch.setattr(webhook_common, "store_slack_run_mapping", mapping)
     monkeypatch.setattr(slack_webhooks, "show_slack_thinking_status", status)
+    monkeypatch.setattr(
+        webhook_common.ThreadRecord,
+        "read",
+        AsyncMock(
+            return_value=webhook_common.ThreadRecord(
+                exists=True, metadata={"visibility": "public", "workspace": "engineering"}
+            )
+        ),
+    )
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
@@ -399,7 +408,8 @@ async def test_web_question_keeps_context_without_slack_delivery(
         assert config["agent_model_id"] == model_choice[0]
         assert config["agent_effort"] == model_choice[1]
         assert config["model_selection"] == "explicit"
-    assert persisted.await_args.kwargs["visibility"] == "private"
+    assert persisted.await_args.kwargs["visibility"] == "public"
+    assert persisted.await_args.kwargs["workspace"] == config["workspace"]
     assert persisted.await_args.kwargs["source_context"] is None
     messages = str(run["kwargs"]["input"])
     assert "first request" in messages and "context" in messages

@@ -1302,7 +1302,7 @@ async def _process_slack_mention_impl(
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    visibility = "private" if request.web_only else _slack_thread_visibility(channel_context)
+    visibility = "public" if request.web_only else _slack_thread_visibility(channel_context)
     if request.web_only:
         configurable.pop("slack_thread", None)
         configurable.pop("slack_breakout", None)
@@ -1336,7 +1336,7 @@ async def _process_slack_mention_impl(
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",
     )
-    if (visibility == "private" or allowed_bot is not None) and not persisted:
+    if (request.web_only or visibility == "private" or allowed_bot is not None) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 
