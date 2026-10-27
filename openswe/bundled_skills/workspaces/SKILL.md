@@ -64,9 +64,9 @@ Keep it to seconds.
 It runs in three places:
 
 1. At the end of every full rebuild, so a broken one is caught on a builder.
-2. **In a run's own sandbox** when it boots from an image older than an hour, before the first model call, so the run works against fresh checkouts.
+1. **In a run's own sandbox** when it boots from an image older than an hour, before the first model call, so the run works against fresh checkouts.
    Never fatal — a failure is logged and the run continues on the image as captured.
-3. As an hourly **update refresh** — boot from the current image, run it, capture — enqueued by that same creation, so later runs skip step 2.
+1. As an hourly **update refresh** — boot from the current image, run it, capture — enqueued by that same creation, so later runs skip step 2.
 
 ## Reading a refresh
 

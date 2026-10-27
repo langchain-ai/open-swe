@@ -27,14 +27,14 @@ Order the chunks so each builds on what the reader already saw: usually the core
 Send to Other the hunks that hold nothing but:
 
 1. Imports, includes, requires and `use` declarations.
-2. Boilerplate and ceremony: migration revision headers and `downgrade` stubs, module docstrings that restate the code, `__all__`, registration lists, `__init__` re-exports.
-3. Generated code and artifacts: lockfiles, snapshots, golden files, bundles, vendored code, files marked "generated, do not edit".
-4. Pure formatting and reordered but unchanged declarations.
-5. Mechanical repetition: for a rename or call-site migration, put one representative hunk in a chunk and leave the rest.
-6. Forced plumbing: forwarded parameters, zero values for a new return slot, annotations that follow from a change elsewhere.
-7. Comment churn that narrates the code, and reworded error or log text.
-8. Test scaffolding and repeated cases, keeping one scenario per behavior.
-9. Docs, changelogs and config churn that restate the code.
+1. Boilerplate and ceremony: migration revision headers and `downgrade` stubs, module docstrings that restate the code, `__all__`, registration lists, `__init__` re-exports.
+1. Generated code and artifacts: lockfiles, snapshots, golden files, bundles, vendored code, files marked "generated, do not edit".
+1. Pure formatting and reordered but unchanged declarations.
+1. Mechanical repetition: for a rename or call-site migration, put one representative hunk in a chunk and leave the rest.
+1. Forced plumbing: forwarded parameters, zero values for a new return slot, annotations that follow from a change elsewhere.
+1. Comment churn that narrates the code, and reworded error or log text.
+1. Test scaffolding and repeated cases, keeping one scenario per behavior.
+1. Docs, changelogs and config churn that restate the code.
 
 A hunk that mixes noise with a real change goes in a chunk, unless you split the noise off first.
 Never hide a real behavior change in Other: a new condition, a different call, a changed value, return path or data flow always goes in a chunk.

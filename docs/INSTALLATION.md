@@ -312,8 +312,8 @@ The app posts events to your deployment's URL, so it needs the same public URL a
 
 </details>
 
-2. Install the app to your workspace.
-3. Add to the environment (step 6):
+1. Install the app to your workspace.
+1. Add to the environment (step 6):
 
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
@@ -451,12 +451,12 @@ Responders can copy the agent's postmortem summary and consult retained incident
 1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**.
    Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, and `app_mention` events.
    The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
-2. Access follows the rest of Open SWE: any signed-in dashboard user can read incidents, postmortems, and history, and only `CONFIGURED_ADMINS` can change incident settings.
+1. Access follows the rest of Open SWE: any signed-in dashboard user can read incidents, postmortems, and history, and only `CONFIGURED_ADMINS` can change incident settings.
    In Slack, anyone in an incident channel can pause, resume, or complete it; asking the agent a question or starting an incident manually requires a connected Open SWE account (Sign in with Slack in the dashboard), the same as mentioning Open SWE anywhere else.
    Reads recheck current channel access.
-3. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Workspaces → the workspace → MCP connections** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers).
+1. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Workspaces → the workspace → MCP connections** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers).
    The agent uses those tools like any other workspace integration, only for an explicit responder request.
-4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn.
+1. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn.
    Enable Incidents, then create a matching public channel or rename one into the prefix.
    Anyone with a connected Open SWE account can also mention the bot in any public channel and ask it to monitor that channel as an incident; the agent's `manage_incident` tool enrolls it.
    To turn it off, anyone in the channel mentions the bot with `pause` (stops automatic analysis) or `complete` (ends the incident), asks it in plain words, or uses the buttons on the incident's dashboard page.
@@ -555,9 +555,9 @@ A machine caller reads back only the threads it started, through `GET /dashboard
 Open SWE listens for Linear comments that mention `@openswe`.
 
 1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** **Comments → Create**, plus **Issues** when workspace automations should run on Linear issue events.
-2. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use.
+1. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use.
    Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
-3. Set a workspace default repository under **Open SWE Agent**.
+1. Set a workspace default repository under **Open SWE Agent**.
    Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
 
 **Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
@@ -633,8 +633,8 @@ Runs that name no repository use the workspace's default repository (**Workspace
 Writes use the first key; reads try every key in order.
 
 1. Generate a new key: `openssl rand -base64 32`.
-2. Prepend it, keeping the old key second: `TOKEN_ENCRYPTION_KEY="<new_key>,<old_key>"`, and restart.
-3. Once every active user has signed in again (each fresh OAuth flow re-encrypts under the new key), drop the old key.
+1. Prepend it, keeping the old key second: `TOKEN_ENCRYPTION_KEY="<new_key>,<old_key>"`, and restart.
+1. Once every active user has signed in again (each fresh OAuth flow re-encrypts under the new key), drop the old key.
    Anything still encrypted under it fails to decrypt and that user is asked to sign in again.
 
 </details>

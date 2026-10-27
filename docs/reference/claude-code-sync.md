@@ -6,9 +6,9 @@ Open SWE uses that to mirror a person's Claude Code sessions into the dashboard:
 ## Connect a machine
 
 1. In the dashboard, open **Settings → Claude Code**, name the machine, and choose **Connect Claude Code**.
-2. Merge the settings it shows into `~/.claude/settings.json`.
+1. Merge the settings it shows into `~/.claude/settings.json`.
    They hold the machine's token, which is not shown again.
-3. Start a new Claude Code session.
+1. Start a new Claude Code session.
    It appears in the sidebar with a terminal icon on its first prompt.
 
 Revoking a machine under **Machines** on the same page stops that machine from mirroring.

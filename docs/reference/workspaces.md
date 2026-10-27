@@ -51,13 +51,13 @@ Settings resolve from the least to the most specific tier, each overriding the o
 1. **Instance.**
    The settings record as it existed before workspaces (then "team settings"), kept under its original Store key so an upgrade needs no migration.
    Admins edit it on the Admin page.
-2. **Workspace.**
+1. **Workspace.**
    A sparse record of overrides per workspace slug.
    A field that is unset inherits the instance value, so a new workspace behaves exactly like the instance until an admin changes something.
    `GET /dashboard/api/workspaces/{slug}/settings` returns the effective values and the overrides separately; `PUT` replaces the overrides, and a `null` field means "inherit".
-3. **User.**
+1. **User.**
    The existing profile fields (model and effort, subagent model, default repository, adaptive routing, draft-PR review) override the workspace's effective settings for that user's runs.
-4. **Thread.**
+1. **Thread.**
    A run's `configurable` (`agent_model_id`, `agent_effort`, `repo`) overrides all of the above for that thread.
 
 MCP connections follow the same shape without a thread tier: **instance** connections (`/dashboard/api/mcps`) are loaded for every run, the **workspace** connections are added, then the **user's** personal connections.
@@ -80,14 +80,14 @@ Resolution for new work, in order, and the first match wins:
 
 1. An existing thread's recorded workspace.
    Follow-ups on issues, PRs, Linear issues, and Slack threads land here; none of them recompute the workspace from the repository.
-2. A `/workspace:<slug>` command on the message that opens the thread, e.g. `@Open SWE /workspace:infra fix the flaky test`.
+1. A `/workspace:<slug>` command on the message that opens the thread, e.g. `@Open SWE /workspace:infra fix the flaky test`.
    The older `workspace:<slug>` and `env:<slug>` tags still work anywhere in the message.
-3. The Slack channel's bound workspace.
+1. The Slack channel's bound workspace.
    A message in a workspace's channel runs there even when it names a repository another workspace prefers, since every workspace can use every repository.
-4. The repository's preferred workspace.
+1. The repository's preferred workspace.
    This is how GitHub events, Linear issues, automations, and GitHub Actions federation (through the binding's `may_start_threads`) pick a workspace.
-5. The user's default workspace, a per-user preference.
-6. The `default` workspace.
+1. The user's default workspace, a per-user preference.
+1. The `default` workspace.
    Instance policy decides what happens to a GitHub event for a repository no workspace owns: route it to `default`, which is the compatible upgrade behavior, or drop it, which a locked-down install should prefer.
 
 ### GitHub access and the sandbox image

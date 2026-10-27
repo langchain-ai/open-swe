@@ -14,7 +14,7 @@ It is refused unless `langgraph dev` is the runtime, and the `ALLOWED_GITHUB_USE
 1. Confirm `gh` is logged in.
    `gh auth status` — if not, `gh auth login`.
 
-2. Check the ports.
+1. Check the ports.
    The backend wants 2024 and Vite wants 3000:
 
    ```bash
@@ -25,7 +25,7 @@ It is refused unless `langgraph dev` is the runtime, and the `ALLOWED_GITHUB_USE
    Never kill one without asking.
    Use another port instead and point Vite at it — every command below takes `PORT` for exactly that reason.
 
-3. Make sure `.env` has these.
+1. Make sure `.env` has these.
    The GitHub App keys are *not* needed; these are:
 
    | Key | Why |
@@ -38,20 +38,20 @@ It is refused unless `langgraph dev` is the runtime, and the `ALLOWED_GITHUB_USE
 
    Startup aborts with `ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured` when the allowlist is missing.
 
-4. Start the backend.
+1. Start the backend.
    `make dev` covers this when 2024 is free and you want its postgres container; otherwise run it directly:
 
    ```bash
    uv run langgraph dev --no-browser --port 2026 --n-jobs-per-worker 10
    ```
 
-5. Start Vite against it:
+1. Start Vite against it:
 
    ```bash
    DASHBOARD_API_URL=http://127.0.0.1:2026 pnpm run dev
    ```
 
-6. Open `http://localhost:3000` and press **Continue with GitHub**.
+1. Open `http://localhost:3000` and press **Continue with GitHub**.
    With no App configured it redirects to the `gh` login and lands you signed in.
    To skip the page, go straight to `/dashboard/api/auth/dev-login?redirect_to=/agents/reviews`.
 
@@ -83,12 +83,12 @@ Nothing is stubbed; runs cost money and take minutes.
 1. `.env` needs a model key — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
    With both set, `DEFAULT_MODEL_ID` resolves to the OpenAI model; with only Anthropic, to Claude.
 
-2. Set `SANDBOX_TYPE=local`.
+1. Set `SANDBOX_TYPE=local`.
    `langsmith` sandboxes **cannot work from a laptop**: the run PATCHes a proxy config whose `match_hosts` is the hostname of your `DASHBOARD_API_BASE_URL`, and the sandbox API rejects `localhost` with a bare `422 unknown` whose body never reaches the log.
    It fails in `PrepareReviewerRunMiddleware.before_agent`, so the agent never starts and the review settles with zero findings — which reads exactly like a model that chose to say nothing.
    Either use `local`, or expose the dashboard on a real hostname (`make tunnel`, see docs/DEVELOPMENT.md) before using `langsmith`.
 
-3. Get a session cookie, then post the trigger.
+1. Get a session cookie, then post the trigger.
    Mutations are CSRF-checked against `DASHBOARD_BASE_URL`, so send a matching `Origin` — without it you get `403 CSRF check failed`:
 
    ```bash
@@ -99,14 +99,14 @@ Nothing is stubbed; runs cost money and take minutes.
 
    A `{"success": true, "thread_id": "..."}` means the run is queued, not finished.
 
-4. Watch it in the backend log.
+1. Watch it in the backend log.
    The run is minutes long and the failures worth catching are sandbox provisioning and model auth, so grep for both rather than only for the tool you care about:
 
    ```bash
    tail -f logs/backend.log | grep -E --line-buffered "sandbox|Traceback|error_detail=[^N]|publish_review"
    ```
 
-5. Reviewer output lands where the dashboard reads it — findings in reviewer thread metadata, guidance points in `pull_request_guidance`.
+1. Reviewer output lands where the dashboard reads it — findings in reviewer thread metadata, guidance points in `pull_request_guidance`.
    Check the table directly when a page looks empty, to tell "the agent recorded nothing" apart from "the read path is broken":
 
    ```bash

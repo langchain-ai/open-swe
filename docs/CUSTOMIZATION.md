@@ -93,7 +93,7 @@ def create_my_provider_sandbox(sandbox_id: str | None = None):
     ...
 ```
 
-2. **Register it** in `openswe/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
+1. **Register it** in `openswe/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
 
 ```python
 SANDBOX_FACTORIES = {
@@ -289,7 +289,7 @@ Enabled connections provide baseline tools for all users, limited to the tools s
 Only admins can manage connections or reveal saved credentials.
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
-2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
+1. Choose **Headers / API key** or **OAuth client credentials** for authentication.
    For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY` in PostgreSQL; normal dashboard responses only return header names.
    Admins can use the eye icon (**Show saved headers**) to reveal values on demand, then the crossed-out eye to clear them from the editor.
    Entered or imported values also have an eye icon to show or hide them.
@@ -297,7 +297,7 @@ Only admins can manage connections or reveal saved credentials.
    For OAuth, enter the token URL, client ID, client secret, scopes, and the provider's client authentication method.
    The secret is encrypted in PostgreSQL and is never returned to the browser.
    Leave it blank when editing to keep it.
-3. Choose **Save and discover tools**.
+1. Choose **Save and discover tools**.
    For new connections, all discovered tools are selected by default.
    Review the selection, then choose **Save connection** to enable those tools.
    Rediscovering an existing connection preserves its selected tools, including an intentionally empty selection.
@@ -552,11 +552,11 @@ Users can override either on a per-comment basis by including `repo:owner/name` 
 Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
-2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description").
+1. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description").
    This lets a channel be pinned to a repo without anyone repeating it per-message.
-3. The triggering user's dashboard `default_repo`.
-4. The workspace's default repository (its own override, else the instance's).
-5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
+1. The triggering user's dashboard `default_repo`.
+1. The workspace's default repository (its own override, else the instance's).
+1. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
 Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent).
 A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
@@ -584,7 +584,7 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
     return {"status": "accepted"}
 ```
 
-2. **Create a processing function** that builds the prompt and starts an agent run:
+1. **Create a processing function** that builds the prompt and starts an agent run:
 
 ```python
 async def process_my_trigger(task_description: str, repo_config: dict):
@@ -606,7 +606,7 @@ async def process_my_trigger(task_description: str, repo_config: dict):
     )
 ```
 
-3. **Add a communication tool** (optional) so the agent can report back:
+1. **Add a communication tool** (optional) so the agent can report back:
 
 ```python
 # openswe/tools/my_trigger_reply.py

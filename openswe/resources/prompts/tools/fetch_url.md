@@ -12,6 +12,6 @@ Returns: Dictionary containing:
 
 IMPORTANT: After using this tool:
 1. Read through the markdown content
-2. Extract relevant information that answers the user's question
-3. Synthesize this into a clear, natural language response
-4. NEVER show the raw markdown to the user unless specifically requested
+1. Extract relevant information that answers the user's question
+1. Synthesize this into a clear, natural language response
+1. NEVER show the raw markdown to the user unless specifically requested

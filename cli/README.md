@@ -49,9 +49,9 @@ cp cli/dist/oswe /usr/local/bin/
 The CLI uses the first credential it finds:
 
 1. **`OPEN_SWE_API_KEY`** — a workspace API key (`osk_…`) an admin minted.
-2. **GitHub Actions** — inside a job with `permissions: id-token: write`, the job's own OIDC token, requested with the backend URL as its audience (override with `OPEN_SWE_OIDC_AUDIENCE`).
+1. **GitHub Actions** — inside a job with `permissions: id-token: write`, the job's own OIDC token, requested with the backend URL as its audience (override with `OPEN_SWE_OIDC_AUDIENCE`).
    An admin must first let the repository start threads in its workspace's settings.
-3. **A person's session** — `OPEN_SWE_SESSION`, or the one `oswe login` stored.
+1. **A person's session** — `OPEN_SWE_SESSION`, or the one `oswe login` stored.
 
 An API key and a workflow are machines: their threads are always `system` threads.
 A person's threads are always private: whoever can prompt one runs commands on this machine.
@@ -114,11 +114,11 @@ What happens:
 1. A sandbox bridge is registered for the current directory and starts serving the remote agent's requests.
    Every run gets its own bridge, so two runs in one directory never serve each other's requests.
    The thread's bridge is remembered in `~/.open-swe/bridges.json` for `--thread`.
-2. A thread is created on the deployment, with `origin` repo detected from `git remote get-url origin`, and its dashboard URL is printed to stderr.
-3. The agent works.
+1. A thread is created on the deployment, with `origin` repo detected from `git remote get-url origin`, and its dashboard URL is printed to stderr.
+1. The agent works.
    Nothing it says or runs is printed; follow it on the dashboard.
    If the event stream drops, for example while the backend restarts, the CLI reconnects with backoff; it gives up after 10 reconnects in a row that each lasted under a minute.
-4. The agent ends the run by calling `cli_result` with `stdout` and an `exit_code`.
+1. The agent ends the run by calling `cli_result` with `stdout` and an `exit_code`.
    The CLI prints that `stdout` verbatim as its only output on stdout, releases the bridge, and exits with that code.
 
 The agent may hand parts of the work to task workers, which run on this machine through the same bridge.

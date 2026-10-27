@@ -43,10 +43,10 @@ If no tunnel is running, recover the domain from configuration or prior local ru
 For a first-time setup, the free ngrok plan gives you a static domain:
 
 1. Sign up at [dashboard.ngrok.com](https://dashboard.ngrok.com/signup) and install the agent (`brew install ngrok`, or the download the dashboard offers).
-2. Connect the agent to your account with the `ngrok config add-authtoken …` command shown under **Getting Started → Your Authtoken**.
-3. Under **Domains**, claim the free static domain.
+1. Connect the agent to your account with the `ngrok config add-authtoken …` command shown under **Getting Started → Your Authtoken**.
+1. Under **Domains**, claim the free static domain.
    It looks like `<name>.ngrok-free.dev`.
-4. Start the tunnel and leave it running while you develop:
+1. Start the tunnel and leave it running while you develop:
 
    ```bash
    make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev   # or export NGROK_DOMAIN once in your shell
@@ -310,13 +310,13 @@ A task started from `http://localhost:3000` is a real run on that deployment, an
 The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
 
 1. Add the **`preview`** label to your PR.
-2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour.
+1. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour.
    Labeling alone does not deploy.
-3. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**.
+1. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**.
    A successful run may still omit a PR.
-4. Wait for the run's **Deploy the preview tree** job.
+1. Wait for the run's **Deploy the preview tree** job.
    It rolls the preview deployment to the published `preview` commit and fails, with the revision's build or server logs, unless the revision deploys.
-5. Open [preview](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) and test with non-production tasks and repositories.
+1. Open [preview](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) and test with non-production tasks and repositories.
    For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
 
 When PRs conflict with the preview tree, the run makes one `oswe` call (an Open SWE agent on the backend in the `OPEN_SWE_BACKEND_URL` repository variable) that merges all of them; the summary marks those PRs `conflicts resolved by oswe`, and later runs replay the resolution from a git rerere cache.

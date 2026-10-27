@@ -15,10 +15,10 @@ If it refuses them, pick someone yourself:
 The first reviewer comes from the code owners of most of the changed files; reviewers for the other code owners are added only after that reviewer approves.
 {% endif %}
 1. Read the repository's CODEOWNERS (`.github/CODEOWNERS`, `CODEOWNERS`, or `docs/CODEOWNERS`) for the files the pull request changes.
-2. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
-3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code.
+1. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
+1. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code.
    Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
-4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them.
+1. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them.
    It shows them on the review card, requests their review on GitHub, and messages them directly.
 
 If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request needs no reviewer: then stop.

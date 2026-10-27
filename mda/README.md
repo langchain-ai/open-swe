@@ -114,10 +114,10 @@ The backend:
 ## Run locally
 
 1. In the repository root `.env`, add `REMOTE_RUNTIME_TOKEN_SECRET` (any random string) and `MDA_RUNTIME_URL=http://localhost:2025`, then start the backend with `make dev`.
-2. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above.
+1. In `mda/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above.
    Then run `make dev-mda` from the repository root.
    Unset `ANTHROPIC_BASE_URL` in that shell if a tool such as Claude Code set it.
-3. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here.
+1. Use Open SWE as usual: your dashboard, Slack and GitHub threads run here.
    `uv run python -m evals.reviewer.run_eval --limit 3` runs reviews here without publishing to GitHub.
 
 The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.

@@ -4,13 +4,13 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
 
 1. **Documentation.**
    Markdown under `docs/`, `README.md`, or `SECURITY.md`, including updating documented commands or settings to match the current code.
-2. **Tests only.**
+1. **Tests only.**
    Adds or fixes tests without deleting assertions, skipping tests, or loosening what a test checks.
-3. **Small, low-risk code changes.**
+1. **Small, low-risk code changes.**
    Roughly 50 changed lines or fewer, in one feature area, with tests for any behavior change.
    For example: UI copy or styling fixes, log or error message fixes, type-only changes, lint fixes, or removing dead code that no supported user flow can reach.
 
-4. **Stricter approval policy only.**
+1. **Stricter approval policy only.**
    Changes confined to this file that solely narrow the set of PRs eligible for automatic approval (for example, adding an exclusion or tightening a limit).
    Any project member may propose restrictions on what they would approve.
    Compare the whole diff against the base policy: every PR eligible under the proposed policy must already be eligible under the base policy, and at least some previously eligible PRs must become ineligible.

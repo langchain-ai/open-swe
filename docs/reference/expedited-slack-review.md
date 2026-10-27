@@ -114,13 +114,13 @@ The tool:
 1. Re-reads the PR.
    Merged → card marked merged.
    Closed → card closed.
-2. Recomputes the fingerprint for the current head.
+1. Recomputes the fingerprint for the current head.
    A mismatch means a commit changed what voters saw: the card is marked superseded and the agent is told to post a new one.
    A commit that touched only files the card did not draw, such as minority tests, keeps the votes.
-3. Needs one approval from someone other than the author, and readiness: open, not a draft, conflict-free, every required check reported, no check running, every required check passed, no unresolved review thread, no standing request for changes, and, where Open SWE auto-review is enabled, an Open SWE review for this exact head SHA.
+1. Needs one approval from someone other than the author, and readiness: open, not a draft, conflict-free, every required check reported, no check running, every required check passed, no unresolved review thread, no standing request for changes, and, where Open SWE auto-review is enabled, an Open SWE review for this exact head SHA.
    Anything missing is returned to the agent and nothing is written.
-4. Submits a GitHub `APPROVE` review at the current head for any approver whose review from the click is not a standing approval: it never landed, or GitHub dismissed it as stale after a later commit.
-5. Merges with a GitHub App token scoped to contents and pull requests on that repository, conditional on the current head SHA, using a merge method the repository allows.
+1. Submits a GitHub `APPROVE` review at the current head for any approver whose review from the click is not a standing approval: it never landed, or GitHub dismissed it as stale after a later commit.
+1. Merges with a GitHub App token scoped to contents and pull requests on that repository, conditional on the current head SHA, using a merge method the repository allows.
    GitHub refusing leaves the card open and the reason goes back to the agent.
    No admin bypass, ever.
 

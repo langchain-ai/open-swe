@@ -3,9 +3,9 @@
 This drives the **whole happy path** through two mock UIs:
 
 1. A user asks Open SWE to implement something in a **mock Slack** thread.
-2. The **real agent** runs: its model loop on a local **Managed Deep Agents** server (the real `mda/` project), its tools and middleware on the backend (`langgraph dev`).
+1. The **real agent** runs: its model loop on a local **Managed Deep Agents** server (the real `mda/` project), its tools and middleware on the backend (`langgraph dev`).
    It implements the change in a **local temp-dir sandbox**, pushes a branch, and opens a PR on a **fake GitHub**.
-3. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
+1. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
 
 ## What is faked vs. real
 

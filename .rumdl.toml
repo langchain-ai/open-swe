@@ -2,7 +2,7 @@
 # Fix locally with `uvx rumdl@0.3.0 check --fix <files>`.
 
 [global]
-enable = ["MD013"]
+enable = ["MD013", "MD029"]
 
 [MD013]
 # One sentence per line, however long, so an edited sentence changes one line of the diff.
@@ -11,3 +11,7 @@ reflow = true
 reflow-mode = "sentence-per-line"
 code-blocks = false
 tables = false
+
+[MD029]
+# Every item is numbered 1., so inserting or moving an item does not renumber the ones after it.
+style = "one"
