@@ -1485,12 +1485,8 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
 
     assert client.runs.create.await_args is not None
     launch = client.runs.create.await_args.kwargs
-    # The coordinator's catalog, which the worker's graph is built from until it adopts its own.
-    assert launch["context"] == {
-        "graph": "agent",
-        "__worker_grant": "worker-grant",
-        "__catalog": COORDINATOR_CATALOG.model_dump(mode="json"),
-    }
+    # The worker reads its coordinator's catalog with the grant, never from its context.
+    assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
     }

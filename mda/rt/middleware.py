@@ -117,8 +117,6 @@ _TRACKED_BY_OPEN_SWE: Final = frozenset(
     {"check_async_task", "update_async_task", "cancel_async_task", "list_async_tasks"}
 )
 WORKER_GRANT_KEY: Final = "__worker_grant"
-# The catalog a run's graph is built from, planned by the backend as the run starts.
-CATALOG_KEY: Final = "__catalog"
 # Waits before launching again a worker MDA failed to start for a reason that may pass.
 _LAUNCH_RETRY_SECONDS: Final = (4.0, 12.0)
 
@@ -831,14 +829,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                 result = await handler(
                     request.override(
                         tool_call=launched_call,
-                        runtime=_launch_runtime(
-                            request.runtime,
-                            reply.grant,
-                            # A worker runs on its coordinator's catalog until it adopts its own.
-                            _json_object.validate_python(
-                                self._backend.run.catalog.model_dump(mode="json")
-                            ),
-                        ),
+                        runtime=_launch_runtime(request.runtime, reply.grant),
                     )
                 )
             if (launched := _launched_task(result)) is not None:
@@ -874,11 +865,13 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
         return _worker_message(registered.worker, tool_call_id)
 
 
-def _launch_runtime(runtime: ToolRuntime, grant: str, catalog: dict[str, JsonValue]) -> ToolRuntime:
-    """The tool runtime the launch sees: a worker grant for context, in place of the run's."""
-    return dataclasses.replace(
-        runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant, CATALOG_KEY: catalog}
-    )
+def _launch_runtime(runtime: ToolRuntime, grant: str) -> ToolRuntime:
+    """The tool runtime the launch sees: a worker grant for context, in place of the run's.
+
+    The worker's graph is built from its coordinator's catalog, which the grant reads,
+    until it adopts its own.
+    """
+    return dataclasses.replace(runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant})
 
 
 def _launched_task(result: ToolMessage | Command) -> _Launched | None:

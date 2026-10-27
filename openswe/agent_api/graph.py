@@ -159,6 +159,7 @@ from runtime_api.operations import (
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.skills import SKILLS, RunSkills
 
+from openswe.agent_api import catalogs
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.failures import OperationFailure
 from openswe.agent_api.git_metadata import (
@@ -437,24 +438,16 @@ class RunSession:
             ),
         )
 
-    async def plan(self, run: RemoteRun | None = None) -> Catalog:
-        """The catalog, with who the run acts for, the box MDA creates for it, and the grant
-        of each operation to the run (``run``, or the one this session serves)."""
+    async def plan(self) -> Catalog:
+        """The catalog, with who the run acts for and the box MDA creates for it; it grants
+        nothing, as each run's grants are its own."""
         sandbox = await self.sandbox()
-        catalog = self.catalog()
-        run = run or self.run
-        return catalog.model_copy(
+        return self.catalog().model_copy(
             update={
                 "trace_metadata": TurnGitMetadata(self.config).actor,
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
-                "operations": catalog.operations
-                if run is None
-                else [
-                    operation.model_copy(update={"grant": run.grant(operation.name)})
-                    for operation in catalog.operations
-                ],
             }
         )
 
@@ -820,6 +813,12 @@ class TokenRun:
 
     async def _session(self) -> RunSession:
         return await self.graph.session(self.run, self.run_id)
+
+    async def catalog(self, _request: RunRequest) -> Catalog:
+        """The catalog the run started with, granted to it."""
+        if self.run.catalog_digest is None:
+            return await _planned_catalog(await self._session())
+        return self.run.grant_operations(await catalogs.kept(self.run.catalog_digest))
 
     async def skills(self, _request: RunRequest) -> RunSkills:
         """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
@@ -1215,15 +1214,18 @@ def _message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
     return [block for block in content if isinstance(block, str | dict)]
 
 
-async def _catalog(session: RunSession, _request: RunRequest) -> Catalog:
-    """The catalog of a run started without it, and a token that carries what was decided."""
+async def _planned_catalog(session: RunSession) -> Catalog:
+    """The catalog of a run started without it, and a token that names it and carries what
+    was decided."""
+    planned = await session.plan()
     if session.run is None:
-        return await session.plan()
-    run = session.run.model_copy(update={"settings": session.settings()})
+        return planned
+    run = session.run.model_copy(
+        update={"settings": session.settings(), "catalog_digest": await catalogs.keep(planned)}
+    )
     if run.grant_id is None:
         run = run.granting()
-    catalog = await session.plan(run)
-    return catalog.model_copy(update={"run_token": sign_runtime_token(run)})
+    return run.grant_operations(planned).model_copy(update={"run_token": sign_runtime_token(run)})
 
 
 def _b64(data: bytes | None) -> str | None:
@@ -1328,6 +1330,7 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
 
 # Calls any run answers from its token and request: what it reads and what it reports.
 RUN_CALLS: Final = Handlers[TokenRun]()
+RUN_CALLS.serve(CATALOG, TokenRun.catalog)
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
 RUN_CALLS.serve(SKILLS, TokenRun.skills)
 RUN_CALLS.serve(INBOX, TokenRun.inbox)
@@ -1355,8 +1358,6 @@ TOOL_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
 # The calls answered from the run's plan: its preparation, and every phase and tool
 # call of a run still served from it.
 API: Final = Handlers[RunSession]()
-# Only for runs started without their catalog in the context.
-API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(AFTER_MODEL, RunSession.after_model)

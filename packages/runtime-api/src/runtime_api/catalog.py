@@ -1,10 +1,10 @@
 """What the backend works out for a run as it starts it: its operations, subagents,
 models, sandbox and the rules of its middleware.
 
-The run's context carries it (``CATALOG`` answers a run started without it), and
-the MDA run builds its agent from it: a tool for each operation, the subagents it
-may delegate to, the models it calls, the box its file and shell tools run in, and
-what its middleware does around each model call.
+The backend keeps it, the run's token names it, and the run reads it with
+``CATALOG``. The MDA run builds its agent from it: a tool for each operation, the
+subagents it may delegate to, the models it calls, the box its file and shell tools
+run in, and what its middleware does around each model call.
 """
 
 from typing import Literal

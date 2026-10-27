@@ -618,7 +618,7 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     # A provider MDA declares no box for, so the catalog reads no thread metadata.
@@ -646,7 +646,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
+    plans: list[RunnableConfig] = []
+
     async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        plans.append(config)
         # What the planner decides for the run, such as the sender's draft preference.
         config["configurable"]["draft_prs"] = False
         search = integration("mcp_search")
@@ -743,6 +746,13 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         isinstance(op, dict) and resigned.granted(str(op["name"]), str(op["grant"]))
         for op in operations
     )
+    # The token names the catalog worked out here, which the run reads again, as
+    # each graph load does, without planning it again.
+    assert resigned.catalog_digest is not None
+    again = await graph.api(resigned, "catalog", {"run_id": "run-1"})
+    assert isinstance(again, dict)
+    assert again["operations"] == operations and again["run_token"] is None
+    assert len(plans) == 1
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
@@ -1062,14 +1072,14 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
 
 
 async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
     from runtime_api.catalog import Catalog
     from runtime_api.workers import Adopt
 
-    from openswe.agent_api import async_workers, hosted
+    from openswe.agent_api import async_workers, catalogs, hosted
     from openswe.agent_api.graph import RunStart
     from openswe.prompts import prompt
 
@@ -1101,8 +1111,11 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
-    # Planned as the worker's own run, so its first run never asks for a catalog.
+    # Planned as the worker's own run, so its first run never asks for a catalog, and
+    # kept for the token that names it.
     assert reply.catalog == planned
+    assert adopted.catalog_digest is not None
+    assert await catalogs.kept(adopted.catalog_digest) == planned
     assert graph.start_run.await_args.args[0].thread_id == "worker"
     # The settings the worker's run starts with ride in its token.
     assert adopted.settings == RunSettings(draft_prs=True)

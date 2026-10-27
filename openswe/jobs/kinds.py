@@ -12,6 +12,7 @@ from typing import Final
 from pydantic import JsonValue
 
 from openswe import event_claims
+from openswe.agent_api import catalogs
 from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
 from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
 from openswe.agent_api.report_receipts import purge_report_receipts
@@ -175,6 +176,11 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return {"threads_settled": await reconcile_busy_threads()}
 
 
+@WORKER.register(catalogs.PRUNE_JOB)
+async def _run_catalog_prune(_job: Job) -> None:
+    logger.info("Pruned run catalogs", extra={"catalogs_pruned": await catalogs.prune()})
+
+
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)
 async def _slack_channel_directory(_job: Job) -> None:
     await sync_directory()
@@ -205,6 +211,9 @@ async def start_jobs() -> None:
         ensure_directory_sync,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
+        ),
+        lambda: queue.schedule(
+            catalogs.PRUNE_JOB, cron=catalogs.PRUNE_SCHEDULE, key=catalogs.PRUNE_JOB
         ),
         lambda: queue.schedule(
             REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
