@@ -25,7 +25,7 @@ from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
 from openswe.slack.request import SlackRequest
 from openswe.threads import index
-from openswe.threads.router import channel_run_starting
+from openswe.threads.router import channel_run_metadata, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
 from openswe.webhooks import common
 
@@ -116,13 +116,18 @@ async def _prepare_run(
     indexed = await index.get(thread_id)
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id,
-        {"assistant_id": "agent", "config": cast(JsonValue, run_config)},
+        {
+            "assistant_id": "agent",
+            "config": cast(JsonValue, run_config),
+            # So the attribution the run's hooks read rides in its run token.
+            "metadata": cast(JsonValue, run_config["metadata"]),
+        },
         thread_metadata=indexed.metadata if indexed else {},
     )
     answer: EndpointAnswer = {
         "input": cast(dict[str, AnswerJson], prepared.input),
         "context": cast(dict[str, AnswerJson], rewritten["context"]),
-        "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
+        "metadata": cast(dict[str, AnswerJson], channel_run_metadata(run_config["metadata"])),
     }
     if COMPLETION_WEBHOOK_URL:
         answer["webhook"] = COMPLETION_WEBHOOK_URL
