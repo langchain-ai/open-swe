@@ -158,6 +158,26 @@ export function useThreadTranscript(
     let stream: TranscriptEventStream | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
     let attempt = 0
+    let frame: number | null = null
+    let deadline: ReturnType<typeof setTimeout> | null = null
+
+    const cancelPublication = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      if (deadline !== null) clearTimeout(deadline)
+      frame = null
+      deadline = null
+    }
+
+    const flush = () => {
+      cancelPublication()
+      if (!disposed && stateRef.current) publish(stateRef.current)
+    }
+
+    const schedulePublication = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(flush)
+      deadline = setTimeout(flush, 50)
+    }
 
     const subscribe = () => {
       const from = stateRef.current?.version ?? 0
@@ -170,12 +190,17 @@ export function useThreadTranscript(
           // The frame carries the newest window, so it is merged rather than
           // swapped in: older pages the reader already loaded are settled and
           // stay.
-          if (!disposed) publish(applySnapshot(stateRef.current, snapshot))
+          if (disposed) return
+          cancelPublication()
+          publish(applySnapshot(stateRef.current, snapshot))
         },
         onSynchronized: () => {
-          if (!disposed) onConnected()
+          if (disposed) return
+          flush()
+          onConnected()
         },
         onDeleted: () => {
+          cancelPublication()
           // The stream is over and there is nothing left to read: drop the
           // cached transcript, surface the failure the way a missing thread
           // already surfaces, and let the sidebar refetch without this thread.
@@ -196,7 +221,22 @@ export function useThreadTranscript(
           const current = stateRef.current
           if (!current) return
           const next = applyEvent(current, event)
-          if (next !== current) publish(next)
+          if (next !== current) {
+            stateRef.current = next
+            if (
+              event.event_type === "message.appended" &&
+              !(
+                (event.payload.text &&
+                  !current.messages[event.payload.message_id]?.text) ||
+                (event.payload.reasoning &&
+                  !current.messages[event.payload.message_id]?.reasoning)
+              )
+            ) {
+              schedulePublication()
+            } else {
+              flush()
+            }
+          }
           if (!runTracker) return
           const payload = event.payload
           runTracker.transcriptEvent({
@@ -214,6 +254,7 @@ export function useThreadTranscript(
         },
         onError: (streamError) => {
           if (disposed) return
+          flush()
           stream?.close()
           stream = null
           if (attempt >= MAX_RECONNECT_ATTEMPTS) {
@@ -254,10 +295,15 @@ export function useThreadTranscript(
 
     return () => {
       disposed = true
+      cancelPublication()
       if (retry) clearTimeout(retry)
       stream?.close()
-      const entry = cache.get(threadId)
-      if (entry) entry.touchedAt = Date.now()
+      if (stateRef.current) {
+        cache.set(threadId, {
+          state: stateRef.current,
+          touchedAt: Date.now(),
+        })
+      }
     }
   }, [
     hydration,
