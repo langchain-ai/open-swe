@@ -18,7 +18,7 @@ surface.subagents = [SurfaceSubagent(name="general-purpose", ...)]
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `openswe/sandboxes/providers/langsmith.py`.
+Open SWE runs each thread in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Managed Deep Agents creates it; the backend connects to it through `openswe/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
@@ -43,89 +43,11 @@ For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a s
 
 The proxy token is minted at runtime from the GitHub App installation credentials. Do not store GitHub access tokens as deployment environment variables.
 
-### Using a different sandbox provider
+### Who creates sandboxes
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `openswe/sandboxes/providers/` and a factory function registered in `openswe/sandboxes/providers/registry.py`:
+Every thread's sandbox is a LangSmith sandbox that Managed Deep Agents creates when the thread's run starts, and replaces when the agent asks for a fresh one. The backend never creates a thread's sandbox: it connects to the one MDA opened, configures its GitHub proxy and git identity, and runs the backend's tools in it. A thread bridged to its owner's machine runs there instead.
 
-| `SANDBOX_TYPE` | Integration file | Required env vars |
-|---|---|---|
-| `langsmith` (default) | `openswe/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `openswe/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `openswe/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `openswe/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `openswe/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `openswe/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
-
-> **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
-
-The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
-
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
-
-### Adding a new sandbox provider
-
-1. **Create an integration file** at `openswe/sandboxes/providers/my_provider.py` with a factory function matching this signature:
-
-```python
-def create_my_provider_sandbox(sandbox_id: str | None = None):
-    """Create or reconnect to a sandbox.
-
-    Args:
-        sandbox_id: Optional existing sandbox ID to reconnect to.
-            If None, creates a new sandbox.
-
-    Returns:
-        An object implementing SandboxBackendProtocol.
-    """
-    ...
-```
-
-2. **Register it** in `openswe/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
-
-```python
-SANDBOX_FACTORIES = {
-    ...
-    "my_provider": ("openswe.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
-}
-```
-
-The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`. See the existing integration files for reference.
-
-### Building a custom sandbox provider
-
-If none of the built-in providers fit, you can build your own. The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`. The protocol requires:
-
-- **File operations**: `ls()`, `read()`, `write()`, `edit()`, `glob()`, `grep()`
-- **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
-- **Identity**: `id` property returning a unique sandbox identifier
-
-The easiest approach is to extend `BaseSandbox` from `deepagents.backends.sandbox` — it implements all file operations by delegating to `execute()`, so you only need to implement the shell execution layer:
-
-```python
-from deepagents.backends.sandbox import BaseSandbox
-from deepagents.backends.protocol import ExecuteResponse
-
-
-class MySandbox(BaseSandbox):
-    def __init__(self, connection):
-        self._conn = connection
-
-    @property
-    def id(self) -> str:
-        return self._conn.id
-
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        result = self._conn.run(command, timeout=timeout or 300)
-        return ExecuteResponse(
-            output=result.stdout + result.stderr,
-            exit_code=result.exit_code,
-            truncated=False,
-        )
-```
-
-See `deepagents.backends.LangSmithSandbox` and `openswe/sandboxes/providers/langsmith.py` for a full reference implementation.
-
----
+Sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace.
 
 ## 2. Model
 

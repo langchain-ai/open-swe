@@ -18,3 +18,7 @@ deleted, but it becomes inaccessible from this thread after the handoff.
 Returns ``success``, ``old_sandbox_id``, ``new_sandbox_id``,
 ``old_sandbox_stopped``, and ``old_sandbox_stop_error`` on success. Report the
 stop outcome to the user, including any failure, alongside the recreation result.
+
+A thread whose sandbox predates Managed Deep Agents gets no ``new_sandbox_id``
+but ``handed_to_mda: true``: this run has no sandbox anymore, and the thread's
+next run starts in the fresh one. Tell the user, then end your turn.

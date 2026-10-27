@@ -57,7 +57,7 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
 async def test_mda_owns_new_threads_and_its_own_boxes(
     monkeypatch, metadata: dict[str, str], host: dict[str, str], owner: str | None
 ) -> None:
-    """MDA creates new threads' boxes; the backend keeps the ones it made; workers share MDA's."""
+    """MDA creates new threads' boxes; a box the backend made before is kept; workers share MDA's."""
     from openswe.sandboxes.managed import ManagedSandbox
 
     workspace = Workspace(
@@ -73,7 +73,6 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
     async def read_metadata(thread_id: str) -> dict[str, str]:
         return host if thread_id == _HOST else metadata
 
-    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     monkeypatch.setattr("openswe.sandboxes.lifecycle.load_workspace", load)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
 
@@ -106,6 +105,12 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
         ({}, None, {"sandbox_owner": "mda"}),
         ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, "mda-box", None),
         ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, None, None),
+        # A thread handed over by ``recreate_sandbox`` gets the box it asked for, once.
+        (
+            {"sandbox_replacement": {"workspace": "default", "source": "base"}},
+            "mda-box",
+            {"sandbox_owner": "mda", "sandbox_id": "mda-box", "sandbox_replacement": None},
+        ),
         (
             {"sandbox_id": "old-box", "sandbox_owner": "mda"},
             "mda-box",

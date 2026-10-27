@@ -86,6 +86,11 @@ class SandboxBackendProxy(BaseSandbox):
         self._backend = backend
         self._startup_task = None
 
+    def detach(self) -> None:
+        """Forget the box; the next call connects to whatever the thread is bound to then."""
+        self._backend = None
+        self._startup_task = None
+
     @property
     def has_backend(self) -> bool:
         return self._backend is not None

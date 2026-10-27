@@ -531,9 +531,9 @@ async def ensure_reviewer_sandbox_for_thread(
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
-        # thread per PR, re-triggered on every push. Refusing to replace an
+        # thread per PR, re-triggered on every push. Staying bound to an
         # unreachable one would brick reviews on that PR for good.
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 

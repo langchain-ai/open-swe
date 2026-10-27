@@ -6,7 +6,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 from sqlalchemy import select
 
-from openswe.config import ENV
 from openswe.database import postgres
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.workspaces.rows import WorkspaceRow
@@ -46,8 +45,6 @@ class QueueConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def validate_controller(self) -> Self:
-        if ENV.SANDBOX_TYPE.get() == "local":
-            raise ValueError("The queue requires isolated agent sandboxes")
         if self.mode == "custom" and (
             self.policy.validation is None
             or not self.policy.checks

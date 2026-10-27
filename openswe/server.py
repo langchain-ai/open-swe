@@ -811,9 +811,7 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
 
 
 async def _reconnect_agent_box(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
-    return await ensure_sandbox_for_thread(
-        thread_id, workspace_slug=workspace, record_stale_boot=True
-    )
+    return await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace)
 
 
 class ThreadFiles:
@@ -979,7 +977,7 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
 
     They are served by the LangSmith box itself, which a bridged thread does not have.
     """
-    return ENV.SANDBOX_TYPE.get() == "langsmith" and cfg.stop_summary is not True and not bridged
+    return cfg.stop_summary is not True and not bridged
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:

@@ -88,14 +88,14 @@ is stubbed; runs cost money and take minutes.
 1. `.env` needs a model key — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. With both set,
    `DEFAULT_MODEL_ID` resolves to the OpenAI model; with only Anthropic, to Claude.
 
-2. Set `SANDBOX_TYPE=local`. `langsmith` sandboxes **cannot work from a laptop**: the
-   run PATCHes a proxy config whose `match_hosts` is the hostname of your
-   `DASHBOARD_API_BASE_URL`, and the sandbox API rejects `localhost` with a bare
-   `422 unknown` whose body never reaches the log. It fails in
-   `PrepareReviewerRunMiddleware.before_agent`, so the agent never starts and the
-   review settles with zero findings — which reads exactly like a model that chose to
-   say nothing. Either use `local`, or expose the dashboard on a real hostname
-   (`make tunnel`, see docs/DEVELOPMENT.md) before using `langsmith`.
+2. Expose the dashboard on a real hostname (`make tunnel`, see docs/DEVELOPMENT.md).
+   Every run's sandbox is a LangSmith one Managed Deep Agents creates, and those
+   **cannot work from a laptop's `localhost`**: the run PATCHes a proxy config whose
+   `match_hosts` is the hostname of your `DASHBOARD_API_BASE_URL`, and the sandbox
+   API rejects `localhost` with a bare `422 unknown` whose body never reaches the
+   log. It fails in `PrepareReviewerRunMiddleware.before_agent`, so the agent never
+   starts and the review settles with zero findings — which reads exactly like a
+   model that chose to say nothing.
 
 3. Get a session cookie, then post the trigger. Mutations are CSRF-checked against
    `DASHBOARD_BASE_URL`, so send a matching `Origin` — without it you get

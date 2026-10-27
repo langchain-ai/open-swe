@@ -190,10 +190,6 @@ class TestRefreshProxyOnSandboxReuse:
                     response=response,
                 ),
             ),
-            patch(
-                "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-            ) as mock_create,
-            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from openswe.sandboxes.lifecycle import (
                 SandboxUnreachableError,
@@ -204,4 +200,3 @@ class TestRefreshProxyOnSandboxReuse:
                 await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
-            mock_create.assert_not_awaited()
