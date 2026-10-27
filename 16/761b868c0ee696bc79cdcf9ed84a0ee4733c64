@@ -1,0 +1,77 @@
+tests/slack/test_slack_start_new_thread_tool.py
+  s_27878fb276b595::t_2afa4b6ec46328 29,42-56
+  s_27878fb276b595::t_a154b7990f0fcb 57-58
+openswe/github/repos.py
+  s_27878fb276b595::t_2afa4b6ec46328 13,45,81,89-95
+openswe/mcp/managed.py
+  s_27878fb276b595::t_2afa4b6ec46328 45,71-72,197-199,209-219
+  s_27878fb276b595::t_0ced062716f5da 220-221
+mda/pyproject.toml
+  s_27878fb276b595::t_2afa4b6ec46328 7,13-14
+openswe/resources/prompts/system/shared-base.md
+  s_27878fb276b595::t_2afa4b6ec46328 30-31
+pyproject.toml
+  s_27878fb276b595::t_2afa4b6ec46328 15,17,23,43,84-85
+tests/dashboard/test_dashboard_repos.py
+  s_27878fb276b595::t_2afa4b6ec46328 6-7,9-10,12,51-82
+  s_27878fb276b595::t_1bb167217a57a0 83-84
+openswe/slack/breakout.py
+  s_27878fb276b595::t_2afa4b6ec46328 307-309
+tests/auth/test_auth_sources.py
+  s_27878fb276b595::t_2afa4b6ec46328 91,105,151
+openswe/github/http.py
+  s_27878fb276b595::t_2afa4b6ec46328 46,226-234,239
+openswe/resources/prompts/system/source-slack.md.jinja
+  s_27878fb276b595::t_2afa4b6ec46328 18
+tests/e2e/harness.py
+  s_27878fb276b595::t_2afa4b6ec46328 1864
+openswe/schedules/store.py
+  s_27878fb276b595::t_2afa4b6ec46328 38,471
+openswe/dashboard/repo_access.py
+  s_27878fb276b595::t_2afa4b6ec46328 10,20,51,59-65
+openswe/server.py
+  s_27878fb276b595::t_2afa4b6ec46328 124,1345
+openswe/slack/breakout_destination.py
+  s_27878fb276b595::t_2afa4b6ec46328 14-16,23-35
+openswe/resources/prompts/tools/slack_breakout_thread.md
+  s_27878fb276b595::t_2afa4b6ec46328 3-4,9
+desktop/package.json
+  s_27878fb276b595::t_2afa4b6ec46328 3
+openswe/middleware/stale_workspace.py
+  s_27878fb276b595::t_2afa4b6ec46328 1,12-13
+openswe/slack/channels.py
+  s_27878fb276b595::t_2afa4b6ec46328 309
+openswe/slack/tools/start_new_thread.py
+  s_27878fb276b595::t_2afa4b6ec46328 233-235
+tests/mcp/test_managed_mcps.py
+  s_27878fb276b595::t_2afa4b6ec46328 109-143
+openswe/api/github_errors.py
+  s_27878fb276b595::t_2afa4b6ec46328 13,19-21
+openswe/threads/access.py
+  s_27878fb276b595::t_2afa4b6ec46328 9,35
+tests/slack/test_slack_breakout.py
+  s_27878fb276b595::t_2afa4b6ec46328 22,205-226
+  s_27878fb276b595::t_831d27bca4d7dd 227-228
+tests/slack/test_slack_channel_options.py
+  s_27878fb276b595::t_2afa4b6ec46328 51-53
+mda/uv.lock
+  s_27878fb276b595::t_143e35cc3ebe9b 1223,1231,1233,1250,1260,1262,1267,1277,1279,1310,1319,1321,1594-1595
+uv.lock
+  s_27878fb276b595::t_18c669676532b7 11-12,363-397,1972,1980,1982,1999,2009,2011,2042,2052,2054,2059,2100,2102,2155,2166,2168,2173,2182,2184,2627-2628,2632,2634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "16761b868c0ee696bc79cdcf9ed84a0ee4733c64",
+  "prompts": {},
+  "sessions": {
+    "s_27878fb276b595": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ee8f61-55f2-484d-a39a-c3b1cad86d8d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
