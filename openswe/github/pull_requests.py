@@ -50,11 +50,11 @@ from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
-from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
 from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.repo_names import display_repo_name
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
@@ -274,9 +274,7 @@ class PullRequest(Base):
 
     @property
     def label(self) -> str:
-        orgs = {org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()}
-        repository = self.repo if self.owner.lower() in orgs else self.repo_full_name
-        return f"{repository}#{self.number}"
+        return f"{display_repo_name(self.repo_full_name)}#{self.number}"
 
     @property
     def url(self) -> str:

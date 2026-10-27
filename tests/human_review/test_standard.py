@@ -561,7 +561,11 @@ async def test_merged_card_names_only_actual_approvers(
 
 
 @pytest.mark.parametrize("available", [True, False])
-async def test_open_card_counts_only_non_test_files(available: bool) -> None:
+@pytest.mark.parametrize("orgs, label", [("O", "r#1"), ("o,other", "o/r#1"), ("other", "o/r#1")])
+async def test_open_card_counts_only_non_test_files(
+    available: bool, orgs: str, label: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", orgs)
     pr = PullRequest(
         owner="o",
         repo="r",
@@ -584,8 +588,10 @@ async def test_open_card_counts_only_non_test_files(available: bool) -> None:
         patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
     ):
-        _, blocks = await ReviewCard(request)._render_standard(None)
+        text, blocks = await ReviewCard(request)._render_standard(None)
     rendered = str(block_payload(blocks))
+    assert f"Review requested for {label}: Fix" == text
+    assert f"<https://github.com/o/r/pull/1|{label}>" in rendered
     assert ("+10 −5 in 1 non-test file" in rendered) is available
     assert "+110" not in rendered
     assert "−55" not in rendered
