@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.linear.session import LinearSessionTurn
+from openswe.linear.session import NO_REPOSITORY, LinearSessionTurn
 from openswe.utils.repo import extract_repo_from_text
 
 
@@ -41,7 +41,7 @@ class TestLinearSessionRepository:
                 },
             },
         )
-        assert turn is not None
+        assert isinstance(turn, LinearSessionTurn)
         return turn
 
     @pytest.mark.asyncio
@@ -67,9 +67,23 @@ class TestLinearSessionRepository:
         assert chosen == ({"owner": "langchain-ai", "name": "open-swe"}, None)
 
     @pytest.mark.asyncio
-    async def test_refuses_a_repository_outside_the_allowlist(self) -> None:
+    async def test_tells_the_session_a_repository_is_outside_the_allowlist(self) -> None:
         with patch("openswe.webhooks.common.is_repo_allowed", return_value=False):
-            assert await self._turn("repo:other-org/other-repo").repository("thread-1") is None
+            chosen = await self._turn("repo:other-org/other-repo").repository("thread-1")
+        assert chosen == {
+            "decline": "I'm not allowed to work in `other-org/other-repo`. Name a repository "
+            "Open SWE may work in, or ask your Open SWE admin to allow this one."
+        }
+
+    @pytest.mark.asyncio
+    async def test_asks_which_repository_when_none_is_named_or_set(self) -> None:
+        with patch(
+            "openswe.webhooks.common.get_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({})),
+        ):
+            chosen = await self._turn("please fix this bug").repository("thread-1")
+        assert chosen == NO_REPOSITORY
+        assert "repo:owner/name" in NO_REPOSITORY["decline"]
 
     @staticmethod
     def _author(personal: dict[str, str], fallback: dict[str, str]) -> SimpleNamespace:

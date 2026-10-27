@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from standardwebhooks import Webhook
 
 from openswe.linear import channel
+from openswe.linear.session import NO_REPOSITORY, UNREADABLE_SESSION
 
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 _THREAD = str(uuid.uuid4())
@@ -149,10 +150,12 @@ async def test_a_session_turn_starts_the_run_prepared_on_the_sessions_thread(
 
 
 @pytest.mark.asyncio
-async def test_a_session_turn_the_backend_declines_starts_nothing(
+async def test_a_session_turn_the_backend_declines_tells_the_session_why(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(channel.LinearSessionTurn, "prepare_run", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        channel.LinearSessionTurn, "prepare_run", AsyncMock(return_value=NO_REPOSITORY)
+    )
     payload = {
         "type": "AgentSessionEvent",
         "action": "created",
@@ -161,4 +164,31 @@ async def test_a_session_turn_the_backend_declines_starts_nothing(
         "agentSession": {"id": "session-1", "issue": {"id": "issue-1"}},
     }
     response = await _post(app, _call("AgentSessionEvent.created", payload))
-    assert response.json() is None
+    # MDA's channel starts nothing, and posts the text in the session.
+    assert response.json() == NO_REPOSITORY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "agent_session",
+    [{"id": "session-1"}, {"id": "session-1", "issue": None}],
+    ids=["no-schema-match", "no-issue"],
+)
+async def test_a_session_it_cant_read_is_told_so(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, agent_session: dict[str, Any]
+) -> None:
+    prepare = AsyncMock()
+    monkeypatch.setattr(channel.LinearSessionTurn, "prepare_run", prepare)
+    payload: dict[str, Any] = {
+        "type": "AgentSessionEvent",
+        "action": "created",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "agentSession": agent_session,
+    }
+    if "issue" not in agent_session:
+        # Not a session event MDA's schema reads.
+        del payload["webhookTimestamp"]
+    response = await _post(app, _call("AgentSessionEvent.created", payload))
+    assert response.json() == UNREADABLE_SESSION
+    prepare.assert_not_awaited()
