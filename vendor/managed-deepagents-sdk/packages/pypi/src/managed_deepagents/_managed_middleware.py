@@ -15,7 +15,6 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config
 
-from managed_deepagents._channels.binding import resolve_runtime_channel
 from managed_deepagents._identity_runtime import (
     RuntimeConfigLike,
     build_managed_server_info,
@@ -25,6 +24,7 @@ from managed_deepagents._identity_runtime import (
 from managed_deepagents._managed_tools import (
     ManagedRuntimeExtras,
     adapt_managed_runtime,
+    thread_overrides,
     with_managed_runtime,
 )
 from managed_deepagents._runtime_schedules import RuntimeSchedules
@@ -87,7 +87,6 @@ def managed_middleware_overrides(
     """
     configurable = _configurable_from(runtime)
     overrides: ManagedRuntimeExtras = {
-        "channel": None,
         "backend": None,
         "schedules": RuntimeSchedules(runtime),
     }
@@ -99,15 +98,7 @@ def managed_middleware_overrides(
     server_info = build_managed_server_info(runtime, configurable)
     if server_info is not None:
         overrides["server_info"] = server_info
-    existing_channel = getattr(runtime, "channel", None)
-    if existing_channel is not None:
-        overrides["channel"] = existing_channel
-    else:
-        from_binding = resolve_runtime_channel(
-            getattr(runtime, "context", None), configurable, include_lead=True
-        )
-        if from_binding is not None:
-            overrides["channel"] = from_binding
+    overrides.update(thread_overrides(runtime, configurable))
     config = getattr(runtime, "config", None)
     if isinstance(config, Mapping) and isinstance(configurable, Mapping):
         sanitized = sanitize_configurable(configurable)

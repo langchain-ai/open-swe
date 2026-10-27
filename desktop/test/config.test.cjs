@@ -15,6 +15,7 @@ const {
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  parseDesktopEnvironments,
   resolveBackendUrl,
   resolveAppRuntime,
   staticFilePath,
@@ -258,4 +259,18 @@ test("keeps static file resolution inside the bundled UI root", () => {
     path.join(root, "assets/app.js"),
   );
   assert.equal(staticFilePath(root, `${APP_URL}%2e%2e%2fsecret`), null);
+});
+
+test("keeps only well-formed alternate environments", () => {
+  assert.deepEqual(
+    parseDesktopEnvironments({
+      environments: [
+        { name: "staging", url: "https://staging.example" },
+        { name: "bad", url: "file:///etc/passwd" },
+        { name: 1, url: "https://x.example" },
+      ],
+    }),
+    [{ name: "staging", url: "https://staging.example/" }],
+  );
+  assert.deepEqual(parseDesktopEnvironments(null), []);
 });

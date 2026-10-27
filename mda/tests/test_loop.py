@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 import pytest
 from langchain.agents import create_agent
@@ -25,7 +26,8 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, PhaseResult, Route, TaskContext
+from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
+from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
@@ -45,6 +47,8 @@ _REPLY = ReplyRules(
     nudge=[_NUDGE],
     nudge_sender=_GUARD,
 )
+
+_TOKEN_EXPIRES = datetime(2999, 1, 1, 12, tzinfo=UTC)
 
 type Calls = list[tuple[str, dict[str, JsonValue]]]
 
@@ -73,11 +77,24 @@ def _backend(
         headers: Mapping[str, str] | None = None,
     ) -> JsonValue:
         name = path.rsplit("/", 1)[-1]
+        if name == REPORTS.name:
+            return (await _taking(body)).model_dump(mode="json")
         calls.append((name, body))
         answer = answers[name]
         if isinstance(answer, BackendCallError):
             raise answer
         return answer.model_dump(mode="json")
+
+    async def _taking(body: dict[str, JsonValue]) -> ReportsTaken:
+        """Each item of a batch, answered as the call it stands for."""
+        replies: list[dict[str, JsonValue]] = []
+        for item in Reports.model_validate(body).items:
+            calls.append((item.endpoint, item.request.model_dump(mode="json")))
+            answer = answers[item.endpoint]
+            if isinstance(answer, BackendCallError):
+                return ReportsTaken(replies=replies, refused=str(answer))
+            replies.append(answer.model_dump(mode="json"))
+        return ReportsTaken(replies=replies)
 
     monkeypatch.setattr(backend, "post", post)
     return backend, calls
@@ -85,6 +102,26 @@ def _backend(
 
 def _state(*messages: BaseMessage, **held: JsonValue) -> dict[str, object]:
     return {"messages": list(messages), STATE_KEY: held}
+
+
+async def test_a_failed_github_token_refresh_waits_before_the_next_try(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"refresh_github_proxy": BackendCallError("refresh_github_proxy failed: timed out")},
+        LoopRules(refresh_github_proxy=True),
+    )
+    loop = RunLoop(backend)
+
+    first = await loop.before_model(_state(HumanMessage(content="Fix the login", id="human-1")))
+    held = {"github_proxy_refresh_at": first.update["github_proxy_refresh_at"]}
+    second = await loop.before_model(
+        _state(HumanMessage(content="Fix the login", id="human-1"), **held)
+    )
+
+    assert first.call is not None and second.call is not None
+    assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
 
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
@@ -104,7 +141,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         monkeypatch,
         {
             "task_context": TaskContext(instructions="You coordinate the task.", message=context),
-            "refresh_github_proxy": Done(),
+            "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
         },
         rules,
     )
@@ -116,7 +153,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     )
 
     planned = await loop.before_model(state)
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
     assert planned.call is not None
     assert planned.call.system_prompt == (
@@ -124,7 +161,10 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         "Walk the reviewer through it.\n\nYou coordinate the task."
     )
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
-    assert planned.update == {"model_route": "fast"}
+    assert planned.update == {
+        "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",
+        "model_route": "fast",
+    }
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
     assert planned.call.fallback == _FALLBACK
@@ -132,11 +172,17 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert [message.content for message in messages_from_dict(planned.messages)] == [context]
     assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]
 
-    # The task's context the model still sees is not added again.
+    # The task's context the model still sees is not added again, and a token with time
+    # left is not replaced.
     again = await loop.before_model(
-        _state(HumanMessage(content=context, id="task-context:1"), model_route="fast")
+        _state(
+            HumanMessage(content=context, id="task-context:1"),
+            model_route="fast",
+            github_proxy_refresh_at=planned.update["github_proxy_refresh_at"],
+        )
     )
     assert again.messages == []
+    assert [name for name, _ in calls].count("refresh_github_proxy") == 1
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
@@ -277,6 +323,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         "rt.middleware.build_model",
         lambda spec, use_gateway: FakeListChatModel(responses=["Model call limits exceeded"]),
     )
+    monkeypatch.setattr("rt.outbox._RETRY_SECONDS", (0.0,))
     backend.run.invocation_id = "turn"
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
@@ -284,15 +331,18 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
-    # Only preparation is a phase call: the loop and the end of the run are named calls,
-    # and the graph's own work goes out whether or not the run's end is recorded.
-    assert calls[0][0] == "prepare"
-    assert sorted(name for name, _ in calls[1:]) == [
-        "run_ended",
-        "settle_review_check",
+    # Only preparation is a phase call: the loop and the end of the run are named calls.
+    # The graph's own work goes out before the run's end, in the order asked for, and
+    # work the backend keeps failing is tried again, then let go of for the rest.
+    assert [name for name, _ in calls] == [
+        "prepare",
         "step_limit_reached",
+        "step_limit_reached",
+        "step_limit_reached",
+        "settle_review_check",
+        "run_ended",
     ]
 
 
@@ -337,7 +387,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         {"messages": [HumanMessage(content="hello", id="human-1")]},
         {"configurable": {"thread_id": "thread-1"}},
     )
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
     # The run's usage counts its own replies by the invocation stamped on them here.
     assert [

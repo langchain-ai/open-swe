@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import DeepAgentDefinition
 
-_DYNAMIC_ONLY_FIELDS = ("instructions", "memory", "mcp", "sandbox", "skills")
+_DYNAMIC_ONLY_FIELDS = ("instructions", "memory", "mcp", "sandbox", "skills", "browser")
 
 
 def assert_static_agent_definition(definition: DeepAgentDefinition) -> None:

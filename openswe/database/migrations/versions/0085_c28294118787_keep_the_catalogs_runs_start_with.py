@@ -8,7 +8,7 @@ keeps it here by digest, and the run's token names the digest.
 from alembic import op
 
 revision = "c28294118787"
-down_revision = "6416028c3ce3"
+down_revision = "4fd72cf43b71"
 branch_labels = None
 depends_on = None
 
