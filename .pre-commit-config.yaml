@@ -25,6 +25,15 @@ repos:
         language: system
         files: ^(uv\.lock|pyproject\.toml)$
         pass_filenames: false
+  - repo: local
+    hooks:
+      - id: rumdl
+        name: Reflow Markdown to one sentence per line
+        # Settings live in .rumdl.toml. Jinja tag lines are shielded by the script.
+        entry: python scripts/reflow_markdown.py
+        language: python
+        additional_dependencies: ['rumdl==0.3.0']
+        files: \.md(\.jinja)?$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

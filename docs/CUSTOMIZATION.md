@@ -1,6 +1,9 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org. Every run's model loop runs on Managed Deep Agents (`mda/`). What the run gets from the backend is decided in one function, `plan_agent()` in `openswe/server.py` (`plan_reviewer()` and `plan_review_scout()` for the reviewer and the review scout). It records the run's tools, middleware, models and subagents in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model, tools and middleware.
+Open SWE is designed to be forked and customized for your org.
+Every run's model loop runs on Managed Deep Agents (`mda/`).
+What the run gets from the backend is decided in one function, `plan_agent()` in `openswe/server.py` (`plan_reviewer()` and `plan_review_scout()` for the reviewer and the review scout).
+It records the run's tools, middleware, models and subagents in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model, tools and middleware.
 
 ```python
 # openswe/server.py — the end of plan_agent()
@@ -18,11 +21,14 @@ surface.subagents = [SurfaceSubagent(name="general-purpose", ...)]
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `openswe/sandboxes/providers/langsmith.py`.
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands.
+Sandbox creation and connection is handled in `openswe/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
-New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot. Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page. Workspace setup and update scripts receive the selected repository names in the space-delimited `OPENSWE_WORKSPACE_REPOS` environment variable.
+New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot.
+Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page.
+Workspace setup and update scripts receive the selected repository names in the space-delimited `OPENSWE_WORKSPACE_REPOS` environment variable.
 
 Per-sandbox resources are configured on the deployment:
 
@@ -34,18 +40,21 @@ DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, d
 DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
 ```
 
-This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
+This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
+The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
-The proxy token is minted at runtime from the GitHub App installation credentials. Do not store GitHub access tokens as deployment environment variables.
+The proxy token is minted at runtime from the GitHub App installation credentials.
+Do not store GitHub access tokens as deployment environment variables.
 
 ### Using a different sandbox provider
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `openswe/sandboxes/providers/` and a factory function registered in `openswe/sandboxes/providers/registry.py`:
+Set the `SANDBOX_TYPE` environment variable to switch providers.
+Each provider has a corresponding integration file in `openswe/sandboxes/providers/` and a factory function registered in `openswe/sandboxes/providers/registry.py`:
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
@@ -56,11 +65,15 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `modal` | `openswe/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `openswe/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
-> **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+> **Warning**: `local` runs commands directly on your host with no sandboxing.
+> Only use for local development with human-in-the-loop enabled.
 
-The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
+The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers.
+Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
+A workspace's base snapshot must exist in that LangSmith workspace.
+The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -89,11 +102,14 @@ SANDBOX_FACTORIES = {
 }
 ```
 
-The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`. See the existing integration files for reference.
+The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`.
+See the existing integration files for reference.
 
 ### Building a custom sandbox provider
 
-If none of the built-in providers fit, you can build your own. The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`. The protocol requires:
+If none of the built-in providers fit, you can build your own.
+The agent accepts any backend that implements `SandboxBackendProtocol` from `deepagents`.
+The protocol requires:
 
 - **File operations**: `ls()`, `read()`, `write()`, `edit()`, `glob()`, `grep()`
 - **Shell execution**: `execute(command, timeout=None) -> ExecuteResponse`
@@ -136,19 +152,28 @@ LLM_MODEL_ID="anthropic:claude-opus-5-5"
 LLM_REASONING_EFFORT="high"
 ```
 
-When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6.1-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`.
+All other deployments default to `openai:gpt-6.1-sol`, including deployments with both keys set.
+The default reasoning effort is `medium`.
 
-Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+Either variable can be set independently.
+When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used.
+The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
-These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
+These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults.
+Existing selections are not overwritten.
+Restart the backend after changing its environment.
 
-Forked tasks configured with the main model reuse its model instance and reasoning effort for prompt-cache compatibility. A different subagent model retains its own effort but cannot share the main model's cache.
+Forked tasks configured with the main model reuse its model instance and reasoning effort for prompt-cache compatibility.
+A different subagent model retains its own effort but cannot share the main model's cache.
 
-`max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
+`max_tokens` is a maximum completion/output token budget, not the model's total context window.
+For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
 ### Switching models
 
-Models are named in the `provider:model` format, with their provider settings, as a `ModelChoice`. The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `plan_agent()` never reaches the run:
+Models are named in the `provider:model` format, with their provider settings, as a `ModelChoice`.
+The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `plan_agent()` never reaches the run:
 
 ```python
 # Anthropic
@@ -161,7 +186,8 @@ ModelChoice("openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort"
 ModelChoice("google_genai:gemini-2.5-pro", {"temperature": 0, "max_tokens": 16_000})
 ```
 
-`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort. To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
+`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort.
+To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
 
 ### Using different models per context
 
@@ -182,15 +208,28 @@ surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_ga
 
 ### Auto model routing with Jev
 
-Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`. When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe. Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`. Routing is independent of the provider-proxy gateway toggle below. The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
+Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
+When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe.
+Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
+Routing is independent of the provider-proxy gateway toggle below.
+The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
-Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
+Jev receives the latest human task text (up to 8,000 characters).
+Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off.
+The confidence cutoff is an initial heuristic, not a calibrated correctness probability.
+Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
 ### Choosing a model in the opening request
 
-New Slack threads and Auto/routed dashboard threads also use Jev to recognize explicit runtime model requests such as "use Opus" or `/model Oppus`. This classification uses the first human request (the triggering message in Slack), up to 8,000 characters, and the available model catalog. It shares Auto routing's credentials, three-second deadline, and confidence cutoff. Title generation runs independently in the background.
+New Slack threads and Auto/routed dashboard threads also use Jev to recognize explicit runtime model requests such as "use Opus" or `/model Oppus`.
+This classification uses the first human request (the triggering message in Slack), up to 8,000 characters, and the available model catalog.
+It shares Auto routing's credentials, three-second deadline, and confidence cutoff.
+Title generation runs independently in the background.
 
-A recognized model is checked for availability and image support, assigned a compatible default effort, and persisted before work begins. It remains selected on follow-ups; explicit UI/API model choices take precedence. A clearly unavailable model or failure to persist the selection stops the run. No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
+A recognized model is checked for availability and image support, assigned a compatible default effort, and persisted before work begins.
+It remains selected on follow-ups; explicit UI/API model choices take precedence.
+A clearly unavailable model or failure to persist the selection stops the run.
+No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
 
 Run the live intent cases from the repository root with an activated Python environment and configured TypeSafe or gateway credentials:
 
@@ -198,13 +237,17 @@ Run the live intent cases from the repository root with an activated Python envi
 LANGSMITH_TRACING=false python -m evals.model_request
 ```
 
-The cases cover typos, ambiguous names, quoted and forwarded requests, model mentions as task subjects, and unavailable models. They call Jev and are separate from the deterministic unit tests.
+The cases cover typos, ambiguous names, quoted and forwarded requests, model mentions as task subjects, and unavailable models.
+They call Jev and are separate from the deterministic unit tests.
 
 ### Routing through the LangSmith LLM Gateway
 
-Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
+Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly.
+The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing.
+Your org must have the gateway enabled with Provider Secrets configured.
 
-Routing is opt-in and off by default. Enable it either way:
+Routing is opt-in and off by default.
+Enable it either way:
 
 | Env var | Default | Purpose |
 |---|---|---|
@@ -215,15 +258,21 @@ Routing is opt-in and off by default. Enable it either way:
 
 The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
-Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
+Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`.
+**OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning.
+Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
-**Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic, Baseten, and Fireworks are unaffected.
+**Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions.
+Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled.
+Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions.
+Anthropic, Baseten, and Fireworks are unaffected.
 
 ---
 
 ## 3. Tools
 
-Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents). GitHub operations are handled by `gh` inside the sandbox.
+Open SWE ships with a small set of custom tools on top of the built-in Deep Agents tools (file reads, writes, edits, deletes, search, shell execution, and subagents).
+GitHub operations are handled by `gh` inside the sandbox.
 
 | Tool | File | Purpose |
 |---|---|---|
@@ -235,30 +284,26 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 ### Workspace MCP servers
 
 Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
-Connections belong to this Open SWE deployment and are shared across repositories
-and remote coding-agent threads. Enabled connections provide baseline tools for
-all users, limited to the tools selected by an admin. Only admins can manage
-connections or reveal saved credentials.
+Connections belong to this Open SWE deployment and are shared across repositories and remote coding-agent threads.
+Enabled connections provide baseline tools for all users, limited to the tools selected by an admin.
+Only admins can manage connections or reveal saved credentials.
 
-1. Choose **Add MCP server** and enter a unique lowercase connection name, an
-   HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
+1. Choose **Add MCP server** and enter a unique lowercase connection name, an HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
 2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
-   For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
-   in PostgreSQL; normal dashboard responses only return header names.
-   Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
-   then the crossed-out eye to clear them from the editor. Entered or imported
-   values also have an eye icon to show or hide them. Use headers
-   for credentials, rather than URL query parameters.
-   For OAuth, enter the token URL, client ID, client secret, scopes, and the
-   provider's client authentication method. The secret is encrypted in PostgreSQL
-   and is never returned to the browser. Leave it blank when editing to keep it.
-3. Choose **Save and discover tools**. For new connections, all discovered tools
-   are selected by default. Review the selection, then choose **Save connection**
-   to enable those tools. Rediscovering an existing connection preserves its
-   selected tools, including an intentionally empty selection. Newly added tools
-   on the remote server require explicit selection.
-   Discovery checks the draft before saving; if it fails, no connection is
-   created and existing settings stay unchanged. Discovery only lists tools.
+   For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY` in PostgreSQL; normal dashboard responses only return header names.
+   Admins can use the eye icon (**Show saved headers**) to reveal values on demand, then the crossed-out eye to clear them from the editor.
+   Entered or imported values also have an eye icon to show or hide them.
+   Use headers for credentials, rather than URL query parameters.
+   For OAuth, enter the token URL, client ID, client secret, scopes, and the provider's client authentication method.
+   The secret is encrypted in PostgreSQL and is never returned to the browser.
+   Leave it blank when editing to keep it.
+3. Choose **Save and discover tools**.
+   For new connections, all discovered tools are selected by default.
+   Review the selection, then choose **Save connection** to enable those tools.
+   Rediscovering an existing connection preserves its selected tools, including an intentionally empty selection.
+   Newly added tools on the remote server require explicit selection.
+   Discovery checks the draft before saving; if it fails, no connection is created and existing settings stay unchanged.
+   Discovery only lists tools.
 
 Alternatively, choose **Import JSON** and paste a Claude-style configuration:
 
@@ -277,38 +322,32 @@ Alternatively, choose **Import JSON** and paste a Claude-style configuration:
 }
 ```
 
-Datadog, LangSmith, Linear, and Currents agent tools are configured through
-Workspace MCPs. The dedicated Datadog and Currents credentials forms and built-in
-provider tools have been removed. Reconnect Datadog using the MCP configuration
-above; legacy saved credentials are not migrated automatically. Use the JSON
-import or connection form to add the other MCP servers as needed.
+Datadog, LangSmith, Linear, and Currents agent tools are configured through Workspace MCPs.
+The dedicated Datadog and Currents credentials forms and built-in provider tools have been removed.
+Reconnect Datadog using the MCP configuration above; legacy saved credentials are not migrated automatically.
+Use the JSON import or connection form to add the other MCP servers as needed.
 
-The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the
-Currents REST API. Run its Streamable HTTP server on an HTTPS host reachable by
-Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY`
-header. The Currents REST API URL itself does not speak MCP, and the local
-`npx @currents/mcp` command cannot be imported as a workspace connection.
+The [Currents MCP server](https://github.com/currents-dev/currents-mcp) wraps the Currents REST API.
+Run its Streamable HTTP server on an HTTPS host reachable by Open SWE, then configure its `/mcp` URL with an `Authorization: Bearer YOUR_API_KEY` header.
+The Currents REST API URL itself does not speak MCP, and the local `npx @currents/mcp` command cannot be imported as a workspace connection.
 
-Optional reviewer trace resolution and personal LangSmith credential proxying
-have been removed. Configure agent access to LangSmith through Workspace MCPs.
-Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
-`LANGSMITH_ENDPOINT`. Linear webhook intake uses the signed webhook setup;
-configure Linear replies and other agent operations through Workspace MCPs.
-Automatic failure notices use the workspace connection named `linear` and its
-selected `save_comment` tool (`create_comment` is also supported). These notices
-run independently of the agent and honor the connection's enabled state and tool
-selection. Delivery failures are logged without marking the run as notified.
+Optional reviewer trace resolution and personal LangSmith credential proxying have been removed.
+Configure agent access to LangSmith through Workspace MCPs.
+Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
+Linear webhook intake uses the signed webhook setup; configure Linear replies and other agent operations through Workspace MCPs.
+Automatic failure notices use the workspace connection named `linear` and its selected `save_comment` tool (`create_comment` is also supported).
+These notices run independently of the agent and honor the connection's enabled state and tool selection.
+Delivery failures are logged without marking the run as notified.
 
-Use the endpoint for your Datadog site (this example uses US5). Replace the key
-placeholders directly in the dashboard. Import supports multiple named servers,
-optional `type` (`http` by default, or `sse`), and string authentication headers.
-It opens each connection for review without saving automatically. Existing
-connections keep their enabled state and selected tools. Local `command` servers
-and environment-variable expansion are not supported.
+Use the endpoint for your Datadog site (this example uses US5).
+Replace the key placeholders directly in the dashboard.
+Import supports multiple named servers, optional `type` (`http` by default, or `sse`), and string authentication headers.
+It opens each connection for review without saving automatically.
+Existing connections keep their enabled state and selected tools.
+Local `command` servers and environment-variable expansion are not supported.
 
-For a Linear OAuth application, enable **Client credentials tokens** in the
-application's settings, then import this configuration. The `oauth` object is
-an Open SWE extension to the remote MCP JSON format:
+For a Linear OAuth application, enable **Client credentials tokens** in the application's settings, then import this configuration.
+The `oauth` object is an Open SWE extension to the remote MCP JSON format:
 
 ```json
 {
@@ -329,19 +368,17 @@ an Open SWE extension to the remote MCP JSON format:
 }
 ```
 
-Client credentials require no redirect URI. Open SWE requests a bearer token,
-caches it in memory until shortly before expiry, and obtains another when needed.
-A rejected token is renewed once on HTTP 401. Client credentials go only to the
-configured token URL; bearer tokens go to the MCP server. Both destinations use
-the same public HTTPS address validation and redirect restrictions. An explicit
-`Authorization` header cannot be combined with OAuth.
+Client credentials require no redirect URI.
+Open SWE requests a bearer token, caches it in memory until shortly before expiry, and obtains another when needed.
+A rejected token is renewed once on HTTP 401.
+Client credentials go only to the configured token URL; bearer tokens go to the MCP server.
+Both destinations use the same public HTTPS address validation and redirect restrictions.
+An explicit `Authorization` header cannot be combined with OAuth.
 
-Other providers can use the same `oauth` settings with their own token URL and
-scope format; `client_secret_basic` sends credentials using HTTP Basic instead
-of the request body. Changing the token URL, client ID, or MCP URL requires
-re-entering the client secret. Sending `oauth: null` removes OAuth credentials;
-omitting `oauth` from a partial API update preserves them. Linear documents this
-flow under [client credentials tokens](https://linear.app/developers/oauth-2-0-authentication#client-credentials-tokens).
+Other providers can use the same `oauth` settings with their own token URL and scope format; `client_secret_basic` sends credentials using HTTP Basic instead of the request body.
+Changing the token URL, client ID, or MCP URL requires re-entering the client secret.
+Sending `oauth: null` removes OAuth credentials; omitting `oauth` from a partial API update preserves them.
+Linear documents this flow under [client credentials tokens](https://linear.app/developers/oauth-2-0-authentication#client-credentials-tokens).
 
 Examples for the generic connection form:
 
@@ -350,72 +387,56 @@ Examples for the generic connection form:
 | `incident` | `https://mcp.incident.io/mcp` | `Authorization`: `Bearer <your incident.io API key>` |
 | `datadog` | `https://mcp.datadoghq.com/v1/mcp?toolsets=core` | `DD_API_KEY`: your API key; `DD_APPLICATION_KEY`: your application key |
 
-Both examples use Streamable HTTP. Choose the Datadog MCP hostname for your site
-(for example, `mcp.datadoghq.eu`). Use appropriately scoped provider keys and
-select the read tools you need for investigation. The incident.io authentication
-and catalog are documented in [its remote MCP guide](https://docs.incident.io/ai/remote-mcp).
-Datadog documents its headers and site-specific endpoints in the
-[MCP setup guide](https://docs.datadoghq.com/mcp_server/setup/#api-and-application-keys).
-Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
-includes logs, metrics, traces, dashboards, monitors, and incidents.
+Both examples use Streamable HTTP.
+Choose the Datadog MCP hostname for your site (for example, `mcp.datadoghq.eu`).
+Use appropriately scoped provider keys and select the read tools you need for investigation.
+The incident.io authentication and catalog are documented in [its remote MCP guide](https://docs.incident.io/ai/remote-mcp).
+Datadog documents its headers and site-specific endpoints in the [MCP setup guide](https://docs.datadoghq.com/mcp_server/setup/#api-and-application-keys).
+Enter Datadog key values directly, without a `Bearer` prefix.
+The `core` toolset includes logs, metrics, traces, dashboards, monitors, and incidents.
 
-Allowed tools appear in the agent's **MCPs** tool group with connection
-prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
-collisions. Catalogs are cached for ten minutes
-per settings revision. Changing a connection causes the next run to discover its
-catalog again. Every tool call reloads the current authentication settings and checks whether the
-connection and tool are still enabled. Disabling or deleting a connection blocks
-subsequent calls from already-loaded tools; it does not cancel an in-flight call.
+Allowed tools appear in the agent's **MCPs** tool group with connection prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming collisions.
+Catalogs are cached for ten minutes per settings revision.
+Changing a connection causes the next run to discover its catalog again.
+Every tool call reloads the current authentication settings and checks whether the connection and tool are still enabled.
+Disabling or deleting a connection blocks subsequent calls from already-loaded tools; it does not cancel an in-flight call.
 
-Editing keeps saved headers unless **Replace headers** is selected. Replacing
-with an empty header list clears those headers. Changing the URL requires
-explicitly replacing or clearing saved headers. Requests must remain on the
-configured public HTTPS origin; redirects, private addresses, local processes,
-and interactive OAuth login are not supported by this connection manager.
+Editing keeps saved headers unless **Replace headers** is selected.
+Replacing with an empty header list clears those headers.
+Changing the URL requires explicitly replacing or clearing saved headers.
+Requests must remain on the configured public HTTPS origin; redirects, private addresses, local processes, and interactive OAuth login are not supported by this connection manager.
 
-The backend implementation lives in `openswe/mcp`: connection models and credential
-preparation, OAuth, HTTPS transport, and tool discovery/execution. Workspace storage
-and dashboard authorization remain in the workspace adapters. Existing stored
-connections and imported JSON need no migration.
+The backend implementation lives in `openswe/mcp`: connection models and credential preparation, OAuth, HTTPS transport, and tool discovery/execution.
+Workspace storage and dashboard authorization remain in the workspace adapters.
+Existing stored connections and imported JSON need no migration.
 
-For another scope, provide an `MCPSource` with an owner-specific `namespace` plus
-async `list_connections` and `get_connection` callbacks. The caller must authorize
-each source before passing it to `load_mcp_tools(workspace_source, user_source)`.
-Sources are ordered from lowest to highest precedence. Distinct connection names
-contribute tools; a later connection with the same name replaces the entire earlier
-connection, including credentials and allowed tools. Disabled connections and empty
-tool selections also override earlier entries, preventing fallback to broader access.
+For another scope, provide an `MCPSource` with an owner-specific `namespace` plus async `list_connections` and `get_connection` callbacks.
+The caller must authorize each source before passing it to `load_mcp_tools(workspace_source, user_source)`.
+Sources are ordered from lowest to highest precedence.
+Distinct connection names contribute tools; a later connection with the same name replaces the entire earlier connection, including credentials and allowed tools.
+Disabled connections and empty tool selections also override earlier entries, preventing fallback to broader access.
 Saved secrets must only be preserved from the previous record in the same scope.
 
-Catalog and token caches include the source namespace. Each tool call resolves the
-current winning connection again, checks its allowlist, and refuses to switch scopes
-mid-run. Source lookup errors must raise instead of returning an empty result, so a
-failed lookup cannot expose a lower-precedence connection. The product wires the
-workspace source and the triggering user's personal source (below) into every remote
-coding-agent run.
-An unavailable server omits its tools without preventing other connections from
-loading. This catalog is not attached to the separate read-only reviewer or
-Investigate graphs.
+Catalog and token caches include the source namespace.
+Each tool call resolves the current winning connection again, checks its allowlist, and refuses to switch scopes mid-run.
+Source lookup errors must raise instead of returning an empty result, so a failed lookup cannot expose a lower-precedence connection.
+The product wires the workspace source and the triggering user's personal source (below) into every remote coding-agent run.
+An unavailable server omits its tools without preventing other connections from loading.
+This catalog is not attached to the separate read-only reviewer or Investigate graphs.
 
 ### Personal MCP servers
 
-Any signed-in user can connect remote MCP servers with their own credentials under
-**Settings → Connections → MCP servers**. The form, JSON import, OAuth, header handling, and
-tool discovery work exactly like workspace connections. Records live in PostgreSQL under the
-person's `users` row, so one user's connections and credentials are
-never visible to, reused by, or revealed to another user. The dashboard API is
-`/dashboard/api/my-mcps` and requires only a signed-in session.
+Any signed-in user can connect remote MCP servers with their own credentials under **Settings → Connections → MCP servers**.
+The form, JSON import, OAuth, header handling, and tool discovery work exactly like workspace connections.
+Records live in PostgreSQL under the person's `users` row, so one user's connections and credentials are never visible to, reused by, or revealed to another user.
+The dashboard API is `/dashboard/api/my-mcps` and requires only a signed-in session.
 
-Personal connections load only inside a **private thread owned by the triggering
-user**. Collaborative (workspace or Slack channel) threads can be prompted by anyone, so
-they run without personal credentials; to use yours, continue the thread privately from
-the dashboard.
-Both scopes share the **MCPs** tool group. A personal connection with the same name as a
-workspace connection replaces it entirely for that user's runs, and a disabled personal
-connection hides the workspace one rather than falling back to it.
-Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targeting a
-private thread are rejected unless the commenter owns that thread, before credentials
-are read or a run is dispatched.
+Personal connections load only inside a **private thread owned by the triggering user**.
+Collaborative (workspace or Slack channel) threads can be prompted by anyone, so they run without personal credentials; to use yours, continue the thread privately from the dashboard.
+Both scopes share the **MCPs** tool group.
+A personal connection with the same name as a workspace connection replaces it entirely for that user's runs, and a disabled personal connection hides the workspace one rather than falling back to it.
+Desktop (local) runs do not load MCP connections yet.
+GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
 
 ### Adding a Python tool
 
@@ -460,7 +481,8 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you don't use Slack, remove `slack_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
+If you don't use Slack, remove `slack_reply` from the tools list.
+If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
@@ -481,11 +503,15 @@ surface.base_tools = tools
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `openswe/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub.
+Each is implemented as a webhook endpoint in `openswe/webapp.py`.
+You can add, remove, or modify triggers independently.
 
 ### Removing a trigger
 
-If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
+If you don't use Linear, simply don't configure the Linear webhook and remove the env vars.
+Same for Slack.
+The webhook endpoints still exist but won't receive events.
 
 To fully remove a trigger's code, delete the corresponding endpoint from `openswe/webapp.py`:
 
@@ -508,7 +534,8 @@ These are used as the fallback when:
 
 ### Repository extraction from messages
 
-Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `openswe/utils/repo.py` handles parsing these formats:
+Both Slack and Linear support specifying a target repo directly in the message or comment text.
+The shared utility `extract_repo_from_text()` in `openswe/utils/repo.py` handles parsing these formats:
 
 - `repo:owner/name` — explicit org and repo
 - `repo owner/name` — space syntax (same result)
@@ -517,19 +544,22 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-Linear comments use the triggering user's dashboard default repository, then the workspace default repository. Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
+Linear comments use the triggering user's dashboard default repository, then the workspace default repository.
+Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
 
 ### Customizing Slack routing
 
 Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
-2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
+2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description").
+   This lets a channel be pinned to a repo without anyone repeating it per-message.
 3. The triggering user's dashboard `default_repo`.
 4. The workspace's default repository (its own override, else the instance's).
 5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
-Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
+Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent).
+A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
 
 Reading the channel topic/purpose requires the bot's Slack token to have the `channels:read` (and `groups:read` for private channels) scope so `conversations.info` succeeds.
 
@@ -595,7 +625,9 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`. It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
+The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`.
+It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run.
+Edit a section's file to customize it:
 
 | File | What it controls |
 |---|---|
@@ -608,7 +640,8 @@ The system prompt is the template `openswe/resources/prompts/system/main.md.jinj
 
 ### Default prompt file
 
-Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on. This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
+Open SWE supports a `default_prompt.md` file for org-level instructions that apply to **every** agent run, regardless of which repository is being worked on.
+This is the recommended way to set default repository preferences, org conventions, and shared guidelines.
 
 The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
 
@@ -620,7 +653,9 @@ The file is loaded at agent startup and injected into the system prompt between 
 DEFAULT_PROMPT_PATH="/path/to/my-org-prompt.md"
 ```
 
-**Format:** Write plain markdown. The content is injected as-is under a `### Custom Instructions` heading in the system prompt. Example:
+**Format:** Write plain markdown.
+The content is injected as-is under a `### Custom Instructions` heading in the system prompt.
+Example:
 
 ```markdown
 # Default Prompt
@@ -635,7 +670,8 @@ When no repository is specified, work on the **my-app** repository under **my-or
 - Always tag the requesting user when work is complete
 ```
 
-**Loading order:** Default prompt → System prompt sections → AGENTS.md (per-repo). If the file is missing or empty, it is silently skipped — no error is raised.
+**Loading order:** Default prompt → System prompt sections → AGENTS.md (per-repo).
+If the file is missing or empty, it is silently skipped — no error is raised.
 
 **When to use `default_prompt.md` vs `AGENTS.md`:**
 
@@ -647,22 +683,31 @@ When no repository is specified, work on the **my-app** repository under **my-or
 
 ### Using AGENTS.md
 
-Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions. The agent reads it from the sandbox at startup and appends it to the system prompt. This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
+Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions.
+The agent reads it from the sandbox at startup and appends it to the system prompt.
+This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
 
 ---
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop. Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call. Open SWE includes:
+Middleware hooks run around the agent loop.
+Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call.
+Open SWE includes:
 
 | Middleware | Type | Purpose |
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
 
-There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
+There is intentionally no after-agent middleware that opens a PR for the agent.
+The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel.
+If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `plan_agent()`. The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph. Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
+Add custom middleware by appending to the middleware list in `plan_agent()`.
+The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph.
+Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do.
+See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
 

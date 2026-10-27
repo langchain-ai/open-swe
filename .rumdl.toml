@@ -1,0 +1,13 @@
+# Markdown reflow, run by the `rumdl` pre-commit hook.
+# Fix locally with `uvx rumdl@0.3.0 check --fix <files>`.
+
+[global]
+enable = ["MD013"]
+
+[MD013]
+# One sentence per line, however long, so an edited sentence changes one line of the diff.
+line-length = 0
+reflow = true
+reflow-mode = "sentence-per-line"
+code-blocks = false
+tables = false
