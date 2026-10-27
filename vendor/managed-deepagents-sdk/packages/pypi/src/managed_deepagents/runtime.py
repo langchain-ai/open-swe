@@ -105,6 +105,7 @@ from managed_deepagents._identity_runtime import (
 from managed_deepagents._log import logger
 from managed_deepagents._managed_composition import (
     assert_dynamic_memory_selection,
+    snapshot_browser_selection,
     snapshot_managed_composition,
     snapshot_mcp_selection,
     snapshot_memory_selection,
@@ -871,6 +872,10 @@ async def _compile_resolved_managed_agent_async(
     )
     if run_sandbox is not None and sandbox_selection_fingerprint and is_run and sandbox_setup:
         run_sandbox = _inherit_setup_recipe(run_sandbox, sandbox)
+    # Eval builds ship no browser, like no nested sandbox.
+    run_browser = (
+        None if trial_root_dir is not None else _select_run_browser(definition.config, browser)
+    )
     register_channel_messaging(channels or [])
     memory_selected_by_dynamic_resolver = "memory" in definition.config
     run_memory = (
@@ -893,7 +898,7 @@ async def _compile_resolved_managed_agent_async(
         "channels": channels,
         "identity": identity,
         "memory": run_memory,
-        "browser": browser,
+        "browser": run_browser,
         "trial_root_dir": trial_root_dir,
     }
     context_schema = definition.config.get("context_schema")
@@ -1090,6 +1095,23 @@ def _select_run_sandbox(
     return snapshot_sandbox_selection(config["sandbox"])
 
 
+def _select_run_browser(
+    config: Mapping[str, object],
+    declared: BrowserDefinition | None,
+) -> BrowserDefinition | None:
+    """Keep, disable, or replace ``browser.py``'s browser for this run."""
+    if "browser" not in config:
+        return declared
+    selected = snapshot_browser_selection(config["browser"])
+    if selected is not None and declared is None:
+        msg = (
+            "The agent factory selected a browser, but the project has no browser.py. "
+            "Declare `browser = define_browser()` there so the deployment installs Stagehand."
+        )
+        raise ValueError(msg)
+    return selected
+
+
 def _compile_managed_agent(
     definition: DeepAgentDefinition,
     config: ManagedRunConfig | None = None,
@@ -1126,6 +1148,7 @@ def _compile_managed_agent(
     merged.pop("memory", None)
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
+    merged.pop("browser", None)
     merged.pop("replicate_traces", None)
     merged.pop("_openswe_graph_inputs", None)
     merged["context_schema"] = context_schema
@@ -1230,7 +1253,6 @@ def _compile_managed_agent(
         merged["tools"] = authored_tools + connector_tools
 
     # Managed prompt behavior surrounds authored middleware in the same order as TS.
-    _prepend_schedule_delivery_middleware(merged)
     _append_channel_response_format_middleware(merged)
     if mounted_memory:
         _append_memory_instructions_middleware(
@@ -1682,23 +1704,6 @@ def _wrap_declarative_subagents(
     return wrapped
 
 
-def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
-    """Install ``deliver_to`` schedule delivery middleware ahead of authored hooks.
-
-    Replies to a run's thread origin are posted as the run ends, not here.
-    """
-    from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
-        create_schedule_delivery_middleware,
-    )
-
-    schedule_mw = create_schedule_delivery_middleware()
-    middleware_value = merged.get("middleware")
-    authored = (
-        list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
-    )
-    merged["middleware"] = [schedule_mw, *authored]
-
-
 def _prepend_credential_gate_middleware(
     merged: dict[str, object],
     connectors: list[Connector] | None,
@@ -1802,16 +1807,25 @@ def _append_browser_middleware(
 
 
 def _append_channel_response_format_middleware(merged: dict[str, object]) -> None:
-    """Install managed channel response guidance after authored middleware."""
+    """Install managed channel response guidance after authored middleware.
+
+    The run-output recorder goes first, so a stateless run's delivery reads
+    what the agent ended with.
+    """
     from managed_deepagents._channels.response_format import (  # noqa: PLC0415
         create_channel_response_format_middleware,
     )
+    from managed_deepagents._channels.run_output import RunOutputMiddleware  # noqa: PLC0415
 
     middleware_value = merged.get("middleware")
     existing = (
         list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
     )
-    merged["middleware"] = [*existing, create_channel_response_format_middleware()]
+    merged["middleware"] = [
+        RunOutputMiddleware(),
+        *existing,
+        create_channel_response_format_middleware(),
+    ]
 
 
 #: Refusal returned instead of globbing the sandbox root.
@@ -1941,6 +1955,18 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if not self._shared:
             self._resolved_backend = backend
 
+    def opened(self) -> SandboxBackendProtocol | None:
+        """This thread's sandbox if this process opened it, by any handle; never opens one."""
+        if self._resolved_backend is not None:
+            return self._resolved_backend
+        try:
+            key = _thread_scope_key(self._config(), self._source.selection_fingerprint)
+        except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
+            return None
+        with _managed_sandbox_lock:
+            entry = _managed_sandboxes.get(key)
+        return entry.backend if entry is not None else None
+
     @property
     def id(self) -> str:
         # deepagents' sandbox protocol guards require a non-empty ``id``
@@ -1958,20 +1984,6 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
-
-    def opened(self) -> SandboxBackendProtocol | None:
-        """This thread's sandbox if this process opened it, by any handle; never opens one."""
-        if self._resolved_backend is not None:
-            return self._resolved_backend
-        try:
-            key = _sandbox_scope_key(
-                self._sandbox(), self._config(), self._source.selection_fingerprint
-            )
-        except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
-            return None
-        with _managed_sandbox_lock:
-            entry = _managed_sandboxes.get(key)
-        return entry.backend if entry is not None else None
 
     def ls(self, path: str = "/") -> LsResult:
         return self._call(lambda backend: backend.ls(path))

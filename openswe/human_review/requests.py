@@ -347,7 +347,7 @@ class HumanReviewRequest(Base):
             return list(rows)
 
     @classmethod
-    async def design_review_history(cls) -> dict[str, datetime]:
+    async def design_review_history(cls, repository: str) -> dict[str, datetime]:
         """Last supplementary design assignment per person, for least-recently-picked rotation."""
         login = cls.run_config["design_review"]["github_login"].astext
         assigned_at = cast(
@@ -359,7 +359,7 @@ class HumanReviewRequest(Base):
                 .join(cls.pull_request)
                 .join(PullRequest.repository)
                 .where(
-                    Repository.key == "langchain-ai/langchainplus",
+                    Repository.key == repository.lower(),
                     login.is_not(None),
                     login != "",
                 )

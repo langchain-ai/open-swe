@@ -13,6 +13,7 @@ from langgraph_sdk.schema import MultitaskStrategy
 
 from managed_deepagents._agent_auth_http import ConnectionsNotConfiguredError
 from managed_deepagents._channels.actor import endpoint_actor
+from managed_deepagents._channels.github_app_setup import github_app_setup
 from managed_deepagents._channels.github_connections import (
     GITHUB_TOKEN_SLUG,
     github_app_connection_slug,
@@ -41,10 +42,8 @@ from managed_deepagents._channels.http.provider import (
     EventReceived,
     channel_name,
     check_event_keys,
-    defined_fields,
     event_snapshot,
     finish_events,
-    handled_event_keys,
     read_deployment_secret,
     receive_events,
     reset_deployment_secrets,
@@ -128,15 +127,8 @@ def github_channel(
         _endpoint_fields,
     )
     check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS)
-    repositories = _repositories(app)
-    provider_config: dict[str, JsonValue] = {"events": handled_event_keys(handlers)}
-    if app is not None:
-        provider_config["app"] = defined_fields(
-            {
-                "permissions": dict(app["permissions"]) if "permissions" in app else None,
-                "repositories": list(app["repositories"]) if "repositories" in app else None,
-            }
-        )
+    app_setup = github_app_setup(handlers, app)
+    repositories = frozenset(app_setup["repositories"]) if "repositories" in app_setup else None
 
     def name() -> str:
         return channel_name(channel)
@@ -189,10 +181,13 @@ def github_channel(
                 id=delivery["thread_id"], channel=ChannelName(name=name())
             ),
         ),
-        provider_config=provider_config,
+        # mda deploy sets up the GitHub App from this.
+        provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
     )
     channel.paused_notice = _post_paused_notice
+    # Deploy provides the App's token at this name.
+    channel.agent_connections = [GITHUB_TOKEN_SLUG]
     return channel
 
 
@@ -224,28 +219,6 @@ def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
     if event.action is not None:
         fields["action"] = event.action
     return fields
-
-
-def _repositories(app: GitHubAppOptions | None) -> frozenset[str] | None:
-    """The repositories the channel is limited to, after checking the App options."""
-    # A misspelled option would silently widen what the agent's token reaches.
-    unknown = sorted(set(app or {}) - {"permissions", "repositories"})
-    if unknown:
-        raise ValueError(
-            f"unknown GitHub app option {', '.join(unknown)}; use permissions or repositories"
-        )
-    # GitHub names are case-insensitive; deploy validates the rest.
-    repositories = (
-        None
-        if app is None or "repositories" not in app
-        else frozenset(repository.strip().lower() for repository in app["repositories"])
-    )
-    if repositories is not None and not repositories:
-        raise ValueError(
-            "GitHub app.repositories must list at least one repository; "
-            "omit it to allow every repository"
-        )
-    return repositories
 
 
 async def _github_app_value(env_key: str, suffix: str) -> str | None:

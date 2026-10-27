@@ -169,6 +169,31 @@ pub const PYTHON_BROWSER: Dependency = Dependency {
     version: "==4.3.0",
 };
 
+/// PyPI package behind that browser's `run`, `snapshot` and `screenshot`
+/// tools: Stagehand's facade. Pinned like the package's typing group: it is a
+/// first release, and `browser.py` is written against how it closes and saves.
+pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
+    name: "stagehand-middleware",
+    version: "==0.1.0",
+};
+
+/// npm package that drives a LangSmith browser from the deployment, for
+/// projects that declare one in `browser.ts`. Pinned to the release that
+/// `managed-deepagents` lists as a peer dependency, so a deployment
+/// runs the Stagehand the package is tested against.
+pub const TYPESCRIPT_BROWSER: Dependency = Dependency {
+    name: "@browserbasehq/stagehand",
+    version: "4.3.0",
+};
+
+/// npm package behind that browser's `run`, `snapshot` and `screenshot`
+/// tools: Stagehand's facade, the npm twin of [`PYTHON_BROWSER_TOOLS`]. Pinned
+/// to the release that `managed-deepagents` lists as a peer dependency.
+pub const TYPESCRIPT_BROWSER_TOOLS: Dependency = Dependency {
+    name: "stagehand-middleware",
+    version: "0.1.1",
+};
+
 /// npm package that provides the local LangGraph in-memory dev server.
 ///
 /// The caret range keeps local development on compatible LangGraph CLI updates;
@@ -206,6 +231,14 @@ pub fn managed_dependencies(language: Language) -> &'static [Dependency] {
     match language {
         Language::TypeScript => TYPESCRIPT_MANAGED,
         Language::Python => PYTHON_MANAGED,
+    }
+}
+
+/// Extra dependencies for projects that declare a `browser`.
+pub fn browser_dependencies(language: Language) -> &'static [Dependency] {
+    match language {
+        Language::TypeScript => &[TYPESCRIPT_BROWSER, TYPESCRIPT_BROWSER_TOOLS],
+        Language::Python => &[PYTHON_BROWSER, PYTHON_BROWSER_TOOLS],
     }
 }
 
@@ -666,6 +699,38 @@ mod tests {
             .and_then(|rest| rest.strip_suffix('"'))
             .unwrap();
         assert_eq!(PYTHON_BROWSER.version, format!("=={version}"));
+    }
+
+    #[test]
+    fn typescript_browser_dependency_matches_the_npm_packages_pin() {
+        let package: serde_json::Value =
+            serde_json::from_str(include_str!("../../../packages/npm/package.json")).unwrap();
+        for dep in [TYPESCRIPT_BROWSER, TYPESCRIPT_BROWSER_TOOLS] {
+            assert_eq!(package["peerDependencies"][dep.name], dep.version);
+        }
+        // The browser loads its extension from the same Stagehand release.
+        let runtime = include_str!("../../../packages/npm/src/runtime/browser-langsmith.ts");
+        let pin = format!("STAGEHAND_VERSION = \"{}\"", TYPESCRIPT_BROWSER.version);
+        assert!(runtime.contains(&pin), "browser-langsmith.ts lacks {pin}");
+        // Python deployments run the same Stagehand.
+        assert_eq!(
+            PYTHON_BROWSER.version,
+            format!("=={}", TYPESCRIPT_BROWSER.version)
+        );
+    }
+
+    #[test]
+    fn browser_tools_dependency_matches_the_packages_typing_pin() {
+        // The package's tests and type checks run against the release deployments get.
+        let pyproject = include_str!("../../../packages/pypi/pyproject.toml");
+        let pin = format!(
+            "\"{}{}\"",
+            PYTHON_BROWSER_TOOLS.name, PYTHON_BROWSER_TOOLS.version
+        );
+        assert!(
+            pyproject.contains(&pin),
+            "pyproject.toml does not pin {pin}"
+        );
     }
 
     #[test]

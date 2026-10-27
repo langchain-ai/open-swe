@@ -51,6 +51,14 @@ class ReviewChannelRule(BaseModel):
     channel: str = Field(min_length=1)
 
 
+class DesignReviewSettings(BaseModel):
+    team: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
+    paths: list[str] = Field(min_length=1)
+
+    def matches(self, path: str) -> bool:
+        return any(fnmatchcase(path, pattern) for pattern in self.paths)
+
+
 class ReviewFile(BaseModel):
     filename: str
 
@@ -60,6 +68,7 @@ class RepoSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
+    design_review: DesignReviewSettings | None = Field(None, alias="designReview")
     review_channel: str = Field("", alias="reviewChannel")
     review_channel_rules: list[ReviewChannelRule] = Field(
         default_factory=list, alias="reviewChannelRules"

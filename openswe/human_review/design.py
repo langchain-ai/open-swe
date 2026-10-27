@@ -14,13 +14,14 @@ from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.org_membership import team_members
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
-from openswe.human_review.lifecycle import ReviewCard
+from openswe.github.repo_files import DesignReviewSettings, RepoSettings
 from openswe.human_review.picking import Coverage, ReviewerAvailability
 from openswe.human_review.requests import HumanReviewRequest, slack_mention
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm
+from openswe.threads.runs import start_dashboard_thread
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
 
@@ -40,11 +41,11 @@ class DesignState(BaseModel):
     dm_notified: bool = False
 
 
-def potential_ui(path: str) -> bool:
+def potential_ui(path: str, settings: DesignReviewSettings) -> bool:
     """Production frontend paths warrant judgment, not automatic design assignment."""
     file = PurePosixPath(path.lower())
     return (
-        path.startswith("smith-frontend/")
+        settings.matches(path)
         and file.suffix in {".tsx", ".jsx", ".ts", ".js", ".css", ".scss", ".sass", ".less"}
         and not {"tests", "test", "__tests__", "e2e", "playwright", "cypress", "__mocks__"}
         & set(file.parts)
@@ -56,13 +57,11 @@ def potential_ui(path: str) -> bool:
 class DesignReview:
     request: HumanReviewRequest
 
-    @property
-    def enabled(self) -> bool:
+    async def settings(self) -> DesignReviewSettings | None:
+        if self.request.kind not in ("standard", "posted"):
+            return None
         pr = self.request.pull_request
-        return (pr.owner.lower(), pr.repo.lower()) == (
-            "langchain-ai",
-            "langchainplus",
-        ) and self.request.kind in ("standard", "posted")
+        return (await RepoSettings.cached(pr.owner, pr.repo)).design_review
 
     @property
     def state(self) -> DesignState:
@@ -82,12 +81,13 @@ class DesignReview:
 
     async def start(self, pull: PullRequestClient, reason: str = "") -> None:
         """Queue immediate semantic assessment, or an agent's reasoned design-review request."""
-        if not self.enabled or self.request.state != "open":
+        settings = await self.settings()
+        if settings is None or self.request.state != "open":
             return
         if not reason and self.state.assessment_requested:
             return
         files = await ChangedFile.of_pull(pull)
-        if files is None or not any(potential_ui(file.filename) for file in files):
+        if files is None or not any(potential_ui(file.filename, settings) for file in files):
             return
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is None or row.state != "open":
@@ -100,7 +100,7 @@ class DesignReview:
 
     async def run(self) -> str:
         """Assess once, then rotate a designer as soon as someone eligible is working."""
-        if not self.enabled or skip_on_preview("design_review"):
+        if await self.settings() is None or skip_on_preview("design_review"):
             return "disabled"
         pr = self.request.pull_request
         async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
@@ -133,9 +133,14 @@ class DesignReview:
             row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
         pr = self.request.pull_request
         try:
-            if await ReviewCard(self.request).notify_agent(
-                prompt("runs/design-review", pr_url=pr.url),
+            login = self.request.requester_login
+            if login and await start_dashboard_thread(
+                login,
+                None,
+                prompt=prompt("runs/design-review", pr_url=pr.url),
                 title=f"Assess design review for {pr.repo}#{pr.number}",
+                repos=[f"{pr.owner}/{pr.repo}"],
+                visibility="private",
                 unlisted=True,
             ):
                 return "assessment_requested"
@@ -153,7 +158,11 @@ class DesignReview:
         return "retrying"
 
     async def _choose(self, pull: PullRequestClient) -> tuple[User | None, timedelta]:
-        members = await team_members("langchain-ai", "product-design")
+        settings = await self.settings()
+        if settings is None:
+            return None, _RETRY
+        org, team = settings.team.split("/", 1)
+        members = await team_members(org, team)
         users = await asyncio.gather(*(User.for_login("github", login) for login in members or []))
         reviews = await latest_review_states(pull, self.request.pull_request.author)
         if reviews is None:
@@ -176,7 +185,9 @@ class DesignReview:
             eligible.append((user, hours))
         if not eligible:
             return None, _RETRY
-        history = await HumanReviewRequest.design_review_history()
+        history = await HumanReviewRequest.design_review_history(
+            f"{self.request.pull_request.owner}/{self.request.pull_request.repo}"
+        )
         now = datetime.now(UTC)
         eligible.sort(
             key=lambda person: (

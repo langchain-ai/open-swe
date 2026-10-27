@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Literal, NotRequired, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -15,9 +17,11 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
 from typing_extensions import TypedDict
 
 from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
-from managed_deepagents._identity_runtime import _field, is_studio_auth_user
+from managed_deepagents._channels.source_providers import is_trusted_source_provider
+from managed_deepagents._identity_runtime import _auth_user_fields, _field, is_studio_auth_user
 from managed_deepagents._loopback import is_loopback_url, resolve_loopback_api_url
 from managed_deepagents._thread_record import (
+    THREAD_CONVERSATION_METADATA,
     THREAD_PARTICIPANTS_METADATA,
     THREAD_RECORD_METADATA,
     parse_thread_record,
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
 _MAX_HANDOFF_SIZE = 8192
 
 SCHEDULE_HANDOFF_HEADER = "x-mda-schedule-handoff"
+THREAD_HANDOFF_HEADER = "x-mda-thread-handoff"
 _SEARCH_PAGE = 100
 SCHEDULE_LIMIT_PREFIX = "Schedule limit reached"
 
@@ -88,6 +93,35 @@ class ScheduleHandoffUser(ExecutionUser, total=False):
     mda_schedule_access: ScheduleAccess
 
 
+@with_config(ConfigDict(extra="forbid"))
+class ThreadHandoffConversation(TypedDict):
+    """The conversation a scheduled run's post started."""
+
+    provider: str
+    source_thread_key: str
+
+
+@with_config(ConfigDict(extra="forbid"))
+class ThreadHandoffGrant(TypedDict):
+    """The thread and scheduled run a handoff caller may move."""
+
+    thread: str
+    execution: ExecutionUser
+
+
+@with_config(ConfigDict(extra="forbid"))
+class ThreadHandoff(ThreadHandoffGrant):
+    """A scheduled run handing its thread to the conversation its post started."""
+
+    conversation: ThreadHandoffConversation
+
+
+class ThreadHandoffUser(ExecutionUser, total=False):
+    """The conversation a thread handoff names, as a channel caller; never validated as input."""
+
+    mda_thread_handoff: ThreadHandoffGrant
+
+
 class _CronRow(TypedDict, total=False):
     cron_id: str
     end_time: str | None
@@ -97,10 +131,18 @@ _EXECUTION = TypeAdapter(ExecutionUser)
 _ACCESS = TypeAdapter(ScheduleAccess)
 _CHANNEL = TypeAdapter(ChannelContext)
 _CRON_ROWS = TypeAdapter(list[_CronRow])
+_HANDOFF = TypeAdapter(ThreadHandoff)
+_HANDOFF_GRANT = TypeAdapter(ThreadHandoffGrant)
+_EXECUTION_KEYS = ExecutionUser.__required_keys__ | ExecutionUser.__optional_keys__
+_HANDOFF_TIMEOUT_SECONDS = 15
 
 
 def schedule_request_config(access: ScheduleAccess) -> tuple[str, dict[str, str]]:
     """Use the deployed API URL and server key, or the local dev API."""
+    return _handoff_request_config(SCHEDULE_HANDOFF_HEADER, access)
+
+
+def _handoff_request_config(header: str, value: object) -> tuple[str, dict[str, str]]:
     hosted = os.environ.get("LANGSMITH_HOST_API_URL", "").strip().rstrip("/")
     base = hosted or resolve_loopback_api_url()
     secret = os.environ.get("MDA_HANDOFF_SECRET")
@@ -112,7 +154,7 @@ def schedule_request_config(access: ScheduleAccess) -> tuple[str, dict[str, str]
     headers = {
         "content-type": "application/json",
         "x-mda-handoff-secret": secret,
-        SCHEDULE_HANDOFF_HEADER: json.dumps(access),
+        header: json.dumps(value),
     }
     if hosted and api_key:
         headers["x-api-key"] = api_key
@@ -129,12 +171,22 @@ def validate_execution(value: object) -> ExecutionUser:
     return result
 
 
-def schedule_handoff_user(
-    headers: Mapping[str, object], path: str | None, method: str | None
-) -> ScheduleHandoffUser | None:
-    raw = headers.get(SCHEDULE_HANDOFF_HEADER)
-    if raw is None:
+def schedule_execution(configurable: Mapping[str, object] | None) -> ExecutionUser | None:
+    """The principal a managed cron fire runs as, from the run's configurable."""
+    user = _auth_user_fields(_field(configurable, "langgraph_auth_user"))
+    if user is None:
         return None
+    try:
+        execution = validate_execution(
+            {key: value for key, value in user.items() if key in _EXECUTION_KEYS}
+        )
+    except ValueError:
+        return None
+    return execution if execution.get("mda_scheduled_run") is True else None
+
+
+def _verified_handoff(headers: Mapping[str, object], raw: object) -> str:
+    """A handoff header's value, unless the request lacks the handoff secret."""
     expected = os.environ.get("MDA_HANDOFF_SECRET")
     supplied = headers.get("x-mda-handoff-secret")
     if (
@@ -145,7 +197,112 @@ def schedule_handoff_user(
         or len(raw) > _MAX_HANDOFF_SIZE
     ):
         raise ValueError("Schedule access is not permitted")
-    access = _ACCESS.validate_python(json.loads(raw), strict=True)
+    return raw
+
+
+#: The waits, in seconds, before each retry of a handoff a retry can fix.
+_HANDOFF_RETRY_DELAYS_SECONDS = (0.5, 2.0)
+
+
+async def hand_off_scheduled_thread(handoff: ThreadHandoff, metadata: Mapping[str, object]) -> None:
+    """Move a scheduled run's thread to the conversation its post started.
+
+    ``metadata`` holds that conversation's record and key. The handoff can only
+    follow the post, which names the conversation, so a failed request or an
+    Agent Server error is retried. A retried run finds the thread already moved.
+    """
+    base, headers = _handoff_request_config(THREAD_HANDOFF_HEADER, handoff)
+    url = f"{base}/threads/{handoff['thread']}"
+    async with httpx.AsyncClient(
+        timeout=_HANDOFF_TIMEOUT_SECONDS, follow_redirects=False
+    ) as client:
+        for delay in (*_HANDOFF_RETRY_DELAYS_SECONDS, None):
+            try:
+                status = await _move_thread(client, url, headers, metadata, handoff)
+            except httpx.HTTPError:
+                status = None
+            if status == "moved":
+                return
+            if delay is None or (status is not None and status < HTTPStatus.INTERNAL_SERVER_ERROR):
+                suffix = "" if status is None else f" with status {status}"
+                raise RuntimeError(f"Thread handoff failed{suffix}")
+            await asyncio.sleep(delay)
+
+
+async def _move_thread(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: Mapping[str, str],
+    metadata: Mapping[str, object],
+    handoff: ThreadHandoff,
+) -> Literal["moved"] | int:
+    """One handoff attempt: ``"moved"``, or the status that refused it."""
+    moved = await client.patch(url, headers=headers, json={"metadata": metadata})
+    if moved.is_success:
+        return "moved"
+    if moved.status_code != HTTPStatus.NOT_FOUND:
+        return moved.status_code
+    current = await client.get(url, headers=headers)
+    key = handoff["conversation"]["source_thread_key"]
+    if current.is_success and _held_conversation(current.json()) == key:
+        return "moved"
+    return moved.status_code
+
+
+def _held_conversation(thread: object) -> object:
+    """The conversation key a thread's metadata names, if any."""
+    return _field(_field(thread, "metadata"), THREAD_CONVERSATION_METADATA)
+
+
+def thread_handoff_user(
+    headers: Mapping[str, object], path: str | None, method: str | None
+) -> ThreadHandoffUser | None:
+    """The conversation a thread handoff names, as a channel caller.
+
+    It may only update the scheduled run's own thread, once, or read it to check.
+    """
+    raw = headers.get(THREAD_HANDOFF_HEADER)
+    if raw is None:
+        return None
+    handoff = _HANDOFF.validate_python(json.loads(_verified_handoff(headers, raw)), strict=True)
+    thread = handoff["thread"]
+    UUID(thread)
+    execution = validate_execution(handoff["execution"])
+    conversation = handoff["conversation"]
+    if (
+        method not in {"PATCH", "GET"}
+        or path != f"/threads/{thread}"
+        or execution.get("mda_scheduled_run") is not True
+        or not conversation["source_thread_key"]
+        or not is_trusted_source_provider(conversation["provider"])
+    ):
+        raise ValueError("Thread handoff is not permitted")
+    return {
+        **execution,
+        "mda_source_provider": conversation["provider"],
+        "mda_source_thread_id": conversation["source_thread_key"],
+        "mda_thread_handoff": {"thread": thread, "execution": execution},
+    }
+
+
+def thread_handoff_grant(user: object) -> ThreadHandoffGrant | None:
+    """The thread and scheduled run a handoff caller may move, if it is one."""
+    value = _field(user, "mda_thread_handoff")
+    if value is None:
+        return None
+    try:
+        return _HANDOFF_GRANT.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
+def schedule_handoff_user(
+    headers: Mapping[str, object], path: str | None, method: str | None
+) -> ScheduleHandoffUser | None:
+    raw = headers.get(SCHEDULE_HANDOFF_HEADER)
+    if raw is None:
+        return None
+    access = _ACCESS.validate_python(json.loads(_verified_handoff(headers, raw)), strict=True)
     UUID(access["assistant"])
     if "thread" in access:
         UUID(access["thread"])

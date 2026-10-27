@@ -3,14 +3,11 @@
 A human review request is a Slack card asking people to review one pull request.
 It has two kinds, stored in one `human_review_request` table:
 
-- **Standard** (this document): any open pull request, posted in the repository's
-  review channel; people sign up and review on GitHub, and it merges once they approve.
-- **Expedited** ([expedited-slack-review.md](expedited-slack-review.md)): a tiny pull
-  request approved straight from the diff on the card.
+- **Standard** (this document): any open pull request, posted in the repository's review channel; people sign up and review on GitHub, and it merges once they approve.
+- **Expedited** ([expedited-slack-review.md](expedited-slack-review.md)): a tiny pull request approved straight from the diff on the card.
 
-One request per pull request is open at a time, whatever its kind. Asking for an
-expedited review of a pull request with an open standard request replaces it; asking
-for a standard review while an expedited card is open is refused.
+One request per pull request is open at a time, whatever its kind.
+Asking for an expedited review of a pull request with an open standard request replaces it; asking for a standard review while an expedited card is open is refused.
 
 ## Configuration
 
@@ -20,10 +17,9 @@ for a standard review while an expedited card is open is refused.
 { "reviewChannel": "#eng-reviews" }
 ```
 
-The value is a channel name or id. It is read from the pull request's head commit,
-falling back to the default branch when the head has no settings file. The
-`request_human_review` tool accepts a `channel` that overrides it or stands in when
-the repository sets none.
+The value is a channel name or id.
+It is read from the pull request's head commit, falling back to the default branch when the head has no settings file.
+The `request_human_review` tool accepts a `channel` that overrides it or stands in when the repository sets none.
 
 For monorepos, add ordered path rules:
 
@@ -37,80 +33,78 @@ For monorepos, add ordered path rules:
 }
 ```
 
-Patterns match case-sensitive repository-relative paths; `*` includes nested
-paths. The first matching rule assigns each changed file to a channel, and
-unmatched files do not count toward any channel when rules are configured. If no
-rule matches, no review channel is available and the PR page hides the Slack
-review request button. Without rules, `reviewChannel` remains the repo-wide
-destination. The channel with
-the most changed files wins; ties are broken uniformly at random among the tied
-channels. Files count equally, including tests. The selected
-channel gets one canonical request, which stays there once posted. Explicit
-channel overrides still take precedence. Expedited cards use the same routing
-for their broadcast destination.
+Patterns match case-sensitive repository-relative paths; `*` includes nested paths.
+The first matching rule assigns each changed file to a channel, and unmatched files do not count toward any channel when rules are configured.
+If no rule matches, no review channel is available and the PR page hides the Slack review request button.
+Without rules, `reviewChannel` remains the repo-wide destination.
+The channel with the most changed files wins; ties are broken uniformly at random among the tied channels.
+Files count equally, including tests.
+The selected channel gets one canonical request, which stays there once posted.
+Explicit channel overrides still take precedence.
+Expedited cards use the same routing for their broadcast destination.
 
-Workspace admins can override the two-hour auto-assignment wait through
-`PUT /dashboard/api/workspaces/{workspace}/settings` with
-`human_review_auto_assign_minutes` (a positive integer; `null` inherits the instance
-setting). The instance default can be set through `PUT /dashboard/api/settings`.
+### Supplementary design reviews
+
+Opt in on the repository's default branch:
+
+```json
+{
+  "designReview": {
+    "team": "langchain-ai/product-design",
+    "paths": ["smith-frontend/*"]
+  }
+}
+```
+
+The team is a GitHub `organization/team-slug`; paths use the same glob matching as review channel rules.
+Production UI changes matching those paths get an isolated, unlisted assessment when standard or posted review starts.
+The assessment judges user-visible UX impact, excluding test-only changes, internal refactors, and tiny styling tweaks.
+Significant changes rotate an available team member and send labeled Design review notifications through GitHub and Slack.
+The assessment never replaces the engineering request's owning thread or summary, and design approval does not substitute engineering review.
+Settings use the default branch's cached configuration; changes can take 30 minutes to refresh.
+
+Workspace admins can override the two-hour auto-assignment wait through `PUT /dashboard/api/workspaces/{workspace}/settings` with `human_review_auto_assign_minutes` (a positive integer; `null` inherits the instance setting).
+The instance default can be set through `PUT /dashboard/api/settings`.
 This affects reviewer assignment, not the two-hour auto-merge deadline.
 
 ## Requesting
 
-- Asking is a per-person feature flag, **Request human reviews in Slack** on the
-  Feature Flags page (`human_review_requests`), off by default. Without it the
-  dashboard hides its button and refuses the request, and the agent does not get
-  `request_human_review` in runs that person starts. Signing up, dismissing, and the
-  agent's pick of a reviewer work for everyone.
-- The agent calls `request_human_review`; people use **Request review in Slack** on
-  the dashboard's pull request views.
-- Refused while the pull request is closed, a draft, conflicted, or failing a required
-  check.
-- From a Slack thread in the review channel, the card is a reply in that thread that is
-  also sent to the channel. Otherwise it is a new message in the review channel.
-- The card shows the pull request's number and title, a summary, its author, size and
-  branches, who asked when that is not the author, and its reviewers once anyone signs up.
-  The agent must pass the summary as `inline_summary`; a dashboard request shows the
-  start of the PR description instead, cut at 280 characters with an ellipsis. Nothing
-  is generated by a model.
-- Asking again with an `inline_summary`, from the thread or by the person that made the
-  request, replaces the open card's summary; anyone else gets the existing card unchanged.
-- The agent can take a request down with `dismiss_human_review_request`, the same as
-  the card's Dismiss button; the card reads "dismissed by Open SWE" and any reason.
-- The `oswe` MCP server offers `request_human_review` and
-  `dismiss_human_review_request` to local coding sessions, through
-  `POST /dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review` (with an
-  optional `inline_summary` and `channel`) and `.../human-review/dismiss`. The card
-  then names the signed-in person.
+- Asking is a per-person feature flag, **Request human reviews in Slack** on the Feature Flags page (`human_review_requests`), off by default.
+  Without it the dashboard hides its button and refuses the request, and the agent does not get `request_human_review` in runs that person starts.
+  Signing up, dismissing, and the agent's pick of a reviewer work for everyone.
+- The agent calls `request_human_review`; people use **Request review in Slack** on the dashboard's pull request views.
+- Refused while the pull request is closed, a draft, conflicted, or failing a required check.
+- From a Slack thread in the review channel, the card is a reply in that thread that is also sent to the channel.
+  Otherwise it is a new message in the review channel.
+- The card shows the pull request's number and title, a summary, its author, size and branches, who asked when that is not the author, and its reviewers once anyone signs up.
+  The agent must pass the summary as `inline_summary`; a dashboard request shows the start of the PR description instead, cut at 280 characters with an ellipsis.
+  Nothing is generated by a model.
+- Asking again with an `inline_summary`, from the thread or by the person that made the request, replaces the open card's summary; anyone else gets the existing card unchanged.
+- The agent can take a request down with `dismiss_human_review_request`, the same as the card's Dismiss button; the card reads "dismissed by Open SWE" and any reason.
+- The `oswe` MCP server offers `request_human_review` and `dismiss_human_review_request` to local coding sessions, through `POST /dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review` (with an optional `inline_summary` and `channel`) and `.../human-review/dismiss`.
+  The card then names the signed-in person.
 
 ## Reviewers
 
-- **Allow automatic review picks** in dashboard Settings controls whether Open SWE
-  can automatically assign you, including fallback agent picks. It defaults to on
-  and can also be changed with `save_user_settings` using
-  `auto_human_review_enabled`. Turning it off does not prevent someone explicitly
-  naming you as a reviewer or you signing up yourself.
+- **Allow automatic review picks** in dashboard Settings controls whether Open SWE can automatically assign you, including fallback agent picks.
+  It defaults to on and can also be changed with `save_user_settings` using `auto_human_review_enabled`.
+  Turning it off does not prevent someone explicitly naming you as a reviewer or you signing up yourself.
 - **I'll review** adds the clicker as a reviewer and requests their review on GitHub.
   Any number of people may sign up; they need write access and cannot be the author.
 - **Dismiss** closes the card; anyone may click it.
-- If nobody signs up within 2 hours (or the workspace’s configured timeout), the agent that asked is woken (for a dashboard
-  request, the requester's pull request thread) to pick one from CODEOWNERS and the
-  review history of the changed files. It calls `assign_human_reviewer`, which adds the
-  person to the card, tags them in the card's thread, and DMs them. In concierge mode
-  the DM is recorded in their concierge conversation.
+- If nobody signs up within 2 hours (or the workspace’s configured timeout), the agent that asked is woken (for a dashboard request, the requester's pull request thread) to pick one from CODEOWNERS and the review history of the changed files.
+  It calls `assign_human_reviewer`, which adds the person to the card, tags them in the card's thread, and DMs them.
+  In concierge mode the DM is recorded in their concierge conversation.
 
 ## Merging
 
-The request re-checks the pull request on every review and CI completion webhook, and
-two hours after it was posted. It merges, as the GitHub App and never with an admin
-bypass, when:
+The request re-checks the pull request on every review and CI completion webhook, and two hours after it was posted.
+It merges, as the GitHub App and never with an admin bypass, when:
 
 - at least one approval is standing on GitHub, and
 - every reviewer on the card has approved, or two hours have passed, and
-- the pull request is otherwise ready: checks green, no conflicts, no unresolved
-  threads, no standing change request, and an Open SWE review of the head where
-  auto-review is on.
+- the pull request is otherwise ready: checks green, no conflicts, no unresolved threads, no standing change request, and an Open SWE review of the head where auto-review is on.
 
-While it waits, the card says what it is waiting on. A merged request's card collapses
-to one line and its message gets a `:merged:` reaction. A card that was also sent to
-the channel leaves it when it closes, and the closed card stays in the thread.
+While it waits, the card says what it is waiting on.
+A merged request's card collapses to one line and its message gets a `:merged:` reaction.
+A card that was also sent to the channel leaves it when it closes, and the closed card stays in the thread.

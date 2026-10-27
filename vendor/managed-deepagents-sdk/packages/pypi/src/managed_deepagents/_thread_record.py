@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 THREAD_RECORD_METADATA = "ls_mda_thread"
 THREAD_PARTICIPANTS_METADATA = "ls_mda_participants"
+#: The source thread key of a conversation a scheduled run started, on the run's own
+#: thread. Ingress runs the conversation's events there.
+THREAD_CONVERSATION_METADATA = "ls_mda_conversation"
 #: Every metadata key with this prefix belongs to MDA; only managed ingress writes one.
 THREAD_RECORD_METADATA_PREFIX = "ls_mda_"
 _RECORD_VERSION = 1
@@ -196,11 +199,26 @@ def thread_record_metadata(record: ThreadRecord) -> dict[str, JsonValue]:
     }
 
 
-def strip_thread_record_keys(metadata: object) -> None:
-    """Remove every ``ls_mda_*`` key from a metadata dict, in place."""
-    if isinstance(metadata, dict):
-        for key in [key for key in metadata if str(key).startswith(THREAD_RECORD_METADATA_PREFIX)]:
+def strip_thread_record_keys(
+    metadata: object, *, keep_record: bool = False, keep_conversation: bool = False
+) -> None:
+    """Remove every ``ls_mda_*`` key from a metadata dict, in place.
+
+    With ``keep_record``, the two keys a record is stored in stay; with
+    ``keep_conversation``, the conversation key stays too.
+    """
+    if not isinstance(metadata, dict):
+        return
+    kept = {
+        *(_RECORD_KEYS if keep_record else ()),
+        *((THREAD_CONVERSATION_METADATA,) if keep_conversation else ()),
+    }
+    for key in [key for key in metadata if str(key).startswith(THREAD_RECORD_METADATA_PREFIX)]:
+        if key not in kept:
             del metadata[key]
+
+
+_RECORD_KEYS = (THREAD_RECORD_METADATA, THREAD_PARTICIPANTS_METADATA)
 
 
 def names_thread_record_key(metadata: object) -> bool:
@@ -211,6 +229,7 @@ def names_thread_record_key(metadata: object) -> bool:
 
 
 __all__ = [
+    "THREAD_CONVERSATION_METADATA",
     "THREAD_PARTICIPANTS_METADATA",
     "THREAD_RECORD_METADATA",
     "THREAD_RECORD_METADATA_PREFIX",

@@ -55,12 +55,17 @@ from managed_deepagents._identity_runtime import (
 from managed_deepagents._log import logger
 from managed_deepagents._schedule_auth import (
     ScheduleHandoffUser,
+    ThreadHandoffGrant,
+    ThreadHandoffUser,
     authorize_schedule,
     is_execution_record,
     schedule_access,
     schedule_handoff_user,
+    thread_handoff_grant,
+    thread_handoff_user,
 )
 from managed_deepagents._thread_record import (
+    THREAD_CONVERSATION_METADATA,
     THREAD_PARTICIPANTS_METADATA,
     THREAD_RECORD_METADATA,
     names_thread_record_key,
@@ -374,7 +379,7 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
         authorization: str | None = None,
         path: str | None = None,
         method: str | None = None,
-    ) -> ManagedUser | ScheduleHandoffUser:
+    ) -> ManagedUser | ScheduleHandoffUser | ThreadHandoffUser:
         return await _authenticate(cfg, http, headers, authorization, path, method)
 
     # ``auth.authenticate`` / ``auth.on`` / ``auth.on.threads`` /
@@ -392,6 +397,17 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
 
 
 async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
+    """Scope a threads request to its caller, or to the thread a handoff names."""
+    handoff = thread_handoff_grant(ctx.user)
+    if handoff is None:
+        return _scope_caller_threads(ctx, value)
+    try:
+        return _authorize_thread_handoff(ctx.user, handoff, ctx.action, value)
+    except ManagedAuthError as err:
+        raise _http_exception(err) from err
+
+
+def _scope_caller_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
     # Let Studio inspect every deployment thread so channel-triggered runs
     # and their interrupts are visible there, and answer interrupts on any
     # thread, which channels link to. Keep other mutations owner-scoped:
@@ -428,6 +444,33 @@ async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | 
         # whose upstream TypedDict does not declare ``metadata``.
         _stamp_thread_metadata(cast("JsonObject", value), user, key, ctx.action)
     return {"owner": key}
+
+
+def _authorize_thread_handoff(
+    user: object, handoff: ThreadHandoffGrant, action: str, value: object
+) -> FilterType:
+    """Let a scheduled run move its own thread to the conversation its post started.
+
+    One update, found under the run's owner key, that writes the conversation's
+    record and key and makes the conversation the owner. A read finds the
+    thread only once the conversation owns it.
+    """
+    if action == "read" and str(_field(value, "thread_id")) == handoff["thread"]:
+        return {"owner": _thread_owner_key(user)}
+    metadata = _field(value, "metadata")
+    if (
+        action != "update"
+        or not isinstance(value, dict)
+        or str(value.get("thread_id")) != handoff["thread"]
+        or value.get("action") is not None
+        or not isinstance(metadata, dict)
+        or metadata.get(THREAD_CONVERSATION_METADATA) != _field(user, "mda_source_thread_id")
+        or not _is_own_thread_record(metadata, user)
+    ):
+        raise ManagedAuthError(403, "Thread handoff is not permitted")
+    strip_thread_record_keys(metadata, keep_record=True, keep_conversation=True)
+    metadata["owner"] = _thread_owner_key(user)
+    return {"owner": _thread_owner_key(handoff["execution"])}
 
 
 def _is_single_thread_interrupt(value: object) -> bool:
@@ -522,7 +565,7 @@ async def _authenticate(
     authorization: str | None,
     path: str | None,
     method: str | None,
-) -> ManagedUser | ScheduleHandoffUser:
+) -> ManagedUser | ScheduleHandoffUser | ThreadHandoffUser:
     """Resolve the caller identity, bypassing auth for public channel Events routes."""
     # Provider-signed channel Events must reach the public HTTP handler before
     # MDA ingress can succeed (Slack cannot present ``x-mda-ingress-secret``).
@@ -530,12 +573,9 @@ async def _authenticate(
         return channel_events_bypass_user()
     normalized = _normalize_headers(headers)
     try:
-        try:
-            schedule_user = schedule_handoff_user(normalized, path, method)
-        except ValueError as err:
-            raise ManagedAuthError(403, "Schedule access is not permitted") from err
-        if schedule_user is not None:
-            return schedule_user
+        handoff_user = _handoff_user(normalized, path, method)
+        if handoff_user is not None:
+            return handoff_user
         managed_handoff = _resolve_managed_handoff_user(normalized)
         if managed_handoff is not None:
             return managed_handoff
@@ -552,6 +592,22 @@ async def _authenticate(
         return await asyncio.to_thread(resolve, cfg, validated_http, normalized, authorization)
     except ManagedAuthError as err:
         raise _http_exception(err) from err
+
+
+def _handoff_user(
+    headers: Mapping[str, object], path: str | None, method: str | None
+) -> ScheduleHandoffUser | ThreadHandoffUser | None:
+    """A schedule or thread handoff caller, which the handoff secret verifies."""
+    try:
+        schedule_user = schedule_handoff_user(headers, path, method)
+    except ValueError as err:
+        raise ManagedAuthError(403, "Schedule access is not permitted") from err
+    if schedule_user is not None:
+        return schedule_user
+    try:
+        return thread_handoff_user(headers, path, method)
+    except ValueError as err:
+        raise ManagedAuthError(403, "Thread handoff is not permitted") from err
 
 
 async def resolve_request_identity(

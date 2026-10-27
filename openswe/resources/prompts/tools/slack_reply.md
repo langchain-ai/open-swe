@@ -1,56 +1,44 @@
-Send a message to the person who asked, in Slack and the Web UI. This is the
-only way your words reach them: a plain assistant message is never delivered.
+Send a message to the person who asked, in Slack and the Web UI.
+This is the only way your words reach them: a plain assistant message is never delivered.
 
-Use this for clarifying questions, essential progress updates, and the final
-answer or outcome. `response_type` says whether this reply ends your turn.
-Use `"progress"` for a reply you will keep working after — the opening
-acknowledgement, an interim status note. Use `"final"` for anything that leaves
-the asker holding the ball: the answer, the outcome, a failure, a blocking
-question, an approval request. A `progress` reply settles nothing, so a turn
-that ends on one is treated as an unanswered turn.
-For Slack-triggered information-only requests, put the
-complete answer in `message`, not merely a summary, and do not repeat it in
-the final assistant response. Make `message` as concise as possible: default
-to one sentence with only the outcome/status and link, or one blocking
-question. Omit greetings, preambles, headings, recaps, implementation
-details, and redundant context; use bullets only when multiple items are
-essential. End the run by posting a concise final outcome here.
+Use this for clarifying questions, essential progress updates, and the final answer or outcome.
+`response_type` says whether this reply ends your turn.
+Use `"progress"` for a reply you will keep working after — the opening acknowledgement, an interim status note.
+Use `"final"` for anything that leaves the asker holding the ball: the answer, the outcome, a failure, a blocking question, an approval request.
+A `progress` reply settles nothing, so a turn that ends on one is treated as an unanswered turn.
+For Slack-triggered information-only requests, put the complete answer in `message`, not merely a summary, and do not repeat it in the final assistant response.
+Make `message` as concise as possible: default to one sentence with only the outcome/status and link, or one blocking question.
+Omit greetings, preambles, headings, recaps, implementation details, and redundant context; use bullets only when multiple items are essential.
+End the run by posting a concise final outcome here.
 
-Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~,
-[link text](url), and Markdown lists. Replies use Slack's native Markdown blocks.
+Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~, [link text](url), and Markdown lists.
+Replies use Slack's native Markdown blocks.
 
-Show source code, diffs, commands, logs, and config in fenced code blocks
-rather than inline, and always give the fence a language identifier so Slack
-highlights it: ```python, ```typescript, ```sql, ```bash, ```json, ```yaml,
-or ```diff for a change (`+` lines render green, `-` lines red). Paste the
-code verbatim with its original whitespace, and keep each fence at the top
-level of the message rather than inside a list or quote, so it stays
-highlighted even in a long message.
+Slack delivery may replace GitHub PR links with Open SWE review-page URLs according to the requester's preference; the tool-call text is not proof of the delivered URL.
+Set `preserve_github_links=true` when the user requests direct GitHub links, needs links for sharing outside Open SWE, or corrects dashboard links to GitHub links.
+This preserves clickable GitHub URLs in both `message` and `blocks` for this reply only, without changing their preference.
+Do not use code blocks as a link-rewriting workaround.
 
-Past 12,000 characters, prose falls back to Slack's legacy mrkdwn and may lose
-less-common Markdown formatting; top-level code blocks stay highlighted. A
-message with `options` must stay within 12,000 characters so its buttons are
-not hidden; shorten it or share the body as an artifact.
+Show source code, diffs, commands, logs, and config in fenced code blocks rather than inline, and always give the fence a language identifier so Slack highlights it: ```python, ```typescript, ```sql, ```bash, ```json, ```yaml, or ```diff for a change (`+` lines render green, `-` lines red).
+Paste the code verbatim with its original whitespace, and keep each fence at the top level of the message rather than inside a list or quote, so it stays highlighted even in a long message.
+
+Past 12,000 characters, prose falls back to Slack's legacy mrkdwn and may lose less-common Markdown formatting; top-level code blocks stay highlighted.
+A message with `options` must stay within 12,000 characters so its buttons are not hidden; shorten it or share the body as an artifact.
 If supplying explicit `blocks`, use the formatting required by each block type.
 
-When asking a user to choose among concrete answers or actions, pass `options`
-to offer one-click answer buttons, including for blocking questions and approvals.
+When asking a user to choose among concrete answers or actions, pass `options` to offer one-click answer buttons, including for blocking questions and approvals.
 Slack renders interactive buttons and the web UI renders the same choices.
-Use short, concrete button labels. In `message`, explain exactly what each
-button means and what choosing it will do; never rely on the short label alone.
+Use short, concrete button labels.
+In `message`, explain exactly what each button means and what choosing it will do; never rely on the short label alone.
 Name the specific change and its scope rather than vague actions like "Save rule".
-For example: "Block PRs" prevents PR creation in concierge DMs and requires a
-separate work thread; "Keep PRs allowed" leaves PR creation in concierge DMs enabled.
-Offer only options that provide a concrete answer or trigger meaningful work; one
-button is enough when there is only one useful action. Do not add no-op options
-such as "Just discussing", "Do nothing", or "Ignore" — the user can simply ignore
-the offer. Do not add options such as "Reply in Slack" or "Tell me more" that merely
-ask the user to type a reply; they can already reply manually.
+For example: "Block PRs" prevents PR creation in concierge DMs and requires a separate work thread; "Keep PRs allowed" leaves PR creation in concierge DMs enabled.
+Offer only options that provide a concrete answer or trigger meaningful work; one button is enough when there is only one useful action.
+Do not add no-op options such as "Just discussing", "Do nothing", or "Ignore" — the user can simply ignore the offer.
+Do not add options such as "Reply in Slack" or "Tell me more" that merely ask the user to type a reply; they can already reply manually.
 Do not invent choices for open-ended questions.
 
-When the decision belongs to a specific person, set `option_user_id` to their
-Slack user ID (the `U...` ID, not their name or GitHub login). This restricts
-all option buttons to that person server-side; an @mention alone does not.
+When the decision belongs to a specific person, set `option_user_id` to their Slack user ID (the `U...` ID, not their name or GitHub login).
+This restricts all option buttons to that person server-side; an @mention alone does not.
 Use the intended decision-maker, even when someone else triggered the run.
 Omit `option_user_id` only for genuinely shared choices that anyone may answer.
 Recipient-scoped options cannot be combined with custom `blocks`.

@@ -420,10 +420,13 @@ async def _request_review(
                     "The pull request must be open and not a draft for a Design review."
                 )
             await DesignReview(active).start(pull, design_review_reason)
+            return result
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return result
 
+    if design_review_reason and not inline_summary:
+        return _failure("Design assessment requires an existing review request.")
     blockers = await review_blockers(pull)
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")

@@ -154,50 +154,80 @@ pub(crate) fn required_env_from_connector_requirements(
     out
 }
 
-/// Agent connection names a channel reserves for what its setup provides,
-/// such as `mda/github-token`, the GitHub App's installation token. They are
-/// not workspace connections, so deploy neither checks for them nor creates
-/// them.
-/// Each with what the token is and what the agent acts as with it.
-const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 3] = [
-    (
-        "mda/github-token",
-        "the GitHub App's installation token",
-        "act on GitHub as the App",
-    ),
-    (
-        "mda/linear-token",
-        "the Linear app's token",
-        "act in Linear as the app",
-    ),
-    (
-        "mda/slack-bot-token",
-        "the Slack app's bot token",
-        "act in Slack as the app",
-    ),
-];
+/// Connection names under `mda/` belong to MDA: a channel's setup provides
+/// them, such as `mda/github-token`, the GitHub App's installation token. They
+/// are not workspace connections, so deploy neither checks for them nor
+/// creates them, and a new channel needs no change here.
+const RESERVED_CONNECTION_PREFIX: &str = "mda/";
 
-/// Whether `slug` is a channel's reserved agent connection.
 fn is_channel_reserved_agent_connection(slug: &str) -> bool {
-    CHANNEL_RESERVED_AGENT_CONNECTIONS
-        .iter()
-        .any(|(reserved, _, _)| *reserved == slug)
+    slug.starts_with(RESERVED_CONNECTION_PREFIX)
 }
 
-/// Why a project cannot declare `slug` as a user connection, for a channel's
-/// reserved agent connection: reading an app's token as the person running
-/// the agent is not supported yet.
-pub(crate) fn reserved_user_connection_error(slug: &str) -> Option<String> {
-    CHANNEL_RESERVED_AGENT_CONNECTIONS
-        .iter()
-        .find(|(reserved, _, _)| *reserved == slug)
-        .map(|(_, token, acts_as)| {
-            format!(
-                "'{slug}' is not supported as a user connection yet: it is {token}, an \
-                 agent connection. Use connections.get(\"{slug}\", {{ type: \"agent\" }}) \
-                 to {acts_as}."
-            )
-        })
+/// The `mda/` agent connections the project's channels say their setup
+/// provides, such as `mda/github-token`, each with the name of the channel
+/// that provides it.
+pub(crate) fn channel_provided_connections(
+    channels: &ChannelRequirements,
+) -> BTreeMap<String, String> {
+    let mut provided = BTreeMap::new();
+    for (channel, manifest) in channels {
+        for slug in declared_slugs(manifest, "agentConnections") {
+            if is_channel_reserved_agent_connection(slug) {
+                provided.insert(slug.to_string(), channel.clone());
+            }
+        }
+    }
+    provided
+}
+
+/// The `mda/` agent connections the project's connectors read that none of
+/// its channels provides, so reading them fails at runtime.
+pub(crate) fn unprovided_reserved_connections(
+    connectors: &ConnectorRequirements,
+    channels: &ChannelRequirements,
+) -> Vec<String> {
+    let provided = channel_provided_connections(channels);
+    let slugs: BTreeSet<&str> = connectors
+        .values()
+        .flat_map(|manifest| declared_slugs(manifest, "agentConnections"))
+        .filter(|slug| is_channel_reserved_agent_connection(slug) && !provided.contains_key(*slug))
+        .collect();
+    slugs.into_iter().map(str::to_string).collect()
+}
+
+fn declared_slugs<'a>(manifest: &'a Value, field: &str) -> impl Iterator<Item = &'a str> {
+    manifest
+        .get(field)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+/// Why a project cannot declare `slug` as a user connection: names under
+/// `mda/` are agent connections a channel's setup provides, and reading an
+/// app's token as the person running the agent is not supported yet.
+/// `provided` is what [`channel_provided_connections`] returns.
+pub(crate) fn reserved_user_connection_error(
+    slug: &str,
+    provided: &BTreeMap<String, String>,
+) -> Option<String> {
+    if !is_channel_reserved_agent_connection(slug) {
+        return None;
+    }
+    Some(match provided.get(slug) {
+        Some(channel) => format!(
+            "'{slug}' is not supported as a user connection yet: the {channel} channel's app \
+             provides it as an agent connection. Use connections.get(\"{slug}\", {{ type: \
+             \"agent\" }}) to act as the app."
+        ),
+        None => format!(
+            "'{slug}' cannot be a user connection: names under mda/ are reserved for the \
+             agent connections channels provide. Use connections.get(\"{slug}\", {{ type: \
+             \"agent\" }}) for a channel's token, or rename the connection."
+        ),
+    })
 }
 
 /// Collect unique user-owned connection slugs from compiled connector requirements.
@@ -1590,17 +1620,52 @@ build-backend = \"setuptools.build_meta\"
             user_connections_from_connector_requirements(&requirements),
             vec!["mda/github-token".to_string()]
         );
-        let error = reserved_user_connection_error("mda/github-token").unwrap();
+        let channels = BTreeMap::from([(
+            "github".to_string(),
+            serde_json::json!({ "provider": "github", "agentConnections": ["mda/github-token"] }),
+        )]);
+        let provided = channel_provided_connections(&channels);
+        assert_eq!(
+            provided,
+            BTreeMap::from([("mda/github-token".to_string(), "github".to_string())])
+        );
+        let error = reserved_user_connection_error("mda/github-token", &provided).unwrap();
         assert!(
             error.contains("not supported as a user connection yet"),
             "{error}"
         );
+        assert!(error.contains("the github channel's app"), "{error}");
         assert!(error.contains("{ type: \"agent\" }"), "{error}");
-        let linear = reserved_user_connection_error("mda/linear-token").unwrap();
-        assert!(linear.contains("the Linear app's token"), "{linear}");
-        let slack = reserved_user_connection_error("mda/slack-bot-token").unwrap();
-        assert!(slack.contains("the Slack app's bot token"), "{slack}");
-        assert!(reserved_user_connection_error("notion").is_none());
+        // The whole namespace is reserved, provided by a channel or not.
+        let error = reserved_user_connection_error("mda/acme-token", &provided).unwrap();
+        assert!(error.contains("names under mda/ are reserved"), "{error}");
+        assert!(reserved_user_connection_error("notion", &provided).is_none());
+    }
+
+    #[test]
+    fn reserved_agent_connections_no_channel_provides_are_listed() {
+        let connectors = BTreeMap::from([(
+            "mcp".to_string(),
+            serde_json::json!({
+                "agentConnections": ["mda/github-token", "mda/linear-token", "docs-token"]
+            }),
+        )]);
+        let channels = BTreeMap::from([(
+            "linear".to_string(),
+            serde_json::json!({ "provider": "linear", "agentConnections": ["mda/linear-token"] }),
+        )]);
+
+        assert_eq!(
+            unprovided_reserved_connections(&connectors, &channels),
+            vec!["mda/github-token".to_string()]
+        );
+        assert_eq!(
+            unprovided_reserved_connections(&connectors, &BTreeMap::new()),
+            vec![
+                "mda/github-token".to_string(),
+                "mda/linear-token".to_string()
+            ]
+        );
     }
 
     #[test]

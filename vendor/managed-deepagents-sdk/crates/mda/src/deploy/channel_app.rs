@@ -69,7 +69,7 @@ pub(crate) struct AppChannelManifest<C> {
     #[serde(default)]
     #[expect(
         dead_code,
-        reason = "part of the channel manifest schema; unused by app setup"
+        reason = "part of the channel manifest schema; read by connection checks"
     )]
     agent_connections: Option<Value>,
     pub(crate) provider_config: C,

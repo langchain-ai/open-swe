@@ -10,6 +10,7 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
+from openswe.github.repo_files import RepoSettings
 from openswe.human_review import design, standard
 from openswe.human_review.design import DesignReview
 from openswe.human_review.lifecycle import ReviewCard
@@ -46,6 +47,15 @@ def review(monkeypatch: pytest.MonkeyPatch) -> HumanReviewRequest:
         async with lock:
             yield None, request
 
+    monkeypatch.setattr(
+        design.RepoSettings,
+        "cached",
+        AsyncMock(
+            return_value=RepoSettings.model_validate(
+                {"designReview": {"team": "example/designers", "paths": ["smith-frontend/*"]}}
+            )
+        ),
+    )
     monkeypatch.setattr(HumanReviewRequest, "locked", locked)
     return request
 
@@ -81,9 +91,13 @@ async def test_only_production_ui_changes_schedule_semantic_assessment(
 async def test_failed_assessment_dispatch_retries_then_runs_once(
     review: HumanReviewRequest,
 ) -> None:
+    review.thread_id = "engineering-thread"
+    review.requested_by = _user("requester")
     with (
         patch.object(
-            ReviewCard, "notify_agent", AsyncMock(side_effect=[RuntimeError("unavailable"), True])
+            design,
+            "start_dashboard_thread",
+            AsyncMock(side_effect=[RuntimeError("unavailable"), "assessment-thread"]),
         ) as notify,
         patch.object(design.queue, "schedule", AsyncMock()),
     ):
@@ -92,6 +106,9 @@ async def test_failed_assessment_dispatch_retries_then_runs_once(
         assert await DesignReview(review)._assess() == "assessment_requested"
         assert await DesignReview(review)._assess() == "assessed"
     assert notify.await_count == 2
+    assert review.thread_id == "engineering-thread"
+    assert notify.await_args is not None
+    assert notify.await_args.kwargs["unlisted"] is True
 
 
 async def test_design_delivery_is_idempotent_and_retries_only_missing_notifications(
@@ -215,10 +232,13 @@ async def test_design_approval_only_counts_for_engineering_when_they_also_have_t
     assert result["engineer"] == "CHANGES_REQUESTED"
 
 
+@pytest.mark.parametrize("kind", ["posted", "standard"])
 async def test_design_request_reuses_posted_review_without_replacing_engineering(
     review: HumanReviewRequest,
+    kind: str,
 ) -> None:
-    review.kind = "posted"
+    review.kind = kind
+    review.tldr = "Original engineering summary"
     reason = "Redesigned experiment comparison workflow"
     pr = review.pull_request
     with (
@@ -238,11 +258,12 @@ async def test_design_request_reuses_posted_review_without_replacing_engineering
             MagicMock(),
             standard.Origin(),
             channel="",
-            inline_summary="Improves comparing experiments.",
+            inline_summary=None,
             design_review_reason=reason,
         )
     assert result.reused and result.success
-    assert review.kind == "posted"
+    assert review.kind == kind
+    assert review.tldr == "Original engineering summary"
     assert DesignReview(review).state.reason == reason
     assert review.participants == []
     post.assert_not_awaited()
@@ -265,3 +286,16 @@ async def test_design_only_approval_keeps_the_engineering_card_open(
     assert not text.startswith(":white_check_mark: ")
     assert "approved by @designer" not in text
     assert review.state == "open"
+
+
+async def test_unconfigured_repository_does_not_start_design_review(
+    review: HumanReviewRequest,
+) -> None:
+    with (
+        patch.object(design.RepoSettings, "cached", AsyncMock(return_value=RepoSettings())),
+        patch.object(ChangedFile, "of_pull", AsyncMock()) as files,
+        patch.object(design.queue, "schedule", AsyncMock()) as schedule,
+    ):
+        await DesignReview(review).start(MagicMock())
+    files.assert_not_awaited()
+    schedule.assert_not_awaited()

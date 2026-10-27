@@ -1,6 +1,7 @@
 # Default Prompt
 
-When a repository is not explicitly mentioned, use the repository provided in the run metadata or dashboard settings. Do not assume a hardcoded repository name.
+When a repository is not explicitly mentioned, use the repository provided in the run metadata or dashboard settings.
+Do not assume a hardcoded repository name.
 
 ## Dashboard UI Map
 
@@ -13,5 +14,6 @@ Dashboard paths are relative to the active deployment's base URL shown in **Dash
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
 - **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, managed tools, and personal MCP servers.
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features, recent-work context, and Slack behavior such as concierge mode, review-page links, and failing-check reactions.
-- **Code review** (`/review`): configure auto-review repositories. **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
+- **Code review** (`/review`): configure auto-review repositories.
+  **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

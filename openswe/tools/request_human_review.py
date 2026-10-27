@@ -68,7 +68,7 @@ async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None
 @audit_tool()
 async def request_human_review(
     pr_url: str,
-    inline_summary: str,
+    inline_summary: str = "",
     channel: str = "",
     auto_merge: bool | None = None,
     design_review_reason: str = "",
@@ -77,7 +77,7 @@ async def request_human_review(
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
-    if not inline_summary.strip():
+    if not inline_summary.strip() and not design_review_reason.strip():
         return _failure(
             "inline_summary is required: one or two sentences on what the change does and why."
         )
@@ -102,7 +102,7 @@ async def request_human_review(
         pr_ref,
         origin,
         channel=channel,
-        inline_summary=inline_summary,
+        inline_summary=inline_summary or None,
         auto_merge=auto_merge,
         design_review_reason=design_review_reason,
     )
@@ -145,7 +145,7 @@ async def _request_for_mcp_caller(
         pr_ref,
         Origin(requester=requester),
         channel=channel,
-        inline_summary=inline_summary,
+        inline_summary=inline_summary or None,
         auto_merge=auto_merge,
         design_review_reason=design_review_reason,
     )
