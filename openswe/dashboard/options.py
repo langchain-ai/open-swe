@@ -67,6 +67,14 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "context_window": 272_000,
     },
     {
+        "id": "openai:gpt-6.1-terra",
+        "label": "GPT-6.1 Terra",
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+        "default_effort": "medium",
+        "supports_images": True,
+        "context_window": 272_000,
+    },
+    {
         "id": "openai:gpt-6-luna",
         "label": "GPT-6 Luna",
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],

@@ -106,6 +106,41 @@ async def test_gateway_status_reads_missing_services_under_either_policy(monkeyp
     assert [item.slug for item in required.missing_for(["Linear"])] == ["linear", "notion"]
 
 
+async def test_built_ins_sharing_a_langsmith_app_each_keep_their_own_consent_link(monkeypatch):
+    def google(name: str) -> dict[str, str]:
+        return {
+            "kind": "oauth",
+            "slug": "langsmith-google",
+            "display_name": f"Google {name}",
+            "verification_url": f"https://smith.langchain.com/connect/{name.lower()}",
+            "auth_id": f"{name.lower()}-auth",
+        }
+
+    listing = [[google("Calendar"), google("Drive")]]
+
+    async def with_session(login, gateway, use):
+        return ListToolsResult.model_validate(
+            {"tools": [], "_meta": {"com.langchain.langsmith/missingCredentials": listing[0]}}
+        )
+
+    monkeypatch.setattr(managed, "_with_session", with_session)
+    monkeypatch.setattr(
+        managed, "_gateway_detail", AsyncMock(return_value={"id": GATEWAY_ID, "name": "Eng"})
+    )
+
+    status = await managed.gateway_status("alice", GATEWAY_ID)
+    [calendar] = status.missing_for(["calendar"])
+    assert (await managed.connect_link("alice", GATEWAY_ID, calendar.slug)).auth_id == (
+        "calendar-auth"
+    )
+
+    # Once Drive is the only one left, the card's Calendar key must read as connected.
+    listing[0] = [google("Drive")]
+    status = await managed.gateway_status("alice", GATEWAY_ID)
+    assert status.missing_for([calendar.slug]) == []
+    assert await managed.connect_link("alice", GATEWAY_ID, calendar.slug) is None
+
+
 async def test_gateway_status_names_the_services_already_connected(monkeypatch):
     notion_id = "01a0f8da-0000-7000-8000-000000000001"
     linear_id = "01a0f8da-0000-7000-8000-000000000002"
@@ -148,7 +183,12 @@ async def test_gateway_status_names_the_services_already_connected(monkeypatch):
             200,
             json={
                 "items": [
-                    {"id": notion_id, "key": "notion", "name": "Notion MCP"},
+                    {
+                        "id": notion_id,
+                        "key": "notion",
+                        "name": "Notion MCP",
+                        "has_credential": True,
+                    },
                     {"id": linear_id, "key": "linear", "name": "Linear"},
                 ]
             },
@@ -163,9 +203,11 @@ async def test_gateway_status_names_the_services_already_connected(monkeypatch):
     assert (await managed.gateway_status("alice", GATEWAY_ID)).connected == []
 
     partial = await managed.gateway_status("alice", GATEWAY_ID, with_connected=True)
-    assert [(item.name, item.tool_count) for item in partial.connected] == [
-        ("Notion MCP", 2),
-        ("Langchain docs", 1),
+    assert [
+        (item.id, item.name, item.tool_count, item.disconnectable) for item in partial.connected
+    ] == [
+        (notion_id, "Notion MCP", 2, True),
+        ("langchain-docs", "Langchain docs", 1, False),
     ]
 
     listing[0] = managed._credentials_required({"credentials": [linear]})
@@ -216,6 +258,41 @@ async def test_gateways_are_read_with_the_users_own_token(monkeypatch):
     assert "X-Tenant-Id" not in requests[-1].headers
     with pytest.raises(managed.LangSmithNotConnected):
         await managed.list_gateways("bob")
+
+
+async def test_disconnect_removes_only_the_callers_credential_for_a_gateway_service(monkeypatch):
+    notion_id = "01a0f8da-0000-7000-8000-000000000001"
+    detail = {
+        "id": GATEWAY_ID,
+        "tools": [{"server_id": notion_id, "tool_name": "search", "mcp_name": "notion_search"}],
+    }
+    requests: list[httpx.Request] = []
+    status = [204]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status[0])
+
+    monkeypatch.setattr(managed, "_gateway_detail", AsyncMock(return_value=detail))
+    monkeypatch.setattr(managed, "refresh_tools", AsyncMock())
+    monkeypatch.setattr(
+        managed, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    )
+
+    with pytest.raises(managed.ManagedToolsError, match="no such service"):
+        await managed.disconnect_service("alice", GATEWAY_ID, "../../kits")
+    assert requests == []
+
+    await managed.disconnect_service("alice", GATEWAY_ID, notion_id)
+    assert (requests[-1].method, requests[-1].url.path) == (
+        "DELETE",
+        f"{managed.SERVERS_PATH}/{notion_id}/credential",
+    )
+    assert requests[-1].headers["Authorization"] == "Bearer alice-langsmith-token"
+
+    status[0] = 404
+    with pytest.raises(managed.ManagedToolsError, match="service no longer exists"):
+        await managed.disconnect_service("alice", GATEWAY_ID, notion_id)
 
 
 def private_thread(monkeypatch, owner: str) -> dict[str, str]:

@@ -103,6 +103,16 @@ class ScheduleEvent(TypedDict):
     new_thread: ReadOnly[bool]
 
 
+ChannelReply: TypeAlias = Literal["auto", "none"]
+"""Whether a channel posts the run's final answer to the conversation:
+``"auto"`` (the default) posts the agent's last reply once the run succeeds,
+and ``"none"`` leaves replying to the agent, through ``runtime.channel.post``
+or its own tools. Either way the channel keeps its other updates, such as
+Slack's status and reactions."""
+
+CHANNEL_REPLIES: frozenset[ChannelReply] = frozenset({"auto", "none"})
+"""Every ``ChannelReply``, for channels that check one."""
+
 ChannelEvent: TypeAlias = (
     MessageEvent | UserPromptResponseEvent | InterruptResumeEvent | ScheduleEvent
 )
@@ -112,7 +122,10 @@ ChannelEvent: TypeAlias = (
 class ChannelInfo:
     name: str
     provider: str
-    event: ChannelEvent
+    #: The event of the message that started this run, or the schedule event of a
+    #: scheduled run; ``None`` for a channel read from the thread record.
+    event: ChannelEvent | None
+    #: The provider's payload, in the run its message started only.
     raw_event: JsonValue = None
 
 
@@ -123,6 +136,13 @@ class PostedChannelMessageRequired(TypedDict):
 class PostedChannelMessage(PostedChannelMessageRequired, total=False):
     provider_message_id: str
     url: str
+
+
+class PostedChannelThread(PostedChannelMessage):
+    """A post that started a new provider thread."""
+
+    thread_id: str
+    """The LangGraph thread replies in the new provider thread run on."""
 
 
 class ChannelError(Exception):

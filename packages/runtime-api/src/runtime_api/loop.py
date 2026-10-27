@@ -17,6 +17,7 @@ how its catalog says to read the inbox; the backend keeps what each thread is ow
 until a run receives it.
 """
 
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -198,6 +199,13 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
+class GitHubProxyRefreshed(BaseModel):
+    """The box's GitHub proxy was given a fresh token."""
+
+    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    expires_at: datetime | None = None
+
+
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
@@ -260,9 +268,13 @@ MODEL_CHOICE = Endpoint(
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# Refreshes only a token near its expiry, so it is safe to send again.
+# Mints a token and sets it on the box, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(
-    "refresh_github_proxy", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+    "refresh_github_proxy",
+    RunRequest,
+    GitHubProxyRefreshed,
+    seconds=LOOP_CALL_SECONDS,
+    delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn, usage is finalized and the turn's git

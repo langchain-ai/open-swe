@@ -22,12 +22,18 @@
 
 <br>
 
-Open SWE turns engineering work into a repeatable system: investigate a codebase, implement changes, validate them, and deliver a pull request. It also reviews pull requests, learns repository-specific review preferences, monitors CI, and responds to feedback. Built by LangChain, it is open source and deployable in your infrastructure.
+Open SWE turns engineering work into a repeatable system: investigate a codebase, implement changes, validate them, and deliver a pull request.
+It also reviews pull requests, learns repository-specific review preferences, monitors CI, and responds to feedback.
+Built by LangChain, it is open source and deployable in your infrastructure.
 
 > [!NOTE]
-> **Under active development.** Expect breaking changes and rough edges. We’re not accepting issues or external contributions at this time. You’re welcome to explore and fork the code, but correctness, stability, and compatibility are not guaranteed.
+> **Under active development.**
+> Expect breaking changes and rough edges.
+> We’re not accepting issues or external contributions at this time.
+> You’re welcome to explore and fork the code, but correctness, stability, and compatibility are not guaranteed.
 >
-> If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md). Deploying it as is requires [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview), which runs its agent; without it, we recommend forking and adapting the code to your own runtime.
+> If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md).
+> Deploying it as is requires [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview), which runs its agent; without it, we recommend forking and adapting the code to your own runtime.
 
 ## What Open SWE does
 
@@ -47,21 +53,35 @@ flowchart LR
 - **Operate:** Schedule recurring tasks and monitor opted-in PRs with `/baby-sit`, diagnosing failures and rerunning only evidence-backed flaky jobs.
 - **Customize:** Choose models, reasoning effort, instructions, skills, integrations, and sandbox providers.
 
-Start and continue work from the **dashboard**, **GitHub issues and PR conversations**, or **Slack**. [Linear](docs/INSTALLATION.md#linear) supports issue-comment triggers and replies through a configured Linear MCP connection. Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
+Start and continue work from the **dashboard**, **GitHub issues and PR conversations**, or **Slack**.
+[Linear](docs/INSTALLATION.md#linear) supports issue-comment triggers and replies through a configured Linear MCP connection.
+Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
 
 ## How it works
 
-[Deep Agents](https://github.com/langchain-ai/deepagents) supplies planning, filesystem, shell, skills, and subagent primitives. [LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state. Open SWE adds engineering tools, integrations, authorization, and user interfaces. The graph entrypoints are declared in [`langgraph.json`](langgraph.json), with an [architecture inventory](AGENTS.md#architecture).
+[Deep Agents](https://github.com/langchain-ai/deepagents) supplies planning, filesystem, shell, skills, and subagent primitives.
+[LangGraph](https://github.com/langchain-ai/langgraph) provides durable execution and thread state.
+Open SWE adds engineering tools, integrations, authorization, and user interfaces.
+The graph entrypoints are declared in [`langgraph.json`](langgraph.json), with an [architecture inventory](AGENTS.md#architecture).
 
-Cloud coding runs in persistent, per-thread Linux sandboxes with tooling supplied by workspace scripts or snapshots. An unreachable coding sandbox is not silently replaced. [LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider; [other providers and local execution](docs/CUSTOMIZATION.md#1-sandbox) are configurable. PR chat does not need a sandbox.
+Cloud coding runs in persistent, per-thread Linux sandboxes with tooling supplied by workspace scripts or snapshots.
+An unreachable coding sandbox is not silently replaced.
+[LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider; [other providers and local execution](docs/CUSTOMIZATION.md#1-sandbox) are configurable.
+PR chat does not need a sandbox.
 
 ## Control and safety
 
-- **GitHub access:** Coding sandboxes normally receive installation-wide GitHub App access; selected workflows use narrower repository scopes. Workspace repository bindings control routing and preloaded checkouts, not a separate credential boundary. See [GitHub access](docs/reference/workspaces.md#github-access-and-the-sandbox-image).
-- **Integrations:** MCP connections layer instance-wide, workspace-specific, and personal tools. Configure their scope and credentials in the [customization guide](docs/CUSTOMIZATION.md#workspace-mcp-servers).
-- **Approvals:** Workflow-file approval prompts guard detected Git pushes, not every possible shell or API write. Reviewers are instructed not to commit or push; PR chat excludes mutation tools.
+- **GitHub access:** Coding sandboxes normally receive installation-wide GitHub App access; selected workflows use narrower repository scopes.
+  Workspace repository bindings control routing and preloaded checkouts, not a separate credential boundary.
+  See [GitHub access](docs/reference/workspaces.md#github-access-and-the-sandbox-image).
+- **Integrations:** MCP connections layer instance-wide, workspace-specific, and personal tools.
+  Configure their scope and credentials in the [customization guide](docs/CUSTOMIZATION.md#workspace-mcp-servers).
+- **Approvals:** Workflow-file approval prompts guard detected Git pushes, not every possible shell or API write.
+  Reviewers are instructed not to commit or push; PR chat excludes mutation tools.
 
-Sandboxes have powerful tools and may have network access. Use least-privilege credentials, restrict repositories and integrations, and tailor approval policies to your deployment. Local execution does not provide cloud sandbox isolation.
+Sandboxes have powerful tools and may have network access.
+Use least-privilege credentials, restrict repositories and integrations, and tailor approval policies to your deployment.
+Local execution does not provide cloud sandbox isolation.
 
 ## Documentation
 
@@ -77,4 +97,5 @@ Sandboxes have powerful tools and may have network access. Use least-privilege c
 
 Open SWE is licensed under the [MIT License](LICENSE).
 
-That license covers Open SWE's own code only. It does not cover anything under [`vendor/`](vendor/README.md), which is not licensed by this repository at all.
+That license covers Open SWE's own code only.
+It does not cover anything under [`vendor/`](vendor/README.md), which is not licensed by this repository at all.

@@ -268,14 +268,6 @@ ENV.var(
     "GITHUB_OIDC_AUDIENCE",
     "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
 )
-ENV.var(
-    "X_SERVICE_AUTH_JWT_SECRET",
-    "Secret minting service JWTs for the legacy brokered GitHub auth.",
-    secret=True,
-)
-ENV.var(
-    "USER_ID_API_KEY_MAP", "Legacy per-user API key map for the brokered GitHub auth.", secret=True
-)
 ENV.var("OPEN_SWE_MENTION_TAGS", "Comma-separated handles this deployment answers to.")
 ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as internal commenters.")
 ENV.var(
@@ -328,6 +320,11 @@ ENV.var(
     "DASHBOARD_DEV_SERVER_URL",
     "Local development only: Vite dev server the backend forwards UI requests to instead of "
     "serving a build, so the dashboard hot-reloads on the backend's origin.",
+)
+ENV.var(
+    "OPENSWE_ALTERNATIVE_ENVS",
+    "Comma-separated name:url backends (e.g. preview:https://...,staging:https://...) the "
+    "desktop app connected to this one offers to switch to until it restarts.",
 )
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(

@@ -84,14 +84,6 @@ impl MemoryDecision {
             Self::None => false,
         }
     }
-
-    /// The declaration path, when the project has one.
-    pub fn path(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Declared(summary) => Some(&summary.path),
-            Self::None => None,
-        }
-    }
 }
 
 /// Resolve the project's memory decision, rejecting the retired knobs.
