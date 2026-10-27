@@ -15,6 +15,7 @@ The user can also edit them in the dashboard Profile tab.
 A thread's system prompt is fixed when the thread opens, so it keeps showing the old text after this call.
 The ``reminder`` in the result is the current version — follow it for the rest of the thread.
 
-Args: instructions: The complete user-level instruction text (markdown).
+Args:
+- instructions: The complete user-level instruction text (markdown).
 
 Returns: ``{"ok": True, "login": str, "instructions": str, "reminder": str}`` on success, or ``{"ok": False, "error": str}`` when the user could not be resolved.

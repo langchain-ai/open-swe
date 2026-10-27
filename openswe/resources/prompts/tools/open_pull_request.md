@@ -17,22 +17,23 @@ The `Made by [Open SWE]` footer is appended to the body here, naming the thread 
 For everything else — updating an existing PR, marking it ready for review, commenting, reading status — keep using `gh`.
 If a PR already exists for the branch, this returns that PR's URL without creating a duplicate; switch to `gh pr edit` for updates.
 
-Args: owner: Repository owner/org (e.g. "langchain-ai").
-repo: Repository name (e.g. "open-swe").
-head: The branch with your changes (already pushed to origin).
-base: The branch you want to merge into (e.g. "main").
-title: PR title.
-body: PR description (Markdown).
-draft: Requested draft status.
-The authenticated user's dashboard preference overrides this value for newly created PRs; existing PRs are returned unchanged.
-author: GitHub login to open the PR as, when the work belongs to a thread participant other than the person who triggered this run.
-Leave empty to use the triggering person.
-retitle_thread: Retitle this thread to the new PR's title by default.
-Set False to preserve its title; returning an existing PR does not retitle the thread.
-resolves_thread: Set True when merging or closing this PR finishes the thread's work, so the thread auto-resolves once every PR it opened is merged or closed.
-Prefer True.
-Use False only when you know more PRs are coming for this thread (a stacked PR, a follow-up you still plan to open) and set True on the last one instead.
-Threads whose PRs never set this stay open until someone resolves them by hand.
+Args:
+- owner: Repository owner/org (e.g. "langchain-ai").
+- repo: Repository name (e.g. "open-swe").
+- head: The branch with your changes (already pushed to origin).
+- base: The branch you want to merge into (e.g. "main").
+- title: PR title.
+- body: PR description (Markdown).
+- draft: Requested draft status.
+  The authenticated user's dashboard preference overrides this value for newly created PRs; existing PRs are returned unchanged.
+- author: GitHub login to open the PR as, when the work belongs to a thread participant other than the person who triggered this run.
+  Leave empty to use the triggering person.
+- retitle_thread: Retitle this thread to the new PR's title by default.
+  Set False to preserve its title; returning an existing PR does not retitle the thread.
+- resolves_thread: Set True when merging or closing this PR finishes the thread's work, so the thread auto-resolves once every PR it opened is merged or closed.
+  Prefer True.
+  Use False only when you know more PRs are coming for this thread (a stacked PR, a follow-up you still plan to open) and set True on the last one instead.
+  Threads whose PRs never set this stay open until someone resolves them by hand.
 
 Returns: On success: {"success": True, "created": bool, "url": str, "number": int, "author": str}.
 ``created`` is False when an open PR already existed.

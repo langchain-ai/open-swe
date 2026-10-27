@@ -40,18 +40,19 @@ Read more of the raw log with `output`, for example to see why a monitor timed o
 At most 3 monitors run per thread.
 Monitors share the worktree: never race them with edits, installs, commits, or pushes.
 
-Args: action: `start` launches a monitor and returns its `monitor_id`; `output` reads its unfiltered raw lines; `stop` ends one; `list` shows this thread's monitors with their status and counts.
-command: The shell command to run.
-Required for `start`.
-filter: A shell command that reads raw lines on stdin and prints the ones that should be events.
-Optional.
-description: A short, specific name shown on every event, e.g. "errors in deploy.log".
-Required for `start`.
-timeout: Seconds before the monitor is stopped, 1 to 86400.
-Defaults to 3600.
-monitor_id: The monitor to read or stop.
-Required for `output` and `stop`.
-start_line: First raw line to return for `output` (1-based, inclusive).
-With neither line given, `output` returns the last 200 lines.
-end_line: Last raw line to return for `output` (inclusive).
-At most 500 lines or 64 KiB come back per call.
+Args:
+- action: `start` launches a monitor and returns its `monitor_id`; `output` reads its unfiltered raw lines; `stop` ends one; `list` shows this thread's monitors with their status and counts.
+- command: The shell command to run.
+  Required for `start`.
+- filter: A shell command that reads raw lines on stdin and prints the ones that should be events.
+  Optional.
+- description: A short, specific name shown on every event, e.g. "errors in deploy.log".
+  Required for `start`.
+- timeout: Seconds before the monitor is stopped, 1 to 86400.
+  Defaults to 3600.
+- monitor_id: The monitor to read or stop.
+  Required for `output` and `stop`.
+- start_line: First raw line to return for `output` (1-based, inclusive).
+  With neither line given, `output` returns the last 200 lines.
+- end_line: Last raw line to return for `output` (inclusive).
+  At most 500 lines or 64 KiB come back per call.

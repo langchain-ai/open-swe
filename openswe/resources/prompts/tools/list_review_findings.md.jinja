@@ -3,8 +3,9 @@ List the findings the reviewer published for {{ "a PR" if mcp else "this PR" }}.
 Use this to ground answers about the review — what was flagged, the severity/confidence, and any resolution notes.
 Prefer quoting these over re-deriving issues from the diff.
 
-Args: status_filter: One of ``open``, ``resolved``, ``dismissed``.
-``None`` (default) returns findings of every status.
+Args:
+- status_filter: One of ``open``, ``resolved``, ``dismissed``.
+  ``None`` (default) returns findings of every status.
 {% if mcp %}
     pr_url: The pull request's GitHub URL. Required.
 {% else %}

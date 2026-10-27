@@ -6,6 +6,7 @@ Read the ``html-artifacts`` skill for the authoring rules: write the page conten
 The artifact is rendered in an opaque-origin sandboxed iframe under a strict CSP: inline CSS and JavaScript, Canvas, WebGL, and Google Fonts work; network access and web storage do not.
 Honor system light/dark mode with `prefers-color-scheme`; ensure readable colors in both modes rather than hard-coding a theme.
 
-Args: artifact_file_path: Path to the HTML artifact in the sandbox.
+Args:
+- artifact_file_path: Path to the HTML artifact in the sandbox.
 
 Returns: ``{success: True, path}`` on success, or ``{success: False, error}``.

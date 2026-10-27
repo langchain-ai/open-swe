@@ -5,6 +5,7 @@ Its repositories and Slack channels fall through to whatever the routing order m
 That policy gates GitHub events only: Slack messages and dashboard runs for those repositories still land in ``default``.
 Confirm with the user first: the snapshot cannot be recovered, only rebuilt.
 
-Args: name: Workspace to delete.
+Args:
+- name: Workspace to delete.
 
 Returns: ``{"ok": True, "deleted": bool}``.

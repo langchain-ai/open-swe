@@ -7,6 +7,7 @@ Read progress with ``background_task("status", task_id)``: the stage it reached 
 To *author* a workspace's image, do not use this — provision this thread's sandbox with ordinary tools and ``publish_workspace`` it.
 A failed refresh keeps the previous image, so runs never drop to the base snapshot because a script broke.
 
-Args: name: Name of a workspace already published with a ``setup_script``.
+Args:
+- name: Name of a workspace already published with a ``setup_script``.
 
 Returns: ``{"status": "started", "task_id": ...}``, or ``status: "error"`` with the reason it could not start.

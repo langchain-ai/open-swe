@@ -6,11 +6,12 @@ Only draft a comment when the user asks you to comment, or agrees to your offer 
 Write the body as the user would, in the first person, without mentioning that you drafted it.
 When the user asks you to add the comment to their review rather than draft it, use `add_review_comment`.
 
-Args: file: Path of a file in the diff, as it appears in `/pr/diff.patch`.
-line: The line the comment attaches to; for a range, its last line.
-body: Comment text in GitHub Markdown.
-start_line: First line of a multi-line range; omit for a single line.
-side: `RIGHT` for new-file line numbers (added or unchanged lines), `LEFT` for old-file line numbers (removed lines).
+Args:
+- file: Path of a file in the diff, as it appears in `/pr/diff.patch`.
+- line: The line the comment attaches to; for a range, its last line.
+- body: Comment text in GitHub Markdown.
+- start_line: First line of a multi-line range; omit for a single line.
+- side: `RIGHT` for new-file line numbers (added or unchanged lines), `LEFT` for old-file line numbers (removed lines).
 
 Returns: `{proposed: true, range, body}`, or `{proposed: false, error}` when the input is invalid.
 The lines must be part of the diff or GitHub rejects the comment when the user posts it.
