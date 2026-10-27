@@ -4,13 +4,18 @@ A thread's history is replayed to the provider on every call, and to whichever
 provider routing or the fallback picks, so a block one provider wrote can break
 every later call on another. A provider stall that never raises would park the
 run with nothing for the retry or the fallback to react to. Anthropic's prompt
-cache is marked here too, where the call's real model is known.
+cache is marked here too, where the call's real model is known. A reply is
+mended here as well: a model copying a long signed URL now and then breaks it
+with whitespace, and every surface shows the reply as the run keeps it.
 """
 
 import asyncio
+import dataclasses
 import logging
-from collections.abc import Awaitable, Callable, Sequence
-from typing import Final
+import re
+from collections.abc import Awaitable, Callable, Iterator, Sequence
+from typing import Final, Self
+from urllib.parse import urlsplit
 
 from langchain.agents.middleware import (
     AgentMiddleware,
@@ -19,7 +24,7 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 
@@ -35,6 +40,11 @@ PROMPT_CACHE_TTL: Final = "1h"
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
 _SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call timed out."
+# Signed URLs carry tokens hundreds of characters long; the links people write stay shorter.
+_ISSUED_URL_MIN_LENGTH: Final = 200
+# No backslash, so a URL found here is a literal regex replacement.
+_URL: Final = re.compile(r"https://[^\s\"'`<>()\[\]\\]+")
+_WHITESPACE: Final = re.compile(r"\s+")
 
 
 class ModelCallTimeoutError(TimeoutError):
@@ -121,6 +131,66 @@ def _in_call_order(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
     return ordered
 
 
+def _urls(text: str) -> Iterator[str]:
+    for match in _URL.finditer(text):
+        yield match.group().rstrip(".,;:!?")
+
+
+@dataclasses.dataclass(frozen=True)
+class _IssuedUrls:
+    """The long URLs the thread's tool results handed the model, such as signed download links."""
+
+    urls: frozenset[str]
+
+    @classmethod
+    def handed(cls, messages: Sequence[AnyMessage]) -> Self:
+        return cls(
+            frozenset(
+                url
+                for message in messages
+                if isinstance(message, ToolMessage)
+                for url in _urls(message.text)
+                if len(url) >= _ISSUED_URL_MIN_LENGTH
+            )
+        )
+
+    def restored(self, message: BaseMessage) -> BaseMessage:
+        """``message`` with its text's broken copies of these URLs written as issued."""
+        if not isinstance(message, AIMessage):
+            return message
+        if isinstance(message.content, str):
+            content = self._text(message.content)
+        else:
+            content = [self._block(block) for block in message.content]
+        if content == message.content:
+            return message
+        return message.model_copy(update={"content": content})
+
+    def _block(self, block: str | dict) -> str | dict:
+        if isinstance(block, str):
+            return self._text(block)
+        text = block.get("text")
+        if block.get("type") != "text" or not isinstance(text, str):
+            return block
+        return {**block, "text": self._text(text)}
+
+    def _text(self, text: str) -> str:
+        compact = _WHITESPACE.sub("", text)
+        for url in self.urls:
+            if url in compact:
+                text = re.sub(r"\s*".join(map(re.escape, url)), url, text)
+        hosts = {urlsplit(url).hostname for url in self.urls}
+        if any(
+            len(url) >= _ISSUED_URL_MIN_LENGTH
+            and url not in self.urls
+            and urlsplit(url).hostname in hosts
+            for url in _urls(text)
+        ):
+            # Never the URL: a signed one grants access to the file.
+            logger.warning("A reply links a URL on a tool-issued URL's host that no tool issued")
+        return text
+
+
 class _ModelCallGuard(AgentMiddleware):
     # Its request carries the whole conversation, which the model call's own trace has.
     trace_policy = MIDDLEWARE_TRACE_POLICY
@@ -139,6 +209,29 @@ class ReplayableHistoryMiddleware(_ModelCallGuard):
         if any(a is not b for a, b in zip(messages, request.messages, strict=True)):
             request = request.override(messages=messages)
         return await handler(request)
+
+
+class IssuedUrlsMiddleware(_ModelCallGuard):
+    """Have a reply link each URL a tool issued exactly as issued.
+
+    A space or newline inside a copied URL ends a Markdown link early, and the link
+    fails. Text in a reply that is such a URL once its whitespace is taken out becomes
+    that URL; nothing else changes. A URL on an issued URL's host that matches none
+    after that is left as written, since guessing could link the wrong file.
+    """
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        response = await handler(request)
+        issued = _IssuedUrls.handed(request.state["messages"])
+        if not issued.urls:
+            return response
+        return dataclasses.replace(
+            response, result=[issued.restored(message) for message in response.result]
+        )
 
 
 class ModelCallTimeoutMiddleware(_ModelCallGuard):
@@ -194,11 +287,13 @@ def model_call_guards(
     They see the model the call really goes to, the fallback included. One deadline
     covers the call and its retries. An agent's call that still fails raises, so the
     fallback takes over and the run-complete webhook sees why; a subagent's that
-    times out becomes its answer. The prompt cache replaces deepagents' own 5m
-    one by name, in place.
+    times out becomes its answer. The answer links each URL a tool issued as issued,
+    before the transcript or the run's state sees it. The prompt cache replaces
+    deepagents' own 5m one by name, in place.
     """
     return [
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
+        IssuedUrlsMiddleware(),
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         # Its default answers with the error as the model's reply instead of raising.
