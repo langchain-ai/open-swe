@@ -205,6 +205,7 @@ from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.github.proxy import proxy_token_recorded
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -544,6 +545,17 @@ class RunSession:
         except SandboxUnreachableError as exc:
             await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
             raise
+        if request.sandbox_id is not None and not proxy_token_recorded(cfg.thread_id):
+            # MDA runs the agent's commands in the box itself, so nothing here connects
+            # to it before its first GitHub call: connect now, which sets its proxy.
+            try:
+                await reconnect_sandbox(self.config, self.assistant_id)
+            except Exception:
+                logger.warning(
+                    "Could not set the GitHub proxy on the thread's box",
+                    extra={"agent_thread_id": cfg.thread_id, "sandbox_id": request.sandbox_id},
+                    exc_info=True,
+                )
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
