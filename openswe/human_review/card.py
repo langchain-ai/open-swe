@@ -148,6 +148,22 @@ def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     ]
 
 
+def summary_blocks(
+    request: HumanReviewRequest,
+    *,
+    heading: str,
+    title: str,
+    author: str,
+    requester: str | None = None,
+    files: list[ChangedFile] | None = None,
+) -> list[Block]:
+    blocks: list[Block] = [section(f"{heading}\n*{escape(title)}*")]
+    if request.tldr:
+        blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
+    blocks.append(context(_stats(request, author, requester, files)))
+    return blocks
+
+
 async def open_card(
     request: HumanReviewRequest,
     *,
@@ -162,10 +178,14 @@ async def open_card(
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    blocks: list[Block] = [section(f"{await _heading(request, review_states)}\n*{escape(title)}*")]
-    if request.tldr:
-        blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
-    blocks.append(context(_stats(request, author, requester, files)))
+    blocks = summary_blocks(
+        request,
+        heading=await _heading(request, review_states),
+        title=title,
+        author=author,
+        requester=requester,
+        files=files,
+    )
     blocks.append(
         context("Auto-merge enabled" if request.auto_merge else "Manual merge — auto-merge is off")
     )
