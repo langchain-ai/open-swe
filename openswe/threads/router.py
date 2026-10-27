@@ -135,6 +135,33 @@ async def channel_run_starting(thread_id: str) -> None:
     await index.set_status(thread_id, "busy")
 
 
+# The run metadata keys MDA takes in a channel endpoint's answer, and among them the ones
+# it keeps for itself, the Agent Server and LangSmith. Its ``normalize_run_input`` refuses
+# an answer with any other key; these mirror its ``_METADATA_KEY`` and
+# ``_RESERVED_METADATA_KEY``.
+_CHANNEL_METADATA_KEY: Final = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+_CHANNEL_RESERVED_METADATA_KEY: Final = re.compile(
+    r"(mda_|langgraph_|ls_).*|assistant_id|graph_id|run_id|run_attempt|thread_id|session_id"
+    r"|conversation_id|user_id|owner|checkpoint_id|checkpoint_ns|constructor|prototype",
+    re.IGNORECASE,
+)
+
+
+def channel_run_metadata(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """A run's metadata as a channel endpoint answers MDA with it: only the keys MDA takes.
+
+    MDA refuses an answer that sets one of its own keys, or one it can't name, and
+    starts nothing. It records who the run is from itself; the attribution the run's
+    hooks read rides in its run token.
+    """
+    return {
+        key: value
+        for key, value in metadata.items()
+        if _CHANNEL_METADATA_KEY.fullmatch(key)
+        and not _CHANNEL_RESERVED_METADATA_KEY.fullmatch(key)
+    }
+
+
 def _reads(method: str, rest: str, body: bytes) -> bool:
     """Whether a call to a thread's runtime only reads it."""
     if method in {"GET", "HEAD"}:

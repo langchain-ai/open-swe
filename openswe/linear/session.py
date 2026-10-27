@@ -34,7 +34,11 @@ from openswe.input_messages import (
 )
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
-from openswe.threads.router import adopt_channel_run, channel_run_starting
+from openswe.threads.router import (
+    adopt_channel_run,
+    channel_run_metadata,
+    channel_run_starting,
+)
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.http_pool import pooled_transport
@@ -295,7 +299,12 @@ class LinearSessionTurn:
         )
         rewritten = await RUNTIMES.mda_runtime.run_payload(
             thread_id,
-            {"assistant_id": "agent", "config": cast(JsonValue, run_config)},
+            {
+                "assistant_id": "agent",
+                "config": cast(JsonValue, run_config),
+                # So the attribution the run's hooks read rides in its run token.
+                "metadata": cast(JsonValue, run_config["metadata"]),
+            },
             # A channel thread has no Slack thread to link.
             thread_metadata={},
         )
@@ -305,7 +314,7 @@ class LinearSessionTurn:
                 self._input(issue_prompt, repository, images, description_urls),
             ),
             "context": cast(dict[str, AnswerJson], rewritten["context"]),
-            "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
+            "metadata": cast(dict[str, AnswerJson], channel_run_metadata(run_config["metadata"])),
         }
         if COMPLETION_WEBHOOK_URL:
             prepared["webhook"] = COMPLETION_WEBHOOK_URL
