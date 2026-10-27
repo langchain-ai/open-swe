@@ -34,6 +34,7 @@ from openswe.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
+from openswe.message_queue import ThreadQueue
 from openswe.prompts import prompt
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
@@ -59,7 +60,6 @@ from openswe.utils.langsmith import create_langsmith_feedback, get_langsmith_tra
 from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
-from openswe.utils.thread_ops import queue_message_for_thread
 from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
@@ -1354,8 +1354,8 @@ async def _process_slack_mention_impl(
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
     # for the next message.
-    if message_update and await queue_message_for_thread(
-        thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
+    if message_update and await ThreadQueue(thread_id).send(
+        [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
     ):
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return False

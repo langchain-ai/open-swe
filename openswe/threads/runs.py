@@ -48,7 +48,7 @@ from openswe.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
-from openswe.message_queue import QueuedMessage
+from openswe.message_queue import ThreadQueue
 from openswe.prompts import prompt
 from openswe.slack.client import update_slack_trace_reply_for_web_handoff
 from openswe.slack.records import lookup_slack_thread_run_mapping
@@ -94,7 +94,7 @@ from openswe.utils.dashboard_handoff import (
     passage_replies,
 )
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
-from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
+from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.utils.thread_settings import thread_model_choice
@@ -1237,7 +1237,7 @@ async def steer_running_thread(
         payload[RELAYED_FROM_KEY] = relayed_from
     elif metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE
-    if not await queue_message_for_thread(thread_id, payload):
+    if not await ThreadQueue(thread_id).send(payload):
         raise HTTPException(502, "failed to deliver the follow-up to the running agent")
     # The run may have ended between the busy check and the store write, past
     # the completion hook's own look at the store. ``reject`` keeps the two
@@ -1422,7 +1422,7 @@ async def dispatch_pending_follow_ups(
     the store; the new run's first model call picks it up. Returns the run id,
     or ``None`` when nothing but notes for the next run was waiting.
     """
-    if not await QueuedMessage.awaits_run(thread_id):
+    if not await ThreadQueue(thread_id).awaits_run():
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(

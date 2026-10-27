@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, Request
 
+from openswe.message_queue import ThreadQueue
 from openswe.slack import routes as slack_routes
 from openswe.slack.payloads import SlackChannelContext
 
@@ -53,7 +54,6 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "claim_slack_event": AsyncMock(return_value=True),
         "slack_event_already_seen": AsyncMock(return_value=False),
         "lookup_slack_thread_id": AsyncMock(return_value="thread-code"),
-        "queue_message_for_thread": AsyncMock(return_value=True),
         "resolve_slack_thread_id": AsyncMock(return_value="thread-code"),
         "get_slack_repo_config": AsyncMock(return_value={"owner": "acme", "name": "billing"}),
         "SLACK_BOT_USER_ID": "U-BOT",
@@ -61,10 +61,12 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(SlackChannelContext, "allows_operations", property(lambda _self: True))
     for name, mock in calls.items():
         monkeypatch.setattr(slack_routes.common, name, mock)
+    queued = AsyncMock(return_value=True)
+    monkeypatch.setattr(ThreadQueue, "send", queued)
     dispatched = AsyncMock()
     monkeypatch.setattr(slack_routes.service, "process_slack_mention", dispatched)
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
-    return {**calls, "process_slack_mention": dispatched}
+    return {**calls, "process_slack_mention": dispatched, "queued": queued}
 
 
 async def _post(event: dict[str, Any]) -> tuple[dict[str, str], BackgroundTasks]:
@@ -93,4 +95,4 @@ async def test_an_ordinary_message_still_reaches_the_session(webhook: dict[str, 
     await _post({**ordinary, "text": "what is the status?"})
 
     webhook["process_slack_mention"].assert_awaited_once()
-    webhook["queue_message_for_thread"].assert_not_awaited()
+    webhook["queued"].assert_not_awaited()

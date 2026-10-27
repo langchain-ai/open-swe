@@ -13,6 +13,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
+from openswe.message_queue import ThreadQueue
 from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
@@ -188,18 +189,10 @@ async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
         return
     if not thread_id or not text.strip():
         return
-    await common.queue_message_for_thread(
-        thread_id,
-        [
-            {
-                "type": "text",
-                "text": (
-                    "This channel's membership changed while you were idle: "
-                    f"{text.strip()}\nNothing is being asked of you. Note who is here "
-                    "and carry on with whatever comes next."
-                ),
-            }
-        ],
+    await ThreadQueue(thread_id).note(
+        "This channel's membership changed while you were idle: "
+        f"{text.strip()}\nNothing is being asked of you. Note who is here "
+        "and carry on with whatever comes next."
     )
 
 

@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.github.comments import fetch_pr_comments_since_last_tag
+from openswe.message_queue import ThreadQueue
 from openswe.slack import move as slack_move
 from openswe.slack import webhook
 from openswe.slack.request import SlackRequest
@@ -156,7 +157,9 @@ async def test_private_slack_edit_rejects_non_owner(monkeypatch):
     monkeypatch.setattr(webhook.common, "get_slack_user_info", AsyncMock(return_value={}))
     monkeypatch.setattr(webhook, "slack_login", AsyncMock(return_value="bob"))
     queue = AsyncMock()
-    monkeypatch.setattr(webhook, "queue_message_for_thread", queue)
+    monkeypatch.setattr(
+        ThreadQueue, "send", lambda queued, content: queue(queued.thread_id, content)
+    )
     request = SlackRequest(
         channel_id="C1",
         thread_ts="1",

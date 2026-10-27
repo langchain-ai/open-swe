@@ -20,7 +20,7 @@ from openswe.input_messages import (
     system_input,
     system_introduction,
 )
-from openswe.message_queue import QueuedMessage
+from openswe.message_queue import QueuedMessage, ThreadQueue
 from openswe.prompts import prompt
 from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
@@ -29,7 +29,6 @@ from openswe.slack.client import (
 )
 from openswe.threads import succession
 from openswe.ui_invalidations import Topic
-from openswe.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +108,7 @@ async def _move_to_live_thread(record: Incident) -> None:
 
 async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
     await _move_to_live_thread(record)
-    return await queue_message_for_thread(
-        record.thread_id, context_block(record.channel_id, message)
-    )
+    return await ThreadQueue(record.thread_id).send(context_block(record.channel_id, message))
 
 
 async def _runs(thread_id: str, status: Literal["pending", "running"]) -> list[dict[str, Any]]:
@@ -148,7 +145,7 @@ async def queued_context_count(thread_id: str) -> int:
     """Count of messages waiting to reach this thread's agent.
 
     Combines the in-run injection queue (``queue_context`` /
-    ``queue_message_for_thread``, used by Slack context and steered
+    ``ThreadQueue.send``, used by Slack context and steered
     follow-ups) with genuine pending runs
     (a composer follow-up enqueued via the server-backed queue adapter is a
     real LangGraph run, not a KV-store entry, and would otherwise be

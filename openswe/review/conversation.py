@@ -15,8 +15,8 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient
-from openswe.github.pull_request_activity import note_pull_request_activity
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +405,9 @@ async def api_post_review_conversation_comment(
         posted = await ConversationComment.post(
             github.repo(owner, repo).pull_request(pr_number), body
         )
-    await note_pull_request_activity(owner, repo, pr_number, session["sub"], "comment", text=body)
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
+        session["sub"], "comment", text=body
+    )
     return posted
 
 
@@ -425,7 +427,9 @@ async def api_reply_to_review_thread(
         reply = await ThreadComment.reply(
             github.repo(owner, repo).pull_request(pr_number), comment_id, body
         )
-    await note_pull_request_activity(owner, repo, pr_number, session["sub"], "reply", text=body)
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
+        session["sub"], "reply", text=body
+    )
     return reply
 
 
@@ -448,10 +452,7 @@ async def api_set_review_thread_resolution(
             .pull_request(pr_number)
             .set_thread_resolved(thread_node_id, resolution.resolved)
         )
-    await note_pull_request_activity(
-        owner,
-        repo,
-        pr_number,
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
         session["sub"],
         "thread-resolved" if resolution.resolved else "thread-unresolved",
     )

@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 import pytest
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.message_queue import ThreadQueue
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
@@ -1089,7 +1090,7 @@ def test_queued_slack_edit_names_people_and_public_channels(
     async def fake_thread_exists(thread_id: str) -> bool:
         return True
 
-    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+    async def fake_send(queue: ThreadQueue, content: object) -> bool:
         captured["queued"] = content
         return True
 
@@ -1097,7 +1098,7 @@ def test_queued_slack_edit_names_people_and_public_channels(
         return channels.get(channel_id)
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
-    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(ThreadQueue, "send", fake_send)
     monkeypatch.setattr(slack_webhooks.SlackChannel, "load", fake_load)
 
     asyncio.run(
@@ -1139,11 +1140,11 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
     async def fake_thread_exists(thread_id: str) -> bool:
         return True
 
-    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+    async def fake_send(queue: ThreadQueue, content: object) -> bool:
         return False
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
-    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(ThreadQueue, "send", fake_send)
 
     asyncio.run(
         slack_webhooks.process_slack_mention(

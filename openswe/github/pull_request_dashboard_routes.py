@@ -18,7 +18,6 @@ from openswe.github.pull_request_actions import (
     act_on_pull_request,
     resolve_review_threads,
 )
-from openswe.github.pull_request_activity import note_pull_request_activity
 from openswe.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
@@ -121,8 +120,8 @@ async def api_act_on_pull_request(
 ) -> PullRequestActionResult:
     async with GitHubClient.as_user(session["sub"]) as github:
         result = await act_on_pull_request(github.repo(owner, repo).pull_request(number), body)
-    await note_pull_request_activity(
-        owner, repo, number, session["sub"], body.action, **body.activity_details()
+    await PullRequest(owner=owner, repo=repo, number=number).note_activity(
+        session["sub"], body.action, **body.activity_details()
     )
     return result
 
@@ -163,7 +162,7 @@ async def api_resolve_review_threads(
     async with GitHubClient.as_user(session["sub"]) as github:
         result = await resolve_review_threads(github.repo(owner, repo).pull_request(number), body)
     if result.resolved:
-        await note_pull_request_activity(
-            owner, repo, number, session["sub"], "resolve-threads", count=len(result.resolved)
+        await PullRequest(owner=owner, repo=repo, number=number).note_activity(
+            session["sub"], "resolve-threads", count=len(result.resolved)
         )
     return result

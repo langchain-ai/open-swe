@@ -6,6 +6,7 @@ rows it consumed, so no update can overwrite another.
 
 import logging
 from collections.abc import Collection
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Self
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.ui_invalidations.topics import Topic
+from openswe.utils.dashboard_handoff import ACTION_KEY
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -78,21 +80,6 @@ class QueuedMessage(Base):
             )
 
     @classmethod
-    async def awaits_run(cls, thread_id: str) -> bool:
-        """Whether anything queued for ``thread_id`` asks for a run, beyond notes for the next one."""
-        async with postgres.session() as session:
-            return bool(
-                await session.scalar(
-                    select(
-                        exists().where(
-                            cls.thread_id == thread_id,
-                            not_(cls.content.contains({PASSIVE_KEY: True})),
-                        )
-                    )
-                )
-            )
-
-    @classmethod
     async def for_thread(cls, thread_id: str) -> list[Self]:
         """Every message queued for ``thread_id``, oldest first."""
         async with postgres.session() as session:
@@ -138,6 +125,55 @@ class QueuedMessage(Base):
             platform=sender.platform if sender else None,
             queued_at=self.queued_at,
         )
+
+
+@dataclass(frozen=True)
+class ThreadQueue:
+    """What waits for one thread's agent: follow-ups, notes, and actions people took for it."""
+
+    thread_id: str
+
+    async def send(self, content: QueuedContent) -> bool:
+        """Queue ``content`` for the thread's next model call; ``False``, logged, when it could not be."""
+        queue_id = content.get("queue_id") if isinstance(content, dict) else None
+        try:
+            await QueuedMessage.put(
+                self.thread_id, content, queue_id=queue_id if isinstance(queue_id, str) else None
+            )
+        except Exception:
+            logger.exception("Failed to queue message", extra={"agent_thread_id": self.thread_id})
+            return False
+        logger.info("Queued message", extra={"agent_thread_id": self.thread_id})
+        return True
+
+    async def note(self, text: str) -> bool:
+        """Queue ``text`` as context for the thread's next run without starting one."""
+        return await self.send({"text": text, PASSIVE_KEY: True})
+
+    async def record_action(self, login: str, action: str, note: str) -> bool:
+        """Queue what ``login`` did in the app, told as ``note``, as their input to the next run."""
+        return await self.send(
+            {
+                "text": note,
+                "sender": {"id": f"github:{login}", "platform": "github", "github_login": login},
+                ACTION_KEY: action,
+                PASSIVE_KEY: True,
+            }
+        )
+
+    async def awaits_run(self) -> bool:
+        """Whether anything queued asks for a run, beyond notes for the next one."""
+        async with postgres.session() as session:
+            return bool(
+                await session.scalar(
+                    select(
+                        exists().where(
+                            QueuedMessage.thread_id == self.thread_id,
+                            not_(QueuedMessage.content.contains({PASSIVE_KEY: True})),
+                        )
+                    )
+                )
+            )
 
 
 class _QueuedSender(BaseModel):

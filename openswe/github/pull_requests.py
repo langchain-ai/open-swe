@@ -56,12 +56,36 @@ from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
+from openswe.message_queue import ThreadQueue
+from openswe.prompts import prompt
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
 from openswe.utils.json_types import JsonObject, thread_metadata
-from openswe.utils.thread_ops import langgraph_client, queue_action_for_thread
+from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
+
+type PullRequestActivity = Literal[
+    "merge",
+    "close",
+    "mark-ready",
+    "update-branch",
+    "resolve-threads",
+    "thread-resolved",
+    "thread-unresolved",
+    "label-added",
+    "label-removed",
+    "comment",
+    "inline-comment",
+    "reply",
+    "review",
+    "re-review",
+    "human-review-requested",
+    "human-review-dismissed",
+    "merge-queued",
+]
+
+_MAX_ACTIVITY_TEXT = 4000
 
 ThreadRole = Literal["primary", "secondary"]
 AGENT_OPENED_LINK_SOURCE = "open_pull_request"
@@ -383,18 +407,43 @@ class PullRequest(Base):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
 
-    async def note_for_threads(self, login: str, action: str, note: str) -> None:
-        """Queue ``login``'s ``action``, told as ``note``, for each linked thread's next run, starting none."""
-        for thread_id in await self.linked_threads():
-            if not await queue_action_for_thread(thread_id, login, action, note):
-                logger.warning(
-                    "Could not queue a pull request note for a linked thread",
-                    extra={
-                        "pr_repo_full_name": self.repo_full_name,
-                        "pr_number": self.number,
-                        "agent_thread_id": thread_id,
-                    },
-                )
+    async def note_activity(
+        self, login: str, activity: PullRequestActivity, *, text: str = "", **details: str | int
+    ) -> None:
+        """Queue ``login``'s ``activity`` here for each linked thread's next run; never fails the action."""
+        try:
+            stored = await self.load(self.owner, self.repo, self.number)
+            text = text.strip()
+            note = prompt(
+                "runs/pull-request-activity",
+                activity=activity,
+                login=login,
+                pr_url=stored.url,
+                text=text[:_MAX_ACTIVITY_TEXT],
+                truncated=len(text) > _MAX_ACTIVITY_TEXT,
+                **details,
+            )
+            for thread_id in await stored.linked_threads():
+                if not await ThreadQueue(thread_id).record_action(
+                    login, f"pull-request-{activity}", note
+                ):
+                    logger.warning(
+                        "Could not queue pull request activity for a linked thread",
+                        extra={
+                            "pr_repo_full_name": self.repo_full_name,
+                            "pr_number": self.number,
+                            "agent_thread_id": thread_id,
+                        },
+                    )
+        except Exception:
+            logger.exception(
+                "Could not note pull request activity for its threads",
+                extra={
+                    "pr_repo_full_name": self.repo_full_name,
+                    "pr_number": self.number,
+                    "pr_activity": activity,
+                },
+            )
 
     async def discover_threads(self) -> Sequence[str] | None:
         """Agent threads whose metadata still points at this PR, oldest first.

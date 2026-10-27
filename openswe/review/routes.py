@@ -15,8 +15,8 @@ from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
-from openswe.github.pull_request_activity import note_pull_request_activity
 from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
 from openswe.review.approvals import fetch_approvals_md
@@ -276,10 +276,7 @@ async def api_change_pull_request_label(
 ) -> None:
     async with _as_viewer(session, owner, repo) as repository:
         await change.apply(repository.pull_request(pr_number))
-    await note_pull_request_activity(
-        owner,
-        repo,
-        pr_number,
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
         session["sub"],
         "label-added" if change.selected else "label-removed",
         label=change.name,
@@ -336,7 +333,9 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     result = await trigger_re_review(owner, repo, pr_number, session["sub"])
-    await note_pull_request_activity(owner, repo, pr_number, session["sub"], "re-review")
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
+        session["sub"], "re-review"
+    )
     return result
 
 
@@ -393,10 +392,7 @@ async def api_post_review_comment(
 ) -> PostedReviewComment:
     async with _as_viewer(session, owner, repo) as repository:
         posted = await PostedReviewComment.post(repository.pull_request(pr_number), comment)
-    await note_pull_request_activity(
-        owner,
-        repo,
-        pr_number,
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
         session["sub"],
         "inline-comment",
         text=comment.body,
@@ -427,8 +423,8 @@ async def api_submit_pull_request_review(
             event=review.event,
             body=review.body.strip(),
         )
-    await note_pull_request_activity(
-        owner, repo, pr_number, session["sub"], "review", text=review.body, event=review.event
+    await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
+        session["sub"], "review", text=review.body, event=review.event
     )
     return submitted
 

@@ -164,7 +164,6 @@ from openswe.utils.multimodal import (
     vision_not_supported_warning,  # noqa: F401
 )
 from openswe.utils.repo import extract_repo_from_text
-from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
@@ -276,7 +275,6 @@ __all__ = [
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
     "process_slack_stop_reaction",
-    "queue_message_for_thread",
     "react_to_github_comment",
     "reconcile_findings_with_review_threads",
     "repo_context_bar_items",

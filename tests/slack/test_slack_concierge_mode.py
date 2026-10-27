@@ -10,6 +10,7 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
+from openswe.message_queue import ThreadQueue
 from openswe.slack import events as slack_events
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
@@ -159,7 +160,9 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 
     monkeypatch.setattr(dm, "lookup_slack_thread_id", AsyncMock(return_value="concierge-thread"))
     queue = AsyncMock(return_value=True)
-    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+    monkeypatch.setattr(
+        ThreadQueue, "send", lambda queued, content: queue(queued.thread_id, content)
+    )
 
     await dm._record_in_concierge_thread("D1", "Mark the PR ready for review")
 
@@ -182,7 +185,9 @@ async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
     lookup = AsyncMock(return_value="concierge-thread")
     monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
     queue = AsyncMock(return_value=True)
-    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+    monkeypatch.setattr(
+        ThreadQueue, "send", lambda queued, content: queue(queued.thread_id, content)
+    )
 
     await dm.note_for_concierge("U1", "D1", "a note")
 

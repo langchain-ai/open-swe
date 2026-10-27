@@ -2,9 +2,9 @@
 
 import logging
 
+from openswe.message_queue import ThreadQueue
 from openswe.run_config import RunConfig
 from openswe.slack.records import lookup_slack_thread_id
-from openswe.utils.thread_ops import queue_note_for_thread
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def note_for_thread_owner(channel_id: str, thread_ts: str, note: str) -> N
     # The thread's own run caused this and already knows.
     if thread_id is None or thread_id == _running_thread_id():
         return
-    if not await queue_note_for_thread(thread_id, note):
+    if not await ThreadQueue(thread_id).note(note):
         logger.warning(
             "Could not queue a note for the Slack thread's agent",
             extra={"slack_channel": channel_id, "agent_thread_id": thread_id},
