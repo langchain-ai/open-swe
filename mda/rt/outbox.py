@@ -28,7 +28,7 @@ from typing import Final, Literal
 
 from langchain_core.messages import ToolMessage, messages_to_dict
 from langsmith.run_trees import RunTree
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.endpoint import Endpoint, Transport, call
 from runtime_api.loop import (
     INBOX_RECEIVED,
@@ -220,16 +220,18 @@ class Outbox:
                 continue
             try:
                 carried = _Carried.model_validate(value)
-            except ValidationError:
-                logger.warning("Dropping an outbox item the run's state could not read")
+                restored = (
+                    carried.item.restore(messages)
+                    if isinstance(carried.item, _ToolResultRef)
+                    else carried.item
+                )
+            except ValueError:
+                # Unreadable, or a tool result the checkpoint no longer holds, such as one
+                # summarized away: failing would fail every later step of the thread.
+                logger.warning("Dropping an outbox item the run's state could not rebuild")
                 self._known.add(key)
                 self._settled.add(key)
                 continue
-            restored = (
-                carried.item.restore(messages)
-                if isinstance(carried.item, _ToolResultRef)
-                else carried.item
-            )
             self._hold(restored, carried.order)
 
     def carried(self, state: Mapping[str, object]) -> dict[str, JsonValue] | None:
