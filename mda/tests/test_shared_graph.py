@@ -10,7 +10,7 @@ import agent
 import httpx2
 import pytest
 from deepagents.backends import StateBackend
-from deepagents.backends.protocol import ExecuteResponse
+from deepagents.backends.protocol import ExecuteResponse, FileDownloadResponse, WriteResult
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -558,6 +558,35 @@ async def test_concurrent_runs_compact_with_their_own_authenticated_models(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
     summaries: list[str] = []
+    archives: dict[str, dict[str, str]] = {}
+
+    def resolve(
+        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
+    ) -> StateBackend:
+        thread_id = str((config or {}).get("configurable", {}).get("thread_id"))
+        files = archives.setdefault(thread_id, {})
+        box = MagicMock(spec=StateBackend)
+        box.id = f"box-{thread_id}"
+
+        async def download(paths: list[str]) -> list[FileDownloadResponse]:
+            return [
+                FileDownloadResponse(
+                    path=path,
+                    content=files[path].encode() if path in files else None,
+                    error=None if path in files else "file_not_found",
+                )
+                for path in paths
+            ]
+
+        async def write(path: str, content: str) -> WriteResult:
+            files[path] = content
+            return WriteResult(path=path)
+
+        box.adownload_files = download
+        box.awrite = write
+        return box
+
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
 
     async def generate(
         model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
@@ -582,10 +611,12 @@ async def test_concurrent_runs_compact_with_their_own_authenticated_models(
     placeholder = _calling()
     placeholder.name = "placeholder"
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", placeholder)
-    history = [HumanMessage("history " * 1000, id=f"h-{i}") for i in range(20)]
 
     async def run(index: int) -> None:
-        catalog = _catalog("lookup", f"grant-{index}").model_copy(
+        history = [
+            HumanMessage(f"thread-{index} " + "history " * 1000, id=f"h-{i}") for i in range(20)
+        ]
+        catalog = _catalog("lookup", f"grant-{index}", snapshot=f"snapshot-{index}").model_copy(
             update={
                 "models": RunModels(
                     model=ModelSpec(model_id=f"run-{index}", kwargs={}),
@@ -613,3 +644,12 @@ async def test_concurrent_runs_compact_with_their_own_authenticated_models(
 
     await asyncio.gather(run(0), run(1))
     assert sorted(summaries) == ["run-0", "run-1"]
+    assert set(archives) == {"summary-0", "summary-1"}
+    for index in range(2):
+        files = archives[f"summary-{index}"]
+        assert len(files) == 1
+        path, content = next(iter(files.items()))
+        assert path.startswith("/conversation_history/")
+        assert content.count("## Summarized at") == 1
+        assert f"thread-{index}" in content
+        assert f"thread-{1 - index}" not in content
