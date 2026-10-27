@@ -18,6 +18,11 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
+from langsmith.sandbox import (
+    ResourceCreationError,
+    SandboxAuthenticationError,
+    SandboxClientError,
+)
 from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
@@ -40,7 +45,7 @@ from runtime_api.reports import Reports
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
 type BackendCalls = list[tuple[str, str, str | None]]
-type Prepared = list[JsonValue]
+type Prepared = list[tuple[JsonValue, JsonValue]]
 type Browsers = list[tuple[JsonValue, JsonValue]]
 
 
@@ -92,7 +97,7 @@ def _calling(*calls: ToolCall) -> GenericFakeChatModel:
 
 @pytest.fixture
 def prepared() -> Prepared:
-    """The box each run reported as it prepared."""
+    """The box each run reported as it prepared, and why it could not open one."""
     return []
 
 
@@ -121,7 +126,7 @@ def backend_calls(
         operation = f"{json['name']}:{json['grant']}" if hook == "operation" else None
         calls.append((hook, headers["Authorization"], operation))
         if hook == "prepare":
-            prepared.append(json.get("sandbox_id"))
+            prepared.append((json.get("sandbox_id"), json.get("sandbox_error")))
         if hook == "browser":
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
@@ -240,8 +245,53 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     )
 
     assert second.nodes["model"] is first.nodes["model"]
-    assert prepared == ["box-thread-1", "box-thread-2"]
+    assert prepared == [("box-thread-1", None), ("box-thread-2", None)]
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
+
+
+async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_reports_why_it_gave_up(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
+) -> None:
+    """A 503 while opening or creating the box is retried until it opens; a refusal that will not
+    change is not, and the backend hears its cause without the secret in it."""
+    request = httpx2.Request("POST", "https://sandbox.invalid/boxes")
+    response = httpx2.Response(503, request=request)
+    unavailable = SandboxClientError("Service Unavailable")
+    unavailable.__cause__ = httpx2.HTTPStatusError("503", request=request, response=response)
+    unscheduled = ResourceCreationError("No capacity", error_type="Unschedulable")
+    unscheduled.__cause__ = httpx2.HTTPStatusError("503", request=request, response=response)
+    failures: dict[object, list[Exception]] = {
+        "thread-1": [unavailable, unscheduled],
+        "thread-2": [SandboxAuthenticationError("Invalid api_key=lsv2-secret")],
+    }
+    attempts: list[object] = []
+
+    def resolve(
+        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
+    ) -> StateBackend:
+        thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
+        attempts.append(thread_id)
+        if failures[thread_id]:
+            raise failures[thread_id].pop(0)
+        box = MagicMock(spec=StateBackend)
+        box.id = f"box-{thread_id}"
+        return box
+
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
+    monkeypatch.setattr("rt.managed_sandbox.asyncio.sleep", AsyncMock())
+    answers = iter([AIMessage(content="done"), AIMessage(content="done")])
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=answers))
+    store = InMemoryStore()
+
+    for thread_id, token in (("thread-1", "token-1"), ("thread-2", "token-2")):
+        catalog = _catalog("web_search", token, snapshot="a")
+        await _run(store, thread_id, _context("agent", token, catalog))
+
+    assert attempts == ["thread-1", "thread-1", "thread-1", "thread-2"]
+    assert prepared == [
+        ("box-thread-1", None),
+        (None, "SandboxAuthenticationError: Invalid api_key=[redacted]"),
+    ]
 
 
 @pytest.mark.parametrize("code_mode", [False, True])

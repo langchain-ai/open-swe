@@ -209,6 +209,7 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
+from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -475,11 +476,24 @@ class RunSession:
             return None
         return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
 
-    async def bind_sandbox(self, sandbox_id: str | None) -> None:
-        """Bind the thread to the box MDA opened before preparing, if MDA owns it."""
+    async def bind_sandbox(self, request: Prepare) -> None:
+        """Bind the thread to the box MDA opened before preparing, if MDA owns it.
+
+        A thread with no box to work in ends the run once the person knows why.
+        """
         cfg = RunConfig.from_config(self.config)
-        if cfg.thread_id is not None and await self.sandbox() is not None:
-            await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
+        if cfg.thread_id is None or await self.sandbox() is None:
+            return
+        try:
+            await bind_mda_sandbox(
+                cfg.thread_id,
+                request.sandbox_id,
+                open_error=request.sandbox_error,
+                workspace_slug=cfg.workspace_slug,
+            )
+        except SandboxUnreachableError as exc:
+            await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
+            raise
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
@@ -595,7 +609,7 @@ class RunSession:
 
     async def prepare(self, request: Prepare) -> PhaseResult:
         # MDA opened the box before preparing; preparation connects to it as to any other.
-        await self.bind_sandbox(request.sandbox_id)
+        await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
         if self.surface.inbox is not None and cfg.thread_id is not None:
             # The events this run was started to carry are its input: it holds them now.
