@@ -325,7 +325,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
     <div
       key={`${index}:${rect.x}:${rect.y}`}
       className={cn(
-        "border-info pointer-events-none absolute overflow-hidden border-2 border-dashed",
+        "pointer-events-none absolute overflow-hidden border-2 border-dashed border-focus",
         !includeIgnored && "bg-surface-level-1/50"
       )}
       style={rectStyle(rect)}
@@ -365,7 +365,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             className={cn(
               "absolute rounded-sm border-2 border-warning bg-transparent",
               index === selectedIndex &&
-                "outline-warning outline-2 outline-offset-2"
+                "outline-2 outline-offset-2 outline-[var(--border-warning)]"
             )}
             style={rectStyle(region)}
           />
@@ -375,7 +375,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
           <div
             key={`${annotation.title}:${index}`}
             title={`${annotation.title}: ${annotation.body}`}
-            className="border-info pointer-events-none absolute rounded-sm border-2"
+            className="pointer-events-none absolute rounded-sm border-2 border-purple"
             style={rectStyle(annotation)}
           >
             <span className="absolute top-0 left-0 max-w-full truncate rounded-br-sm bg-surface-level-1 px-space-1 text-xxs text-primary">
@@ -636,7 +636,8 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
                 <div className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
                   <span>
                     {scenario.mask_rects.length} recorded · {localMasks.length}{" "}
-                    local ignore regions
+                    local ignore{" "}
+                    {localMasks.length === 1 ? "region" : "regions"}
                   </span>
                   {localMasks.map((_, index) => (
                     <Button
