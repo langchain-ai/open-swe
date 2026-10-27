@@ -11,14 +11,19 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal, TypedDict
+from uuid import UUID
 
+import httpx2
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
 
 from openswe.database import configured
+from openswe.dispatch import dispatch_agent_run
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
+from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
+from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -38,10 +43,13 @@ class RolloutAccepted(TypedDict):
 
 _AUDIENCE = "openswe-rollout"
 ROLLOUT_CHECK_REQUESTED = "rollout_check"
+MERGE_COMMIT_SHA = "merge_commit_sha"
+MERGE_COMMIT_PR_URL = "merge_commit_pr_url"
 _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
 _LISTEN_DAYS = 7
+_ROLLOUT_SKILL = ".agents/skills/rollout-check/SKILL.md"
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _CONFIG_KEYS = (
@@ -112,14 +120,49 @@ def _delivery_id(target: str, commits: list[str]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _ask_to_monitor(sha: str) -> str:
+    """Tell the run to offer monitoring only when the repo skill says this change qualifies."""
+    return prompt("runs/rollout-ask-to-monitor", merge_sha=remembered_merge_sha(sha))
+
+
+_PR_URL_RE = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+
+
+def remembered_merge_sha(sha: str) -> str:
+    """A full merge SHA safe to store, or empty when the value is not one."""
+    cleaned = sha.strip().lower()
+    return cleaned if _SHA_RE.fullmatch(cleaned) else ""
+
+
+def _sha_for_pull_request(metadata: dict[str, object], url: str) -> str:
+    """The merge SHA stored for ``url``, never one stored for a different pull request."""
+    records = metadata.get("pull_requests")
+    if isinstance(records, list):
+        for record in records:
+            if isinstance(record, dict) and record.get("url") == url:
+                sha = record.get(MERGE_COMMIT_SHA)
+                return remembered_merge_sha(sha) if isinstance(sha, str) else ""
+    if metadata.get(MERGE_COMMIT_PR_URL) == url:
+        sha = metadata.get(MERGE_COMMIT_SHA)
+        if isinstance(sha, str):
+            return remembered_merge_sha(sha)
+    return ""
+
+
+def merged_pull_request(metadata: dict[str, object]) -> tuple[str, str, int, str] | None:
+    """The thread's current pull request and its merge commit, once that commit is known."""
+    url = metadata.get("pr_url")
+    if not isinstance(url, str):
+        return None
+    sha = _sha_for_pull_request(metadata, url)
+    match = _PR_URL_RE.fullmatch(url)
+    if match is None or not sha:
+        return None
+    return match.group(1), match.group(2), int(match.group(3)), sha
+
+
 def _instructions(sha: str) -> str:
-    return (
-        f"This deployment includes merge commit {sha}. "
-        "The event names the target that finished syncing. "
-        "Confirm the fix and look for regressions on that target. "
-        "Cancel this subscription with listen_events after every target "
-        "expected for this change has included the commit."
-    )
+    return prompt("runs/rollout-deployed", merge_sha=sha)
 
 
 def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> None:
@@ -195,6 +238,28 @@ async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccep
     return {"status": "accepted", "target": target, "commits": len(commits)}
 
 
+async def _deployment_workspace(owner: str, repo: str) -> tuple[Repository, str, UUID] | None:
+    """The repository and workspace that can keep a deployment subscription, if any."""
+    if not configured():
+        return None
+    repository = await Repository.get(f"{owner}/{repo}")
+    workspace = await workspace_for_repo(owner, repo)
+    if repository is None or not workspace:
+        logger.info(
+            "Skipping rollout monitoring; repository is not in a workspace",
+            extra={"repository": f"{owner}/{repo}"},
+        )
+        return None
+    workspace_id = await WORKSPACES.id_for_slug(workspace)
+    if workspace_id is None:
+        logger.info(
+            "Skipping rollout monitoring; workspace has no id",
+            extra={"workspace": workspace},
+        )
+        return None
+    return repository, workspace, workspace_id
+
+
 async def subscribe_merged_thread(
     thread_id: str,
     *,
@@ -211,24 +276,13 @@ async def subscribe_merged_thread(
     rest.
     """
     merge_sha = sha.strip().lower()
-    if not _SHA_RE.fullmatch(merge_sha) or not configured():
+    if not _SHA_RE.fullmatch(merge_sha):
         return
     try:
-        repository = await Repository.get(f"{owner}/{repo}")
-        workspace = await workspace_for_repo(owner, repo)
-        if repository is None or not workspace:
-            logger.info(
-                "Skipping deploy subscription; repository is not in a workspace",
-                extra={"agent_thread_id": thread_id, "repository": f"{owner}/{repo}"},
-            )
+        listener = await _deployment_workspace(owner, repo)
+        if listener is None:
             return
-        workspace_id = await WORKSPACES.id_for_slug(workspace)
-        if workspace_id is None:
-            logger.info(
-                "Skipping deploy subscription; workspace has no id",
-                extra={"agent_thread_id": thread_id, "workspace": workspace},
-            )
-            return
+        repository, workspace, workspace_id = listener
         existing = await EventSubscription.for_thread(thread_id)
         if _already_listening(existing, merge_sha):
             return
@@ -255,6 +309,75 @@ async def subscribe_merged_thread(
     except Exception:  # noqa: BLE001
         logger.warning(
             "Subscribing a merged thread to deployments failed",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+
+
+async def _rollout_skill_at_merge(owner: str, repo: str, sha: str) -> bool:
+    """Whether this merge commit contains the repository rollout skill."""
+    merge_sha = remembered_merge_sha(sha)
+    if not merge_sha:
+        logger.info(
+            "Skipping rollout question; merge commit is unknown",
+            extra={"repository": f"{owner}/{repo}"},
+        )
+        return False
+    try:
+        async with GitHubClient.as_app(owner, repo) as github:
+            body = await github.repo(owner, repo).raw_file(_ROLLOUT_SKILL, merge_sha)
+    except GitHubAppUnavailable, httpx2.HTTPError:
+        logger.warning(
+            "Skipping rollout question; rollout skill could not be read",
+            extra={"repository": f"{owner}/{repo}"},
+            exc_info=True,
+        )
+        return False
+    if body is None:
+        logger.info(
+            "Skipping rollout question; repository has no rollout skill at the merge commit",
+            extra={"repository": f"{owner}/{repo}"},
+        )
+        return False
+    return True
+
+
+async def ask_to_monitor_rollout(
+    thread_id: str,
+    *,
+    owner: str,
+    repo: str,
+    number: int,
+    metadata: dict[str, object],
+    sha: str = "",
+) -> None:
+    """Start a run that asks only when the repository rollout skill says to."""
+    try:
+        if await _deployment_workspace(owner, repo) is None:
+            return
+        if not await _rollout_skill_at_merge(owner, repo, sha):
+            return
+        workspace = metadata.get("workspace")
+        config = _run_config(
+            thread_id,
+            owner,
+            repo,
+            number,
+            workspace if isinstance(workspace, str) else "",
+            metadata,
+        )
+        source = config.get("source")
+        await dispatch_agent_run(
+            thread_id,
+            _ask_to_monitor(sha),
+            config,
+            source=source if isinstance(source, str) else "github",
+            thread_title=None,
+            multitask_strategy="enqueue",
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Asking whether to monitor a rollout failed",
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )

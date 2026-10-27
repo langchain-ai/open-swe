@@ -332,8 +332,9 @@ export function streamMessagesToUi(
       if (entity?.senderType === "self") return
       const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
       const text = taskEvent?.content ?? parsed.content
+      const replies = parsed.type === "message" ? parsed.replies : undefined
       if (text.trim()) chunks.push({ kind: "text", text })
-      if (!chunks.length && !taskEvent) return
+      if (!chunks.length && !taskEvent && !replies) return
       uiMessages.push({
         id: msgId,
         ...(taskEvent ? { taskEvent } : {}),
@@ -349,6 +350,7 @@ export function streamMessagesToUi(
               structuredSenderId: parsed.sender,
               structuredSenderKind: parsed.senderKind,
               structuredSurface: parsed.surface,
+              ...(replies ? { replies } : {}),
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),

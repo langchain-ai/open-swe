@@ -225,7 +225,7 @@ ENV.var(
 )
 ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
-    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
+    "HMAC key(s) signing the run tokens MDA runs present to the agent API (/agent-api); "
     "comma-separated, the first signs and every one verifies. Required.",
     secret=True,
 )
@@ -502,5 +502,10 @@ ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 
 # --- Debugging -------------------------------------------------------
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
+ENV.var(
+    "EVENT_LOOP_STALL_MS",
+    "Log the stack whenever the event loop goes unresponsive this many milliseconds; 0 disables.",
+    default="500",
+)
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")

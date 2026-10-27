@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { AgentNoteCard } from "@/features/reviews/components/AgentNoteCard"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
 import { noteKey, type Note } from "@/features/reviews/page/diffEntries"
@@ -51,6 +52,12 @@ function NoteView({
             number={pr.number}
             id={note.id}
           />
+        </NoteFrame>
+      )
+    case "agent-note":
+      return (
+        <NoteFrame>
+          <AgentNoteCard id={note.id} />
         </NoteFrame>
       )
     case "composer":

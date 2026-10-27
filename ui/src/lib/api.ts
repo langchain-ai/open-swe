@@ -232,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  /** How the server labels this user's messages; empty until they have a name. */
+  display_name?: string
   email: string | null
   avatar_url: string | null
   user_id?: string | null
@@ -311,7 +313,6 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -334,7 +335,6 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
   workspace_default_repos?: Record<string, string>
@@ -476,8 +476,12 @@ export interface ManagedToolsMissingCredential {
 }
 
 export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
   name: string
   tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
 }
 
 export interface ManagedToolsGatewayStatus {
@@ -845,10 +849,10 @@ export interface SlackChannelOption {
   num_members: number | null
 }
 
-/** The channel directory; partial when Slack rate limited the walk over public channels. */
+/** The stored channel directory; refreshing while a walk over Slack is due or running. */
 export interface SlackChannelDirectory {
   channels: Array<SlackChannelOption>
-  partial: boolean
+  refreshing: boolean
 }
 
 export interface WorkspaceOptionList {
@@ -1102,15 +1106,11 @@ export type PullRequestThreadIntent =
   | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
-      scope: PullRequestFixScope
       context: OpenPullRequest | null
     }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
-
-/** One kind of PR problem a fix run handles; comments go through address-comments. */
-export type PullRequestFixScope = "conflicts" | "checks"
 
 export type AgentBatchComment =
   | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
@@ -1214,6 +1214,7 @@ export interface ReviewDetail extends Omit<
   "thread_id" | "status"
 > {
   thread_id: string | null
+  trace_url?: string | null
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
@@ -1674,10 +1675,11 @@ export const api = {
       `/slack/users/${encodeURIComponent(userId)}/name`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: (refresh = false) =>
-    request<SlackChannelDirectory>(
-      `/slack/channels${refresh ? "?refresh=true" : ""}`
-    ),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  refreshSlackChannels: () =>
+    request<SlackChannelDirectory>("/slack/channels/refresh", {
+      method: "POST",
+    }),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   listAllowedSlackBotDirectory: () =>
     request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
@@ -1784,6 +1786,11 @@ export const api = {
       }`,
       { method: "POST" }
     ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
+    ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
@@ -1849,12 +1856,8 @@ export const api = {
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
-    pullRequestThread(pr.repo, pr.number, {
-      intent: "fix",
-      scope,
-      context: pr,
-    }),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   sendCommentsToAgent: (

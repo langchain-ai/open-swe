@@ -13,6 +13,7 @@ import { Switch } from "@langchain/macaw-components/Switch"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
+import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
@@ -48,6 +49,7 @@ import {
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
+  useTriggerAgentSchedule,
   useUpdateAgentSchedule,
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
@@ -123,6 +125,7 @@ export function AutomationEditor({
   const createSchedule = useCreateAgentSchedule()
   const updateSchedule = useUpdateAgentSchedule()
   const deleteSchedule = useDeleteAgentSchedule()
+  const triggerSchedule = useTriggerAgentSchedule()
 
   const [initialDrafts] = useState(() =>
     draftsFor(schedule, template?.schedule)
@@ -301,6 +304,28 @@ export function AutomationEditor({
     )
   }
 
+  const canRun =
+    canManage &&
+    mode === "edit" &&
+    !!schedule &&
+    !isDirty &&
+    !isSaving &&
+    !deleteSchedule.isPending &&
+    !triggerSchedule.isPending &&
+    !savedWorkspaceMissing
+
+  const handleRun = () => {
+    if (!canRun || !schedule) return
+    triggerSchedule.mutate(schedule.id, {
+      onSuccess: (result) => {
+        void navigate({
+          to: "/agents/$threadId",
+          params: { threadId: result.thread_id },
+        })
+      },
+    })
+  }
+
   const handleDelete = () => {
     if (!schedule) return
     if (!window.confirm(`Delete "${schedule.name}"?`)) return
@@ -340,10 +365,23 @@ export function AutomationEditor({
                 disabled={deleteSchedule.isPending}
               />
             )}
+            {mode === "edit" && (
+              <Button
+                color="secondary"
+                variant="outlined"
+                size="md"
+                leftDecorator={LightningIcon}
+                onClick={handleRun}
+                disabled={!canRun}
+                title={isDirty ? "Save changes before running" : undefined}
+              >
+                {triggerSchedule.isPending ? "Starting…" : "Run now"}
+              </Button>
+            )}
             <Button
               size="md"
               onClick={handleSave}
-              disabled={!canSave || isSaving}
+              disabled={!canSave || isSaving || triggerSchedule.isPending}
             >
               {isSaving
                 ? "Saving…"

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
@@ -82,9 +83,13 @@ async def slack_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    *,
+    option_user_id: str | None = None,
 ) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
-    result = await send_slack_reply(message, response_type, options, blocks, state)
+    result = await send_slack_reply(
+        message, response_type, options, blocks, state, option_user_id=option_user_id
+    )
     image_urls = result.pop("image_urls", None)
     if not image_urls:
         return result
@@ -108,8 +113,17 @@ async def send_slack_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: dict[str, Any] | None = None,
+    *,
+    option_user_id: str | None = None,
 ) -> dict[str, Any]:
     """Post a reply in the run's Slack thread."""
+    if option_user_id is not None and (
+        not re.fullmatch(r"[UW][A-Z0-9]+", option_user_id) or not options or blocks is not None
+    ):
+        return {
+            "success": False,
+            "error": "option_user_id requires a canonical Slack member ID (U/W followed by uppercase letters or digits), options, and no custom blocks",
+        }
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
@@ -168,7 +182,9 @@ async def send_slack_reply(
         feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
         slack_blocks = blocks
         if blocks is None:
-            slack_blocks = _reply_blocks(message, options, reserve=_WEB_LINK_BLOCKS + feedback)
+            slack_blocks = _reply_blocks(
+                message, options, reserve=_WEB_LINK_BLOCKS + feedback, option_user_id=option_user_id
+            )
             if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
                 message = markdown_to_mrkdwn(message)
         if feedback and run_id:
@@ -500,10 +516,10 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
 
 
 def _reply_blocks(
-    message: str, options: list[str] | None, *, reserve: int
+    message: str, options: list[str] | None, *, reserve: int, option_user_id: str | None = None
 ) -> list[dict[str, Any]] | None:
     """``message`` then option buttons; ``None`` when they cannot fit in one message."""
-    actions = option_actions(options)
+    actions = option_actions(options, user_id=option_user_id)
     body = markdown_blocks(message)
     if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None

@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
 import httpx
@@ -7,9 +7,9 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.remote_runtime.runs import run_config
-from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
-from openswe.threads import index, router, runtimes
+from openswe.agent_api.runs import run_config
+from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
+from openswe.threads import index, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -96,10 +96,15 @@ class _Harness:
         self.forwarded: list[tuple[str, dict[str, JsonValue]]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
+        self.while_starting: Callable[[], Awaitable[object]] | None = None
 
         def mda(request: httpx.Request) -> httpx.Response:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
-            return httpx.Response(200, json={"run_id": "remote-run"})
+            return httpx.Response(
+                200,
+                json={"run_id": "remote-run"},
+                headers={"content-location": f"/threads/{THREAD}/runs/remote-run"},
+            )
 
         mda_runtime = runtimes.MdaRuntime("http://mda.test")
         mda_runtime._http = httpx.AsyncClient(
@@ -108,6 +113,7 @@ class _Harness:
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
         monkeypatch.setattr(router, "RUNTIMES", self.runtimes)
+        monkeypatch.setattr(store, "RUNTIMES", self.runtimes)
 
         async def context(
             configurable: dict[str, JsonValue],
@@ -116,6 +122,8 @@ class _Harness:
             assistant_id: str,
             metadata: dict[str, JsonValue] | None = None,
         ) -> dict[str, JsonValue]:
+            if self.while_starting is not None:
+                await self.while_starting()
             run = RemoteRun(
                 thread_id=thread_id,
                 assistant_id=assistant_id,
@@ -196,6 +204,7 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
     assert missed == 0
     assert counted == 1
+    await store.THREADS.copies.settled(THREAD)
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []
@@ -226,7 +235,9 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
     harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    # A stop before this run asked to start leaves it be.
+    stopped = {index.STOPPED_AT_KEY: runtimes.now_ms() - 1000}
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada", **stopped})
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -241,6 +252,30 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     assert harness.reached_here == []
     [(path, sent)] = harness.forwarded
     assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/runs", {"assistant_id": "agent"}),
+        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
+    ],
+)
+async def test_a_stop_while_a_run_starts_interrupts_it_once_mda_has_it(
+    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: dict[str, JsonValue]
+) -> None:
+    # Working out the run takes a while, and a stop meanwhile finds no run to cancel.
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    harness.while_starting = lambda: index.update(THREAD, {index.STOPPED_AT_KEY: runtimes.now_ms()})
+
+    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
+
+    assert status == 200
+    assert [path for path, _ in harness.forwarded] == [
+        f"/threads/{THREAD}/runs",
+        f"/threads/{THREAD}/runs/remote-run/cancel",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -404,6 +439,24 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     assert path == f"/threads/{THREAD}/runs"
     assert sent["assistant_id"] == graph
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
+
+
+@pytest.mark.parametrize(
+    ("params", "resumable"),
+    [({}, True), ({"stream_resumable": False}, False)],
+    ids=["streaming-client", "transcript-reader"],
+)
+async def test_a_run_started_by_command_keeps_its_stream_unless_the_client_opts_out(
+    monkeypatch: pytest.MonkeyPatch, secret: None, params: dict[str, JsonValue], resumable: bool
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", **params}}
+
+    await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    [(_, sent)] = harness.forwarded
+    assert sent["stream_resumable"] is resumable
 
 
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:

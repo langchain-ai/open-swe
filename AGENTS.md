@@ -8,7 +8,16 @@ Local setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Before making any change, first till the soil: refactor the surrounding code so the change slots in naturally and the result reads as if it had always been designed that way. Spend real effort here rather than bolting features onto whatever shape the code happens to be in.
 
-Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents, as one graph, `open-swe`, from the project in `mda/`; the backend refuses to start without `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET`. `openswe/threads/router.py` serves the Agent Server's thread API from the PostgreSQL thread index and sends those threads' runs there; every new thread is created there, and threads created before that are read-only (`openswe/graphs/read_only.py`). MDA owns the model loop, checkpoints, the thread's sandbox and every tool call; the backend never runs a tool call. `openswe/remote_runtime/graph.py` takes each MDA run's plan from its graph's planner (`plan_agent`, `plan_reviewer`, `plan_review_scout` fill a `ToolSurface`; no graph is compiled) and serves it behind a run token the router signs: the loop's phases at `/remote-runtime/hooks/{hook}`, and at `/remote-runtime/api/{endpoint}` the typed API MDA's tools call for their work (`packages/runtime-api`, imported by both sides): an operation per planned tool, the thread's files, the shell-command guards and incident evidence. Behavior added as phase middleware or tools reaches MDA runs without changes there; a check around tool calls belongs in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an API endpoint where it needs the backend.
+Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents, as one graph, `open-swe`, from the project in `mda/`; the backend refuses to start without `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET`. `openswe/threads/router.py` serves the Agent Server's thread API from the PostgreSQL thread index and sends those threads' runs there; every new thread is created there, and threads created before that are read-only (`openswe/graphs/read_only.py`).
+
+MDA owns the run: the model loop, checkpoints, the thread's sandbox, every tool call, and every hook and middleware around them. The backend is a set of stateless APIs MDA calls: typed endpoints at `/agent-api/{endpoint}` (`packages/runtime-api`, imported by both sides), each answered from the run token the router signs and the request alone, on whichever replica it lands. Shape new behavior to fit:
+
+- Control flow (when to nudge, route, stop, refresh) is middleware in `mda/rt`; checks around the file and shell tools go in `rt/file_tools.py`.
+- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`route_model`, `task_context`), never a generic phase call or an untyped body.
+- Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
+- State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
+
+The per-run plan is legacy: `plan_agent`, `plan_reviewer` and `plan_review_scout` fill a `ToolSurface` that `RunSession` (`openswe/agent_api/graph.py`) serves to `prepare` and a few runs still on it. Shrink it toward named APIs and MDA middleware; add nothing to it.
 
 ## Conventions
 
@@ -22,7 +31,9 @@ Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents,
 - Keep comments minimal and only explain non-obvious reasons.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions. Typed and slash commands are optional shortcuts, never the only way.
 - User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast. Skip this only when an immediate update would be unsafe or misleading. Slack Block Kit counts: update the clicked message before slow GitHub or Slack calls.
+- The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself. Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
+- Don't add new uses of `langgraph_client` in the backend. Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state. Existing uses are legacy, not a pattern to copy.
 - Don't use the LangGraph Store (`client.store`) for state; keep it in PostgreSQL tables.
 - New tables share one shape: an `id uuid` primary key (`uuid7()`, set in Python); `created_at` and `updated_at` (`timestamptz NOT NULL DEFAULT clock_timestamp()`, `updated_at` set again on every write); and `created_by` and `updated_by` (`uuid REFERENCES users (id) ON DELETE SET NULL`: the person whose action caused the write, NULL for system, API-key and workflow writes). Natural keys are unique indexes, not primary keys. Name a JSON column after what it holds, never `value`, and add no column another column already implies. Reference other rows by foreign key whenever a table holds them (our own `id`, or the key of an existing table such as `slack_channel`), creating the referenced row first if it is filled lazily; store a bare id only for things kept outside our database, like Agent Server threads or Slack teams.
 - Structured logging: static message, values in `extra`. Avoid standard `LogRecord` field names in `extra`.
@@ -36,7 +47,7 @@ Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents,
 
 Never run the full test suite locally; run only tests related to the change.
 
-`mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`). Never import `openswe` there; test each side of a hook against the JSON it exchanges.
+`mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`). Never import `openswe` there; test each side of an endpoint against the models it exchanges.
 
 Tests are maintenance cost. Add one only when you can name a concrete regression existing coverage would miss.
 

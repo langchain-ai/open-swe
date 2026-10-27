@@ -211,6 +211,12 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channel_created",
                 "channel_rename",
                 "channel_archive",
+                "channel_unarchive",
+                "channel_deleted",
+                "group_rename",
+                "group_archive",
+                "group_unarchive",
+                "group_deleted",
                 "message.channels",
                 "message.im",
                 "message.mpim"

@@ -10,25 +10,28 @@ use crate::version;
 use super::gates::is_ci_environment;
 use super::identity::resolve_identity;
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum InstallChannel {
     Npm,
     Pypi,
+    #[default]
     Unknown,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum InvokerDetectionMethod {
     CiEnvironment,
     InteractiveTerminal,
+    #[default]
     NonInteractiveTerminal,
 }
 
 /// Values shared by every event created during one CLI invocation.
+#[derive(Clone, Default, Serialize)]
 pub struct InvocationMetadata {
-    pub(super) install_id: String,
+    pub(super) install_id: Option<String>,
     pub(super) invocation_id: String,
     pub(super) cli_version: String,
     pub(super) os: &'static str,
@@ -38,20 +41,20 @@ pub struct InvocationMetadata {
 
 impl InvocationMetadata {
     /// Read safe, bounded values for the current CLI process.
-    pub fn detect() -> Option<Self> {
-        let install_id = resolve_identity()?;
+    pub fn detect() -> Self {
+        let install_id = resolve_identity();
         let install_channel = detect_install_channel(env::var(INSTALL_CHANNEL_ENV).ok().as_deref());
         let is_ci = is_ci_environment(|name| env::var(name).ok());
         let has_interactive_terminal = io::stdin().is_terminal() && io::stderr().is_terminal();
 
-        Some(Self {
+        Self {
             install_id,
             invocation_id: Uuid::new_v4().to_string(),
             cli_version: version::package_version(),
             os: env::consts::OS,
             install_channel,
             invoker_detection_method: detect_invoker(is_ci, has_interactive_terminal),
-        })
+        }
     }
 }
 

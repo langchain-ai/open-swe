@@ -52,8 +52,9 @@ pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult, SandboxSummar
 pub use snapshots::{SnapshotDelete, SnapshotSummary, DEFAULT_SNAPSHOT_READY_TIMEOUT};
 pub(crate) use trigger_server::{
     ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
+    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackCustomerApp, SlackTriggerMode,
 };
+pub(crate) use workspaces::AuthIdentity;
 pub use workspaces::{DeployTarget, WorkspaceSummary};
 
 pub(crate) use login::{
@@ -423,6 +424,40 @@ impl Client {
     /// Resolve the current `X-Api-Key` value.
     fn api_key(&self) -> Result<String> {
         self.credential.api_key(&self.http)
+    }
+
+    /// Whether the key would travel encrypted: an `https` platform API, or
+    /// plain `http` only to this machine (local LangSmith).
+    pub(crate) fn sends_key_securely(&self) -> bool {
+        let Some(url) = self
+            .platform_api_url
+            .as_deref()
+            .and_then(|url| reqwest::Url::parse(url).ok())
+        else {
+            return false;
+        };
+        match url.scheme() {
+            "https" => true,
+            "http" => url.host_str().is_some_and(|host| {
+                host == "localhost"
+                    || host
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            }),
+            _ => false,
+        }
+    }
+
+    /// The headers that authenticate a request as this client, for senders
+    /// with their own HTTP stack.
+    pub(crate) fn auth_headers(&self) -> Result<Vec<(&'static str, String)>> {
+        let mut headers = vec![("X-Api-Key", self.api_key()?)];
+        if let Some(tenant) = &self.tenant_id {
+            headers.push((TENANT_HEADER, tenant.clone()));
+        }
+        Ok(headers)
     }
 
     /// Whether a LangSmith platform API base is configured for this host — always
@@ -986,6 +1021,20 @@ mod tests {
         handle.join().unwrap();
     }
     use super::*;
+
+    #[test]
+    fn the_key_travels_in_cleartext_only_to_this_machine() {
+        let secure = |platform: &str| {
+            Client::new_with_platform(platform, Some(platform), "key", None)
+                .unwrap()
+                .sends_key_securely()
+        };
+        assert!(secure("https://api.smith.langchain.com"));
+        assert!(secure("http://localhost:1980"));
+        assert!(secure("http://127.0.0.1:1980"));
+        assert!(secure("http://[::1]:1980"));
+        assert!(!secure("http://langsmith.example.com"));
+    }
 
     #[test]
     fn resolve_preferred_env_prefers_cli_override() {
