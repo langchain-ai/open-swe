@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
@@ -68,7 +69,11 @@ export function SidebarNav({
       ))}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label="More"
             type="button"
             className={cn(
               ROW,
@@ -79,7 +84,7 @@ export function SidebarNav({
           >
             <CaretRightIcon size={16} weight="regular" className="shrink-0" />
             More
-          </button>
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" className="w-48">
           {hidden.map((item) => (

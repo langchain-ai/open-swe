@@ -400,13 +400,16 @@ export function AutomationEditor({
             change it.
           </Banner>
         )}
-        <input
+        <Input
+          size="md"
+          debounceMs={0}
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={setName}
           disabled={!canManage}
           placeholder="Untitled automation"
           aria-label="Automation name"
-          className="w-full bg-transparent text-base font-medium text-primary outline-none placeholder:text-placeholder"
+          className="w-full"
+          inputContainerClassName="text-base font-medium"
         />
 
         <div className="mt-space-3 flex items-center gap-space-3 text-xs">
@@ -476,13 +479,16 @@ export function AutomationEditor({
                   }
                 >
                   {draft.custom ? (
-                    <input
+                    <Input
+                      size="md"
+                      debounceMs={0}
                       value={draft.cron}
-                      onChange={(e) => set({ cron: e.target.value })}
+                      onChange={(cron) => set({ cron })}
                       disabled={!canManage}
                       placeholder="0 9 * * 1-5"
                       aria-label="Cron schedule"
-                      className="w-full bg-transparent font-mono text-sm text-primary outline-none placeholder:text-placeholder"
+                      className="w-full"
+                      inputContainerClassName="font-mono"
                     />
                   ) : (
                     <p className="text-sm text-primary">
@@ -732,14 +738,18 @@ function EventChips<E extends string>({
       {items.map((item) => {
         const on = selected.includes(item.value)
         return (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={item.label}
             key={item.value}
             type="button"
             aria-pressed={on}
             onClick={() => onToggle(item.value)}
             disabled={disabled}
             className={cn(
-              "inline-flex items-center gap-space-1 rounded-full border px-space-2 py-space-1 text-xs transition-colors disabled:pointer-events-none",
+              "gap-space-1 rounded-full border px-space-2 py-space-1 disabled:pointer-events-none",
               on
                 ? "border-brand bg-brand-subtle text-primary"
                 : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary"
@@ -749,7 +759,7 @@ function EventChips<E extends string>({
               <CheckIcon size={12} weight="bold" className="text-icon-brand" />
             )}
             {item.label}
-          </button>
+          </Button>
         )
       })}
     </div>

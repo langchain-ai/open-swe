@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 
@@ -51,12 +52,17 @@ export function PullRequestCard({
 }) {
   if (compact) {
     return (
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={`${pr.repo} #${pr.number} ${pr.title}`}
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
         className={cn(
-          "flex w-full gap-space-3 rounded-md py-space-2 pr-space-2 pl-space-2 text-left transition-colors",
+          "h-auto justify-start whitespace-normal",
+          "w-full gap-space-3 py-space-2 pr-space-2 pl-space-2 text-left",
           selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
           outcome && "opacity-60"
         )}
@@ -95,7 +101,7 @@ export function PullRequestCard({
             </>
           )}
         </span>
-      </button>
+      </Button>
     )
   }
 
@@ -137,13 +143,19 @@ export function PullRequestCard({
             weight="medium"
             className="mt-space-1 break-words"
           >
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="xs"
+              aria-label={pr.title}
               type="button"
-              className="text-left hover:underline"
+              className="block h-auto max-w-full border-0 px-0 text-left whitespace-normal hover:underline"
               onClick={onSelect}
             >
-              {pr.title}
-            </button>
+              <Text as="span" variant="h5" weight="medium">
+                {pr.title}
+              </Text>
+            </Button>
           </Text>
         </div>
         <div className="flex flex-wrap items-center gap-x-space-5 gap-y-space-2 text-xs text-secondary">

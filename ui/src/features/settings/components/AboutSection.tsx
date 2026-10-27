@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Card } from "@langchain/macaw-components/Card"
 import { useEffect, useState } from "react"
 
@@ -58,14 +59,15 @@ function IdentityValue({ value }: { value: string | null | undefined }) {
 function CommitValue({ value }: { value: string | null }) {
   if (!value) return <IdentityValue value={value} />
   return (
-    <a
+    <MacawLink
+      variant="xs"
       href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
       target="_blank"
       rel="noopener noreferrer"
       className="underline underline-offset-2 hover:text-primary"
     >
       <IdentityValue value={value} />
-    </a>
+    </MacawLink>
   )
 }
 

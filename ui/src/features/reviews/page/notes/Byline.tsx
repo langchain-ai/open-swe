@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CheckCircleFillIcon } from "@langchain/macaw-components/icons"
 import { Avatar as MacawAvatar } from "@langchain/macaw-components/Avatar"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
@@ -23,14 +24,15 @@ export function ProfileLink({
 }) {
   if (!author) return <span className={className}>{displayName(author)}</span>
   return (
-    <a
+    <MacawLink
+      variant="xs"
       href={githubUrls.profile(author)}
       target="_blank"
       rel="noreferrer"
       className={cn("hover:underline", className)}
     >
       {displayName(author)}
-    </a>
+    </MacawLink>
   )
 }
 
@@ -129,7 +131,8 @@ export function Byline({
       {author?.bot && <Tag>bot</Tag>}
       {verb && <span className="text-secondary">{verb}</span>}
       {href ? (
-        <a
+        <MacawLink
+          variant="xs"
           href={href}
           target="_blank"
           rel="noreferrer"
@@ -137,7 +140,7 @@ export function Byline({
           title={new Date(createdAt).toLocaleString()}
         >
           {when}
-        </a>
+        </MacawLink>
       ) : (
         <span className="shrink-0 text-secondary">{when}</span>
       )}

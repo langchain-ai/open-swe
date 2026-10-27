@@ -1,3 +1,5 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
@@ -147,14 +149,15 @@ function Description({
           />
         )}
         <ProfileLink author={author} className="font-medium text-primary" />
-        <a
+        <MacawLink
+          variant="xs"
           href={githubUrls.pullRequest(pr)}
           target="_blank"
           rel="noreferrer"
           className="hover:text-primary hover:underline"
         >
           opened this {createdAt && <RelativeTimestamp value={createdAt} />}
-        </a>
+        </MacawLink>
         <span className="ml-auto">{labels}</span>
       </header>
       <div
@@ -179,10 +182,14 @@ function Description({
         )}
       </div>
       {overflows && (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={expanded ? "Show less" : "Show the whole description"}
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-space-1 inline-flex items-center gap-space-1 text-xs font-medium text-secondary hover:text-primary"
+          className="mt-space-1 h-auto gap-space-1 border-0 px-0 font-medium text-secondary hover:text-primary"
         >
           <CaretDownIcon
             className={cn(
@@ -191,7 +198,7 @@ function Description({
             )}
           />
           {expanded ? "Show less" : "Show the whole description"}
-        </button>
+        </Button>
       )}
     </article>
   )

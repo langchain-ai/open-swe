@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
@@ -150,13 +151,17 @@ function ReviewChatActionList({
         Added to{" "}
         {sameLogin(action.login, viewer) ? "your" : `@${action.login}'s`}{" "}
         pending review on{" "}
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={`${action.range.file}:${rangeLabel(action.range)}`}
           type="button"
           onClick={() => review.showInDiff(action.range)}
-          className="font-mono underline-offset-2 hover:underline"
+          className="h-auto border-0 px-0 font-mono underline-offset-2 hover:underline"
         >
           {action.range.file}:{rangeLabel(action.range)}
-        </button>
+        </Button>
       </p>
     ) : action.kind === "comment" ? (
       <ProposedCommentCard

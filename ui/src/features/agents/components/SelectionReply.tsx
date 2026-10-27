@@ -1,3 +1,6 @@
+import { Input } from "@langchain/macaw-components/Input"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Button } from "@langchain/macaw-components/Button"
 import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowBendUpLeft"
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react"
 import type { RefObject } from "react"
@@ -310,7 +313,11 @@ export function SelectionReply({
 
   if (!editing)
     return (
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label="Reply"
         type="button"
         data-selection-reply
         // Keep the selection: focus moving to the button would clear it.
@@ -320,11 +327,11 @@ export function SelectionReply({
           setEditing(true)
         }}
         style={{ left: position.left, top: position.top, width: BUTTON.width }}
-        className="fixed z-selection-action-bar flex h-[30px] items-center justify-center gap-space-1 rounded-lg border border-subtle bg-elevated font-sans text-xs font-medium text-primary shadow-md hover:bg-elevated-hover"
+        className="fixed z-selection-action-bar h-[30px] justify-center gap-space-1 rounded-lg border border-subtle bg-elevated font-sans font-medium text-primary shadow-md hover:bg-elevated-hover"
       >
         <ArrowBendUpLeftIcon className="size-3.5" weight="regular" />
         Reply
-      </button>
+      </Button>
     )
 
   const submit = () => {
@@ -347,22 +354,27 @@ export function SelectionReply({
         {offer.passage.preview}
       </p>
       <div className="flex items-center gap-space-1">
-        <input
+        <Input
+          size="sm"
+          debounceMs={0}
           ref={inputRef}
           aria-label="Your reply"
           placeholder="Reply to Open SWE"
           maxLength={SELECTION_LIMIT}
           value={comment}
-          onChange={(event) => setComment(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent px-space-1 text-sm text-primary outline-none placeholder:text-tertiary"
+          onChange={setComment}
+          className="min-w-0 flex-1"
         />
-        <button
+        <IconButton
+          color="secondary"
+          variant="plain"
+          size="sm"
+          icon={ArrowBendUpLeftIcon}
+          iconWeight="regular"
+          label="Add reply"
+          tooltipProps={{ disabled: true }}
           type="submit"
-          aria-label="Add reply"
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-secondary hover:bg-elevated-hover hover:text-primary"
-        >
-          <ArrowBendUpLeftIcon className="size-3.5" weight="regular" />
-        </button>
+        />
       </div>
     </form>
   )

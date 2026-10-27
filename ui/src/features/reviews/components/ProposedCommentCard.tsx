@@ -110,13 +110,17 @@ export function ProposedCommentCard({
         </Text>
         <div className="min-w-0 text-xs text-secondary">
           {onShow ? (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="xs"
+              aria-label={location}
               type="button"
               onClick={onShow}
-              className="truncate font-mono underline-offset-2 hover:underline"
+              className="h-auto truncate border-0 px-0 font-mono underline-offset-2 hover:underline"
             >
               {location}
-            </button>
+            </Button>
           ) : (
             <span className="font-mono">{location}</span>
           )}

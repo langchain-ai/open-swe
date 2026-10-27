@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useRef, useState, type ComponentProps } from "react"
 
@@ -20,7 +21,7 @@ type SlackChannelTextareaProps = Omit<
 > & {
   value: string
   onValueChange: (value: string) => void
-  /** Unstyled `<textarea>` for surfaces that frame the field themselves. */
+  /** Plain Macaw textarea for surfaces that frame the field themselves. */
   bare?: boolean
 }
 
@@ -119,25 +120,17 @@ export function SlackChannelTextarea({
 
   return (
     <div className="relative w-full">
-      {bare ? (
-        <textarea
-          className={className}
-          {...field}
-          onChange={(event) =>
-            handleChange(event.target.value, event.target.selectionStart)
-          }
-        />
-      ) : (
-        <Textarea
-          autoResize
-          className={className}
-          size="md"
-          {...field}
-          onChange={(next) =>
-            handleChange(next, ref.current?.selectionStart ?? null)
-          }
-        />
-      )}
+      <Textarea
+        autoResize={!bare}
+        variant={bare ? "plain" : "default"}
+        className={bare ? undefined : className}
+        inputClassName={bare ? className : undefined}
+        size="md"
+        {...field}
+        onChange={(next) =>
+          handleChange(next, ref.current?.selectionStart ?? null)
+        }
+      />
       {open && (
         <div
           role="listbox"
@@ -145,13 +138,18 @@ export function SlackChannelTextarea({
           className="absolute top-full left-0 z-popover mt-space-1 w-full max-w-sm overflow-hidden rounded-lg border border-default bg-elevated p-space-1 text-primary shadow-md"
         >
           {matches.map((channel) => (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={channel.name}
               key={channel.id}
               type="button"
               role="option"
               aria-selected={channel.id === active?.id}
               className={cn(
-                "relative flex min-h-7 w-full cursor-default items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs/relaxed select-none",
+                "h-auto justify-start whitespace-normal",
+                "relative min-h-7 w-full cursor-default gap-space-2 px-space-2 py-space-1 text-left text-xs/relaxed select-none",
                 channel.id === active?.id && "bg-elevated-hover text-primary"
               )}
               // Keep focus in the textarea so the caret the insertion anchors to survives.
@@ -166,7 +164,7 @@ export function SlackChannelTextarea({
                 id={channel.id}
                 recent={recent.includes(channel.id)}
               />
-            </button>
+            </Button>
           ))}
         </div>
       )}

@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { useEffect, useRef, useState } from "react"
@@ -143,15 +144,19 @@ function StandardUserMessage({ message }: { message: Message }) {
             </div>
           )}
           {!isSystem && isTruncated && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="xs"
+              aria-label={expanded ? "Show less" : "Show more"}
               type="button"
               onClick={() => setExpanded((value) => !value)}
               aria-expanded={expanded}
               data-testid="user-message-show-more"
-              className="mt-space-1 rounded-sm text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+              className="mt-space-1 h-auto border-0 px-0 text-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               {expanded ? "Show less" : "Show more"}
-            </button>
+            </Button>
           )}
         </div>
       )}

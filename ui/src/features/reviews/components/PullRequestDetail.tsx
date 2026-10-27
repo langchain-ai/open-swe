@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
@@ -91,14 +92,15 @@ function CheckRow({ check }: { check: PreviewCheck }) {
       </span>
       <span className="min-w-0 flex-1 truncate text-primary">
         {check.url ? (
-          <a
+          <MacawLink
+            variant="xs"
             className="hover:underline"
             href={check.url}
             target="_blank"
             rel="noreferrer"
           >
             {check.name}
-          </a>
+          </MacawLink>
         ) : (
           check.name
         )}
@@ -380,17 +382,27 @@ function Conversation({
         </p>
       )}
       {(clamped || open || thread.replies.length > 0) && (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={
+            open
+              ? "Show less"
+              : thread.replies.length > 0
+                ? `Show more · ${thread.replies.length} ${thread.replies.length === 1 ? "reply" : "replies"}`
+                : "Show more"
+          }
           type="button"
           onClick={() => setOpen(!open)}
-          className="mt-space-1 text-xs text-secondary hover:text-primary hover:underline"
+          className="mt-space-1 h-auto border-0 px-0 text-secondary hover:text-primary hover:underline"
         >
           {open
             ? "Show less"
             : thread.replies.length > 0
               ? `Show more · ${thread.replies.length} ${thread.replies.length === 1 ? "reply" : "replies"}`
               : "Show more"}
-        </button>
+        </Button>
       )}
     </li>
   )

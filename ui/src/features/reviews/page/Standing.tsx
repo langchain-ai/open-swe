@@ -1,3 +1,5 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
   CaretRightIcon,
   CheckCircleFillIcon,
@@ -168,7 +170,11 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             {standing.details.length > 0 && (
               <p className="mt-0.5 flex flex-wrap gap-x-space-3 text-xxs leading-5">
                 {standing.details.map((fact) => (
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="xs"
+                    aria-label={fact.text}
                     key={fact.text}
                     type="button"
                     onClick={
@@ -176,10 +182,14 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
                         ? showFindings
                         : showOpenConversations
                     }
-                    className={subtleLink}
+                    className={cn(
+                      "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                      "h-auto border-0 px-0",
+                      subtleLink
+                    )}
                   >
                     {fact.text}
-                  </button>
+                  </Button>
                 ))}
               </p>
             )}
@@ -298,14 +308,18 @@ function Row({
   return (
     <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
       {expandable ? (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={label}
           type="button"
           aria-expanded={expanded}
           onClick={onToggle}
-          className="-my-space-1 flex min-w-0 flex-1 items-center gap-space-3 self-stretch py-space-1 text-left"
+          className="-my-space-1 h-auto min-w-0 flex-1 justify-start gap-space-3 self-stretch py-space-1 text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
         >
           {body}
-        </button>
+        </Button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-space-3">
           {body}
@@ -317,20 +331,21 @@ function Row({
         </div>
       )}
       {expandable && (
-        <button
+        <IconButton
+          color="secondary"
+          variant="plain"
+          size="xs"
+          icon={CaretRightIcon}
+          iconWeight="regular"
+          label="Toggle review status"
+          tooltipProps={{ disabled: true }}
+          className="-my-space-1 self-stretch py-space-1"
+          iconClassName={cn("transition-transform", expanded && "rotate-90")}
           type="button"
           tabIndex={-1}
           aria-hidden
           onClick={onToggle}
-          className="-my-space-1 flex shrink-0 items-center self-stretch py-space-1"
-        >
-          <CaretRightIcon
-            className={cn(
-              "size-3 text-secondary transition-transform",
-              expanded && "rotate-90"
-            )}
-          />
-        </button>
+        />
       )}
     </div>
   )
@@ -462,29 +477,34 @@ function ChecksRow({
                 />
               )}
               {check.url ? (
-                <a
+                <MacawLink
+                  variant="xs"
                   href={check.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-w-0 truncate text-primary hover:underline"
+                  className="min-w-0 truncate text-primary hover:underline [&>span]:truncate"
                 >
                   {check.name}
-                </a>
+                </MacawLink>
               ) : (
                 <span className="min-w-0 truncate">{check.name}</span>
               )}
               {state === "fail" && (
-                <button
+                <Button
+                  color="secondary"
+                  variant="plain"
+                  size="xs"
+                  aria-label="Ask why"
                   type="button"
                   onClick={() =>
                     askInChat(
                       `Why is the \`${check.name}\` check failing on this pull request?`
                     )
                   }
-                  className="ml-auto text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100"
+                  className="ml-auto h-auto border-0 px-0 text-secondary opacity-0 group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 >
                   Ask why
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -545,13 +565,21 @@ function ReviewsRow({
         action={
           <>
             {unresolved > 0 && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="xs"
+                aria-label={`${unresolved} unresolved`}
                 type="button"
                 onClick={showOpenConversations}
-                className={cn("text-xs", subtleLink)}
+                className={cn(
+                  "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                  "h-auto border-0 px-0",
+                  subtleLink
+                )}
               >
                 {unresolved} unresolved
-              </button>
+              </Button>
             )}
             {hasUnresolvedConversations(status) &&
               (open ? open.current > 0 : unresolved > 0) && (
@@ -819,11 +847,15 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
               >
                 {findingGroupLabel[finding.group]}
               </span>
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={finding.title}
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
-                className="flex min-w-[16ch] flex-1 items-start gap-space-1 text-left leading-5 text-primary hover:underline"
+                className="h-auto min-w-[16ch] flex-1 items-start justify-start gap-space-1 text-left leading-5 whitespace-normal text-primary hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
               >
                 <CaretRightIcon
                   aria-hidden
@@ -840,20 +872,24 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 >
                   <InlineCode text={finding.title} />
                 </span>
-              </button>
+              </Button>
               <span className="ml-auto flex shrink-0 items-baseline gap-space-1 text-xxs text-secondary">
-                <button
+                <Button
+                  color="secondary"
+                  variant="plain"
+                  size="xs"
+                  aria-label={findingLocation(finding)}
                   type="button"
                   disabled={!isAnchored(finding)}
                   onClick={() => {
                     if (isAnchored(finding))
                       showFinding(finding.id, findingTarget(finding))
                   }}
-                  className="rounded-sm px-space-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary disabled:hover:bg-transparent disabled:hover:text-secondary"
+                  className="h-auto border-0 px-space-1 py-0.5 font-mono hover:bg-surface-level-1-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:hover:bg-transparent disabled:hover:text-secondary"
                   title={finding.file}
                 >
                   {findingLocation(finding)}
-                </button>
+                </Button>
                 <Button
                   size="xs"
                   variant="plain"

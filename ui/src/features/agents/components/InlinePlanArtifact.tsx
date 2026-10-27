@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -37,7 +38,10 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
 
   return (
     <div className="group relative my-space-4">
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
         type="button"
         data-testid="inline-plan-artifact"
         aria-label="Open artifact in the conversation"
@@ -47,7 +51,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             params: { threadId },
           })
         }
-        className="block h-[250px] w-full overflow-hidden rounded-xl border border-default bg-surface-level-1 text-left shadow-sm transition-shadow outline-none hover:shadow-md focus-visible:ring-2 focus-visible:ring-focus"
+        className="block h-[250px] w-full justify-start overflow-hidden rounded-xl border border-default bg-surface-level-1 p-0 text-left whitespace-normal shadow-sm transition-shadow outline-none hover:shadow-md focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         {html ? (
           <PlanArtifactFrame
@@ -69,7 +73,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             <ArrowUpRightIcon size={14} weight="regular" />
           </span>
         </span>
-      </button>
+      </Button>
       <IconButton
         icon={XIcon}
         label="Dismiss artifact"

@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import {
   GlobeRegularIcon,
   PlusIcon,
@@ -363,7 +364,11 @@ function RightPanelEmptyState({
         <div className="grid grid-cols-2 gap-space-2">
           {actions.map((action) =>
             action.available ? (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={action.label}
                 key={action.label}
                 type="button"
                 onClick={action.onClick}
@@ -376,7 +381,8 @@ function RightPanelEmptyState({
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
+                  "h-auto justify-start whitespace-normal",
+                  "relative w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
@@ -393,7 +399,7 @@ function RightPanelEmptyState({
                 <span className="mt-space-1 text-xs leading-relaxed text-secondary">
                   {action.description}
                 </span>
-              </button>
+              </Button>
             ) : (
               <div
                 key={action.label}
@@ -549,9 +555,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"
                       )}
                     >
-                      <button
+                      <Button
+                        color="secondary"
+                        variant="plain"
+                        size="sm"
                         type="button"
-                        className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-surface-level-2"
+                        className="group/close relative size-4 shrink-0 cursor-pointer justify-center p-0 hover:bg-surface-level-2"
                         aria-label={`Close ${title}`}
                         onClick={() => props.onCloseSurface(surface)}
                       >
@@ -568,17 +577,21 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           className="hidden size-3 group-hover/tab:block group-focus-visible/close:block"
                           weight="bold"
                         />
-                      </button>
+                      </Button>
                       <Tooltip title={title}>
-                        <button
+                        <Button
+                          color="secondary"
+                          variant="plain"
+                          size="sm"
+                          aria-label={title}
                           type="button"
                           role="tab"
                           aria-selected={active}
-                          className="flex min-w-0 cursor-pointer items-center"
+                          className="min-w-0 shrink cursor-pointer"
                           onClick={() => props.onActivate(surface)}
                         >
                           <span className="truncate">{title}</span>
-                        </button>
+                        </Button>
                       </Tooltip>
                     </div>
                   </ContextMenuTrigger>
