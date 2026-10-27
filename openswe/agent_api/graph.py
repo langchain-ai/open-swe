@@ -106,6 +106,7 @@ from runtime_api.loop import (
     INBOX_RECEIVED,
     MODEL_CHOICE,
     MODEL_FAILURE,
+    MODEL_RECOVERY,
     MODEL_RESULT,
     PREPARE,
     REFRESH_GITHUB_PROXY,
@@ -130,6 +131,7 @@ from runtime_api.loop import (
     InboxRead,
     InboxReceipt,
     ModelFailure,
+    ModelRecovery,
     ModelResult,
     PhaseResult,
     Prepare,
@@ -201,7 +203,7 @@ from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_
 from openswe.middleware.settle_review_check import settle_review_check
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
-from openswe.model_failures import ModelError
+from openswe.model_failures import ModelError, ProviderWait
 from openswe.prompts import common_prompt, prompt
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
@@ -1037,6 +1039,11 @@ class TokenRun:
         await ModelError.model_validate(request.model_dump()).record(self.run.thread_id)
         return Done()
 
+    async def model_recovery(self, request: ModelRecovery) -> Done:
+        """The run's model calls started or stopped waiting for their provider to recover."""
+        await ProviderWait.model_validate(request.model_dump()).report(self.config)
+        return Done()
+
     async def step_limit_reached(self, _request: RunRequest) -> Done:
         await self.in_run("step_limit_reached", notify_step_limit)
         return Done()
@@ -1350,6 +1357,7 @@ RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(MODEL_FAILURE, TokenRun.model_failure)
+RUN_CALLS.serve(MODEL_RECOVERY, TokenRun.model_recovery)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)

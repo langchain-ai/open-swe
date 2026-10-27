@@ -409,11 +409,11 @@ async def load_snapshot(
             JOIN newest_turn ON newest_turn.turn_id = event.turn_id
             WHERE event.thread_id = :thread_id
               AND event.event_type = 'run.notice'
-              -- Offloading describes what a run is doing right now, so it
-              -- dies with its turn; routing describes how the turn was
-              -- executed and outlives it.
+              -- Offloading and a provider wait describe what a run is doing
+              -- right now, so they die with their turn; routing describes how
+              -- the turn was executed and outlives it.
               AND (
-                  event.payload ->> 'kind' <> 'conversation_offloading'
+                  event.payload ->> 'kind' NOT IN ('conversation_offloading', 'provider_recovery')
                   OR newest_turn.state IN ('requested', 'running')
               )
             ORDER BY event.payload ->> 'kind', event.version DESC

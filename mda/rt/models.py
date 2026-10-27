@@ -22,7 +22,6 @@ _GATEWAY_PROVIDER_PATHS: Final = {
     "fireworks": "/fireworks",
     "google_genai": "/gemini",
 }
-_DEFAULT_MAX_RETRIES: Final = 6
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 600.0
 _kwargs = TypeAdapter(dict[str, JsonValue])
 
@@ -39,7 +38,7 @@ def _gateway_overrides(provider: str) -> dict[str, JsonValue]:
 @lru_cache(maxsize=32)
 def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
     kwargs = _kwargs.validate_python(json.loads(kwargs_json))
-    kwargs.setdefault("max_retries", _DEFAULT_MAX_RETRIES)
+    kwargs["max_retries"] = 0
     kwargs.setdefault("timeout", _DEFAULT_REQUEST_TIMEOUT_SECONDS)
     provider = model_id.split(":", 1)[0]
     if provider == "openai":

@@ -15,6 +15,7 @@ import pytest
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
@@ -60,6 +61,7 @@ from rt.backend import (
 from rt.file_tools import FileToolsMiddleware
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
+from rt.provider_recovery import Backoff, ProviderRecovery
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
@@ -1621,17 +1623,124 @@ class _StatusInCode(Exception):
         self.code = code
 
 
+def _reporting_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[OpenSweBackend, list[tuple[str, dict[str, JsonValue]]]]:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.provider_recovery.run_id", lambda: "run-1")
+    monkeypatch.setattr(
+        "rt.middleware.build_model",
+        lambda *args, **kwargs: FakeListChatModel(responses=["unused"]),
+    )
+    backend = _run_backend("token", invocation_id="run")
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        reported.append((name, body))
+        return Done()
+
+    _answering(monkeypatch, backend, answer)
+    return backend, reported
+
+
+def _opus_request() -> ModelRequest:
+    state: RunState = {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
+            use_gateway=True,
+        ).model_dump(mode="json"),
+    }
+    return ModelRequest(model=FakeListChatModel(responses=["unused"]), messages=[], state=state)
+
+
+_OVERLOADED = anthropic.APIStatusError(
+    "Overloaded",
+    response=httpx2.Response(529, request=_PROVIDER_REQUEST),
+    body={"type": "error", "error": {"type": "overloaded_error"}},
+)
+
+
+async def test_a_provider_outage_waits_for_the_same_model_and_says_so_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, reported = _reporting_backend(monkeypatch)
+    recovery = ProviderRecovery(backend, Backoff(initial_seconds=0))
+    answer = ModelResponse(result=[AIMessage(content="done")])
+    handler = AsyncMock(
+        side_effect=[_OVERLOADED, httpx2.ReadTimeout("timed out"), _OVERLOADED, answer]
+    )
+
+    from rt.model_budget import ModelCallAttempt
+
+    async def invoke(request: ModelRequest) -> ModelResponse:
+        return await ModelCallAttempt(request).call(lambda: handler(request))
+
+    response = await BackendRunMiddleware(backend, recovery=recovery).awrap_model_call(
+        _opus_request(), invoke
+    )
+
+    assert response is answer
+    assert len({id(call.args[0].model) for call in handler.await_args_list}) == 1
+    assert reported == [
+        (
+            "model_recovery",
+            {
+                "run_id": "run-1",
+                "waiting": waiting,
+                "code": "provider_overloaded" if waiting else None,
+                "model_id": "anthropic:claude-opus-5-5",
+                "via_gateway": True,
+            },
+        )
+        for waiting in (True, False)
+    ]
+
+
+class _QuotaSpent(Exception):
+    status_code = 429
+    body: Mapping[str, object] = {"error": {"code": "insufficient_quota"}}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        anthropic.AuthenticationError(
+            "invalid x-api-key",
+            response=httpx2.Response(401, request=_PROVIDER_REQUEST),
+            body={"type": "error", "error": {"type": "authentication_error"}},
+        ),
+        anthropic.BadRequestError(
+            "prompt is too long",
+            response=httpx2.Response(400, request=_PROVIDER_REQUEST),
+            body={"type": "error", "error": {"type": "invalid_request_error"}},
+        ),
+        _QuotaSpent("You exceeded your current quota"),
+        # Our own bug, whatever it says.
+        KeyError("overloaded"),
+    ],
+)
+async def test_a_failure_that_is_not_an_outage_never_waits(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    backend, reported = _reporting_backend(monkeypatch)
+    handler = AsyncMock(side_effect=error)
+
+    with pytest.raises(type(error)):
+        await BackendRunMiddleware(
+            backend, recovery=ProviderRecovery(backend, Backoff(initial_seconds=0))
+        ).awrap_model_call(_opus_request(), handler)
+
+    assert handler.await_count == 1
+    assert "model_recovery" not in {path for path, _ in reported}
+
+
 @pytest.mark.parametrize(
     ("error", "code"),
     [
-        (
-            anthropic.APIStatusError(
-                "Overloaded",
-                response=httpx2.Response(529, request=_PROVIDER_REQUEST),
-                body={"type": "error", "error": {"type": "overloaded_error"}},
-            ),
-            "provider_overloaded",
-        ),
+        (_OVERLOADED, "provider_overloaded"),
         # A client or gateway can let the HTTP library's failure through unwrapped.
         (httpx2.ReadTimeout("timed out", request=_PROVIDER_REQUEST), "provider_timeout"),
         (httpx.ConnectError("refused"), "provider_unavailable"),
@@ -1647,32 +1756,14 @@ class _StatusInCode(Exception):
 async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
     monkeypatch: pytest.MonkeyPatch, error: Exception, code: str
 ) -> None:
-    from langchain.agents.middleware.types import ModelRequest
-
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    model = FakeListChatModel(responses=["unused"])
-    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
-    backend = _run_backend("token", invocation_id="run")
-    reported: list[tuple[str, dict[str, JsonValue]]] = []
-
-    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        reported.append((name, body))
-        return Done()
-
-    _answering(monkeypatch, backend, answer)
-    state: RunState = {
-        "messages": [],
-        "open_swe_call": ModelCall(
-            system_prompt="test",
-            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
-            use_gateway=True,
-        ).model_dump(mode="json"),
-    }
-    request = ModelRequest(model=model, messages=[], state=state)
+    backend, reported = _reporting_backend(monkeypatch)
+    # The wait for the provider to recover has run out.
+    recovery = ProviderRecovery(backend, Backoff(give_up_after_seconds=0))
 
     with pytest.raises(type(error)) as caught:
-        await BackendRunMiddleware(backend).awrap_model_call(request, AsyncMock(side_effect=error))
+        await BackendRunMiddleware(backend, recovery=recovery).awrap_model_call(
+            _opus_request(), AsyncMock(side_effect=error)
+        )
 
     assert caught.value is error
     assert reported == [

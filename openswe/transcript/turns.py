@@ -1,10 +1,11 @@
-"""Closing a turn from outside the graph: the completion webhook and cancels.
+"""Acting on a turn from outside the graph: closing it, or noting what its run is doing.
 
 The middleware normally ends a turn itself. These helpers are the safety net for
 the cases where it cannot — the process died, or the user cancelled the run —
 and they only ever act on a turn that is still open. The command ids match the
 ones the middleware uses, so whichever writer gets there first wins and the
-other is deduplicated by its receipt.
+other is deduplicated by its receipt. A notice comes from a call an MDA run makes
+on the backend while its turn is open.
 """
 
 import logging
@@ -17,7 +18,14 @@ from sqlalchemy import text
 
 from openswe.database import postgres
 from openswe.transcript.engine import Command, append
-from openswe.transcript.events import TurnCompleted, TurnFailed, TurnInterrupted
+from openswe.transcript.events import (
+    JsonObject,
+    NoticeKind,
+    RunNotice,
+    TurnCompleted,
+    TurnFailed,
+    TurnInterrupted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +84,34 @@ async def settle_run_turn(
         },
     )
     return turn_id
+
+
+async def note_on_run_turn(
+    thread_id: str, run_id: str, kind: NoticeKind, data: JsonObject, *, command_id: str
+) -> bool | None:
+    """Add a notice to the open turn of ``run_id``.
+
+    Returns whether it was added, False when ``command_id`` already was, and
+    ``None`` when the run has no open turn to note it on.
+    """
+    if not postgres.configured():
+        return None
+    owned = await run_turn(thread_id, run_id)
+    if owned is None or not owned.open:
+        return None
+    result = await append(
+        thread_id,
+        [
+            Command(
+                command_id=command_id,
+                event=RunNotice(turn_id=owned.turn_id, kind=kind, data=data),
+                actor_kind="system",
+                run_id=run_id,
+                turn_id=owned.turn_id,
+            )
+        ],
+    )
+    return bool(result.events)
 
 
 async def fail_unstarted_turn(thread_id: str, turn_id: UUID, *, error: str) -> None:

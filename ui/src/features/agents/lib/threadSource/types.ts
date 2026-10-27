@@ -4,6 +4,7 @@ import type {
   StreamConnection,
 } from "@/features/agents/lib/stream/connection"
 import type {
+  ProviderWait,
   QueuedTurn,
   StaleWorkspace,
   SubagentToolCall,
@@ -96,6 +97,8 @@ export interface TranscriptThreadSource extends ThreadSourceShared {
   subagentTask: (toolCallId: string) => TranscriptToolCallState | null
   /** The newest turn's sandbox booted from an out-of-date workspace image. */
   workspaceStale: StaleWorkspace | null
+  /** The running turn is waiting for its model's provider to recover. */
+  providerWait: ProviderWait | null
   /** Why the newest turn failed, when it failed and the backend said why. */
   failureReason: string | null
 }

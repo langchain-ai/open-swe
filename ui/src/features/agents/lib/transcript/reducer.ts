@@ -578,15 +578,23 @@ function putToolCall(
   addItem(draft, turn, { kind: "tool", id: call.toolCallId })
 }
 
+const TRANSIENT_NOTICES = [
+  "conversation_offloading",
+  "provider_recovery",
+] as const satisfies ReadonlyArray<NoticeKind>
+
 /**
- * Offloading describes what a run is doing right now, so it dies with its turn
- * — the snapshot drops it for a settled turn, and so does the live stream.
+ * Offloading and a provider wait describe what a run is doing right now, so
+ * they die with their turn — the snapshot drops them for a settled turn, and
+ * so does the live stream.
  */
 function dropTransientNotices(draft: Draft, turnId: string): void {
-  const notice = draft.state.notices["conversation_offloading"]
-  if (!notice || notice.turnId !== turnId) return
+  const ended = TRANSIENT_NOTICES.filter(
+    (kind) => draft.state.notices[kind]?.turnId === turnId
+  )
+  if (!ended.length) return
   const notices = { ...draft.state.notices }
-  delete notices["conversation_offloading"]
+  for (const kind of ended) delete notices[kind]
   draft.state = { ...draft.state, notices }
 }
 
@@ -817,6 +825,28 @@ export function staleWorkspaceNotice(
   return {
     workspaceName: typeof name === "string" ? name : "workspace",
     capturedAt: typeof capturedAt === "string" ? capturedAt : null,
+  }
+}
+
+export interface ProviderWait {
+  /** Who the run is waiting on, as the backend named them. */
+  provider: string | null
+  modelId: string | null
+  viaGateway: boolean
+}
+
+/** The model provider the running turn is waiting on to recover, if it is. */
+export function providerWaitNotice(
+  state: TranscriptState
+): ProviderWait | null {
+  const notice = state.notices["provider_recovery"]
+  if (notice?.data["waiting"] !== true) return null
+  const provider = notice.data["provider"]
+  const modelId = notice.data["model_id"]
+  return {
+    provider: typeof provider === "string" ? provider : null,
+    modelId: typeof modelId === "string" ? modelId : null,
+    viaGateway: notice.data["via_gateway"] === true,
   }
 }
 

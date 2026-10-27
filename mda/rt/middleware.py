@@ -32,6 +32,7 @@ from collections.abc import (
 )
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import partial
 from typing import Annotated, Final, NotRequired, cast
 
 import httpx
@@ -96,9 +97,11 @@ from rt.backend import (
     subagent_of,
 )
 from rt.loop import RunLoop
+from rt.model_budget import provider_attempts
 from rt.model_calls import provider_failure_code
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
+from rt.provider_recovery import ProviderRecovery
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
@@ -282,9 +285,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+        *,
+        recovery: ProviderRecovery | None = None,
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
+        # Shared with the run's subagents, which wait out the same outage.
+        self._recovery = recovery or ProviderRecovery(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
@@ -474,10 +481,24 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=own)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
-            return await handler(request)
+            models = self._backend.run.catalog.models
+            with provider_attempts(
+                partial(
+                    self._recovery.call,
+                    model=models.model if models is not None else None,
+                    via_gateway=models is not None and models.use_gateway,
+                )
+            ):
+                return await handler(request)
         planned = ModelCall.model_validate(raw)
         existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
+        system_prompt = planned.system_prompt
+        if system_prompt is None:
+            if self._loop is None:
+                raise BackendCallError("A referenced system prompt requires the runtime loop")
+            held = request.state.get(STATE_KEY, {})
+            system_prompt = self._loop.system_prompt(held, planned.task_instructions)
+        prompt = f"{system_prompt}\n\n{existing}" if existing else system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
@@ -485,7 +506,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
         try:
-            return await handler(request)
+            with provider_attempts(
+                partial(self._recovery.call, model=model, via_gateway=planned.use_gateway)
+            ):
+                return await handler(request)
         except Exception as exc:
             await self._report_model_failure(model, exc, via_gateway=planned.use_gateway)
             raise

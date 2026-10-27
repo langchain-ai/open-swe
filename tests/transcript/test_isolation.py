@@ -7,14 +7,16 @@ the thing that has to hold.
 
 import asyncio
 from contextlib import aclosing
+from unittest.mock import AsyncMock
 from uuid import uuid7
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
-from openswe import completion
+from openswe import completion, model_failures
 from openswe.database import postgres
+from openswe.model_failures import ProviderWait
 from openswe.transcript.attachments import PendingAttachment
 from openswe.transcript.engine import Command, append, delete_transcript
 from openswe.transcript.events import (
@@ -329,6 +331,12 @@ async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: 
                 actor_kind="agent",
                 turn_id=turn_id,
             ),
+            Command(
+                command_id="notice:provider",
+                event=RunNotice(turn_id=turn_id, kind="provider_recovery", data={"waiting": True}),
+                actor_kind="system",
+                turn_id=turn_id,
+            ),
         ],
     )
 
@@ -337,6 +345,7 @@ async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: 
     assert {notice.kind for notice in running.notices} == {
         "model_routed",
         "conversation_offloading",
+        "provider_recovery",
     }
 
     await append(
@@ -356,6 +365,48 @@ async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: 
     assert [(notice.kind, notice.data) for notice in settled.notices] == [
         ("model_routed", {"model": "claude-haiku"})
     ]
+
+
+async def test_a_run_waiting_on_its_provider_tells_the_person_once(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """However often its calls wait, on whichever replica, and after it resumes elsewhere."""
+    thread_id = str(uuid7())
+    turn_id = uuid7()
+    await _create(thread_id)
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{turn_id}:started:run-1",
+                event=TurnStarted(turn_id=turn_id, run_id="run-1"),
+                actor_kind="agent",
+                run_id="run-1",
+                turn_id=turn_id,
+            )
+        ],
+    )
+    told = AsyncMock()
+    monkeypatch.setattr(model_failures, "notify_run_source", told)
+    config = {"configurable": {"thread_id": thread_id}}
+
+    def wait(*, waiting: bool) -> ProviderWait:
+        return ProviderWait(
+            run_id="run-1",
+            waiting=waiting,
+            code="provider_overloaded" if waiting else None,
+            model_id="anthropic:claude-opus-5-5",
+        )
+
+    await wait(waiting=True).report(config)
+    await wait(waiting=False).report(config)
+    await wait(waiting=True).report(config)
+
+    told.assert_awaited_once()
+    assert "Anthropic is overloaded" in told.await_args.args[1]
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    assert [(n.kind, n.data["waiting"]) for n in snapshot.notices] == [("provider_recovery", True)]
 
 
 async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(

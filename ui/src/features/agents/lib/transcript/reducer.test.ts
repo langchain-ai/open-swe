@@ -7,6 +7,7 @@ import {
   failureReason,
   fromSnapshot,
   isOffloading,
+  providerWaitNotice,
   prependTurns,
   queuedTurns,
   routedNotice,
@@ -607,6 +608,34 @@ describe("notices", () => {
     })
 
     expect(isOffloading(settled)).toBe(false)
+  })
+
+  it("shows a provider wait until the provider answers or the turn settles", () => {
+    const wait = (version: number, waiting: boolean) =>
+      notice(version, {
+        turn_id: "turn-2",
+        kind: "provider_recovery",
+        data: {
+          waiting,
+          provider: "Anthropic",
+          model_id: "anthropic:claude-opus-5-5",
+          via_gateway: false,
+        },
+      })
+    const waiting = applyEvent(fromSnapshot(twoTurnSnapshot()), wait(11, true))
+    expect(providerWaitNotice(waiting)).toEqual({
+      provider: "Anthropic",
+      modelId: "anthropic:claude-opus-5-5",
+      viaGateway: false,
+    })
+    expect(providerWaitNotice(applyEvent(waiting, wait(12, false)))).toBeNull()
+
+    const settled = applyEvent(waiting, {
+      ...appended(12, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-2", error: "OverloadedError" },
+    })
+    expect(providerWaitNotice(settled)).toBeNull()
   })
 })
 

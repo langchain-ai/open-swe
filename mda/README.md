@@ -63,6 +63,7 @@ Every call is authenticated with the run token.
   Custom stream events the backend emits are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, call limits, caching, and automatic summarization.
   Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`) and fails a call that outlives 15 minutes, its retries included, with `ModelCallTimeoutError`.
+  A call its provider fails for an outage (overload, rate limit, 5xx, dropped connection or timeout) never switches models: `rt/provider_recovery.py` makes it again on the same model with capped exponential backoff, for up to six hours, telling the backend through `MODEL_RECOVERY` when the run starts and stops waiting, so the person hears once and the dashboard shows the wait; any other failure raises at once.
   An agent's call that still fails ends the run.
   MDA first tells the backend why through `MODEL_FAILURE` (the provider's failure code and the model it called), so the run's failure reply names the provider instead of a generic error.
   A subagent's timed-out call becomes its answer instead, which its `task` call hands back to the agent that delegated it.

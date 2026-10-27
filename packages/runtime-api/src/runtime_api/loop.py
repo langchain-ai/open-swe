@@ -55,7 +55,8 @@ class PhaseResult(BaseModel):
 class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
-    system_prompt: str
+    system_prompt: str | None
+    task_instructions: str = ""
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None = None
@@ -168,6 +169,21 @@ class ModelFailure(RunRequest):
     via_gateway: bool = False
 
 
+class ModelRecovery(RunRequest):
+    """The run's model calls started or stopped waiting for their provider to recover.
+
+    ``waiting`` is sent when the first call starts waiting and again, false, when
+    none waits any longer; the person is told the first time a run waits.
+    """
+
+    waiting: bool
+    # Why the provider failed the call that started the wait.
+    code: ModelFailureCode | None = None
+    # provider:model, the model the run keeps waiting for.
+    model_id: str | None = None
+    via_gateway: bool = False
+
+
 class InboxItems(BaseModel):
     """What an inbox reply carries: its queued follow-ups, its events and task messages."""
 
@@ -256,6 +272,11 @@ SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_C
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # A model call failed at its provider: the backend keeps why for the run's failure reply.
 MODEL_FAILURE = Endpoint("model_failure", ModelFailure, Done, seconds=LOOP_CALL_SECONDS)
+# The run's model calls started or stopped waiting out a provider outage: the backend
+# shows it, and tells the person once per run, which its notice receipt keeps true.
+MODEL_RECOVERY = Endpoint(
+    "model_recovery", ModelRecovery, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
 # Classifies the task the conversation asks for; only reads, so it is safe to send again.

@@ -7,18 +7,18 @@ for the retry to react to. Anthropic's prompt cache is marked here too, where th
 call's real model is known.
 """
 
-import asyncio
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Final
 
 import httpx
 import httpx2
+from deepagents.middleware.unsupported_content import UnsupportedContentMiddleware
 from langchain.agents.middleware import (
     AgentMiddleware,
-    ModelRetryMiddleware,
 )
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.exceptions import (
@@ -32,28 +32,24 @@ from langchain_core.exceptions import (
 )
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
+from langchain_fireworks.middleware import FireworksPromptCachingMiddleware
 from langchain_openai import ChatOpenAI
+from langgraph.config import get_config
 from runtime_api.loop import ModelFailureCode
 
+from rt.compaction import PreparedConversation, SummarizationStateMiddleware, context_overflow
+from rt.model_budget import ModelCallAttempt
+from rt.model_budget import ModelCallTimeoutError as ModelCallTimeoutError
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
-# Above the provider client's own request timeout (rt/models.py), so a stalled
-# request fails and retries inside the client first.
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
 # As the in-process graphs': a tool call can outlast the 5m default between model calls.
 PROMPT_CACHE_TTL: Final = "1h"
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
 _SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call timed out."
-
-
-class ModelCallTimeoutError(TimeoutError):
-    """A model call exceeded its wall-clock deadline.
-
-    The backend's run-complete webhook reads this class name as a provider timeout.
-    """
 
 
 _FAILURE_CODES_BY_TYPE: Final[dict[str, ModelFailureCode]] = {
@@ -227,27 +223,94 @@ class ReplayableHistoryMiddleware(_ModelCallGuard):
         return await handler(request)
 
 
-class ModelCallTimeoutMiddleware(_ModelCallGuard):
-    """Fail a model call that outlives its deadline instead of letting it hang."""
-
-    def __init__(self, timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS) -> None:
-        super().__init__()
-        self._timeout_seconds = timeout_seconds
+class OpenAIPromptCachingMiddleware(_ModelCallGuard):
+    """Give OpenAI a stable opaque per-thread cache key unless explicitly configured."""
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        try:
-            return await asyncio.wait_for(handler(request), timeout=self._timeout_seconds)
-        except TimeoutError as exc:
-            logger.warning(
-                "Model call exceeded its deadline", extra={"timeout_seconds": self._timeout_seconds}
+        model = _chat_model(request.model)
+        if isinstance(model, ChatOpenAI):
+            sources = [request.model_settings, model.model_kwargs, model.extra_body or {}]
+            extra = request.model_settings.get("extra_body")
+            if isinstance(extra, dict):
+                sources.append(extra)
+            if not any("prompt_cache_key" in source for source in sources):
+                thread = get_config().get("configurable", {}).get("thread_id")
+                if isinstance(thread, str) and thread:
+                    key = hashlib.sha256(thread.encode()).hexdigest()
+                    request = request.override(
+                        model_settings={**request.model_settings, "prompt_cache_key": key}
+                    )
+        return await handler(request)
+
+
+class FinalModelCallMiddleware(_ModelCallGuard):
+    """Use the harness's final slot for routed compaction and provider-only retries."""
+
+    def __init__(self, timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS) -> None:
+        self._timeout_seconds = timeout_seconds
+
+    @property
+    def name(self) -> str:
+        return "UnsupportedContentMiddleware"
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse | ExtendedModelResponse:
+        attempt = ModelCallAttempt(request, self._timeout_seconds)
+        conversation = PreparedConversation(request, attempt)
+
+        async def cached(request: ModelRequest) -> ModelResponse:
+            cache = AnthropicPromptCachingMiddleware(
+                ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
             )
-            raise ModelCallTimeoutError(
-                f"Model call exceeded the {self._timeout_seconds}s deadline"
-            ) from exc
+            response = await cache.awrap_model_call(request, handler)
+            if not isinstance(response, ModelResponse):
+                raise TypeError("Provider caching returned a non-model response")
+            return response
+
+        async def affinity(request: ModelRequest) -> ModelResponse:
+            return await OpenAIPromptCachingMiddleware().awrap_model_call(request, cached)
+
+        async def fireworks(request: ModelRequest) -> ModelResponse:
+            cache = FireworksPromptCachingMiddleware(unsupported_model_behavior="ignore")
+            response = await cache.awrap_model_call(request, affinity)
+            if not isinstance(response, ModelResponse):
+                raise TypeError("Fireworks caching returned a non-model response")
+            return response
+
+        async def replay(request: ModelRequest) -> ModelResponse:
+            return await ReplayableHistoryMiddleware().awrap_model_call(request, fireworks)
+
+        async def filtered(request: ModelRequest) -> ModelResponse:
+            return await UnsupportedContentMiddleware().awrap_model_call(request, replay)
+
+        async def selected(request: ModelRequest) -> ModelResponse:
+            prepared = await conversation.prepare(request)
+            try:
+                return await conversation.generate(prepared, filtered)
+            except Exception as exc:
+                if attempt.emitted or not context_overflow(exc):
+                    raise
+                prepared = await conversation.prepare(request, rejected=exc)
+                return await conversation.generate(prepared, filtered)
+
+        response = await selected(request)
+        return conversation.finish(response)
+
+
+class _PromptCacheSlot(_ModelCallGuard):
+    def __init__(self, provider: str) -> None:
+        self._provider = provider
+
+    @property
+    def name(self) -> str:
+        return f"{self._provider}PromptCachingMiddleware"
 
 
 class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
@@ -273,20 +336,17 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
 
 
 def model_call_guards(
-    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS, *, subagent: bool = False
+    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
+    *,
+    subagent: bool = False,
+    recovery: AgentMiddleware | None = None,
 ) -> list[AgentMiddleware]:
-    """Innermost around every model call, inside the middleware that picks its model.
-
-    They see the model the call really goes to. One deadline covers the call and its
-    retries. An agent's call that still fails raises and ends the run, which the
-    backend reports as the provider's failure; a subagent's that times out becomes
-    its answer. The prompt cache replaces deepagents' own 5m one by name, in place.
-    """
+    """Prepare once, then recover each provider request without changing models."""
     return [
+        SummarizationStateMiddleware(),
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
-        ReplayableHistoryMiddleware(),
-        ModelCallTimeoutMiddleware(timeout_seconds),
-        # Its default answers with the error as the model's reply instead of raising.
-        ModelRetryMiddleware(retry_on=(TimeoutError,), on_failure="error"),
-        AnthropicPromptCachingMiddleware(ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"),
+        *([recovery] if recovery is not None else []),
+        _PromptCacheSlot("Anthropic"),
+        _PromptCacheSlot("Fireworks"),
+        FinalModelCallMiddleware(timeout_seconds),
     ]
