@@ -34,7 +34,6 @@ def credentials(monkeypatch):
         "get_github_app_installation_token_with_expiry",
         AsyncMock(return_value=("bot-token", None)),
     )
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
     return user
 
 
@@ -304,7 +303,6 @@ async def test_private_thread_does_not_fall_back_to_bot(
 ):
     thread_metadata["visibility"] = "private"
     credentials.return_value = None
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
     with pytest.raises(auth.GitHubUserAuthRequired):
         await auth.resolve_github_token(config(), "thread-1")
 
@@ -330,7 +328,6 @@ async def test_metadata_lookup_failure_cannot_use_personal_credentials(
 async def test_github_webhook_context_always_uses_workspace_bot(monkeypatch, credentials):
     from openswe.webhooks import common
 
-    monkeypatch.setattr(common, "is_bot_token_only_mode", lambda: False)
     monkeypatch.setattr(
         common,
         "get_github_app_installation_token_with_expiry",
