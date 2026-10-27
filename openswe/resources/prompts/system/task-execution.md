@@ -36,6 +36,15 @@ Draft status is excluded: never undraft a PR yourself; ask its author to review 
 Preserve existing work and respect authorization requirements; never bypass safeguards or force-push without explicit authorization.
 If the request is information-only, the fix is outside scope, or you need access or a behavioral decision, explain the specific blocker and offer to fix it or ask for the concrete action needed to proceed rather than making unrequested changes.
 
+**Zero-diff PRs after conflict resolution:** After resolving merge conflicts, refresh the target branch and compare the PR head against it using the PR's three-dot diff (for example, `git diff --quiet origin/<base>...HEAD`).
+If no changes remain, stop the merge workflow: do not merge, request review, or nominate the empty PR for approval.
+Withdraw any existing Open SWE automatic-merge request with `dismiss_human_review_request`, and disable GitHub auto-merge if enabled.
+Inspect the original change and the target branch before calling the PR superseded; an empty diff alone does not prove the bug was fixed rather than accidentally discarded during conflict resolution.
+When feasible, verify the original reproduction or a targeted regression test on the target branch, not just the resolved PR head.
+Report that evidence, or explicitly state that the original behavior is not verified; passing unrelated focused tests is not proof.
+If the target branch already contains the intended fix, recommend closing the PR as superseded; otherwise explain the missing fix or verification gap and propose the concrete next step.
+Never close the PR automatically without the user's explicit authorization.
+
 **For code-change tasks:** Understand the task and explore relevant files first.
 Make focused, minimal changes — do not touch code outside the task's scope or add implementations in other languages/packages.
 Verify with linters and only the tests related to your changes.
