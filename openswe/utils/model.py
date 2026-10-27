@@ -10,7 +10,7 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
-# primary provider a fair chance before the fallback middleware kicks in.
+# provider a fair chance before the run fails.
 DEFAULT_MAX_RETRIES = 6
 
 # Per-request deadline. Without one a stalled provider connection can park a run
@@ -157,20 +157,6 @@ def _codex_profile(model_id: str) -> dict[str, object] | None:
     profile: dict[str, object] = dict(_get_default_model_profile(model_id.partition(":")[2]))
     profile["max_input_tokens"] = context_window
     return profile
-
-
-def fallback_model_id_for(primary_model_id: str) -> str | None:
-    """Return the cross-provider fallback model id for a given primary, if any.
-
-    Anthropic primaries fall back to OpenAI and vice versa. Returns ``None``
-    when the provider has no configured cross-provider fallback (e.g. Google,
-    local, or self-hosted providers we don't want to silently route off-host).
-    """
-    if primary_model_id.startswith("anthropic:"):
-        return "openai:gpt-6.1-sol"
-    if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-5-5"
-    return None
 
 
 def model_request_defaults(model_id: str) -> ModelKwargs:

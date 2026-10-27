@@ -27,8 +27,7 @@ def test_task_retry_on_transient_status() -> None:
 
 
 def test_task_retry_on_subagent_model_deadline() -> None:
-    # A subagent has no fallback middleware, so retrying the delegated task is
-    # how a wedged model call inside it recovers.
+    # Retrying the delegated task is how a wedged model call inside it recovers.
     assert task_retry_on(ModelCallTimeoutError("wedged")) is True
 
 

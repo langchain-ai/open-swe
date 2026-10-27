@@ -61,10 +61,12 @@ Every call is authenticated with the run token.
   Subagents start from the task alone: deepagents' `fork` mode would hand them this agent's middleware, `BackendRunMiddleware` included.
 - **State:** graph state preparation and the loop write that MDA does not know rides in `open_swe_state` and goes back with every call.
   Custom stream events the backend emits are re-emitted here, so the UI gets them too.
-- **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
+- **MDA-native behaviour:** model-call shaping stays MDA's own: retries, call limits, caching, and automatic summarization.
   Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`) and fails a call that outlives 15 minutes, its retries included, with `ModelCallTimeoutError`.
-  An agent's call then goes to the fallback model and, failing that, ends the run with that error.
-  A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
+  A call its provider fails for an outage (overload, rate limit, 5xx, dropped connection or timeout) never switches models: `rt/provider_recovery.py` makes it again on the same model with capped exponential backoff, for up to six hours, telling the backend through `MODEL_RECOVERY` when the run starts and stops waiting, so the person hears once and the dashboard shows the wait; any other failure raises at once.
+  An agent's call that still fails ends the run.
+  MDA first tells the backend why through `MODEL_FAILURE` (the provider's failure code and the model it called), so the run's failure reply names the provider instead of a generic error.
+  A subagent's timed-out call becomes its answer instead, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
 - **One graph for every run:** the factory builds each graph once per process from what is the same for every run that plays it (`GraphInputs`: the graph, and where its workers report) and declares that to MDA (`_openswe_graph_inputs`, `vendor/mda-changes/2026-10-26-openswe-graph-inputs.md`), which compiles it once and shares it between every run, thread and person, and every read of a thread's state.

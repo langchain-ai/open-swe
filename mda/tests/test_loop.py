@@ -1,5 +1,6 @@
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from langchain.agents import create_agent
@@ -11,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
     messages_from_dict,
 )
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, JsonValue
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
@@ -30,8 +32,7 @@ from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, Tas
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
-_FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-_FAST = ModelSpec(model_id="fireworks:kimi", kwargs={}, reads_images=False, fallback=_FALLBACK)
+_FAST = ModelSpec(model_id="fireworks:kimi", kwargs={}, reads_images=False)
 _VISION = ModelSpec(model_id="google_genai:gemini-3.8-flash", kwargs={})
 _MODELS = RunModels(
     model=_MAIN, subagent_model=_MAIN, use_gateway=True, routes={"fast": _FAST}, vision=_VISION
@@ -156,7 +157,10 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     await backend.outbox.drain()
 
     assert planned.call is not None
-    assert planned.call.system_prompt == (
+    assert planned.call.system_prompt is None
+    assert loop.system_prompt(
+        cast(dict[str, object], state[STATE_KEY]), planned.call.task_instructions
+    ) == (
         "This is a preview deployment.\n\nYou are Open SWE.\n\n"
         "Walk the reviewer through it.\n\nYou coordinate the task."
     )
@@ -167,7 +171,6 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     }
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
-    assert planned.call.fallback == _FALLBACK
     assert planned.call.use_gateway is True
     assert [message.content for message in messages_from_dict(planned.messages)] == [context]
     assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]
@@ -405,3 +408,72 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+async def test_native_prompt_reference_reconstructs_from_checkpoint_without_refetching_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain.agents.middleware.types import (
+        ExtendedModelResponse,
+        ModelRequest,
+        ModelResponse,
+    )
+    from langgraph.checkpoint.memory import InMemorySaver
+    from rt.middleware import RunState
+
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "task_context": TaskContext(instructions="Captured task instructions."),
+        },
+        LoopRules(deployment_prompt="Deployment.", task_coordination=True, review_guide=True),
+    )
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    state = _state(
+        HumanMessage("go"),
+        rendered_system_prompt="Large durable prompt.",
+        review_guide_rules="Guide.",
+    )
+    planned = await RunLoop(backend).before_model(state)
+    assert planned.call is not None
+    captured: list[str] = []
+    wrapper = BackendRunMiddleware(backend)
+
+    class Reconstruct(AgentMiddleware):
+        state_schema = RunState
+
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse | ExtendedModelResponse]],
+        ) -> ModelResponse | ExtendedModelResponse:
+            async def observe(prepared: ModelRequest) -> ModelResponse:
+                assert prepared.system_message is not None
+                captured.append(prepared.system_message.text)
+                response = await handler(prepared)
+                assert isinstance(response, ModelResponse)
+                return response
+
+            return await wrapper.awrap_model_call(request, observe)
+
+    graph = create_agent(
+        model=model,
+        system_prompt="Harness.",
+        middleware=[Reconstruct()],
+        checkpointer=InMemorySaver(),
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "native-reference"}}
+    await graph.ainvoke({**state, "open_swe_call": planned.call.model_dump()}, config)
+    await graph.ainvoke({"messages": [HumanMessage("resume")]}, config)
+    checkpoint = await graph.aget_state(config)
+    assert checkpoint.values["open_swe_call"]["system_prompt"] is None
+    assert (
+        captured
+        == [
+            "Deployment.\n\nLarge durable prompt.\n\nGuide.\n\nCaptured task instructions.\n\nHarness."
+        ]
+        * 2
+    )
+    assert [name for name, _ in calls] == ["task_context"]

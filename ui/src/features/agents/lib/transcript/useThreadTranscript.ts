@@ -30,9 +30,11 @@ import { fetchOlderTurns, fetchTranscript, openTranscriptEvents } from "./api"
 import {
   applyEvent,
   applySnapshot,
+  failureReason,
   fromSnapshot,
   isOffloading as offloadingFromState,
   prependTurns,
+  providerWaitNotice,
   routedNotice,
   queuedTurns,
   staleWorkspaceNotice,
@@ -42,7 +44,12 @@ import type { StreamConnection } from "@/features/agents/lib/stream/connection"
 import type { RunTracker } from "@/lib/perf/streaming"
 import type { Message } from "@/features/agents/lib/types"
 import type { TranscriptEventStream } from "./api"
-import type { TranscriptState, QueuedTurn, StaleWorkspace } from "./reducer"
+import type {
+  ProviderWait,
+  TranscriptState,
+  QueuedTurn,
+  StaleWorkspace,
+} from "./reducer"
 
 const CACHE_TTL_MS = 5 * 60_000
 
@@ -114,6 +121,10 @@ export interface ThreadTranscript {
   isOffloading: boolean
   routed: { route?: string; modelId?: string | null } | null
   workspaceStale: StaleWorkspace | null
+  /** The running turn is waiting for its model's provider to recover. */
+  providerWait: ProviderWait | null
+  /** Why the newest turn failed, when it failed and the backend said why. */
+  failureReason: string | null
   error: unknown
   connection: StreamConnection
   /** Turns older than the loaded window remain on the server. */
@@ -381,6 +392,8 @@ export function useThreadTranscript(
     isOffloading: state ? offloadingFromState(state) : false,
     routed: state ? routedNotice(state) : null,
     workspaceStale: state ? staleWorkspaceNotice(state) : null,
+    providerWait: state ? providerWaitNotice(state) : null,
+    failureReason: state ? failureReason(state) : null,
     error,
     connection,
     hasOlder: state?.olderCursor != null,

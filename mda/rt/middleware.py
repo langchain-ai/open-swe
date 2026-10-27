@@ -32,6 +32,7 @@ from collections.abc import (
 )
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import partial
 from typing import Annotated, Final, NotRequired, cast
 
 import httpx
@@ -64,18 +65,20 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import InboxSpec
+from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
     BEFORE_MODEL,
     INBOX,
+    MODEL_FAILURE,
     PREPARE,
     Inbox,
     InboxRead,
     InboxReceipt,
     ModelCall,
+    ModelFailure,
     ModelResult,
     PhaseResult,
     Prepare,
@@ -94,8 +97,11 @@ from rt.backend import (
     subagent_of,
 )
 from rt.loop import RunLoop
+from rt.model_budget import provider_attempts
+from rt.model_calls import provider_failure_code
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
+from rt.provider_recovery import ProviderRecovery
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
@@ -132,32 +138,12 @@ def _merge(
     return {**held, **(right or {})}
 
 
-_TOOL_PAIRING_ERRORS: Final = (
-    "no tool output found for function call",
-    "no tool call found for function call output",
-    "unexpected `tool_use_id`",
-    "unexpected tool_use_id",
-    "without `tool_result`",
-    "must be followed by tool messages",
-    "must be a response to a preceeding message with 'tool_calls'",
-    "must be a response to a preceding message with 'tool_calls'",
-)
-
-
 def _has_image(request: ModelRequest) -> bool:
     return any(
         block.get("type") == "image"
         for message in request.messages
         for block in message.content_blocks
     )
-
-
-def _tool_pairing_error(exc: Exception) -> bool:
-    """A 400 over unpaired tool history, which the fallback would get as well."""
-    if getattr(exc, "status_code", None) != 400:
-        return False
-    message = str(exc).lower()
-    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
 
 
 class RunState(AgentState):
@@ -299,9 +285,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+        *,
+        recovery: ProviderRecovery | None = None,
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
+        # Shared with the run's subagents, which wait out the same outage.
+        self._recovery = recovery or ProviderRecovery(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
@@ -491,10 +481,24 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=own)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
-            return await handler(request)
+            models = self._backend.run.catalog.models
+            with provider_attempts(
+                partial(
+                    self._recovery.call,
+                    model=models.model if models is not None else None,
+                    via_gateway=models is not None and models.use_gateway,
+                )
+            ):
+                return await handler(request)
         planned = ModelCall.model_validate(raw)
         existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
+        system_prompt = planned.system_prompt
+        if system_prompt is None:
+            if self._loop is None:
+                raise BackendCallError("A referenced system prompt requires the runtime loop")
+            held = request.state.get(STATE_KEY, {})
+            system_prompt = self._loop.system_prompt(held, planned.task_instructions)
+        prompt = f"{system_prompt}\n\n{existing}" if existing else system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
@@ -502,17 +506,38 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
         try:
-            return await handler(request)
+            with provider_attempts(
+                partial(self._recovery.call, model=model, via_gateway=planned.use_gateway)
+            ):
+                return await handler(request)
         except Exception as exc:
-            if planned.fallback is None or _tool_pairing_error(exc):
-                raise
-            # As the in-process graph does: another provider before failing the run.
-            logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            return await handler(
-                request.override(
-                    model=build_model(planned.fallback, use_gateway=planned.use_gateway)
-                )
-            )
+            await self._report_model_failure(model, exc, via_gateway=planned.use_gateway)
+            raise
+
+    async def _report_model_failure(
+        self, model: ModelSpec | None, exc: Exception, *, via_gateway: bool
+    ) -> None:
+        """Tell the backend why the provider failed, which the run's end alone cannot."""
+        code = provider_failure_code(exc)
+        model_id = model.model_id if model is not None else None
+        logger.warning(
+            "Model call failed",
+            exc_info=exc,
+            extra={"model_call_failure": {"model_id": model_id, "code": code}},
+        )
+        if code is None:
+            return
+        failure = ModelFailure(
+            run_id=run_id(),
+            code=code,
+            error_type=type(exc).__name__,
+            model_id=model_id,
+            via_gateway=via_gateway,
+        )
+        try:
+            await call(self._backend, MODEL_FAILURE, failure)
+        except BackendCallError:
+            logger.warning("Could not tell the backend why the model call failed", exc_info=True)
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

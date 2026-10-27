@@ -89,7 +89,6 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         ),
         patch("openswe.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("openswe.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.make_model", return_value=MagicMock()),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),

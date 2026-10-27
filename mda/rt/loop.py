@@ -266,11 +266,11 @@ class RunLoop:
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
-                system_prompt=self._system_prompt(current, context),
+                system_prompt=None,
+                task_instructions=context.instructions,
                 hidden_tools=self._hidden(current),
                 model=model,
                 vision=None if model.reads_images else self._models.vision,
-                fallback=model.fallback,
                 use_gateway=self._models.use_gateway,
             ),
         )
@@ -363,14 +363,14 @@ class RunLoop:
             return await self._chosen_model(selected, held.get("selected_effort"))
         return self._models.model
 
-    def _system_prompt(self, held: Mapping[str, object], context: TaskContext) -> str:
+    def system_prompt(self, held: Mapping[str, object], task_instructions: str) -> str:
         rendered = held.get("rendered_system_prompt")
         guide = held.get("review_guide_rules") if self.rules.review_guide else None
         sections = [
             self.rules.deployment_prompt,
             rendered if isinstance(rendered, str) else "",
             guide if isinstance(guide, str) else "",
-            context.instructions,
+            task_instructions,
         ]
         return "\n\n".join(section for section in sections if section)
 

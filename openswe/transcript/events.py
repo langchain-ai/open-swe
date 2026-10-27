@@ -29,7 +29,9 @@ type ActorKind = Literal["user", "agent", "system"]
 type ThreadStatus = Literal["idle", "running", "error"]
 type MessageRole = Literal["human", "ai"]
 type ToolOutcome = Literal["completed", "error"]
-type NoticeKind = Literal["model_routed", "conversation_offloading", "workspace_stale"]
+type NoticeKind = Literal[
+    "model_routed", "conversation_offloading", "workspace_stale", "provider_recovery"
+]
 type CheckpointStatus = Literal["ready", "missing", "error"]
 type FileChangeKind = Literal["added", "removed", "modified"]
 type JsonObject = dict[str, JsonValue]
@@ -226,6 +228,9 @@ class TurnFailed(_Body):
     turn_id: UUID
     run_id: str | None = None
     error: str
+    # Why the run failed and what to do next, in words for the person; None
+    # where only the technical ``error`` is known.
+    reason: str | None = None
 
 
 class TurnInterrupted(_Body):
@@ -300,8 +305,9 @@ class RunNotice(_Body):
 
     Notices have no projection: the snapshot serves the latest one per kind for
     the thread's newest turn, read straight from the log, so ``model_routed``
-    survives a reload. ``conversation_offloading`` describes what a run is doing
-    right now, so the snapshot drops it once its turn has settled.
+    survives a reload. ``conversation_offloading`` and ``provider_recovery``
+    describe what a run is doing right now, so the snapshot drops them once their
+    turn has settled.
     """
 
     type: Literal["run.notice"] = "run.notice"

@@ -57,6 +57,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
 )
 from rt.model_calls import model_call_guards
+from rt.provider_recovery import ProviderRecovery, ProviderRecoveryMiddleware
 from rt.remote_files import FILE_TOOLS, RemoteFiles
 from rt.run_tools import (
     RunCodeInterpreter,
@@ -184,6 +185,8 @@ def _parts(inputs: GraphInputs) -> _Parts:
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
         IncidentEvidenceMiddleware(backend),
     ]
+    # The agent's model calls and its subagents' wait out one outage together.
+    recovery = ProviderRecovery(backend)
     subagent = _SUBAGENTS[inputs.graph]
     subagents: list[SubAgent] = [
         {
@@ -201,7 +204,9 @@ def _parts(inputs: GraphInputs) -> _Parts:
                     replace_sandbox,
                     RunToolsMiddleware(toolsets, subagent=subagent),
                     RunSubagentMiddleware(toolsets, subagent),
-                    *model_call_guards(subagent=True),
+                    *model_call_guards(
+                        subagent=True, recovery=ProviderRecoveryMiddleware(recovery)
+                    ),
                 ],
             ),
         }
@@ -211,7 +216,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, opened_sandbox),
+            BackendRunMiddleware(backend, opened_sandbox, recovery=recovery),
             replace_sandbox,
             *reports,
             skills,

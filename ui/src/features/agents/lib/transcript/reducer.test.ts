@@ -4,8 +4,10 @@ import { fetchToolOutput } from "./api"
 import {
   applyEvent,
   applySnapshot,
+  failureReason,
   fromSnapshot,
   isOffloading,
+  providerWaitNotice,
   prependTurns,
   queuedTurns,
   routedNotice,
@@ -47,6 +49,7 @@ function turn(
     requested_at: requestedAt,
     started_at: state === "requested" ? null : requestedAt,
     error: null,
+    reason: null,
   }
 }
 
@@ -517,6 +520,22 @@ describe("transcript events", () => {
     })
     expect(ended.status).toBe("idle")
   })
+
+  it("explains a failed turn only in the words the backend wrote for the person", () => {
+    const failed = (reason?: string): StoredEvent => ({
+      ...appended(11, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-2", error: "APIStatusError: 529", reason },
+    })
+    const reason = "Anthropic was overloaded and never recovered."
+
+    expect(
+      failureReason(applyEvent(fromSnapshot(twoTurnSnapshot()), failed()))
+    ).toBeNull()
+    expect(
+      failureReason(applyEvent(fromSnapshot(twoTurnSnapshot()), failed(reason)))
+    ).toBe(reason)
+  })
 })
 
 function notice(version: number, payload: RunNoticePayload): StoredEvent {
@@ -589,6 +608,34 @@ describe("notices", () => {
     })
 
     expect(isOffloading(settled)).toBe(false)
+  })
+
+  it("shows a provider wait until the provider answers or the turn settles", () => {
+    const wait = (version: number, waiting: boolean) =>
+      notice(version, {
+        turn_id: "turn-2",
+        kind: "provider_recovery",
+        data: {
+          waiting,
+          provider: "Anthropic",
+          model_id: "anthropic:claude-opus-5-5",
+          via_gateway: false,
+        },
+      })
+    const waiting = applyEvent(fromSnapshot(twoTurnSnapshot()), wait(11, true))
+    expect(providerWaitNotice(waiting)).toEqual({
+      provider: "Anthropic",
+      modelId: "anthropic:claude-opus-5-5",
+      viaGateway: false,
+    })
+    expect(providerWaitNotice(applyEvent(waiting, wait(12, false)))).toBeNull()
+
+    const settled = applyEvent(waiting, {
+      ...appended(12, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-2", error: "OverloadedError" },
+    })
+    expect(providerWaitNotice(settled)).toBeNull()
   })
 })
 

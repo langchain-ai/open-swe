@@ -35,7 +35,6 @@ from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.prompts import common_prompt
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
-from openswe.server import fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -174,19 +173,11 @@ async def run_hooks(
 
 
 def model_spec(model_id: str, kwargs: Mapping[str, object]) -> ModelSpec:
-    """``model_id`` as the runtime calls it: whether it reads images, and its fallback."""
-    fallback = fallback_model_choice(model_id)
+    """``model_id`` as the runtime calls it, and whether it reads images."""
     return ModelSpec(
         model_id=model_id,
         kwargs=_json_object.validate_python(dict(kwargs)),
         reads_images=model_supports_images(model_id),
-        fallback=None
-        if fallback is None
-        else ModelSpec(
-            model_id=fallback.model_id,
-            kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-            reads_images=model_supports_images(fallback.model_id),
-        ),
     )
 
 
@@ -229,17 +220,10 @@ class ModelChoices:
     def call(self, shaped: ModelCall, state: Mapping[str, object]) -> ModelCall:
         model = self.model_for(state)
         vision = self.vision_for(model)
-        fallback = fallback_model_choice(model.model_id)
         return shaped.model_copy(
             update={
                 "model": model,
                 "vision": vision,
-                "fallback": None
-                if fallback is None
-                else ModelSpec(
-                    model_id=fallback.model_id,
-                    kwargs=_json_object.validate_python(dict(fallback.kwargs)),
-                ),
                 "use_gateway": self.models.use_gateway,
             }
         )

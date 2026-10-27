@@ -98,7 +98,6 @@ from openswe.middleware import (
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
-    ModelFallbackMiddleware,
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
@@ -274,9 +273,6 @@ from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.json_types import as_json_object, thread_metadata
 from openswe.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    fallback_model_id_for,
     make_model,
     provider_model_kwargs,
 )
@@ -621,19 +617,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "start_thread",
         "task",
     }
-
-
-def fallback_model_choice(primary_model_id: str) -> ModelChoice | None:
-    """The cross-provider model a call on ``primary_model_id`` falls back to, if any."""
-    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
-        primary_model_id
-    )
-    if not fallback_model_id or fallback_model_id == primary_model_id:
-        return None
-    kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-    if fallback_model_id.startswith("openai:"):
-        kwargs["reasoning"] = DEFAULT_LLM_REASONING
-    return ModelChoice(fallback_model_id, kwargs)
 
 
 def _general_purpose_description() -> str:
@@ -1738,18 +1721,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
-        fallback = fallback_model_choice(primary_model_id)
-        if fallback is None:
-            return None
-        logger.info(
-            "Configured model fallback",
-            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback.model_id},
-        )
-        return _make_model_or_defer(fallback.model_id, use_gateway=use_gateway, **fallback.kwargs)
-
-    fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
-
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
@@ -1992,7 +1963,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             notify_step_limit_reached,
             record_run_usage,
             model_selection,
-            fallback_middleware,
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
             ModelErrorMiddleware(),
         ],

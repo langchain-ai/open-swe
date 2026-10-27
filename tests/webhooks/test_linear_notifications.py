@@ -8,7 +8,7 @@ import pytest
 from langchain_core.tools import BaseTool
 from mcp.types import CallToolResult, TextContent, Tool
 
-from openswe import completion
+from openswe import completion, run_source
 from openswe.linear import notifications
 from openswe.mcp import MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as workspace_mcps
@@ -82,9 +82,7 @@ async def test_failed_linear_run_posts_through_mcp(
 async def test_linear_sandbox_failure_posts_through_mcp(
     linear_mcp: LinearMCP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        sandbox_circuit_breaker, "get_active_slack_thread", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(run_source, "get_active_slack_thread", AsyncMock(return_value=None))
     await sandbox_circuit_breaker.post_sandbox_unreachable_notification(
         {"configurable": {"linear_issue": {"id": "issue-1"}}}, sandbox_id="sb-dead"
     )
