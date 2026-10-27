@@ -18,9 +18,9 @@ from managed_deepagents._identity_auth import (
     IDENTITY_LINKS_STORE_PREFIX,
     INGRESS_SECRET_ENV,
     INGRESS_SECRET_HEADER,
-    LANGSMITH_API_KEY_ENV,
     USER_HEADER,
 )
+from managed_deepagents._langsmith_env import resolve_server_api_key
 from managed_deepagents._loopback import (
     is_loopback_url,
     resolve_loopback_api_key,
@@ -103,7 +103,7 @@ def create_langgraph_identity_link_store() -> IdentityLinkStore | None:
     api_url = resolve_loopback_api_url()
     is_local = is_loopback_url(api_url)
     handoff = os.environ.get(HANDOFF_SECRET_ENV, "").strip() if is_local else ""
-    server_api_key = os.environ.get(LANGSMITH_API_KEY_ENV, "").strip()
+    server_api_key = resolve_server_api_key()
     ingress = os.environ.get(INGRESS_SECRET_ENV, "").strip() if is_local else ""
     if not handoff and not server_api_key and not ingress:
         return None

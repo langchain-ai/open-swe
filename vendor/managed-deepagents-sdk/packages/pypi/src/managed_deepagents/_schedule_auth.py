@@ -16,7 +16,11 @@ from typing_extensions import TypedDict
 
 from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
 from managed_deepagents._identity_runtime import _field, is_studio_auth_user
-from managed_deepagents._loopback import is_loopback_url, resolve_loopback_api_url
+from managed_deepagents._langsmith_env import resolve_server_api_key
+from managed_deepagents._loopback import (
+    is_loopback_url,
+    resolve_loopback_api_url,
+)
 from managed_deepagents.run_context import ChannelContext, is_managed_key
 
 if TYPE_CHECKING:
@@ -88,7 +92,7 @@ def schedule_request_config(access: ScheduleAccess) -> tuple[str, dict[str, str]
     hosted = os.environ.get("LANGSMITH_HOST_API_URL", "").strip().rstrip("/")
     base = hosted or resolve_loopback_api_url()
     secret = os.environ.get("MDA_HANDOFF_SECRET")
-    api_key = os.environ.get("LANGSMITH_API_KEY", "").strip()
+    api_key = resolve_server_api_key()
     if not secret or (
         not is_loopback_url(base) and not (hosted.startswith("https://") and api_key)
     ):

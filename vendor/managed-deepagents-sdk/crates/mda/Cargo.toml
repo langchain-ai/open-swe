@@ -35,7 +35,7 @@ opentelemetry-otlp = { version = "0.33", default-features = false, features = [
 opentelemetry_sdk = { version = "0.33", default-features = false, features = [
     "logs",
 ] }
-oxc = "0.154.0"
+oxc = "0.155.0"
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
     "form",
@@ -55,7 +55,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 # PEP 440 specifier parsing for `requires-python`. Pinned exactly: this is
 # uv's internal crate on a 0.0.x line, so minor bumps may break the API.
-uv-pep440 = "=0.0.93"
+uv-pep440 = "=0.0.96"
 uuid = { version = "1.24.0", default-features = false, features = [
     "std",
     "v4",

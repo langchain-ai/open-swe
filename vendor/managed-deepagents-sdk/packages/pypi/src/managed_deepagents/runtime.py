@@ -30,6 +30,7 @@ from collections.abc import (
     Iterator,
     Mapping,
     Sequence,
+    Sized,
 )
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
@@ -95,6 +96,7 @@ from managed_deepagents._connector import (
     run_connector_sandbox_hooks,
 )
 from managed_deepagents._eval_filesystem import create_eval_trial_filesystem_backend
+from managed_deepagents._graph_build_timing import GraphBuildTiming
 from managed_deepagents._identity_auth import build_managed_auth
 from managed_deepagents._identity_http import build_managed_http_app
 from managed_deepagents._identity_runtime import (
@@ -102,6 +104,7 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
+from managed_deepagents._langsmith_env import resolve_server_api_key
 from managed_deepagents._log import logger
 from managed_deepagents._managed_composition import (
     assert_dynamic_memory_selection,
@@ -490,7 +493,7 @@ def _sandbox_client_kwargs(sandbox: SandboxDefinition) -> _SandboxClientKwargs:
     if api_endpoint:
         kwargs["api_endpoint"] = api_endpoint
     api_key = _string_option(sandbox.options.get("api_key")) or _string_option(
-        os.environ.get("LANGSMITH_API_KEY")
+        resolve_server_api_key()
     )
     if api_key:
         kwargs["api_key"] = api_key
@@ -769,6 +772,7 @@ async def compile_managed_agent_async(
     Generated entries pass `async_subagent_graphs` to the lead, and
     `async_subagent` to build that async subagent's own graph instead.
     """
+    timing = GraphBuildTiming()
     if runtime is not None:
         execution = runtime.execution_runtime
         is_run = execution is not None
@@ -792,14 +796,15 @@ async def compile_managed_agent_async(
     )
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
-    definition = await resolve_agent_definition(entry, factory_runtime)
+    with timing.phase("factory"):
+        definition = await resolve_agent_definition(entry, factory_runtime)
     if GENERAL_PURPOSE in (async_subagent_graphs or {}) or async_subagent == GENERAL_PURPOSE:
         definition = with_async_general_purpose(definition)
     if async_subagent is not None:
         definition = async_subagent_definition(definition, async_subagent)
     else:
         definition = route_async_subagents(definition, async_subagent_graphs or {})
-    return await _compile_resolved_managed_agent_async(
+    agent = await _compile_resolved_managed_agent_async(
         definition,
         config,
         context_root=context_root,
@@ -820,7 +825,10 @@ async def compile_managed_agent_async(
         skip_factory_inspection_tools=factory_inspection,
         factory_entry=factory_entry,
         shared_graph=async_subagent or "lead",
+        timing=timing,
     )
+    timing.log(kind="run" if is_run else "read", run_id=_platform_run_id(config))
+    return agent
 
 
 async def _compile_resolved_managed_agent_async(
@@ -845,6 +853,7 @@ async def _compile_resolved_managed_agent_async(
     skip_factory_inspection_tools: bool = False,
     factory_entry: bool = False,
     shared_graph: str | None = None,
+    timing: GraphBuildTiming,
 ) -> CompiledAgent:
     """Select native context schema and memory access for a resolved definition.
 
@@ -947,6 +956,7 @@ async def _compile_resolved_managed_agent_async(
             inspection=not is_run,
             skip_factory_inspection_tools=skip_factory_inspection_tools,
             context_schema=context_schema,
+            timing=timing,
         )
         if isinstance(agent, CompiledAgent):
             agent.__class__ = (
@@ -1127,6 +1137,7 @@ def _compile_managed_agent(
     inspection: bool = False,
     skip_factory_inspection_tools: bool = False,
     context_schema: object = None,
+    timing: GraphBuildTiming,
 ) -> tuple[CompiledAgent, RunConfiguration]:
     """Compile the definition; ``_for_call`` adds each call's telemetry and config."""
     allowed_user_id = user_access.user_id
@@ -1164,17 +1175,23 @@ def _compile_managed_agent(
     context = (
         None
         if inspection
-        else _open_context_backend(context_repo=context_repo, context_root=context_root)
+        else timing.measure(
+            "context",
+            lambda: _open_context_backend(context_repo=context_repo, context_root=context_root),
+        )
     )
     selected_skills_backend = (
         None
         if skip_factory_inspection_tools
-        else _resolve_run_skills(
-            authored_skills,
-            context,
-            context_repo=context_repo,
-            context_root=context_root,
-            trial_root_dir=trial_root_dir,
+        else timing.measure(
+            "skills",
+            lambda: _resolve_run_skills(
+                authored_skills,
+                context,
+                context_repo=context_repo,
+                context_root=context_root,
+                trial_root_dir=trial_root_dir,
+            ),
         )
     )
     mounted_memory: MemoryLayers = []
@@ -1201,10 +1218,13 @@ def _compile_managed_agent(
             sandbox_backend=sandbox_backend,
         )
 
-    merged["system_prompt"] = _select_system_prompt(
-        authored_instructions,
-        context.backend if context is not None else None,
-        system_prompt,
+    merged["system_prompt"] = timing.measure(
+        "instructions",
+        lambda: _select_system_prompt(
+            authored_instructions,
+            context.backend if context is not None else None,
+            system_prompt,
+        ),
     )
 
     # Mounted the same way in every mode, but resolved against different roots:
@@ -1240,7 +1260,7 @@ def _compile_managed_agent(
         authored_tools = (
             list(cast("Iterable[object]", tools_value)) if tools_value is not None else []
         )
-        connector_tools = load_connector_tools(connectors)
+        connector_tools = timing.measure("connectors", lambda: load_connector_tools(connectors))
         if identity is not None:
             connector_tools = wrap_tools_with_managed_runtime(connector_tools)
         merged["tools"] = authored_tools + connector_tools
@@ -1263,9 +1283,14 @@ def _compile_managed_agent(
     # Author ``metadata`` is not a create_deep_agent kwarg — apply it on the
     # compiled runnable so LangSmith root runs carry prompt provenance, etc.
     metadata = merged.pop("metadata", None)
+    timing.set_sizes(
+        tools=_count(merged.get("tools")),
+        middleware=_count(merged.get("middleware")),
+        subagents=_count(merged.get("subagents")),
+    )
     # The definition and managed adapters are validated at their own boundaries.
     # This heterogeneous argument map cannot express each native keyword type.
-    agent = create_deep_agent(**cast("Any", merged))
+    agent = timing.measure("create_deep_agent", lambda: create_deep_agent(**cast("Any", merged)))
     compiled = (
         agent.with_config({"metadata": dict(metadata)})
         if isinstance(metadata, Mapping) and metadata
@@ -1287,6 +1312,10 @@ def _compile_managed_agent(
             user_denied_reason=user_access.denied_reason,
         ),
     )
+
+
+def _count(value: object) -> int:
+    return len(value) if isinstance(value, Sized) else 0
 
 
 def _platform_run_id(config: Mapping[str, object] | None) -> str | None:
@@ -1620,12 +1649,14 @@ async def compile_agent_factory_for_eval_async(
     # Harbor calls this helper only to execute a scored trial. Missing context
     # means the run has empty authored context; it is not graph inspection.
     context = config.get("context") if config is not None else None
-    definition = await resolve_agent_definition(
-        entry, _internal_server_runtime(config, context, is_run=True)
-    )
+    timing = GraphBuildTiming()
+    with timing.phase("factory"):
+        definition = await resolve_agent_definition(
+            entry, _internal_server_runtime(config, context, is_run=True)
+        )
     reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
-    return await _compile_resolved_managed_agent_async(
+    agent = await _compile_resolved_managed_agent_async(
         eval_definition,
         config,
         run_context=context,
@@ -1637,7 +1668,10 @@ async def compile_agent_factory_for_eval_async(
         trial_root_dir=_eval_app_dir(config),
         report_telemetry=False,
         skip_factory_inspection_tools=False,
+        timing=timing,
     )
+    timing.log(kind="run", run_id=_platform_run_id(config))
+    return agent
 
 
 def _prepare_eval_definition(

@@ -15,11 +15,11 @@ from managed_deepagents._identity_auth import (
     HANDOFF_SECRET_HEADER,
     INGRESS_SECRET_ENV,
     INGRESS_SECRET_HEADER,
-    LANGSMITH_API_KEY_ENV,
     SOURCE_PROVIDER_HEADER,
     SOURCE_THREAD_HEADER,
     USER_HEADER,
 )
+from managed_deepagents._langsmith_env import resolve_server_api_key
 from managed_deepagents._log import logger
 from managed_deepagents._loopback import (
     is_loopback_url,
@@ -123,7 +123,7 @@ def _create_ingress_loopback_client(
     api_key = resolve_loopback_api_key()
     is_local = is_loopback_url(api_url)
     handoff_secret = os.environ.get(HANDOFF_SECRET_ENV, "").strip() if is_local else ""
-    server_api_key = os.environ.get(LANGSMITH_API_KEY_ENV, "").strip()
+    server_api_key = resolve_server_api_key()
     ingress_secret = os.environ.get(INGRESS_SECRET_ENV, "").strip() if is_local else ""
     headers = {
         USER_HEADER: user_id,
@@ -140,7 +140,7 @@ def _create_ingress_loopback_client(
 def _has_loopback_credential() -> bool:
     is_local = is_loopback_url(resolve_loopback_api_url())
     return bool(
-        os.environ.get(LANGSMITH_API_KEY_ENV, "").strip()
+        resolve_server_api_key()
         or (
             is_local
             and (
