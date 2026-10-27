@@ -2,6 +2,7 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { createFileRoute } from "@tanstack/react-router"
 import { useMemo } from "react"
 
+import { validateFrontendReviewSearch } from "@/features/reviews/frontend/search"
 import { ReviewPage } from "@/features/reviews/page/ReviewPage"
 import { warmReviewPage } from "@/features/reviews/page/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -10,6 +11,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
+  validateSearch: validateFrontendReviewSearch,
   // Runs on hover intent too: the shell's data and the highlighter warm up
   // before the click lands. Never awaited, so navigation is never held.
   loader: ({ context, params }) =>
@@ -32,6 +34,8 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
 function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
   const session = useSession()
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
   const pr = useMemo(
     () => ({ owner, repo, number: Number(number) }),
     [owner, repo, number]
@@ -49,5 +53,21 @@ function ReviewDetailPage() {
         {number} is not a pull request number.
       </main>
     )
-  return <ReviewPage key={`${owner}/${repo}/${number}`} pr={pr} />
+  return (
+    <ReviewPage
+      key={`${owner}/${repo}/${number}`}
+      pr={pr}
+      frontendActive={search.view === "frontend"}
+      frontendRunId={search.run}
+      onViewChange={(view) =>
+        void navigate({
+          search:
+            view === "frontend" ? { view: "frontend", run: search.run } : {},
+        })
+      }
+      onFrontendRunChange={(run) =>
+        void navigate({ search: { view: "frontend", run } })
+      }
+    />
+  )
 }

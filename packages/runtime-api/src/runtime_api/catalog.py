@@ -182,6 +182,13 @@ class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
     operations: list[OperationSpec] = []
+    # A PR-bound run's native runtime tool; it calls a named API, not a legacy operation.
+    frontend_review_description: str | None = None
+    frontend_assessment_description: str | None = None
+    frontend_inspect_description: str | None = None
+    # A specialized runtime replaces its coding instructions with this prompt.
+    system_prompt: str | None = None
+    code_interpreter: bool = True
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}

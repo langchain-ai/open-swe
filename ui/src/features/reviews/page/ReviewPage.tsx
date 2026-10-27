@@ -1,3 +1,4 @@
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -15,6 +16,7 @@ import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import { FrontendReviewer } from "@/features/reviews/frontend/FrontendReviewer"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
 import { Navigator } from "./Navigator"
@@ -23,7 +25,19 @@ import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
-export function ReviewPage({ pr }: { pr: PullRequestRef }) {
+export function ReviewPage({
+  pr,
+  frontendActive = false,
+  frontendRunId,
+  onViewChange,
+  onFrontendRunChange,
+}: {
+  pr: PullRequestRef
+  frontendActive?: boolean
+  frontendRunId?: string
+  onViewChange?: (view: "code" | "frontend") => void
+  onFrontendRunChange?: (id: string) => void
+}) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const chatThreadId = useReviewChat(pr).data?.thread_id
@@ -100,18 +114,42 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
           leftInset={leftInset}
           compactRail={!wide}
           navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
+          showFileControls={!frontendActive}
         />
+        <div className="shrink-0 border-b border-default px-space-4 py-space-2">
+          <GroupedTabs
+            size="sm"
+            value={frontendActive ? "frontend" : "code"}
+            onChange={(view) => onViewChange?.(view)}
+            options={[
+              { value: "code", display: "Code review" },
+              { value: "frontend", display: "Frontend reviewer" },
+            ]}
+          />
+        </div>
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />
         ) : (
           <div className="flex min-h-0 flex-1">
-            {navigatorInline && (
+            {navigatorInline && !frontendActive && (
               <div className="w-[248px] shrink-0 border-r border-default bg-surface-level-1">
                 <Navigator pr={pr} />
               </div>
             )}
-            <section aria-label="Changes" className="min-w-0 flex-1">
-              <Changes pr={pr} />
+            <section
+              aria-label={frontendActive ? "Frontend review" : "Changes"}
+              className="min-w-0 flex-1"
+            >
+              {frontendActive ? (
+                <FrontendReviewer
+                  pr={pr}
+                  currentHeadSha={headSha}
+                  runId={frontendRunId}
+                  onRunChange={(id) => onFrontendRunChange?.(id)}
+                />
+              ) : (
+                <Changes pr={pr} />
+              )}
             </section>
             {wide && (
               <RightPanelShell
@@ -135,7 +173,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             <Rail pr={pr} onClose={() => setRailOpen(false)} />
           </SideSheet>
         )}
-        {!roomForNavigator && (
+        {!roomForNavigator && !frontendActive && (
           <SideSheet
             side="left"
             title="Files"

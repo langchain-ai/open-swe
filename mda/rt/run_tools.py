@@ -26,6 +26,7 @@ from runtime_api.loop import ModelCall
 
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
 from rt.file_tools import FileToolsMiddleware
+from rt.frontend_review import frontend_assessment_tool, frontend_inspect_tool, frontend_review_tool
 from rt.models import build_model
 from rt.search_tools import search_tools_tool
 from rt.tools import operation_tool
@@ -63,7 +64,18 @@ class RunTools:
             if catalog.search_tools
             else []
         )
-        self.by_name = {tool.name: tool for tool in (*operations, *searched)}
+        frontend = (
+            [frontend_review_tool(backend, catalog.frontend_review_description)]
+            if catalog.frontend_review_description
+            else []
+        )
+        if catalog.frontend_assessment_description:
+            frontend.append(
+                frontend_assessment_tool(backend, catalog.frontend_assessment_description)
+            )
+        if catalog.frontend_inspect_description:
+            frontend.append(frontend_inspect_tool(backend, catalog.frontend_inspect_description))
+        self.by_name = {tool.name: tool for tool in (*operations, *searched, *frontend)}
         self.excluded = frozenset(catalog.excluded)
         # Every schema offered costs each call its context, and OpenAI answers some
         # requests carrying hundreds with nothing; the tools the model seldom needs are
@@ -249,7 +261,8 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         """The interpreter sets its tools once; these are each run's."""
 
     def _runs_code(self) -> bool:
-        return self._active(self._toolsets.get())
+        tools = self._toolsets.get()
+        return tools.catalog.code_interpreter and self._active(tools)
 
     async def abefore_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
         if not self._runs_code():

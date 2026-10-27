@@ -88,6 +88,12 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
     """What ``endpoint`` answers ``body`` with, as the run or worker grant that called it."""
     from openswe.agent_api import async_workers
 
+    if isinstance(principal, RemoteRun) and principal.configurable.get("frontend_review_id"):
+        from openswe.frontend_review.runtime import ALLOWED_ENDPOINTS
+
+        if endpoint not in ALLOWED_ENDPOINTS:
+            raise RefusedCallError("This visual assessment cannot call code-review or sandbox APIs")
+
     if isinstance(principal, WorkerGrant):
         if async_workers.GRANT_API.serves(endpoint):
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
@@ -99,6 +105,10 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
         return {**catalog, "run_token": None} if isinstance(catalog, dict) else catalog
     if async_workers.RUN_API.serves(endpoint):
         return await async_workers.RUN_API.dispatch(endpoint, principal, body)
+    from openswe.frontend_review.agent_api import API as FRONTEND_REVIEW_API
+
+    if FRONTEND_REVIEW_API.serves(endpoint):
+        return await FRONTEND_REVIEW_API.dispatch(endpoint, principal, body)
     return await _graph(principal)(principal, endpoint, body)
 
 

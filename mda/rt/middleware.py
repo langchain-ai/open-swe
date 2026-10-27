@@ -421,6 +421,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         planned = ModelCall.model_validate(raw)
         existing = request.system_message.text if request.system_message is not None else ""
         prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
+        if self._backend.run.catalog.system_prompt is not None:
+            prompt = self._backend.run.catalog.system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model

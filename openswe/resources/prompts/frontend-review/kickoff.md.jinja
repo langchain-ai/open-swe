@@ -1,0 +1,7 @@
+Review captured frontend evidence {{ review_id }} for this run's pull request and commits.
+
+First call `read_frontend_review` with that review id. Inspect every supplied before/after screenshot, alongside the changed-pixel metrics and the capture's coverage limits. Assess layout, hierarchy, readability, consistency, and visible regressions. Keep intended changes, design suggestions, and directly observed defects distinct. A screenshot does not prove interaction, keyboard, accessibility, or backend behavior.
+
+Call `submit_frontend_review` once with a concise, useful summary and scenario-specific annotations in original screenshot coordinates. Keep annotations precise and grounded in visible evidence. Mention missing build attestation or other material coverage gaps. Do not invent recordings or successful authentication. If there is no supported concern, explain that without inventing a finding.
+
+Finish after saving the assessment. This request authorizes the visual report only; do not edit code, call code-review publishing tools, approve the pull request, or post a GitHub comment.

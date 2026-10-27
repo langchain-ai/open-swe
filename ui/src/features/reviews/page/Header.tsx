@@ -62,11 +62,13 @@ export function Header({
   leftInset,
   compactRail,
   navigatorShown,
+  showFileControls,
 }: {
   pr: PullRequestRef
   leftInset: string
   compactRail: boolean
   navigatorShown: boolean
+  showFileControls: boolean
 }) {
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
@@ -116,15 +118,17 @@ export function Header({
       >
         <Link to="/agents/reviews" />
       </IconButton>
-      <IconButton
-        icon={TreeViewIcon}
-        label={navigatorShown ? "Hide files" : "Show files"}
-        aria-pressed={navigatorShown}
-        size="md"
-        color="secondary"
-        variant="plain"
-        onClick={toggleNavigator}
-      />
+      {showFileControls && (
+        <IconButton
+          icon={TreeViewIcon}
+          label={navigatorShown ? "Hide files" : "Show files"}
+          aria-pressed={navigatorShown}
+          size="md"
+          color="secondary"
+          variant="plain"
+          onClick={toggleNavigator}
+        />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex min-h-7 min-w-0 items-center gap-space-2">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
@@ -290,7 +294,7 @@ export function Header({
             />
           </div>
         )}
-        {files.length > 0 && (
+        {showFileControls && files.length > 0 && (
           <button
             type="button"
             onClick={jumpToUnviewed}
