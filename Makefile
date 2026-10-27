@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck mda-typecheck mda-test test tests integration_tests help run dev dev-mda mda-cli dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
+.PHONY: all format format-check lint typecheck mda-typecheck mda-test test tests integration_tests help run dev dev-mda mda-cli dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli hooks
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -170,6 +170,7 @@ help:
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
+	@echo 'hooks                         - install the prek git hooks (pre-commit and pre-push)'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on openswe/ and tests/'
