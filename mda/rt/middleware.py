@@ -101,6 +101,7 @@ from rt.backend import (
 from rt.box_setup import box_setup
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
+from rt.managed_sandbox import OpenedSandbox
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles
@@ -315,7 +316,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     def __init__(
         self,
         backend: OpenSweBackend,
-        open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+        open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
@@ -376,11 +377,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
-        update = await self._before_agent(state, runtime)
+        update, opened = await self._before_agent(state, runtime)
         held = {**state.get(STATE_KEY, {}), **_held(update)}
         run = self._backend.run
         if self._in_box:
-            files = getattr(runtime, "backend", None)
+            # A box MDA could not open is not asked for again here: the run's first tool
+            # call opens it, or says why it cannot.
+            files = getattr(runtime, "backend", None) if opened else None
             box_setup(run).start(files)
         else:
             # Without a box of MDA's, the thread's files are the backend's to reach.
@@ -393,7 +396,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         """Whether the run's files are in MDA's box, which it opens before preparing."""
         return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
 
-    async def _before_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
+    async def _before_agent(
+        self, state: RunState, runtime: Runtime
+    ) -> tuple[dict[str, object] | None, bool]:
+        """The update preparing the run makes, and whether the box is open, as far as
+        this run tried."""
         # Every call the run makes reads its catalog; the graph holds none of it.
         await self._backend.run.plan()
         trace = turn_trace(self._backend.run)
@@ -409,22 +416,31 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            return None
+            return None, True
         in_box = self._in_box
-        sandbox_id = (
-            await self._open_sandbox(runtime) if self._open_sandbox is not None and in_box else None
+        opened = (
+            await self._open_sandbox(runtime)
+            if self._open_sandbox is not None and in_box
+            else OpenedSandbox()
         )
         # Not behind the outbox: what an earlier run left unsent changes nothing here.
         prepared = await call(
             self._backend,
             PREPARE,
-            run_call(Prepare, run_id(), state, in_box=in_box, sandbox_id=sandbox_id),
+            run_call(
+                Prepare,
+                run_id(),
+                state,
+                in_box=in_box,
+                sandbox_id=opened.sandbox_id,
+                sandbox_error=opened.error,
+            ),
         )
         # What the backend's preparation writes wins over where a turn starts from.
         starting = self._loop.starting() if self._loop is not None else {}
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared.update))
-        return {**update, "open_swe_prepared_for": invocation}
+        return {**update, "open_swe_prepared_for": invocation}, opened.error is None
 
     @staticmethod
     def _started(state: RunState, prepared: Mapping[str, JsonValue]) -> RunStarted:

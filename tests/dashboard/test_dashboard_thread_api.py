@@ -744,14 +744,32 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
     assert exc_info.value is error
 
 
-async def test_proxy_commands_closes_the_turn_of_a_start_that_could_not_be_delivered(
-    monkeypatch,
+_REFUSED_START = json.dumps(
+    {"type": "error", "id": 0, "error": "unknown_error", "message": "failed to create run"}
+).encode()
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status_code"),
+    [
+        pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
+        pytest.param(
+            thread_proxy.CommandReply(200, _REFUSED_START, "application/json"),
+            200,
+            id="runtime-refused",
+        ),
+    ],
+)
+async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
+    monkeypatch, refusal: Exception | thread_proxy.CommandReply, status_code: int
 ) -> None:
     turn_id = uuid7()
 
     class UndeliverableThreads(ThreadStoreOverClient):
         async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
-            raise httpx.ConnectError("MDA unreachable")
+            if isinstance(refusal, Exception):
+                raise refusal
+            return refusal
 
     class IdleThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -775,7 +793,7 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_could_not_be_deliv
         "tid", "ada", b'{"method": "run.start", "params": {}}'
     )
 
-    assert status == 500
+    assert status == status_code
     failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
 
 

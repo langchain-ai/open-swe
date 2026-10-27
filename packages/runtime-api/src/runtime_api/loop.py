@@ -42,6 +42,8 @@ class Prepare(RunCall):
     # None when it could not.
     in_box: bool = False
     sandbox_id: str | None = None
+    # Why the runtime could not open it, secrets removed.
+    sandbox_error: str | None = None
 
 
 class PhaseResult(BaseModel):

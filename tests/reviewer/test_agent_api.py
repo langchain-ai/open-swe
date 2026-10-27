@@ -218,7 +218,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
     assert [prompt["working_dir"] for prompt in prompts] == ["/workspace"]
-    bound.assert_awaited_once_with("thread-1", "box-1", workspace_slug=None)
+    bound.assert_awaited_once_with("thread-1", "box-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()
 
