@@ -1442,6 +1442,9 @@ service checks. When the event's thread takes a turn, MDA POSTs
 "interrupted"?}}` as JSON to it, with the request's headers (never logged), and
 starts the run the service answers with: `{"input", "context"?, "metadata"?,
 "webhook"?}`, checked as a handler's result. `null` or HTTP 204 starts nothing.
+`{"decline": "<text>"}` starts nothing too, and the Linear channel tells the
+agent session that text, non-blank and up to 2000 characters, instead of its own
+"I'm not set up to work on this request."
 A GitHub event also carries what a handler gets beside the payload: its
 `"action"`, `"repository"`, `"sender"` and `"mentions"`, so a service checks them
 as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
