@@ -32,7 +32,7 @@ from collections.abc import (
 )
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Annotated, Final, NotRequired
+from typing import Annotated, Final, NotRequired, cast
 
 import httpx
 from deepagents.middleware import async_subagents
@@ -48,6 +48,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolCall,
@@ -57,6 +58,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
+from langgraph.graph.message import add_messages
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -339,7 +341,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self, state: Mapping[str, object], update: dict[str, object] | None
     ) -> dict[str, object] | None:
         """``update``, with what the run's state carries of the outbox from here."""
-        carried = self._backend.outbox.carried(state)
+        carried = self._backend.outbox.carried(
+            {
+                **state,
+                "messages": add_messages(
+                    [*cast("list[BaseMessage]", state.get("messages", []))],
+                    [*cast("list[BaseMessage]", update["messages"])],
+                ),
+            }
+            if update is not None and "messages" in update
+            else state
+        )
         return update if carried is None else {**(update or {}), OUTBOX_KEY: carried}
 
     @hook_config(can_jump_to=["end"])
@@ -446,7 +458,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     ) -> ToolMessage | Command:
         result = await handler(request)
         # The call's reports, and its subagent's, ride with its result into the checkpoint.
-        carried = self._backend.outbox.carried(request.state)
+        messages = (
+            [result]
+            if isinstance(result, ToolMessage)
+            else result.update.get("messages", [])
+            if isinstance(result.update, dict)
+            else []
+        )
+        carried = self._backend.outbox.carried(
+            {**request.state, "messages": add_messages(request.state["messages"], messages)}
+        )
         if carried is None:
             return result
         if isinstance(result, ToolMessage):

@@ -483,10 +483,12 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
     checkpointer = InMemorySaver()
     config: RunnableConfig = {"configurable": {"thread_id": "thread-1"}}
 
+    payload = "large-tool-result:" + "x" * 100_000
+
     @tool
     async def look() -> str:
         """Look around."""
-        return "seen"
+        return payload
 
     def run(backend: OpenSweBackend, *replies: AIMessage) -> Awaitable[dict[str, object]]:
         graph = create_agent(
@@ -519,18 +521,25 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
 
     up = _run_backend(invocation_id="invocation-1")
     sent: list[tuple[str, str]] = []
+    results: list[dict[str, JsonValue]] = []
 
     async def taking(path: str, body: dict[str, JsonValue], **kwargs: object) -> JsonValue:
         if path != REPORTS.path:
             return PhaseResult().model_dump(mode="json")
         items = Reports.model_validate(body).items
         sent.extend((item.endpoint, item.key) for item in items)
+        results.extend(item.request.result for item in items if item.endpoint == "tool_result")
         return ReportsTaken(replies=[{} for _ in items]).model_dump(mode="json")
 
     monkeypatch.setattr(up, "post", taking)
     left_over = await checkpointer.aget_tuple(config)
     assert left_over is not None
     carried = left_over.checkpoint["channel_values"][OUTBOX_KEY]
+    assert payload not in json.dumps(carried)
+    assert any(
+        isinstance(message, ToolMessage) and message.content == payload
+        for message in left_over.checkpoint["channel_values"]["messages"]
+    )
     await run(up, AIMessage(content="again", id="ai-3"))
 
     # The first run's reports, in the order it made them, then the second's.
@@ -542,9 +551,50 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
         "model_result",
     ]
     assert {key for _, key in sent[:4]} == set(carried)
+    assert messages_from_dict(results)[0].content == payload
     after = await checkpointer.aget_tuple(config)
     assert after is not None
     assert not after.checkpoint["channel_values"].get(OUTBOX_KEY)
+
+
+@pytest.mark.parametrize("namespace", [[], ["task-1"]])
+async def test_outbox_keeps_results_when_checkpoint_messages_cannot_restore_them(
+    monkeypatch: pytest.MonkeyPatch, namespace: list[str]
+) -> None:
+    from rt.outbox import OUTBOX_KEY, Outbox, carry
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend()
+    received: list[dict[str, JsonValue]] = []
+
+    async def taking(path: str, body: dict[str, JsonValue], **kwargs: object) -> JsonValue:
+        items = Reports.model_validate(body).items
+        received.extend(item.request.result for item in items if item.endpoint == "tool_result")
+        return ReportsTaken(replies=[{} for _ in items]).model_dump(mode="json")
+
+    monkeypatch.setattr(backend, "post", taking)
+    result = ToolMessage(content="original result", tool_call_id="call-1", id="result-1")
+    backend.outbox.finished(
+        ToolCallReport(run_id="run-1", name="look", tool_call_id="call-1", namespace=namespace),
+        result,
+    )
+    state: dict[str, object] = {"messages": [result]}
+    saved = backend.outbox.carried(state)
+    assert saved is not None
+    if not namespace:
+        assert "original result" not in json.dumps(saved)
+    else:
+        assert "original result" in json.dumps(saved)
+    state[OUTBOX_KEY] = saved
+    state["messages"] = []
+    expanded = backend.outbox.carried(state)
+    state[OUTBOX_KEY] = carry(saved, expanded)
+    assert "original result" in json.dumps(state[OUTBOX_KEY])
+    restored = Outbox(backend)
+    restored.adopt(state)
+    await restored.drain()
+    await backend.outbox.drain()
+    assert received == messages_to_dict([result]) * 2
 
 
 class _RecordingAnthropic(ChatAnthropic):

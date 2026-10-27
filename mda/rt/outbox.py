@@ -21,10 +21,10 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, Literal
 
 from langchain_core.messages import ToolMessage, messages_to_dict
 from langsmith.run_trees import RunTree
@@ -42,7 +42,7 @@ from runtime_api.loop import (
     ToolResultReport,
 )
 from runtime_api.operations import RunRequest
-from runtime_api.reports import REPORTS, Item, Reports, ReportsTaken, item
+from runtime_api.reports import REPORTS, Item, Reports, ReportsTaken, Sent, ToolFinished, item
 
 from rt.tracing import TurnTrace
 
@@ -70,11 +70,33 @@ _MAX_REFUSALS: Final = 3
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 
+class _ToolResultRef(Sent):
+    endpoint: Literal["tool_result_ref"] = "tool_result_ref"
+    request: ToolCallReport
+    result_id: str | None = None
+
+    def restore(self, messages: Mapping[str, ToolMessage]) -> ToolFinished:
+        message = messages.get(self.request.tool_call_id)
+        if message is None:
+            raise ValueError(f"Missing checkpoint tool result: {self.request.tool_call_id}")
+        [result] = _json_dicts.validate_python(
+            messages_to_dict([message.model_copy(update={"id": self.result_id})])
+        )
+        return ToolFinished(
+            endpoint="tool_result",
+            key=self.key,
+            trace=self.trace,
+            request=ToolResultReport.model_validate(
+                {**self.request.model_dump(), "result": result}
+            ),
+        )
+
+
 class _Carried(BaseModel):
     """An item as the run's state carries it."""
 
     order: int
-    item: Item
+    item: Item | _ToolResultRef
 
 
 @dataclass
@@ -105,6 +127,15 @@ class _Backoff:
     @property
     def exhausted(self) -> bool:
         return self.since is not None and time.monotonic() - self.since > _GIVE_UP_SECONDS
+
+
+def _tool_messages(state: Mapping[str, object]) -> dict[str, ToolMessage]:
+    messages = state.get("messages")
+    return (
+        {message.tool_call_id: message for message in messages if isinstance(message, ToolMessage)}
+        if isinstance(messages, Sequence)
+        else {}
+    )
 
 
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
@@ -183,6 +214,7 @@ class Outbox:
     def adopt(self, state: Mapping[str, object]) -> None:
         """Take over what ``state`` carries that this process never held: a restarted
         run's, or an earlier run's on the thread, which goes out first."""
+        messages = _tool_messages(state)
         for key, value in _held(state).items():
             if key in self._known:
                 continue
@@ -193,7 +225,12 @@ class Outbox:
                 self._known.add(key)
                 self._settled.add(key)
                 continue
-            self._hold(carried.item, carried.order)
+            restored = (
+                carried.item.restore(messages)
+                if isinstance(carried.item, _ToolResultRef)
+                else carried.item
+            )
+            self._hold(restored, carried.order)
 
     def carried(self, state: Mapping[str, object]) -> dict[str, JsonValue] | None:
         """What the run's state carries of the outbox from here: what still waits, and
@@ -203,10 +240,21 @@ class Outbox:
         update: dict[str, JsonValue] = {
             key: None for key in held if key in self._settled and key not in self._waiting
         }
+        messages = _tool_messages(state)
         for key, waiting in self._waiting.items():
-            if key not in held:
-                carried = _Carried(order=waiting.order, item=waiting.item)
-                update[key] = carried.model_dump(mode="json")
+            saved: Item | _ToolResultRef = waiting.item
+            if isinstance(saved, ToolFinished) and not saved.request.namespace:
+                reference = _ToolResultRef(
+                    key=saved.key,
+                    trace=saved.trace,
+                    request=ToolCallReport.model_validate(saved.request.model_dump()),
+                    result_id=ToolMessage.model_validate(saved.request.result["data"]).id,
+                )
+                if saved.request.tool_call_id in messages and reference.restore(messages) == saved:
+                    saved = reference
+            carried = _Carried(order=waiting.order, item=saved).model_dump(mode="json")
+            if carried != held.get(key):
+                update[key] = carried
         return update or None
 
     def _add[Request: BaseModel, Response: BaseModel](
