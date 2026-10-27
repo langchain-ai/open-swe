@@ -18,6 +18,7 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, AnyMessage, get_buffer_string
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
@@ -50,7 +51,9 @@ class PreparedConversation:
         self._updates: dict[str, object] = {}
         self.provider_failure: Exception | None = None
 
-    async def prepare(self, request: ModelRequest) -> ModelRequest:
+    async def prepare(
+        self, request: ModelRequest, rejected: Exception | None = None
+    ) -> ModelRequest:
         backend = getattr(request.runtime, "backend", None)
         backend = backend if isinstance(backend, BackendProtocol) else StateBackend()
 
@@ -72,7 +75,10 @@ class PreparedConversation:
         selected: ModelRequest | None = None
 
         async def capture(prepared: ModelRequest) -> ModelResponse:
-            nonlocal selected
+            nonlocal selected, rejected
+            if rejected is not None:
+                error, rejected = rejected, None
+                raise error
             selected = prepared
             return ModelResponse(result=[])
 
@@ -114,3 +120,21 @@ class PreparedConversation:
         if not self._updates:
             return response
         return ExtendedModelResponse(model_response=response, command=Command(update=self._updates))
+
+
+def context_overflow(error: Exception) -> bool:
+    if isinstance(error, ContextOverflowError):
+        return True
+    if getattr(error, "status_code", None) not in {400, 413, 422}:
+        return False
+    return any(
+        marker in str(error).lower()
+        for marker in (
+            "context_length_exceeded",
+            "maximum context length",
+            "context window exceeded",
+            "exceeds the context window",
+            "context limit exceeded",
+            "prompt is too long",
+        )
+    )

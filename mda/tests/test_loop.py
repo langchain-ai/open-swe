@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import cast
 
@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
     messages_from_dict,
 )
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, JsonValue
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
@@ -391,3 +392,64 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
+
+
+async def test_native_prompt_reference_reconstructs_from_checkpoint_without_refetching_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langgraph.checkpoint.memory import InMemorySaver
+    from rt.middleware import RunState
+
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "task_context": TaskContext(instructions="Captured task instructions."),
+        },
+        LoopRules(deployment_prompt="Deployment.", task_coordination=True, review_guide=True),
+    )
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    state = _state(
+        HumanMessage("go"),
+        rendered_system_prompt="Large durable prompt.",
+        review_guide_rules="Guide.",
+    )
+    planned = await RunLoop(backend).before_model(state)
+    assert planned.call is not None
+    captured: list[str] = []
+    wrapper = BackendRunMiddleware(backend)
+
+    class Reconstruct(AgentMiddleware):
+        state_schema = RunState
+
+        async def awrap_model_call(
+            self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+        ) -> ModelResponse:
+            async def observe(prepared: ModelRequest) -> ModelResponse:
+                assert prepared.system_message is not None
+                captured.append(prepared.system_message.text)
+                return await handler(prepared)
+
+            return await wrapper.awrap_model_call(request, observe)
+
+    graph = create_agent(
+        model=model,
+        system_prompt="Harness.",
+        middleware=[Reconstruct()],
+        checkpointer=InMemorySaver(),
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "native-reference"}}
+    await graph.ainvoke({**state, "open_swe_call": planned.call.model_dump()}, config)
+    await graph.ainvoke({"messages": [HumanMessage("resume")]}, config)
+    checkpoint = await graph.aget_state(config)
+    assert checkpoint.values["open_swe_call"]["system_prompt"] is None
+    assert (
+        captured
+        == [
+            "Deployment.\n\nLarge durable prompt.\n\nGuide.\n\nCaptured task instructions.\n\nHarness."
+        ]
+        * 2
+    )
+    assert [name for name, _ in calls] == ["task_context"]

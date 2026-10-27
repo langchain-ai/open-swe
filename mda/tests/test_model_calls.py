@@ -20,6 +20,7 @@ from langchain_core.messages import (
     AnyMessage,
     BaseMessage,
     HumanMessage,
+    SystemMessage,
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
@@ -427,3 +428,103 @@ async def test_provider_retry_override_cannot_multiply_attempts(
     monkeypatch.setenv(key, "test")
     model = build_model(ModelSpec(model_id=model_id, kwargs={"max_retries": 6}), use_gateway=False)
     assert model.model_dump()["max_retries"] == 0
+
+
+async def test_shared_deadline_bounds_retry_after_and_cancellation_propagates() -> None:
+    from rt.model_budget import ModelCallBudget
+
+    response = httpx2.Response(
+        429,
+        headers={"Retry-After": "60"},
+        request=httpx2.Request("POST", "https://provider.invalid"),
+    )
+    error = openai.APIStatusError("rate limited", response=response, body=None)
+    attempts = AsyncMock(side_effect=error)
+
+    async def limited(request: ModelRequest) -> ModelResponse:
+        return await ModelCallBudget().call(attempts)
+
+    with pytest.raises(ModelCallTimeoutError):
+        await ModelCallTimeoutMiddleware(0.01).awrap_model_call(
+            ModelRequest(model=_ANTHROPIC, messages=[]), limited
+        )
+    assert attempts.await_count == 1
+    cancelled = AsyncMock(side_effect=asyncio.CancelledError)
+    with pytest.raises(asyncio.CancelledError):
+        await ModelCallBudget().call(cancelled)
+    assert cancelled.await_count == 1
+
+
+async def test_budget_caps_summary_and_generation_requests_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rt.model_budget import ModelCallBudget
+
+    monkeypatch.setattr("rt.model_budget.retry_delay", lambda *_: 0.0)
+    budget = ModelCallBudget(max_attempts=3)
+    assert await budget.call(AsyncMock(return_value="summary"), streaming=False) == "summary"
+    failure = TimeoutError("generation failed")
+    generation = AsyncMock(side_effect=failure)
+    with pytest.raises(TimeoutError) as raised:
+        await budget.call(generation)
+    assert raised.value is failure
+    assert generation.await_count == 2
+    assert budget.remaining == 0
+    assert not budget.can_retry(failure)
+
+
+async def test_final_prompt_and_tool_schema_alone_trigger_compaction() -> None:
+    class FinalShape(AgentMiddleware):
+        async def awrap_model_call(
+            self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+        ) -> ModelResponse:
+            return await handler(
+                request.override(
+                    system_message=SystemMessage("context " * 1200),
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "large",
+                                "description": "schema " * 1200,
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ],
+                )
+            )
+
+    model = _RuntimeModel(responses=["unused"], profile={"max_input_tokens": 8000})
+    route = _RuntimeRoute(model)
+    graph = create_deep_agent(model, middleware=[route, FinalShape(), *model_call_guards()])
+    await graph.ainvoke({"messages": [HumanMessage("history " * 60) for _ in range(20)]})
+    assert model.summaries == 1
+    assert len(model.received[-1]) < 21
+    assert model.received[-1][0].text == "context " * 1200
+
+
+async def test_provider_context_rejection_retains_one_compaction_recovery() -> None:
+    class RejectContext(_RuntimeModel):
+        async def _agenerate(
+            self,
+            messages: list[BaseMessage],
+            stop: list[str] | None = None,
+            run_manager: AsyncCallbackManagerForLLMRun | None = None,
+            **kwargs: object,
+        ) -> ChatResult:
+            if self.attempts == 0:
+                self.attempts += 1
+                response = httpx2.Response(
+                    400, request=httpx2.Request("POST", "https://provider.invalid")
+                )
+                raise openai.APIStatusError(
+                    "maximum context length exceeded", response=response, body=None
+                )
+            return await super()._agenerate(messages, stop, run_manager, **kwargs)
+
+    model = RejectContext(responses=["unused"], profile={"max_input_tokens": 20000})
+    graph = create_deep_agent(model, middleware=[*model_call_guards()])
+    result = await graph.ainvoke({"messages": [HumanMessage("history " * 100) for _ in range(20)]})
+    assert result["messages"][-1].content == "done"
+    assert model.summaries == 1
+    assert model.attempts == 2

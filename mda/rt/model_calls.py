@@ -24,10 +24,11 @@ from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
+from langchain_fireworks.middleware import FireworksPromptCachingMiddleware
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_config
 
-from rt.compaction import PreparedConversation, SummarizationStateMiddleware
+from rt.compaction import PreparedConversation, SummarizationStateMiddleware, context_overflow
 from rt.model_budget import ModelCallBudget, fallback_model, retry_delay
 
 logger = logging.getLogger(__name__)
@@ -218,15 +219,28 @@ class FinalModelCallMiddleware(_ModelCallGuard):
         async def affinity(request: ModelRequest) -> ModelResponse:
             return await OpenAIPromptCachingMiddleware().awrap_model_call(request, cached)
 
+        async def fireworks(request: ModelRequest) -> ModelResponse:
+            cache = FireworksPromptCachingMiddleware(unsupported_model_behavior="ignore")
+            response = await cache.awrap_model_call(request, affinity)
+            if not isinstance(response, ModelResponse):
+                raise TypeError("Fireworks caching returned a non-model response")
+            return response
+
         async def replay(request: ModelRequest) -> ModelResponse:
-            return await ReplayableHistoryMiddleware().awrap_model_call(request, affinity)
+            return await ReplayableHistoryMiddleware().awrap_model_call(request, fireworks)
 
         async def filtered(request: ModelRequest) -> ModelResponse:
             return await UnsupportedContentMiddleware().awrap_model_call(request, replay)
 
         async def selected(request: ModelRequest) -> ModelResponse:
             prepared = await conversation.prepare(request)
-            return await conversation.generate(prepared, filtered)
+            try:
+                return await conversation.generate(prepared, filtered)
+            except Exception as exc:
+                if budget.emitted or budget.remaining <= 0 or not context_overflow(exc):
+                    raise
+                prepared = await conversation.prepare(request, rejected=exc)
+                return await conversation.generate(prepared, filtered)
 
         try:
             response = await selected(request)
@@ -246,9 +260,12 @@ class FinalModelCallMiddleware(_ModelCallGuard):
 
 
 class _PromptCacheSlot(_ModelCallGuard):
+    def __init__(self, provider: str) -> None:
+        self._provider = provider
+
     @property
     def name(self) -> str:
-        return "AnthropicPromptCachingMiddleware"
+        return f"{self._provider}PromptCachingMiddleware"
 
 
 class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
@@ -281,6 +298,7 @@ def model_call_guards(
         SummarizationStateMiddleware(),
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
         ModelCallTimeoutMiddleware(timeout_seconds),
-        _PromptCacheSlot(),
+        _PromptCacheSlot("Anthropic"),
+        _PromptCacheSlot("Fireworks"),
         FinalModelCallMiddleware(),
     ]
