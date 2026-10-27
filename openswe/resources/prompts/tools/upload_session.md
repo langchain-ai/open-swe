@@ -8,7 +8,7 @@ The transcript upload in step 2 is REQUIRED: calling this tool alone leaves an e
    The cloud agent sees only what was pushed.
    Then call this tool with that `repo` and `branch`, or with `pr_url` alone.
    It creates the thread and returns its `url`, the `upload_url`, a one-time `upload_token` valid for `expires_in_seconds`, and `next_step`.
-1. Upload the transcript by following `next_step`: POST the session's JSONL transcript, verbatim and gzipped, to `upload_url` from this machine with `Authorization: Bearer <upload_token>`.
+2. Upload the transcript by following `next_step`: POST the session's JSONL transcript, verbatim and gzipped, to `upload_url` from this machine with `Authorization: Bearer <upload_token>`.
    For Claude Code, the transcript is `~/.claude/projects/<the session's working directory with every character other than a letter or digit replaced by '-'>/<session id>.jsonl`, where the session id is `$CLAUDE_CODE_SESSION_ID`.
    The first upload returns the thread; later posts with the same `upload_token` return 204 and change nothing.
    `upload_token` is a credential, so keep it out of anything you post.

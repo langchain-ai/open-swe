@@ -19,7 +19,7 @@ Steps, in order:
    Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: `yarn format` then `yarn lint`; Go: find the commands from `Makefile`/`go.mod`/CI).
    Then review your diff for correctness and unintended changes.
 
-1. **Push & open/update the PR.**
+2. **Push & open/update the PR.**
    Commit locally and `git push origin <branch>`.
    - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the triggering user.
      Pass `resolves_thread=true` unless you know more PRs are coming for this thread (a stack, a planned follow-up); then set it only on the last one.
@@ -36,7 +36,7 @@ Steps, in order:
    For public repos, don't manually include private conversation content or PR/issue references; the automatic Slack backlink is allowed.
    Keep commit messages concise and focused on the "why".
 
-1. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions.
+3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions.
    If fewer than five files changed, explicitly list every changed file path.
    Use the response path in Source Context.
    Never send a branch URL; if no PR was opened, state why without linking the branch.

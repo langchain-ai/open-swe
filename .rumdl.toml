@@ -15,3 +15,12 @@ tables = false
 [MD029]
 # Every item is numbered 1., so inserting or moving an item does not renumber the ones after it.
 style = "one"
+
+[per-file-ignores]
+# Prompts, skills and agent instructions refer to steps by number.
+"openswe/resources/prompts/**" = ["MD029"]
+"openswe/bundled_skills/**" = ["MD029"]
+".claude/**" = ["MD029"]
+".agents/**" = ["MD029"]
+".open-swe/**" = ["MD029"]
+"**/AGENTS.md" = ["MD029"]
