@@ -24,7 +24,7 @@ it("only loads evidence through the authenticated report media API", () => {
   expect(() =>
     evidenceMediaUrl(path.replace("before.png", "%2e%2e%2fsecrets"))
   ).toThrow(/authenticated/)
-  expect(() => evidenceMediaUrl(path.replace("before.png", "%5csecrets"))).toThrow(
-    /authenticated/
-  )
+  expect(() =>
+    evidenceMediaUrl(path.replace("before.png", "%5csecrets"))
+  ).toThrow(/authenticated/)
 })
