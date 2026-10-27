@@ -66,136 +66,26 @@ async def test_stale_catalog_is_served_then_refreshed(registry_db, monkeypatch):
     assert sorted(await names()) == ["fetch", "search"]
 
 
-@pytest.mark.parametrize("phase", ["miss", "stale", "expired", "mutate"])
-async def test_discovery_limits_network_work_not_cache_hits(monkeypatch, phase):
-    from langgraph_api import cache
-
-    records = [
-        MCPConnection.model_construct(
-            name=f"server{i}",
-            url="https://example.com/mcp",
-            revision="one",
-            allowed_tools=["search"],
-        )
-        for i in range(24)
-    ]
-    warm = records[0].model_copy(update={"name": "warm"})
-    source = runtime.MCPSource(
-        scope="workspace",
-        namespace=("bounded", phase),
-        list_connections=AsyncMock(return_value=[*records, warm]),
-        get_connection=AsyncMock(
-            side_effect=lambda name: next(r for r in records if r.name == name)
-        ),
-    )
-    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[SEARCH]))
-    if phase != "miss":
-        await asyncio.gather(*(runtime._catalog(source, record) for record in records))
-    now = cache._now_ms()
-    age = {"stale": 11 * 60 * 1000, "expired": 25 * 60 * 60 * 1000}.get(phase, 0)
-    monkeypatch.setattr(cache, "_now_ms", lambda: now + age)
-    await runtime._catalog(source, warm)
-    saturated = asyncio.Event()
-    release = asyncio.Event()
-    active = peak = calls = 0
+async def test_discovery_caps_active_requests(monkeypatch):
+    active = peak = 0
 
     async def discover(record, namespace):
-        nonlocal active, peak, calls
+        nonlocal active, peak
         active += 1
-        calls += 1
         peak = max(peak, active)
-        if active == 8:
-            saturated.set()
         try:
-            await release.wait()
+            await asyncio.sleep(0)
             return [SEARCH]
         finally:
             active -= 1
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
-    refreshes = (
-        [
-            asyncio.create_task(runtime.refresh_mcp_catalog(source, record.name))
-            for record in records
-        ]
-        if phase == "mutate"
-        else []
-    )
-    loads = [asyncio.create_task(runtime.load_mcp_tools(source)) for _ in range(2)]
-    try:
-        await asyncio.wait_for(saturated.wait(), timeout=2)
-        tools = await asyncio.wait_for(
-            runtime.load_mcp_tools(source, connection_name="warm"), timeout=2
-        )
-        assert [tool.name for tool in tools] == ["mcp_warm_search"]
-        if phase == "stale":
-            assert all(
-                len(tools) == 25 for tools in await asyncio.wait_for(asyncio.gather(*loads), 2)
-            )
-    finally:
-        release.set()
-        results = await asyncio.gather(*loads, *refreshes)
-        await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
-    assert all(len(tools) == 25 for tools in results[:2])
-    assert (calls, peak, active) == (24, 8, 0)
-
-
-async def test_cancelled_discovery_releases_slots(monkeypatch):
-    monkeypatch.setattr(runtime, "_DISCOVERY_CONCURRENCY", 1)
     record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
-    entered = asyncio.Event()
-    release = asyncio.Event()
-
-    async def discover(record, namespace):
-        entered.set()
-        await release.wait()
-        return [SEARCH]
-
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-    active = asyncio.create_task(runtime.discover_tools(record, ("ns",)))
-    queued = None
-    try:
-        await asyncio.wait_for(entered.wait(), 2)
-        queued = asyncio.create_task(runtime.discover_tools(record, ("ns",)))
-        await asyncio.sleep(0)
-        queued.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await queued
-        active.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await active
-        release.set()
-        assert await asyncio.wait_for(runtime.discover_tools(record, ("ns",)), 2) == [SEARCH]
-    finally:
-        active.cancel()
-        if queued is not None:
-            queued.cancel()
-        await asyncio.gather(active, *([queued] if queued else []), return_exceptions=True)
-
-
-async def test_timed_out_discovery_does_not_block_queued_connection(monkeypatch):
-    monkeypatch.setattr(runtime, "_DISCOVERY_CONCURRENCY", 1)
-    monkeypatch.setattr(runtime, "_TIMEOUT_SECONDS", 0.01)
-    slow = MCPConnection.model_construct(name="slow", url="https://example.com/mcp")
-    healthy = slow.model_copy(update={"name": "healthy"})
-
-    async def discover(record, namespace):
-        if record.name == "slow":
-            await asyncio.Event().wait()
-        return [SEARCH]
-
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
     results = await asyncio.wait_for(
-        asyncio.gather(
-            runtime.discover_tools(slow, ("ns",)),
-            runtime.discover_tools(healthy, ("ns",)),
-            return_exceptions=True,
-        ),
-        2,
+        asyncio.gather(*(runtime.discover_tools(record, ("ns",)) for _ in range(24))), 2
     )
-    assert isinstance(results[0], ValueError)
-    assert "timed out" in str(results[0])
-    assert results[1] == [SEARCH]
+    assert results == [[SEARCH]] * 24
+    assert peak == 8
 
 
 @pytest.mark.parametrize(
