@@ -521,7 +521,18 @@ class RunSession:
         A thread with no box to work in ends the run once the person knows why.
         """
         cfg = RunConfig.from_config(self.config)
-        if cfg.thread_id is None or await self.sandbox() is None:
+        managed = cfg.thread_id is not None and await self.sandbox() is not None
+        # TODO(mda-debug): remove once channel runs get their GitHub proxy.
+        logger.info(
+            "mda-debug: prepare binds the box MDA opened",
+            extra={
+                "agent_thread_id": cfg.thread_id,
+                "sandbox_id": request.sandbox_id,
+                "managed_by_mda": managed,
+                "workspace_slug": cfg.workspace_slug,
+            },
+        )
+        if cfg.thread_id is None or not managed:
             return
         try:
             await bind_mda_sandbox(
