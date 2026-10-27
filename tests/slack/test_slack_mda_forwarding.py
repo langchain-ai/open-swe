@@ -110,6 +110,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mda_forwarding, "startable_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(mda_forwarding, "claim_conversation", AsyncMock(return_value=_MDA_THREAD))
     monkeypatch.setattr(slack_service, "account_link_needed", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value="ada"))
 
 
 async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_sent_it(
@@ -129,7 +130,7 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
     assert startable.await_args.kwargs["can_start"] is True
     cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_awaited_once_with(
-        "A1", "T1", "C1", "1786573369.551099"
+        "A1", "T1", "C1", "1786573369.551099", owner_login="ada"
     )
     [(task, (url, body, headers))] = tasks.tasks
     # The forward knows which message it carries, to tell its thread if it's lost.
