@@ -48,7 +48,9 @@ class _FakeClient:
     async def conversations_list(self, **kwargs: Any) -> dict[str, Any]:
         return await self._page("conversations_list", kwargs)
 
-    async def conversations_info(self, *, channel: str) -> dict[str, Any]:
+    async def conversations_info(
+        self, *, channel: str, include_num_members: bool = False
+    ) -> dict[str, Any]:
         return {"channel": self.info[channel]}
 
 

@@ -1,0 +1,26 @@
+name: Pre-commit
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  precommit:
+    name: Pre-commit checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Run hooks
+        # no-commit-to-branch would fail on main, where there is nothing to commit.
+        run: SKIP=no-commit-to-branch uvx prek@0.5.7 run --all-files --show-diff-on-failure

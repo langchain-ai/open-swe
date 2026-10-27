@@ -25,15 +25,10 @@ impl Client {
     /// workspace from `GET /api/v1/workspaces/current/secrets`.
     ///
     /// Returns the secret key names (values are never exposed by the API).
-    /// Errors when the platform API is unavailable for this host (see
-    /// [`Client::platform_api_available`]) or the request fails; the caller
-    /// decides whether an inability to verify should block the deploy.
+    /// Errors when the request fails; the caller decides whether an inability
+    /// to verify should block the deploy.
     pub fn workspace_secret_keys(&self) -> Result<Vec<String>> {
-        let base = self
-            .platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")?;
-
+        let base = self.platform_base();
         let value = self.request(
             base,
             Method::GET,

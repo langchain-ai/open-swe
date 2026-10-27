@@ -7,7 +7,7 @@ import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Annotated, Literal, Protocol, TypeGuard, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, TypeGuard, cast, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -17,7 +17,11 @@ from managed_deepagents._channels.types import (
     ChannelMessage,
     JsonValue,
     PostedChannelMessage,
+    PostedChannelThread,
 )
+
+if TYPE_CHECKING:
+    from managed_deepagents._channels.run_input import ChannelRunResult
 
 
 class ChannelMessagingAdapter(Protocol):
@@ -44,29 +48,66 @@ def json_copy(value: JsonValue) -> JsonValue:
 
 
 def channel_info(
-    *, name: str, provider: str, event: Mapping[str, object], raw_event: JsonValue = None
+    *, name: str, provider: str, event: Mapping[str, object] | None, raw_event: JsonValue = None
 ) -> ChannelInfo:
     return ChannelInfo(
         name,
         provider,
-        cast("ChannelEvent", immutable_copy(event)),
+        cast("ChannelEvent | None", immutable_copy(event)),
         cast("JsonValue", immutable_copy(raw_event)),
     )
 
 
+class ChannelPost(Protocol):
+    @overload
+    def __call__(
+        self, message: ChannelMessage, *, new_thread: Literal[False] = False
+    ) -> Awaitable[PostedChannelMessage]: ...
+
+    @overload
+    def __call__(
+        self,
+        message: ChannelMessage,
+        *,
+        new_thread: Literal[True],
+        run: ChannelRunResult | None = None,
+    ) -> Awaitable[PostedChannelThread]: ...
+
+    def __call__(
+        self,
+        message: ChannelMessage,
+        *,
+        new_thread: bool = False,
+        run: ChannelRunResult | None = None,
+    ) -> Awaitable[PostedChannelMessage]:
+        """Post in this thread, or with ``new_thread=True`` at top level.
+
+        A top-level post starts a new provider thread in the same conversation,
+        which replies continue, also without a mention in Slack's thread mode.
+        It returns the thread's ``thread_id``. ``run`` starts a run in it with a
+        channel handler's run input. Only Trigger channels that name the new
+        thread support it.
+        """
+        ...
+
+
+StartThread = Callable[[ChannelMessage, "ChannelRunResult | None"], Awaitable[PostedChannelThread]]
+
+
 @dataclass(frozen=True)
 class RuntimeChannel(ChannelInfo):
-    post: Callable[[ChannelMessage], Awaitable[PostedChannelMessage]] | None = None
+    post: ChannelPost | None = None
 
 
 def create_runtime_channel(
     *,
     name: str,
     provider: str,
-    event: Mapping[str, object],
+    event: Mapping[str, object] | None,
     target: JsonValue,
     transport: ChannelMessagingAdapter | None = None,
     raw_event: JsonValue = None,
+    start_thread: StartThread | None = None,
 ) -> RuntimeChannel:
     facts = channel_info(name=name, provider=provider, event=event, raw_event=raw_event)
     # Keep the route private and copy it so authored code cannot change the target.
@@ -74,21 +115,36 @@ def create_runtime_channel(
     if transport is None:
         return RuntimeChannel(facts.name, facts.provider, facts.event, facts.raw_event)
     bound_target = json_copy(target)
+    # Only a schedule event chooses a new provider thread.
+    schedule = (
+        facts.event if facts.event is not None and facts.event["type"] == "schedule" else None
+    )
 
-    async def post(message: ChannelMessage) -> PostedChannelMessage:
+    async def post(
+        message: ChannelMessage,
+        *,
+        new_thread: bool = False,
+        run: ChannelRunResult | None = None,
+    ) -> PostedChannelMessage:
         validate_message(message)
+        if new_thread:
+            if start_thread is None:
+                raise ValueError("this channel cannot start a new thread")
+            return await start_thread(
+                cast("ChannelMessage", json_copy(cast("JsonValue", message))), run
+            )
+        if run is not None:
+            raise ValueError("a post starts a run only with new_thread=True")
         result = transport.post(
             message=cast("ChannelMessage", json_copy(cast("JsonValue", message))),
             target=json_copy(bound_target),
-            **(
-                {"new_thread": bool(facts.event["new_thread"])}
-                if facts.event["type"] == "schedule"
-                else {}
-            ),
+            **({"new_thread": bool(schedule["new_thread"])} if schedule is not None else {}),
         )
         return cast("PostedChannelMessage", await result if inspect.isawaitable(result) else result)
 
-    return RuntimeChannel(facts.name, facts.provider, facts.event, facts.raw_event, post)
+    return RuntimeChannel(
+        facts.name, facts.provider, facts.event, facts.raw_event, cast("ChannelPost", post)
+    )
 
 
 def _json_value(value: object) -> object:

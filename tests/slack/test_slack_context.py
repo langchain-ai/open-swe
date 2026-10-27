@@ -648,7 +648,6 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common.User, "login_for_email", fake_login_for_email)
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: False)
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
@@ -705,7 +704,6 @@ def test_process_slack_mention_mapped_user_unusable_token_prompts_revoked(
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "has_access_token_record", fake_has_token_record)
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: False)
 
     asyncio.run(
         slack_webhooks.process_slack_mention(
@@ -734,7 +732,6 @@ def bot_run(monkeypatch, allowed_bot):
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setenv("CONFIGURED_ADMINS", "mason-gh")
-    monkeypatch.setattr(webhook_common, "is_bot_token_only_mode", lambda: False)
     monkeypatch.setattr(
         webhook_common,
         "get_valid_access_token",
