@@ -62,6 +62,7 @@ from rt.run_tools import (
     RunCodeInterpreter,
     RunModelCallLimit,
     RunSubagentMiddleware,
+    RunSummarization,
     RunToolsets,
     RunToolsMiddleware,
     subagent_description,
@@ -201,6 +202,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
                     replace_sandbox,
                     RunToolsMiddleware(toolsets, subagent=subagent),
                     RunSubagentMiddleware(toolsets, subagent),
+                    RunSummarization(toolsets, subagent=True),
                     *model_call_guards(subagent=True),
                 ],
             ),
@@ -218,6 +220,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
             files,
             task_retry(),
             RunToolsMiddleware(toolsets),
+            RunSummarization(toolsets),
             _code_mode(inputs.graph, toolsets, files),
             DescribedToolsMiddleware(backend),
             # The coding agent's browser, a LangSmith browser per thread the dashboard

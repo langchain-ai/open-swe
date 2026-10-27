@@ -4,15 +4,22 @@ MDA builds the graph once and shares it between every run of every thread, so th
 graph registers none of the operations a run's catalog names. ``RunToolsMiddleware``
 offers each model call the run's own tools and hands LangGraph's tool node the tool a
 call names; code mode reaches the same tools (``RunCodeInterpreter``). A subagent's
-prompt and model, and the run's limit on model calls, are the run's too.
+prompt and model, the model summarizing a long conversation, and the run's limit on
+model calls are the run's too.
 """
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
 from weakref import finalize
 
+from deepagents.backends import StateBackend
+from deepagents.backends.protocol import BackendProtocol
+from deepagents.middleware.summarization import (
+    SummarizationState,
+    create_summarization_middleware,
+)
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -32,6 +39,8 @@ from rt.tools import operation_tool
 
 _TASK_TOOL: Final = "task"
 _EVAL_TOOL: Final = "eval"
+# deepagents' name for its summarization, which ``RunSummarization`` replaces.
+_SUMMARIZATION: Final = "SummarizationMiddleware"
 
 ToolHandler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 ModelHandler = Callable[[ModelRequest], Awaitable[ModelResponse]]
@@ -79,6 +88,9 @@ class RunTools:
         self.hidden = self.excluded | code_only
         self.subagents = {subagent.name: subagent for subagent in catalog.subagents}
         models = catalog.models
+        self.model: BaseChatModel | None = (
+            None if models is None else build_model(models.model, use_gateway=models.use_gateway)
+        )
         self.subagent_model: BaseChatModel | None = (
             None
             if models is None
@@ -188,6 +200,38 @@ class RunSubagentMiddleware(AgentMiddleware):
         if tools.subagent_model is not None:
             request = request.override(model=tools.subagent_model)
         return await handler(request)
+
+
+class RunSummarization(AgentMiddleware[SummarizationState]):
+    """deepagents' summarization of a long conversation, written by the run's own model.
+
+    deepagents builds its summarization from the model the graph declares, a placeholder
+    each run's model replaces per call, so it would summarize with a model the run never
+    authenticated. This takes its place by name, in the agent and its workers or, with
+    ``subagent``, in the subagent.
+    """
+
+    state_schema = SummarizationState
+
+    def __init__(self, toolsets: RunToolsets, *, subagent: bool = False) -> None:
+        self._toolsets = toolsets
+        self._subagent = subagent
+
+    @property
+    def name(self) -> str:
+        return _SUMMARIZATION
+
+    async def awrap_model_call(
+        self, request: ModelRequest, handler: ModelHandler
+    ) -> ModelResponse | ExtendedModelResponse:
+        tools = self._toolsets.get()
+        model = (tools.subagent_model if self._subagent else tools.model) or request.model
+        backend = getattr(request.runtime, "backend", None)
+        # Made per call, for the call's backend: the thread's box, where it saves what it evicts.
+        summarization = create_summarization_middleware(
+            model, backend if isinstance(backend, BackendProtocol) else StateBackend()
+        )
+        return await summarization.awrap_model_call(request.override(model=model), handler)
 
 
 class RunCodeInterpreter(CodeInterpreterMiddleware):

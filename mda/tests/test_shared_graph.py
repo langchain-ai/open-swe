@@ -12,7 +12,14 @@ import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
@@ -134,7 +141,10 @@ def backend_calls(
 
 
 async def _run(
-    store: InMemoryStore, thread_id: str, context: dict[str, object]
+    store: InMemoryStore,
+    thread_id: str,
+    context: dict[str, object],
+    messages: list[BaseMessage] | None = None,
 ) -> CompiledStateGraph:
     graph = await compile_managed_agent_async(
         agent.agent,
@@ -146,7 +156,7 @@ async def _run(
         async_subagent_graphs=_WORKERS,
     )
     await graph.ainvoke(
-        {"messages": [("user", "Review it")]},
+        {"messages": messages or [HumanMessage(content="Review it")]},
         _thread(thread_id),
         # The run context as the Agent Server hands it over, which LangGraph reads into the schema.
         context=context,  # ty: ignore[invalid-argument-type]
@@ -488,6 +498,62 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
         ("Bearer token-0", "operation_0:grant-0"),
         ("Bearer token-1", "operation_1:grant-1"),
     ]
+
+
+async def test_a_long_conversation_is_summarized_by_the_runs_own_model(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """The graph's placeholder model is never the run's: summarizing must not call it."""
+    summarized_by: list[str] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        if model.name == "placeholder":
+            raise TypeError("Anthropic authentication failed")
+        if len(messages) == 1 and isinstance(messages[0], HumanMessage):
+            summarized_by.append(model.name or "")
+            reply = AIMessage(content="The summary")
+        else:
+            reply = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    def fake(name: str) -> GenericFakeChatModel:
+        model = _calling()
+        model.name = name
+        model.profile = {"max_input_tokens": 20_000}
+        return model
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, **_: fake(spec.model_id))
+    monkeypatch.setattr("rt.run_tools.build_model", lambda spec, **_: fake(spec.model_id))
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", fake("placeholder"))
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={
+            "models": RunModels(
+                model=ModelSpec(model_id="run-model", kwargs={}),
+                subagent_model=ModelSpec(model_id="run-subagent-model", kwargs={}),
+                use_gateway=True,
+            )
+        }
+    )
+    history: list[BaseMessage] = [
+        message
+        for turn in range(8)
+        for message in (
+            HumanMessage(content=f"Question {turn}: " + "words " * 2_000),
+            AIMessage(content=f"Answer {turn}: " + "words " * 2_000),
+        )
+    ]
+
+    await _run(
+        InMemoryStore(),
+        "long",
+        _context("agent", "token", catalog),
+        [*history, HumanMessage(content="Go on")],
+    )
+
+    assert summarized_by == ["run-model"]
 
 
 async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
