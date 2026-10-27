@@ -1,0 +1,25 @@
+pyproject.toml
+  s_27878fb276b595::t_544daf7648389c 22
+mda/pyproject.toml
+  s_27878fb276b595::t_a4093a9bbfca02 15
+mda/uv.lock
+  s_27878fb276b595::t_750cfa1090a5c7 2,1526,1544,1546,1839
+uv.lock
+  s_27878fb276b595::t_74be13cdf538e8 2,2155,2173,2175,2601
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "159c6796c4128e73d5a1fb9c7ffc746763923210",
+  "prompts": {},
+  "sessions": {
+    "s_27878fb276b595": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ee8f61-55f2-484d-a39a-c3b1cad86d8d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
