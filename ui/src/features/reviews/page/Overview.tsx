@@ -1,9 +1,11 @@
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
-import { useQuery } from "@tanstack/react-query"
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
-import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
+import { api, reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -87,6 +89,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
         </details>
       )}
       <Description
+        key={`${pr.owner}/${pr.repo}/${pr.number}`}
         pr={pr}
         body={detail.pr.body}
         author={detail.pr.author}
@@ -118,11 +121,45 @@ function Description({
   labels: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const editButton = useRef<HTMLButtonElement>(null)
+  const queryClient = useQueryClient()
+  const detailQuery = reviewQueries.detail(pr)
+  const [draft, setDraft] = useState<string | null>(null)
+  const closeEditor = () => {
+    setDraft(null)
+    requestAnimationFrame(() =>
+      editButton.current?.focus({ preventScroll: true })
+    )
+  }
+  const update = useMutation({
+    mutationFn: (text: string) =>
+      api.updatePullRequestDescription(pr.owner, pr.repo, pr.number, text),
+    onMutate: async (text) => {
+      await queryClient.cancelQueries(detailQuery)
+      const previous = queryClient.getQueryData(detailQuery.queryKey)
+      queryClient.setQueryData(detailQuery.queryKey, (detail) =>
+        detail ? { ...detail, pr: { ...detail.pr, body: text } } : detail
+      )
+      closeEditor()
+      return previous
+    },
+    meta: { errorTitle: "Couldn't update description" },
+    onError: (_error, text, previous) => {
+      queryClient.setQueryData(detailQuery.queryKey, previous)
+      setDraft(text)
+    },
+    onSettled: () => queryClient.invalidateQueries(detailQuery),
+  })
+  const save = () => {
+    if (draft !== null && draft !== body && !update.isPending)
+      update.mutate(draft)
+  }
   const { owner, repo, number } = pr
   const proxyImage = useCallback(
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),
     [owner, repo, number]
   )
+  const editing = draft !== null
   const [overflows, setOverflows] = useState(false)
   const [expanded, setExpanded] = useState(false)
   useLayoutEffect(() => {
@@ -133,11 +170,11 @@ function Description({
     const observer = new ResizeObserver(measure)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [body])
+  }, [body, editing])
   const clamped = overflows && !expanded
   return (
     <article aria-label="Description" className="group/description">
-      <header className="mb-space-2 flex items-center gap-space-2 text-xs text-secondary">
+      <header className="mb-space-2 flex flex-wrap items-center gap-space-2 text-xs text-secondary">
         {author?.avatar_url && (
           <img
             src={author.avatar_url}
@@ -156,8 +193,59 @@ function Description({
           opened this {createdAt && <RelativeTimestamp value={createdAt} />}
         </a>
         <span className="ml-auto">{labels}</span>
+        {draft === null && (
+          <Button
+            ref={editButton}
+            size="xs"
+            color="secondary"
+            variant="plain"
+            disabled={update.isPending}
+            onClick={() => setDraft(body)}
+          >
+            Edit description
+          </Button>
+        )}
       </header>
+      {draft !== null && (
+        <div className="flex flex-col gap-space-2">
+          <Textarea
+            size="sm"
+            aria-label="PR description"
+            autoFocus
+            rows={12}
+            resize="vertical"
+            maxLength={65536}
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault()
+                save()
+              }
+              if (event.key === "Escape") event.stopPropagation()
+            }}
+          />
+          <div className="flex justify-end gap-space-2">
+            <Button
+              size="sm"
+              color="secondary"
+              variant="plain"
+              onClick={closeEditor}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={draft === body || update.isPending}
+              onClick={save}
+            >
+              Save description
+            </Button>
+          </div>
+        </div>
+      )}
       <div
+        hidden={draft !== null}
         ref={ref}
         className={cn(
           "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
@@ -178,7 +266,7 @@ function Description({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-background to-transparent" />
         )}
       </div>
-      {overflows && (
+      {overflows && draft === null && (
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
