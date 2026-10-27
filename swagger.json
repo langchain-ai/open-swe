@@ -464,6 +464,26 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppUser": {
+        "description": "MDA's ``ResolvedAppUser``: run as this Open SWE user. The only answer besides ``None``.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "user",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "title": "AppUser",
+        "type": "object"
+      },
       "ApprovalsFileStatus": {
         "properties": {
           "found": {
@@ -2461,6 +2481,45 @@
         "title": "GitHubChannelCall",
         "type": "object"
       },
+      "GitHubEndpointActor": {
+        "description": "A ``GitHubActor`` as an endpoint is sent it.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "const": "github",
+            "title": "Provider",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "User",
+              "Bot",
+              "Organization"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "id",
+          "name",
+          "type"
+        ],
+        "title": "GitHubEndpointActor",
+        "type": "object"
+      },
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
@@ -2905,6 +2964,38 @@
           "decline"
         ],
         "title": "LinearDecline",
+        "type": "object"
+      },
+      "LinearEndpointActor": {
+        "description": "A ``LinearActor`` as an endpoint is sent it.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "const": "linear",
+            "title": "Provider",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "id"
+        ],
+        "title": "LinearEndpointActor",
         "type": "object"
       },
       "LinearTrigger": {
@@ -5960,6 +6051,46 @@
         "title": "ResolveReviewThreadsResult",
         "type": "object"
       },
+      "ResolveUserChannel": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ResolveUserChannel",
+        "type": "object"
+      },
+      "ResolveUserEndpointRequest": {
+        "description": "What a ``resolve_user`` endpoint is POSTed: the ``ResolveUserRequest``, with\nthe actor in camelCase, as TypeScript's, and absent when unverified.",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlackEndpointActor"
+              },
+              {
+                "$ref": "#/components/schemas/GitHubEndpointActor"
+              },
+              {
+                "$ref": "#/components/schemas/LinearEndpointActor"
+              }
+            ],
+            "title": "Actor"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ResolveUserChannel"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "title": "ResolveUserEndpointRequest",
+        "type": "object"
+      },
       "Response": {
         "properties": {
           "background": {
@@ -7399,6 +7530,31 @@
           "is_ext_shared"
         ],
         "title": "SlackChannelOption",
+        "type": "object"
+      },
+      "SlackEndpointActor": {
+        "description": "A ``SlackActor`` as an endpoint is sent it, in camelCase as TypeScript's.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "provider": {
+            "const": "slack",
+            "title": "Provider",
+            "type": "string"
+          },
+          "teamId": {
+            "title": "Teamid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "id",
+          "teamId"
+        ],
+        "title": "SlackEndpointActor",
         "type": "object"
       },
       "SlackTrigger": {
@@ -22915,6 +23071,53 @@
           }
         },
         "summary": "Linear Channel Event"
+      }
+    },
+    "/mda/resolve-user": {
+      "post": {
+        "description": "The Open SWE user a channel's verified sender is, or ``None`` for the channel's default.",
+        "operationId": "resolve_user_mda_resolve_user_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveUserEndpointRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AppUser"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Resolve User Mda Resolve User Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve User"
       }
     },
     "/slack/channel/events": {

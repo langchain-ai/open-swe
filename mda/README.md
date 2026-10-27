@@ -162,6 +162,13 @@ Nothing here is generated from the backend: operations, subagents and models com
 Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty checkpoints.
 MDA's dev server also refuses loopback webhooks, so the completion webhook (`COMPLETION_WEBHOOK_URL`) needs the backend at a non-loopback URL.
 
+## Who a channel's run is for
+
+Before every run a channel starts, MDA asks the backend who its verified sender is (`resolve_user` in `identity.py`, the backend's `POST /mda/resolve-user`, signed with `MDA_SERVICE_SECRET` as the channel endpoints are).
+The backend maps the sender as every other ingress does (`User.for_person`): a linked Slack account in the same workspace, a GitHub account by its numeric id, or a Linear user by email.
+A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
+Anyone else, bots, and a sender the channel couldn't verify keep the channel's own principal (`null`); the channel endpoints still gate the run and ask the person to connect their account.
+
 ## Linear
 
 The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear.
