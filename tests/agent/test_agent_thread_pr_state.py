@@ -337,6 +337,65 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kitchen", "other_state", "state", "merged", "legacy", "preview", "expected"),
+    [
+        (True, "merged", "closed", True, False, False, "add"),
+        (True, "open", "closed", True, False, False, "remove"),
+        (True, "closed", "closed", True, False, False, "remove"),
+        (True, "merged", "closed", False, False, False, "remove"),
+        (True, "merged", "open", False, False, False, "remove"),
+        (True, "merged", "closed", True, True, False, "add"),
+        (False, "merged", "closed", True, False, False, "none"),
+        (True, "merged", "closed", True, False, True, "none"),
+    ],
+)
+async def test_kitchen_thread_merge_reaction(
+    kitchen: bool,
+    other_state: str,
+    state: str,
+    merged: bool,
+    legacy: bool,
+    preview: bool,
+    expected: str,
+) -> None:
+    metadata = {
+        "kind": "agent",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+        "pr_state": "merged",
+        "source_context": {"slack_thread": {"channel_id": "C_KITCHEN", "thread_ts": "1.0"}},
+    }
+    if not legacy:
+        metadata["pull_requests"] = [
+            {"url": metadata["pr_url"], "state": "merged"},
+            {"url": "https://github.com/lc/other/pull/9", "state": other_state},
+        ]
+    with (
+        patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.is_kitchen_channel", AsyncMock(return_value=kitchen)),
+        patch("openswe.webhooks.common.skip_on_preview", return_value=preview),
+        patch("openswe.webhooks.common.add_slack_reaction", AsyncMock(return_value=True)) as add,
+        patch("openswe.webhooks.common.remove_slack_reaction", AsyncMock()) as remove,
+        patch("openswe.webhooks.common.create_langsmith_thread_feedback", AsyncMock()),
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state=state, merged=merged))
+
+    if expected == "add":
+        add.assert_awaited_once_with("C_KITCHEN", "1.0", "merged")
+        remove.assert_not_awaited()
+    elif expected == "remove":
+        add.assert_not_awaited()
+        assert [call.args for call in remove.await_args_list] == [
+            ("C_KITCHEN", "1.0", "merged"),
+            ("C_KITCHEN", "1.0", "twisted_rightwards_arrows"),
+        ]
+    else:
+        add.assert_not_awaited()
+        remove.assert_not_awaited()
+
+
 def _follow_up_client(metadata: dict[str, Any]) -> MagicMock:
     fake_client = MagicMock()
     fake_client.threads.get = AsyncMock(return_value={"thread_id": "t1", "metadata": metadata})
