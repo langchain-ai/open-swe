@@ -72,6 +72,15 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),
         ),
+        (
+            "<@U0BOT> /breakout in <#C2|team-oss-kitchen>, run streaming benchmarks",
+            Command("run streaming benchmarks", "<#C2|team-oss-kitchen>", "C2"),
+        ),
+        ("<@U0BOT> /breakout IN <#C2>: fix it", Command("fix it", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout <#C2>, fix it", Command("fix it", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in <#C2>", Command("", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in #target fix it", Command("fix it", "#target")),
+        ("<@U0BOT> /breakout in this channel fix it", Command("in this channel fix it")),
         ("details <@U0BOT> /breakout", Command("", prior_text="details")),
         (
             "<@U0BOT> /WORKSPACE:Infra /breakout fix it",
@@ -224,6 +233,38 @@ async def test_default_breakout_waits_for_destination_in_large_or_unknown_channe
     await breakout.process_slack_breakout(_request(), Command("fix it", channel_id="C1"), None)
 
     start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("private_channel", [None, "C1", "C2"])
+async def test_breakout_in_named_channel_skips_audience_prompt_but_not_private_boundaries(
+    monkeypatch, public_channels, private_channel
+):
+    def load(channel_id, **_):
+        channel = _channel(channel_id, private=channel_id == private_channel)
+        assert channel is not None
+        channel.payload["num_members"] = 98
+        return channel
+
+    public_channels.side_effect = load
+    posted = _patch_slack(monkeypatch)
+    start = AsyncMock()
+    monkeypatch.setattr(breakout, "_start", start)
+    command = Command.from_message(
+        ParsedSlackMessage.parse(
+            "<@U0BOT> /breakout in <#C2|team-oss-kitchen>, run streaming benchmarks", "U0BOT"
+        )
+    )
+
+    await breakout.process_slack_breakout(_request(), command, None)
+
+    if private_channel:
+        start.assert_not_awaited()
+        assert "public source channel and destination" in posted.ephemeral.await_args.args[2]
+    else:
+        assert start.await_args.args[2] == "C2"
+        assert start.await_args.args[1].instruction == "run streaming benchmarks"
+        posted.ephemeral.assert_not_awaited()
 
 
 @pytest.mark.asyncio
