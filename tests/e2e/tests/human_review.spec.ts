@@ -892,6 +892,14 @@ test.describe("Human review in Slack", () => {
     expect(picked.text, "the pick should say why Bob was chosen").toContain(
       "You own 1 of the 1 changed file",
     );
+    expect(cardText(picked)).toContain(`By <@${ALICE.slack}>`);
+    expect(cardText(picked)).toContain("Says bonjour.");
+    expect(cardText(picked)).toContain("Accept within 120 minutes");
+    expect(cardText(picked)).toContain("review card");
+    expect(cardText(picked)).toContain("Turn off automatic review picks");
+    expect(buttons(picked)).toEqual(["Accept", "Decline", "Snooze"]);
+    await loginAs(page, BOB);
+    await showSlack(page, "D_BOB", "reviewer-pick-author");
     await expectNoPickReplies(request, posted);
     const accept = (picked.blocks ?? [])
       .filter((block) => block.type === "actions")
