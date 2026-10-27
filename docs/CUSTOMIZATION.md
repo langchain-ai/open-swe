@@ -544,11 +544,11 @@ To add a new invocation surface (e.g. Jira, Discord, a custom API):
 async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
     # Parse the incoming event
     payload = await request.json()
-    
+
     # Extract task description and repo info
     task_description = payload["description"]
     repo_config = {"owner": "my-org", "name": "my-repo"}
-    
+
     # Create a LangGraph run
     background_tasks.add_task(process_my_trigger, task_description, repo_config)
     return {"status": "accepted"}

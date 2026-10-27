@@ -1,0 +1,45 @@
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+default_stages:
+  - pre-push
+
+exclude: ^(vendor/|openwiki/)
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.5
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.9
+    hooks:
+      - id: actionlint
+  - repo: local
+    hooks:
+      - id: uv-lock-check
+        name: Check uv.lock is up to date
+        entry: uv lock --check
+        language: system
+        files: ^(uv\.lock|pyproject\.toml)$
+        pass_filenames: false
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+        exclude: &generated ^(LICENSE|.*\.(svg|patch|txt|tla))$|^openswe/resources/prompts/tools/
+      - id: trailing-whitespace
+        exclude: *generated
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-added-large-files
+        args: ['--maxkb=3072']
+      - id: check-merge-conflict
+      - id: detect-private-key
+        exclude: ^docs/(DEVELOPMENT|INSTALLATION)\.md$
+      - id: check-toml
+      - id: no-commit-to-branch
+        args: [--branch, main]
+        stages: [pre-commit]

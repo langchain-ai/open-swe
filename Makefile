@@ -88,6 +88,9 @@ install-checkout:
 install:
 	uv sync --extra dev
 
+hooks:
+	prek install
+
 # Single-file `oswe` binary. Bun compiles its own runtime into the output,
 # so the result runs on any machine without Node or Bun installed.
 cli:
