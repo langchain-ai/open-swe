@@ -47,6 +47,7 @@ async def note_pull_request_activity(
         text = text.strip()
         await pull_request.note_for_threads(
             login,
+            f"pull-request-{activity}",
             prompt(
                 "runs/pull-request-activity",
                 activity=activity,

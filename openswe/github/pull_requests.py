@@ -383,10 +383,10 @@ class PullRequest(Base):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
 
-    async def note_for_threads(self, login: str, note: str) -> None:
-        """Queue what ``login`` did, as ``note``, for each linked agent thread's next run, starting none."""
+    async def note_for_threads(self, login: str, action: str, note: str) -> None:
+        """Queue ``login``'s ``action``, told as ``note``, for each linked thread's next run, starting none."""
         for thread_id in await self.linked_threads():
-            if not await queue_action_for_thread(thread_id, login, "pull-request-activity", note):
+            if not await queue_action_for_thread(thread_id, login, action, note):
                 logger.warning(
                     "Could not queue a pull request note for a linked thread",
                     extra={
