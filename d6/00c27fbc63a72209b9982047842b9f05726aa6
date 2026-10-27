@@ -1,0 +1,1059 @@
+ui/src/features/agents/lib/structuredInputMessages.ts
+  s_27878fb276b595::t_2c1d9a768907d0 3-6,39,186-215,289,293
+openswe/walkthrough/record.py
+  s_27878fb276b595::t_2c1d9a768907d0 18,25-27,47-50,61-72,74-75,77-82,101,108,113,143,155,270,273
+ui/src/features/agents/components/messages/useTranscriptScroll.ts
+  s_27878fb276b595::t_2c1d9a768907d0 10-11,13-30,60-116,130-140,146-152,165,172-173,180,183-194,197-325,357-405,417-418,421-422,429,440,445-451,455-475,479-493,495,499,501-506,509-514,516,522,526-528,533,536
+openswe/jobs/kinds.py
+  s_27878fb276b595::t_2c1d9a768907d0 41-42,175-179,197
+tests/merge_queue/test_queue_validation.py
+  s_27878fb276b595::t_2c1d9a768907d0 53
+openswe/resources/prompts/review-guide/main.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 58
+tests/webhooks/test_completion_webhook.py
+  s_27878fb276b595::t_2c1d9a768907d0 209-212,214-220,224,226-227
+openswe/threads/inbox.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-317
+tests/threads/test_thread_router.py
+  s_27878fb276b595::t_2c1d9a768907d0 2,10-12,99,103-107,116,125-126,207,238-240,257-280,444-459
+  s_27878fb276b595::t_1926982f6b5d90 460-461
+ui/src/features/agents/lib/transcript/api.ts
+  s_27878fb276b595::t_2c1d9a768907d0 18,26,182,193,226,234-236
+ui/src/features/reviews/components/ReviewChatActions.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 3-10,13,15-19,22-25,29,43-46,50-75,77,79-89,91-105,108-119,122-123,125-140,142-161
+openswe/threads/succession.py
+  s_27878fb276b595::t_2c1d9a768907d0 11
+tests/sandbox/test_task_worker_sandbox.py
+  s_27878fb276b595::t_2c1d9a768907d0 79,83,85-90,106-112,201,203-204,210,212-220,225-230
+ui/src/features/reviews/page/store.ts
+  s_27878fb276b595::t_2c1d9a768907d0 104-108,163-165,305-307,527-529
+ui/src/features/settings/components/ManagedToolsSection.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 9,15,95-134,168-176,180-194,203,208,257-262,274,306
+openswe/resources/prompts/system/shared-base.md
+  s_27878fb276b595::t_2c1d9a768907d0 12
+openswe/mcp/managed.py
+  s_27878fb276b595::t_2c1d9a768907d0 94-95,98-99,282-283,287,300-304,308-313,403-410,533-560
+  s_27878fb276b595::t_bfc09f782521e8 561-562
+.github/workflows/ci.yml
+  s_27878fb276b595::t_2c1d9a768907d0 17-31,100-118
+  s_27878fb276b595::t_8e7552d3aefbb3 119
+desktop/README.md
+  s_27878fb276b595::t_2c1d9a768907d0 6-8,23-38,44-48,55-69,120,134-135
+scripts/deploy_preview.py
+  s_27878fb276b595::t_2c1d9a768907d0 191-194
+openswe/merge_queue/validation.py
+  s_27878fb276b595::t_2c1d9a768907d0 25-26
+openswe/walkthrough/planner.py
+  s_27878fb276b595::t_2c1d9a768907d0 8-11,14,16-17,26-27,37,44-47,68-69,71,79-103,116,118-128,131,135-144,148,151-162,170,172,196-199,204,212,226-227,229,232,234,240-241,244-249,251,260,262,266-276,279-282
+ui/src/features/agents/components/chat/SqlResultTable.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 2,63,106
+ui/src/features/agents/components/composer/ComposerReplyCards.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-58
+ui/src/features/agents/lib/types.ts
+  s_27878fb276b595::t_2c1d9a768907d0 2,228-229,233-234,380-384,400,491-492
+ui/src/features/settings/components/WorkspaceBindingPickers.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 4-7,10-15,57-59,61-72,127-130,132-156,167-170,189-190
+ui/src/lib/invalidations/topics.ts
+  s_27878fb276b595::t_2c1d9a768907d0 7-11
+ui/src/routes/assistant/index.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1,21
+tests/mcp/test_managed_mcps.py
+  s_27878fb276b595::t_2c1d9a768907d0 151-156,171-175,228-260
+  s_27878fb276b595::t_22ff41c7dc17a5 261-262
+openswe/middleware/notify_step_limit.py
+  s_27878fb276b595::t_2c1d9a768907d0 46-48,50-51,60,72
+openswe/sandboxes/scripts.py
+  s_27878fb276b595::t_2c1d9a768907d0 20-23,44-46,49-51,55,67-82,84-88,94-98,102,105,112
+openswe/walkthrough/checkout.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,6-7,12,14,18,22-24,110-115,117-133,135-161
+openswe/agent_api/async_workers.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-208
+tests/agent/test_rollout_subscription.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,10-11,90-163
+tests/mcp/test_tool_caller.py
+  s_27878fb276b595::t_2c1d9a768907d0 120
+openswe/tasks/messages.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,4,19,79-80,91-106,135,174,187,207
+ui/src/features/agents/components/composer/ChatComposer.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 13-14,57,64-65,67,109-115,122,140,148-149,213-214,219,227-232,294,327-336,394-397,411,425-426,429-437,453-456,486-495,506-507,509,511,518-522,527,530,538-546,569-570,888-894
+  s_27878fb276b595::t_8c25250cf38e2d 895-896
+ui/src/features/reviews/components/AgentNoteCard.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-73
+ui/src/features/agents/components/chat/Markdown.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 22,227,229
+desktop/src/main.cts
+  s_27878fb276b595::t_2c1d9a768907d0 30,69,127,613-622,1212,1221-1235,1237,1723,1756-1760,1762,1780,1838,1842
+mda/rt/middleware.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,3-10,47,49,55,64-81,86-88,90,93-95,102,116-117,180,206-212,215-217,230,241,252,273,275-276,280-281,285,295-298,302-312,314-315,318-334,337-340,350,352-360,364-399,401-403,405,407,414-417,421,423,425-427,429,433,438-440,445-451,454-455,457-466,471,475-479,490-523,525-533,549,555,566,568,609-610,696-698,700,705,707-711,713,715,721,723-724,727-728,730-731,734-737,742-750,754,763,766,769-776,783,786,788-790
+openswe/sandbox_scripts/AGENTS.md
+  s_27878fb276b595::t_2c1d9a768907d0 7-8
+packages/runtime-api/src/runtime_api/endpoint.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-6,9,11,13,15,18-30,38-39,47-51,54-60,70,72-78,86-89,107-111,116-117
+  s_27878fb276b595::t_45a6cfc783816f 118
+ui/src/features/reviews/lib/copyText.ts
+  s_27878fb276b595::t_2c1d9a768907d0 4-17
+openswe/github/webhook.py
+  s_27878fb276b595::t_2c1d9a768907d0 272,287
+openswe/mcp/routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 26,273-280,305,311-320
+  s_27878fb276b595::t_00ea972cfd1836 321-322
+openswe/agent_api/graph.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-1345
+openswe/middleware/model_selection.py
+  s_27878fb276b595::t_2c1d9a768907d0 2,5,66-70,81,84,94-98,103,107,109-110,119-120,127,137
+openswe/sandboxes/lifecycle.py
+  s_27878fb276b595::t_2c1d9a768907d0 425-426,445-452
+tests/e2e/tests/full_flow.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 3-4,36-45
+ui/src/features/agents/components/messages/timeline/AgentTurn.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 49-68,220-235,434-435
+  s_27878fb276b595::t_23483b52e887d4 48
+openswe/review_guide/advance.py
+  s_27878fb276b595::t_2c1d9a768907d0 42,90
+openswe/slack/payloads.py
+  s_27878fb276b595::t_2c1d9a768907d0 303,406,431,438-446
+  s_27878fb276b595::t_6914ddf2c5abd9 447
+openswe/sandboxes/tool_runtime.py
+  s_27878fb276b595::t_2c1d9a768907d0 4,22,120,122-124,133-136
+tests/review_guide/test_review_guide_advance.py
+  s_27878fb276b595::t_2c1d9a768907d0 11-14,24-29,40,48-49,51-52,67,103,116,131
+ui/src/features/agents/lib/transcript/useThreadTranscript.ts
+  s_27878fb276b595::t_2c1d9a768907d0 17,64-80,136,167,176,187,220,226,238,240,262-270
+tests/webhooks/test_event_subscriptions.py
+  s_27878fb276b595::t_2c1d9a768907d0 144,247,258-259
+openswe/slack/tools/move_thread.py
+  s_27878fb276b595::t_2c1d9a768907d0 100-101
+openswe/threads/runtimes.py
+  s_27878fb276b595::t_2c1d9a768907d0 9,21,28,48-51,172-196,262,281-282,307-308,312
+openswe/slack/suggested_actions.py
+  s_27878fb276b595::t_2c1d9a768907d0 15,46,130-136,138-149
+openswe/dashboard/routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 27,77
+openswe/completion.py
+  s_27878fb276b595::t_2c1d9a768907d0 41,194-200,209,430-431,624-632
+openswe/threads/background_work.py
+  s_27878fb276b595::t_2c1d9a768907d0 4,9,15-17,20-21,33-38,46-47,52-142
+openswe/tools/propose_pr_review.py
+  s_27878fb276b595::t_2c1d9a768907d0 7
+ui/src/features/agents/lib/threadSource/types.ts
+  s_27878fb276b595::t_2c1d9a768907d0 13,24
+openswe/slack/dashboard_routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 19-23,76-90
+ui/src/features/reviews/components/RequestHumanReview.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 94-103,105,110,130-131,186,195-196,206-296,298-308,310-314,320,322,324-336
+tests/dashboard/test_dashboard_thread_api.py
+  s_27878fb276b595::t_2c1d9a768907d0 36,49-53,653,747-781,828,833-835
+  s_27878fb276b595::t_f7ed0fda89e6d6 836
+ui/src/features/agents/components/panel/RightPanelTabs.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 25,63-64,68,95,99,163-176,445-446,457
+openswe/slack/breakout_links.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-18
+ui/src/features/agents/lib/streamMessagesToUi.ts
+  s_27878fb276b595::t_2c1d9a768907d0 335,337,353
+mda/rt/run_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-293
+tests/walkthrough/test_walkthrough_plan.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,12-13,15-18,22,29,48-53,71-77,80-87,90-91,97-114,117-118,126-133,137-138,140-141,143-144,149-151,155,157,162-164,168,170,176-194,202-203,206,208-210,212,215-216,225-229,236-237,239-241,243-244,247-249,255-256,266-270,274-277,280-281,287-289,291-292,294,299-300,302-306,309-311,316-320,323-324,326-328,332-334,338-341,343-347,351,355-356,358-362,375-376,389-454
+tests/transcript/test_isolation.py
+  s_27878fb276b595::t_2c1d9a768907d0 16,514-515
+ui/src/features/settings/components/WorkspaceSettings.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 134
+ui/src/features/agents/lib/transcript/reducer.ts
+  s_27878fb276b595::t_2c1d9a768907d0 538-542,545-548,550-551,856-887,905-906,1006,1009,1024,1029
+ui/src/features/agents/components/ThreadPullRequests.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 19,388,394-401,435,463,467,474-476
+tests/reviewer/test_git_trace_metadata.py
+  s_27878fb276b595::t_2c1d9a768907d0 8,116
+mda/rt/managed_sandbox.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-6,26-29,31,41-54,72-79,95,106-108,116,118
+ui/src/features/agents/lib/provider/useSubmitAgentMessage.ts
+  s_27878fb276b595::t_2c1d9a768907d0 87,109-114
+openswe/merge_queue/dispatch.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,35-37,39-62
+openswe/middleware/require_user_reply.py
+  s_27878fb276b595::t_2c1d9a768907d0 33,95-111,150,209-210,212
+ui/src/features/reviews/page/Changes.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 64-65,162-163,192,201-203,211,270,290,308,449,452,533
+openswe/jobs/queue.py
+  s_27878fb276b595::t_2c1d9a768907d0 70-74,250-260
+  s_27878fb276b595::t_70530e23c20ccd 261-262
+openswe/middleware/transcript.py
+  s_27878fb276b595::t_2c1d9a768907d0 205,208,218-220,1166-1168,1198-1200,1204,1341-1342,1349-1350
+openswe/slack/breakout_destination.py
+  s_27878fb276b595::t_2c1d9a768907d0 5,14-21
+  s_27878fb276b595::t_989720e43aa07e 22
+openswe/walkthrough/diff.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-8,11-12,14,16,18-21,24-32,35,37-38,45-140
+tests/e2e/tests/dashboard_my_pull_requests.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 322-323,326,343
+tests/slack/test_slack_interactivity.py
+  s_27878fb276b595::t_2c1d9a768907d0 11,142-143,145,148-154,171,178-191
+ui/src/features/agents/components/messages/UserMessage.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 14,32-55,67-72,107-109,241
+tests/slack/test_slack_start_new_thread_tool.py
+  s_27878fb276b595::t_2c1d9a768907d0 18,137-146,215,239-241,397-410,492,495,509-519,555-568
+openswe/review_scout/graph.py
+  s_27878fb276b595::t_2c1d9a768907d0 12-13,16,25,28,42,201-204,206,219-255,287-306,332,334-342
+tests/e2e/tests/helpers/dashboard.ts
+  s_27878fb276b595::t_2c1d9a768907d0 33-38,42,48-62,326-345
+  s_27878fb276b595::t_787fa08b23aff6 346
+desktop/test/desktop-ui.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-271
+tests/middleware/test_client_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 10
+mda/rt/remote_files.py
+  s_27878fb276b595::t_2c1d9a768907d0 35,38
+.github/workflows/desktop-release.yml
+  s_27878fb276b595::t_2c1d9a768907d0 255,271-288
+  s_27878fb276b595::t_cada4a268644ab 289
+docs/incidents-design.md
+  s_27878fb276b595::t_2c1d9a768907d0 34
+openswe/webhooks/event_matches.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,4-8,12,27,73,101-102,109,115-130,149,179
+openswe/utils/model.py
+  s_27878fb276b595::t_2c1d9a768907d0 6,142-144,149-159
+  s_27878fb276b595::t_3850723a5c1c7d 160-161
+openswe/threads/pr_fixes.py
+  s_27878fb276b595::t_2c1d9a768907d0 108-117,120,123,128
+tests/e2e/tests/inbox.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-98
+tests/slack/test_slack_breakout.py
+  s_27878fb276b595::t_2c1d9a768907d0 92,94-98,102,104-106,180-189,288,307-308,315,334
+openswe/threads/handlers.py
+  s_27878fb276b595::t_2c1d9a768907d0 27,249-254,313,350,379
+ui/src/features/reviews/components/PullRequestThreadAction.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 75
+openswe/agent_api/__init__.py
+  s_27878fb276b595::t_2c1d9a768907d0 1
+openswe/resources/prompts/tools/propose_review_comment.md
+  s_27878fb276b595::t_2c1d9a768907d0 8-9
+openswe/config.py
+  s_27878fb276b595::t_2c1d9a768907d0 228,505-509
+openswe/resources/prompts/runs/rollout-deployed.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 1
+ui/src/lib/appCommands.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 111,117,167
+openswe/slack/channels.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-7,10,13,15,19-20,46-63,93-101,108,143-146,156-159,168,174-261,340-342,344,347,352
+ui/src/features/reviews/page/pullRequestStanding.ts
+  s_27878fb276b595::t_2c1d9a768907d0 113,120
+tests/test_task_events.py
+  s_27878fb276b595::t_2c1d9a768907d0 17-18,21,26,31,354,356,367,395-396,433-434,441,497-504,528,531-534,570-571,721
+openswe/threads/routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 21,23,409-414
+  s_27878fb276b595::t_59b29e1e4ed66b 415-417
+openswe/tools/add_review_comment.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-102
+mda/rt/loop.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-500
+openswe/agent_api/shell_guards.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-79
+openswe/dashboard/auth_routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 271
+openswe/server.py
+  s_27878fb276b595::t_2c1d9a768907d0 13,16-17,29-36,56,114,116-117,121,165,245,253,565,603-605,664-741,752-859,929,1305,1786-1790,1792,1794,1796-1798,1800,1873-1874,1914-1916,1918,1951,1957,1984,2002-2040,2080-2084
+openswe/slack/breakout.py
+  s_27878fb276b595::t_2c1d9a768907d0 11-16,203,307-309
+openswe/walkthrough/plan.py
+  s_27878fb276b595::t_2c1d9a768907d0 6-9,12,15,21-22,56-59,61,63,67-110,114-130,133,135-183,185,189-201,203,206-208,214,225-227,229,234-238,240-241,244-246,249,256,280,287,290,293-294,297-299,301,303,305-306,309-310,312,314-320,322-324,326-327,341-349
+tests/sandbox/test_workspace_github_access.py
+  s_27878fb276b595::t_2c1d9a768907d0 8,15-16,256,263
+openswe/resources/prompts/walkthrough/planning.md
+  s_27878fb276b595::t_2c1d9a768907d0 30
+docs/CUSTOMIZATION.md
+  s_27878fb276b595::t_2c1d9a768907d0 656,665
+tests/agent/test_dispatch.py
+  s_27878fb276b595::t_2c1d9a768907d0 78,193
+tests/threads/test_inbox.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-129
+ui/src/features/agents/components/panel/AgentRightPanel.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 30,44-46,51-52,154-157,312-314,326,388-391
+  s_27878fb276b595::t_3a1c1dbd2b0ce9 392-393
+tests/e2e/fakes.py
+  s_27878fb276b595::t_2c1d9a768907d0 672-674,1024
+ui/src/features/agents/lib/rightPanelStore.ts
+  s_27878fb276b595::t_2c1d9a768907d0 7-8,30,55,110-111,204-209
+ui/src/routes/assistant/$threadId.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1,4,6-10
+tests/e2e/tests/dashboard.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 29-39,42-46,49,55,58,65-66,83
+ui/src/routes/assistant.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1,4
+openswe/github/pull_request_context.py
+  s_27878fb276b595::t_2c1d9a768907d0 19,493,500,502-503
+openswe/incidents/runtime.py
+  s_27878fb276b595::t_2c1d9a768907d0 5,9,12,26,245-247,249-250,253
+tests/agent/test_agent_thread_pr_state.py
+  s_27878fb276b595::t_2c1d9a768907d0 403,415,419,425,427,433,439-480
+.github/workflows/openwiki-update.yml
+  s_27878fb276b595::t_2c1d9a768907d0 50,53
+openswe/merge_queue/store.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-5,8,14,17-19,25,48-51,58-77,102-105,188-189,200-264,379,420-426,429-430,541,854,934-947,952,954-965
+openswe/slack/tools/reply.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,86-87,90-92,116-117,120-126,185-187,519,522
+packages/runtime-api/src/runtime_api/loop.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-249
+ui/src/features/agents/lib/queries.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 17,30,33-38,75-138,609-649,945-973
+  s_27878fb276b595::t_165915ad7afccf 974
+openswe/github/queue.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,5,7-9,128-221
+ui/src/routes/my-settings_.experiments.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 4,22
+tests/dashboard/test_dashboard_reviews.py
+  s_27878fb276b595::t_2c1d9a768907d0 74-102
+openswe/merge_queue/scheduler.py
+  s_27878fb276b595::t_2c1d9a768907d0 24-25
+tests/github/test_open_pull_request.py
+  s_27878fb276b595::t_2c1d9a768907d0 12,581-582,613-614,617-618
+openswe/thread_title.py
+  s_27878fb276b595::t_2c1d9a768907d0 13-14,143,146-148
+tests/agent/test_langsmith_trace_url.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-5,145-201
+  s_27878fb276b595::t_e5a2826e26d2e5 202-203
+tests/expedited_review/test_merge.py
+  s_27878fb276b595::t_2c1d9a768907d0 385-390,393-395,408-411
+ui/src/features/agents/components/messages/Messages.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 3,310,350-353
+  s_27878fb276b595::t_77beed75c23b0c 354
+openswe/tools/propose_review_comment.py
+  s_27878fb276b595::t_2c1d9a768907d0 5,30-34,37
+ui/src/desktop.d.ts
+  s_27878fb276b595::t_2c1d9a768907d0 160
+openswe/threads/store.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-206
+mda/rt/tool_errors.py
+  s_27878fb276b595::t_2c1d9a768907d0 26,28,73,87,89-90
+openswe/threads/status.py
+  s_27878fb276b595::t_2c1d9a768907d0 13,17,34-39
+cli/README.md
+  s_27878fb276b595::t_2c1d9a768907d0 15-29
+openswe/resources/prompts/system/sandbox-file-downloads.md
+  s_27878fb276b595::t_2c1d9a768907d0 20-22
+openswe/slack/channel_options.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,3-5,10-12,16-19,23-24,36-51,55-56,59-64,68-94
+openswe/tools/request_rollout_check.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-11,13-32,40-58,60
+tests/human_review/test_standard.py
+  s_27878fb276b595::t_2c1d9a768907d0 12,170-171,175,180-182,423-436,516-520,538-547,557,563-606,668-721,824-837,842,848,907,909,920,945-948
+tests/conftest.py
+  s_27878fb276b595::t_2c1d9a768907d0 18,23-24,35-36,62-102
+  s_27878fb276b595::t_46905e7d887677 103-104
+tests/merge_queue/test_queue_scheduler.py
+  s_27878fb276b595::t_2c1d9a768907d0 27,67
+tests/middleware/test_transcript.py
+  s_27878fb276b595::t_2c1d9a768907d0 651-653,661-662,664-670,686,688-690,693,695,698,700,703,705,707
+openswe/merge_queue/native.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-46
+mda/agent.py
+  s_27878fb276b595::t_2c1d9a768907d0 5-19,27-28,30,32,34,40-41,43,46,60-70,72,77,87-93,111-112,114-119,122-123,126-142,146-148,150-152,154-155,157-161,164-168,170-172,176,178-185,187-188,190-206,211,214-218,220-226,230-244,247,251,260-263,266-268,271
+tests/sandbox/test_sandbox_recovery.py
+  s_27878fb276b595::t_2c1d9a768907d0 10,25,50,78
+openswe/database/migrations/versions/0082_40e708f0898f_observe_native_merge_queue_candidates.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-20
+openswe/threads/proxy.py
+  s_27878fb276b595::t_2c1d9a768907d0 34,192,202,211,281-290,293,299,308,329-331,344,356,364,367
+desktop/src/desktop-ui.cts
+  s_27878fb276b595::t_2c1d9a768907d0 1-324
+openswe/agent_api/runs.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-57
+openswe/agent_api/run_parts.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-49
+openswe/expedited_review/eligibility.py
+  s_27878fb276b595::t_2c1d9a768907d0 163-166,168-170
+openswe/middleware/model_call_shape.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-43
+openswe/resources/prompts/runs/pull-request-review-chat.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 1
+mda/tests/test_search_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-29
+openswe/slack/move.py
+  s_27878fb276b595::t_2c1d9a768907d0 9-10,183
+openswe/threads/runs.py
+  s_27878fb276b595::t_2c1d9a768907d0 13,64,91-92,94,573-585,694,746,761-763,809,886,958,1004-1005,1014,1022,1063-1065,1160,1163,1188,1232
+ui/scripts/desktop-manifest.mjs
+  s_27878fb276b595::t_2c1d9a768907d0 1-40
+ui/src/features/agents/lib/stream/promptMessage.ts
+  s_27878fb276b595::t_2c1d9a768907d0 2,14-17,20-21,30
+openswe/resources/prompts/review-guide/state.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 2
+ui/src/features/agents/utils/diffSelection.ts
+  s_27878fb276b595::t_2c1d9a768907d0 42-54
+openswe/agent_api/tokens.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-210
+ui/src/features/reviews/lib/chatDiffActions.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 53-71
+tests/review_guide/test_review_guide_walk.py
+  s_27878fb276b595::t_2c1d9a768907d0 2-5,23-24,27-28,31-36,40,42-43,48,59,63,70-71,73,75-76,80,82,87-89,97,99,101-110,114
+ui/src/features/reviews/page/find.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-86
+tests/agent/test_input_messages.py
+  s_27878fb276b595::t_2c1d9a768907d0 11,52-80
+  s_27878fb276b595::t_d044efa09b23f0 81-82
+openswe/sandbox_scripts/walkthrough.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-372
+openswe/tools/open_pull_request.py
+  s_27878fb276b595::t_2c1d9a768907d0 5,16,599-609,623,665,700,815-816,1137,1164
+openswe/tasks/service.py
+  s_27878fb276b595::t_2c1d9a768907d0 15
+tests/dashboard/test_pull_request_context.py
+  s_27878fb276b595::t_2c1d9a768907d0 36,39,42,47,50,107
+scripts/check_langgraph_client.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-31
+ui/src/features/reviews/lib/chatDiffActions.ts
+  s_27878fb276b595::t_2c1d9a768907d0 26-46,101-111,134-149
+openswe/message_queue.py
+  s_27878fb276b595::t_2c1d9a768907d0 8,88-90,94,96
+openswe/resources/prompts/tools/note_on_diff.md
+  s_27878fb276b595::t_2c1d9a768907d0 1-20
+openswe/review/reviews.py
+  s_27878fb276b595::t_2c1d9a768907d0 51,726-728,1270-1271
+  s_27878fb276b595::t_fa8fb822cb575e 1272
+openswe/slack/tools/start_new_thread.py
+  s_27878fb276b595::t_2c1d9a768907d0 16,18,30,32,230-234,315-329,342-343,366-370,373,379,385,389-390,435,442
+openswe/middleware/exclude_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,3,6,8-9,11,16,23-26
+tests/e2e/fake_llm.py
+  s_27878fb276b595::t_2c1d9a768907d0 21,287-294,878-942,1151,1645,1649
+openswe/slack/routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 32,386-387,1212-1219
+  s_27878fb276b595::t_058f668cbedd12 1220
+openswe/skill_store/run_skills.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-70
+tests/tools/test_add_review_comment.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-31
+tests/tools/test_request_rollout_check.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,3,9,12-29,33,39-59,61-62,64-70,72-73,75-146,151-156,160
+mda/rt/file_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 5-6,41,43,79-83,90-91,94-103,108-123,127-128,152-156,165-169,192,216-227,235-236,238-242,283-288
+  s_27878fb276b595::t_531569db4161ca 289-290
+ui/src/routes/agents.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 69
+openswe/human_review/standard.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,44,201-207,214,1005,1154
+openswe/github/http.py
+  s_27878fb276b595::t_2c1d9a768907d0 38,610-639
+  s_27878fb276b595::t_703327f40dde2a 640
+tests/merge_queue/test_queue_controller.py
+  s_27878fb276b595::t_2c1d9a768907d0 4,7,15,24-167,169,172-175,178-180,184,188-190,194-196,205,207-209,219-224
+.github/workflows/deploy_mda.yml
+  s_27878fb276b595::t_2c1d9a768907d0 91-92,98-104,109-138,140,142-150,158-175,180-220
+openswe/agent_api/failures.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-87
+tests/e2e/patches.py
+  s_27878fb276b595::t_2c1d9a768907d0 20,336-337,344-396
+  s_27878fb276b595::t_c16c96dffacde9 397-398
+tests/e2e/tests/background_work.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1,6,11-13,37-48,56-64,72-75
+openswe/threads/index.py
+  s_27878fb276b595::t_2c1d9a768907d0 18,30-31,139-142
+  s_27878fb276b595::t_5434913c592ac8 143
+tests/incidents/test_runtime.py
+  s_27878fb276b595::t_2c1d9a768907d0 14,69-72,115,120,156,161,189,208,214
+tests/slack/test_slack_reply_tool.py
+  s_27878fb276b595::t_2c1d9a768907d0 139-195
+ui/src/features/agents/components/chat/TableScroll.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-71
+openswe/resources/prompts/tools/add_review_comment.md
+  s_27878fb276b595::t_2c1d9a768907d0 1-25
+.github/workflows/build_preview_branch.yml
+  s_27878fb276b595::t_2c1d9a768907d0 31-35,98,108,116,124-130,144-154,161-164
+openswe/database/migrations/versions/0083_6416028c3ce3_keep_walkthrough_lines_as_ranges.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-57
+openswe/resources/prompts/runs/pull-request-fix-scope.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 1-11
+openswe/review_guide/middleware.py
+  s_27878fb276b595::t_2c1d9a768907d0 12,19,22,127,131-139,157,163,175,181-192,214-218
+ui/src/features/agents/utils/passageReply.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-41
+openswe/api/app.py
+  s_27878fb276b595::t_2c1d9a768907d0 13,34,49,114,173,175
+tests/e2e/tests/desktop.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 23,84,238,260-261,266-272
+ui/src/features/automations/components/AutomationEditor.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 14-16,26,44-47,105,123-135,137-185
+ui/src/features/reviews/page/findHighlights.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-99
+mda/rt/tracing.py
+  s_27878fb276b595::t_2c1d9a768907d0 6,16-18,64-91
+  s_27878fb276b595::t_ee0941d8d259dc 92
+.claude/skills/dashboard-preview/SKILL.md
+  s_27878fb276b595::t_2c1d9a768907d0 1-97
+ui/src/features/reviews/page/store.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 4-5,172-184
+  s_27878fb276b595::t_233ab60f163997 185-186
+mda/rt/tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 23-24,39-42,76,82,84-91,97,172-177,212-215,222,227
+tests/middleware/test_model_selection.py
+  s_27878fb276b595::t_2c1d9a768907d0 19-21,27,32,52,69,97,157,190,198,211
+tests/slack/test_slack_channel_options.py
+  s_27878fb276b595::t_2c1d9a768907d0 11-13,36,51-53,60-61,67,79-80,83,96,99,105,107,109,111-112,116-117,119-138,141-146,149-153,155-157,160-161,164-168,170-172,174-176
+tests/tools/test_monitor.py
+  s_27878fb276b595::t_2c1d9a768907d0 185,205,229-257,341
+ui/src/features/reviews/lib/usePendingReview.ts
+  s_27878fb276b595::t_2c1d9a768907d0 22-23
+ui/src/features/reviews/page/Header.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 20,30-31,82,317,324,340-347,356
+ui/src/features/reviews/ReviewBookmarklet.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 5,7-8,24,35
+openswe/agent_api/server.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-199
+openswe/dashboard/profiles.py
+  s_27878fb276b595::t_2c1d9a768907d0 48
+tests/analytics/test_database.py
+  s_27878fb276b595::t_2c1d9a768907d0 71,75-78,86-87
+tests/review_guide/test_review_guide_middleware.py
+  s_27878fb276b595::t_2c1d9a768907d0 1,3,9-12,15
+openswe/utils/dashboard_ui.py
+  s_27878fb276b595::t_2c1d9a768907d0 28-34,245-260,270
+desktop/package.json
+  s_27878fb276b595::t_2c1d9a768907d0 10-12,15-17,90
+tests/test_task_threads.py
+  s_27878fb276b595::t_2c1d9a768907d0 5,515,555,588,641-643,736,752,799,810
+ui/package.json
+  s_27878fb276b595::t_2c1d9a768907d0 7
+ui/src/features/agents/components/AgentsHome.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 8,17,442
+openswe/agent_api/git_metadata.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-195
+openswe/resources/prompts/runs/rollout-ask-to-monitor.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 1
+ui/src/features/agents/components/messages/timeline/foldRows.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 29-31
+ui/src/features/agents/components/SelectionReply.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-369
+ui/src/features/agents/lib/queuedMessages.ts
+  s_27878fb276b595::t_2c1d9a768907d0 24-46,49-50,58,64
+openswe/tools/review_walkthrough.py
+  s_27878fb276b595::t_2c1d9a768907d0 29,67-70,88,149-150,209-210,228-229,232
+ui/src/features/settings/components/StreamPreference.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-28
+openswe/resources/prompts/tasks/role.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 13
+openswe/run_config.py
+  s_27878fb276b595::t_2c1d9a768907d0 125-126
+tests/dashboard/test_pr_fixes.py
+  s_27878fb276b595::t_2c1d9a768907d0 28
+.github/workflows/desktop-ui-release.yml
+  s_27878fb276b595::t_2c1d9a768907d0 1-40
+openswe/human_review/lifecycle.py
+  s_27878fb276b595::t_2c1d9a768907d0 46,107-115,303,319,327,333,341-343,754,761-764
+tests/dashboard/test_profile_auto_human_review.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-15
+tests/test_deploy_preview.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,114-118,120-122,147-148
+ui/src/features/reviews/page/Standing.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 40,228,241,256-258,428,440,603,826,828-842
+desktop/src/desktop-links.cts
+  s_27878fb276b595::t_2c1d9a768907d0 1-43
+openswe/dashboard/options.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,14,25,33,41,49,58-59,67-75,83,91,99,108,200-204
+  s_27878fb276b595::t_c1aabd33c318b6 205-206
+openswe/walkthrough/lines.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-342
+packages/runtime-api/src/runtime_api/skills.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-25
+ui/src/features/agents/components/BackgroundWorkPanel.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-255
+ui/src/features/agents/components/SidebarThreadRow.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 569
+docs/MERGE_QUEUE.md
+  s_27878fb276b595::t_2c1d9a768907d0 3-57,61-62,64,74,116,126-132,137-159,161-162,176-178
+openswe/utils/event_loop.py
+  s_27878fb276b595::t_2c1d9a768907d0 7-9,12,16-23,30-34,69-184
+tests/e2e/tests/review_page_chat.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 457-463,541-543,545-547,549-551,579-581,591-593
+tests/e2e/tests/threads_workspace.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 482
+ui/src/features/agents/lib/queries.ts
+  s_27878fb276b595::t_2c1d9a768907d0 17,34,61-62,734-736,924-927,930-950,954-958,961-962,964,967,995-1009,1055,1057,1061-1063,1070-1078,1285-1286,1349-1350
+mda/tests/test_shared_graph.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-477
+ui/src/components/AppCommandPalette.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 194
+ui/src/features/reviews/lib/chatDrafts.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 10,34-39,43-44,83,91-124,131,137-139,163-165,181,187
+ui/src/features/reviews/ReviewBookmarklet.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 16,22-36,50-81
+  s_27878fb276b595::t_173be2e880be37 82
+tests/agent/test_agent_assembly_context.py
+  s_27878fb276b595::t_2c1d9a768907d0 14,19,66-68,70-71,83-88,90-93,254,646,665,667-668,672,697,768,779-783,786-788
+ui/src/features/reviews/page/FindBar.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-159
+openswe/tools/diff_lines.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-37
+tests/reviewer/test_agent_api.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-1112
+ui/src/features/agents/components/chat/TableScroll.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-68
+ui/src/features/reviews/page/useDiffKeys.ts
+  s_27878fb276b595::t_2c1d9a768907d0 11-12,49-57,188-205
+openswe/agent_api/agent.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-60
+openswe/review_guide/walk.py
+  s_27878fb276b595::t_2c1d9a768907d0 5-7,15-17,29,38,44,49-50,62-65,71,75,115,122-127,178-179,182-186,188-189,203,244,260,274,288,299,324-328,330-331
+openswe/review_guide/context.py
+  s_27878fb276b595::t_2c1d9a768907d0 10,58-59,67,71-73
+docs/INSTALLATION.md
+  s_27878fb276b595::t_2c1d9a768907d0 214-219
+openswe/merge_queue/routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-239
+ui/src/features/reviews/OpenPullRequests.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 248,251,427,429-430,647,999,1003,1008,1012
+openswe/resources/prompts/runs/pull-request-thread.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 1
+tests/dashboard/test_dashboard_ui.py
+  s_27878fb276b595::t_2c1d9a768907d0 34-47
+ui/src/features/agents/components/messages/types.ts
+  s_27878fb276b595::t_2c1d9a768907d0 6,23-24,42-43
+ui/src/features/agents/components/AgentThreadView.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 8,67,72,104-107,286,296,304-305,307-311,314,322,327,349,352-357,366,401,415-420,422-428,433,478-482,534-538,565,603-604,606,929,992,1041
+ui/src/features/agents/lib/api.ts
+  s_27878fb276b595::t_2c1d9a768907d0 5,464-466
+  s_27878fb276b595::t_3648254173264c 467
+ui/src/lib/slack-channels.ts
+  s_27878fb276b595::t_2c1d9a768907d0 2,5-10,19-22,26,37,45,49-150
+  s_27878fb276b595::t_c8c28935377829 151
+mda/README.md
+  s_27878fb276b595::t_2c1d9a768907d0 5,7,9-11,13-16,18,20-21,23-25,79,87-114
+ui/src/features/agents/utils/diffUtils.ts
+  s_27878fb276b595::t_2c1d9a768907d0 177-182
+openswe/utils/dashboard_handoff.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-6,17-60,63-67,69-78
+tests/merge_queue/test_merge_queue_store.py
+  s_27878fb276b595::t_2c1d9a768907d0 10,16,18,132-133,147-148,155-175,962,1018-1136,1153-1350
+tests/slack/test_suggested_actions.py
+  s_27878fb276b595::t_2c1d9a768907d0 2,25,27,29-36,73-77
+openswe/webhooks/common.py
+  s_27878fb276b595::t_2c1d9a768907d0 86-89,91-98,1557-1571,1588,1590-1607
+tests/agent/test_model_handoff_prepare.py
+  s_27878fb276b595::t_2c1d9a768907d0 108
+openswe/agent_api/reviewer.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-60
+.github/workflows/promote_main_to_prod.yml
+  s_27878fb276b595::t_2c1d9a768907d0 49-50,52,80-89
+tests/agent/test_agent_incidents.py
+  s_27878fb276b595::t_2c1d9a768907d0 18,143,157-158,185
+openswe/agent_api/loop.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-285
+ui/src/features/reviews/components/ReviewButton.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1-402
+.agents/skills/writing-pr-body-title-description/SKILL.md
+  s_27878fb276b595::t_2c1d9a768907d0 6
+mda/rt/browser.py
+  s_27878fb276b595::t_2c1d9a768907d0 18-19,21,30-32,34-38,44-45,53-56,74-77
+openswe/dispatch.py
+  s_27878fb276b595::t_2c1d9a768907d0 16-19,402
+openswe/reviewer.py
+  s_27878fb276b595::t_2c1d9a768907d0 23,30,35,57,1030-1041,1055,1077,1080-1084
+openswe/threads/router.py
+  s_27878fb276b595::t_2c1d9a768907d0 8-9,32,40,45,48-49,78-79,81,83-87,89,115,167,199,208,214,225-227,233,264,269,280-282,293-297,301,327
+openswe/github/routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 8,67,106-118
+  s_27878fb276b595::t_da16b25ff1cf2d 119
+mda/tests/test_backend_calls.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,7,9,32-33,52,57-58,61,65-90,92,102-148,261,281,283-287,291,305,312,314,322,330-333,336-337,340,350,352,356,358,361,368-454,476,478,480-485,488,492,530,532,534-539,542,546,585,587,589-595,598,602,640,673-677,700-701,719,733,735,742,745,755,757,770,889,897,904,920,925,948,951-954,970,972-973,1006-1008,1019-1021,1048,1065,1070-1072,1085,1113-1117,1149-1150,1159-1239,1245-1247,1256,1259-1269,1273,1334-1339,1360,1415-1447,1467-1472,1478,1481,1489-1492,1494-1495,1534,1542-1606
+ui/src/features/reviews/lib/status.ts
+  s_27878fb276b595::t_2c1d9a768907d0 86,91
+openswe/agent_api/review_scout.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-44
+tests/dashboard/test_incidents_api.py
+  s_27878fb276b595::t_2c1d9a768907d0 14,164
+openswe/dashboard/options_routes.py
+  s_27878fb276b595::t_2c1d9a768907d0 7,40
+tests/test_thread_title.py
+  s_27878fb276b595::t_2c1d9a768907d0 214-231
+ui/src/features/agents/components/AgentGitPanel.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 16-18,34-35,39-40,51,99-100,227-228,231-242
+  s_27878fb276b595::t_551903fee65b38 15
+tests/e2e/tests/dashboard_pull_requests.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 67-74,240,245-246,253
+packages/runtime-api/src/runtime_api/operations.py
+  s_27878fb276b595::t_2c1d9a768907d0 29-30
+ui/src/features/agents/lib/threadSource/useAgentStreamSource.ts
+  s_27878fb276b595::t_2c1d9a768907d0 62-66
+pyproject.toml
+  s_27878fb276b595::t_2c1d9a768907d0 9,15,17,21,58-59,65-66,77,82,84-85
+openswe/sandboxes/browsers.py
+  s_27878fb276b595::t_2c1d9a768907d0 97-103
+tests/e2e/harness.py
+  s_27878fb276b595::t_2c1d9a768907d0 110-113,117,217-222,364-366,371-374,376,379,389,428-449
+  s_27878fb276b595::t_55a92e64df754b 450-451
+openswe/agent_api/asgi.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-149
+ui/src/features/agents/lib/transcript/reducer.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 3,31-32,439-468,801-827
+openswe/agent_api/hosted.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-15
+openswe/agent_api/client.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-170
+openswe/review_guide/sessions.py
+  s_27878fb276b595::t_2c1d9a768907d0 5-6,9,12,25-26,33-34,36-46,48-49,51-54,141,211-212,214-217,221-233,236-248,251-264,266-291
+packages/runtime-api/src/runtime_api/catalog.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-2,4-7,14-21,26-29,33,38-41,56-59,107-180,205-222
+AGENTS.md
+  s_27878fb276b595::t_2c1d9a768907d0 11-20,34,36,50
+ui/src/features/reviews/components/PullRequestThreadAction.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 63,72,77,80
+openswe/database/migrations/versions/0082_9553a7e0a493_list_slack_channels_from_the_channel_.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-27
+mda/rt/search_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-90
+openswe/agent_api/operations.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-97
+openswe/ui_invalidations/topics.py
+  s_27878fb276b595::t_2c1d9a768907d0 114-116,232
+ui/src/lib/api.ts
+  s_27878fb276b595::t_2c1d9a768907d0 235-236,479-480,483-484,852,855,1217,1678-1682,1789-1793,1859-1860
+ui/src/features/agents/components/AgentsSidebar.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 207,209,600,670,690,865,1018
+ui/src/features/reviews/lib/threadActions.ts
+  s_27878fb276b595::t_2c1d9a768907d0 7,32,34-35,37-39,42-44,46
+tests/test_check_langgraph_client.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-43
+openswe/mcp/runtime.py
+  s_27878fb276b595::t_2c1d9a768907d0 151-159
+ui/src/features/agents/components/messages/Messages.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 16,107,130,133,153,157,242,262-266,268,271-273
+  s_27878fb276b595::t_80be2a9ff6963f 274
+cli/package.json
+  s_27878fb276b595::t_2c1d9a768907d0 20
+ui/src/features/agents/components/files/FilesPanel.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 1,23-27,37-38,54-58,60,75-96,98,106,122-126,137,176-180
+ui/src/lib/hotkeys.ts
+  s_27878fb276b595::t_2c1d9a768907d0 63-67
+ui/src/features/agents/lib/structuredInputMessages.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 89-139
+openswe/middleware/task_coordination.py
+  s_27878fb276b595::t_2c1d9a768907d0 2,11,54-55,58-60,69-84,86-89
+openswe/resources/prompts/tools/start_thread.md
+  s_27878fb276b595::t_2c1d9a768907d0 1-3
+openswe/resources/prompts/tools/slack_reply.md
+  s_27878fb276b595::t_2c1d9a768907d0 51-57
+mda/rt/factory_timing.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-39
+openswe/tools/note_on_diff.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-30
+openswe/middleware/require_cli_result.py
+  s_27878fb276b595::t_2c1d9a768907d0 35-46,81-82
+mda/pyproject.toml
+  s_27878fb276b595::t_2c1d9a768907d0 5,8
+openswe/resources/prompts/system/source-slack.md.jinja
+  s_27878fb276b595::t_2c1d9a768907d0 7-8,18
+openswe/slack/blocks.py
+  s_27878fb276b595::t_2c1d9a768907d0 400-402,414-420
+openswe/input_messages.py
+  s_27878fb276b595::t_2c1d9a768907d0 7,76-79,215-219,305,375-376,397-402
+tests/e2e/tests/human_review.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 495,506-508,525,529,603,605,607,623,626,632,646-647,649-653
+tests/slack/test_slack_move_status.py
+  s_27878fb276b595::t_2c1d9a768907d0 272-274
+openswe/database/migrations/versions/0082_14cf183ef936_track_event_match_delivery.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-19
+openswe/slack/cards.py
+  s_27878fb276b595::t_2c1d9a768907d0 17,23-28,32-35
+openswe/resources/prompts/tools/slack_breakout_thread.md
+  s_27878fb276b595::t_2c1d9a768907d0 1
+openswe/rollout_events.py
+  s_27878fb276b595::t_2c1d9a768907d0 14,16,21,24,26,46-47,52,123-163,165,241-262,279,282-283,285,317-380,382-383
+  s_27878fb276b595::t_0b5b265a3e6b83 381,384-385
+openswe/merge_queue/controller.py
+  s_27878fb276b595::t_2c1d9a768907d0 4,16,24-29,34-38,44-47,54-56,60-67,76-88,104-128
+  s_27878fb276b595::t_7773b4cb9cb2cc 129-130
+ui/src/features/settings/components/OwnershipPicker.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 11-12,91
+mda/rt/backend.py
+  s_27878fb276b595::t_2c1d9a768907d0 3-6,9-10,13-14,20-21,24,28-35,37-60,72-73,79,122-123,136-140,143,146-178,181-184,198,221-222,226,231-394,396,398,403,406-419,423,426,428,430-431,433-435,439-440,442,447,450-451,453-455,460-463,469-470,482,488-489,494,507-508,510-511,513-516,519-523,525-527,530-531,533-538,544-549,551-552,554,556-573,580-595,597-601,604-605,616-623
+openswe/middleware/prepare_run.py
+  s_27878fb276b595::t_2c1d9a768907d0 4,13,52-62
+openswe/human_review/card.py
+  s_27878fb276b595::t_2c1d9a768907d0 9,57,61,64,66-73,76-81,84-89,151,158,165,168,179,189
+openswe/merge_queue/configuration.py
+  s_27878fb276b595::t_2c1d9a768907d0 3,21-25,51-56,58-62
+ui/src/features/agents/utils/passageReply.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-62
+tests/tools/test_workspace_mcp_tools.py
+  s_27878fb276b595::t_2c1d9a768907d0 45,107,167-168,173
+tests/merge_queue/test_queue_dispatch.py
+  s_27878fb276b595::t_2c1d9a768907d0 15-29,50-59,63,66-68,70-71
+desktop/test/desktop-links.test.cjs
+  s_27878fb276b595::t_2c1d9a768907d0 1-63
+openswe/human_review/offer.py
+  s_27878fb276b595::t_2c1d9a768907d0 6,8,10,18-22,24-28,31-48,50-51,61-73,75,84-87
+tests/e2e/tests/dashboard_transcript.spec.ts
+  s_27878fb276b595::t_2c1d9a768907d0 9,269-312
+  s_27878fb276b595::t_e3b4ab3e34f6aa 313-314
+ui/src/lib/slack-channels.test.ts
+  s_27878fb276b595::t_2c1d9a768907d0 1-56
+mda/rt/skills.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-185
+openswe/utils/langsmith.py
+  s_27878fb276b595::t_2c1d9a768907d0 241-298
+ui/src/components/SlackChannelTextarea.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 2,4,7-8,10,44-51,64,164-168
+ui/src/features/reviews/page/notes/NoteView.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 5,57-60
+  s_27878fb276b595::t_fa573f31a25e71 61-62
+mda/tests/test_loop.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-357
+packages/runtime-api/src/runtime_api/workers.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-61
+ui/src/features/automations/components/AutomationsList.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 205,208,211,225,305-307,310,319
+ui/src/features/settings/components/WorkspacesSection.test.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 37,259,306,308
+ui/src/features/automations/components/AutomationEditor.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 16,52,128,307-328,368-380,384
+ui/src/styles.css
+  s_27878fb276b595::t_2c1d9a768907d0 21-27,39-44
+  s_27878fb276b595::t_18b1d05e792625 45
+ui/src/features/reviews/page/diffEntries.ts
+  s_27878fb276b595::t_2c1d9a768907d0 12,57,250,297-301
+  s_27878fb276b595::t_879db5d7bd5564 302
+ui/src/lib/streamPreference.ts
+  s_27878fb276b595::t_2c1d9a768907d0 6
+openswe/middleware/settle_review_check.py
+  s_27878fb276b595::t_2c1d9a768907d0 32-37,41,47,51
+desktop/src/preload.cts
+  s_27878fb276b595::t_2c1d9a768907d0 42
+ui/src/components/SlackChannelCombobox.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 6,9,14-17,39,43-44,50-56,69,101-102,104-105,107-116,118,130,136-142,175-179,219-222,244-247
+swagger.json
+  s_27878fb276b595::t_2c1d9a768907d0 513-557,878-891,914-955,1445-1453,1464,1964-1980,2178,3191-3227,4126-4139,4556-4571,5276-5337,5646,5648-5746,7124,7126,12105-12419,12423,12427,12435,12438,12440-12456,12461,12472,12494,12497,12501-12525,12527-12530,12534,12538,12546,12549,12551-12577,12582,12589,12608,12611,12857-12906,18506-18525,18529,18533,18541,19616-19672,20351
+packages/runtime-api/pyproject.toml
+  s_27878fb276b595::t_2c1d9a768907d0 5
+tests/github/test_github_issue_webhook.py
+  s_27878fb276b595::t_2c1d9a768907d0 14,71,73,87-92,449-452,473,529-531,559,563-569
+mda/tests/test_model_calls.py
+  s_27878fb276b595::t_2c1d9a768907d0 21,29,210-212,214
+openswe/merge_queue/runtime.py
+  s_27878fb276b595::t_2c1d9a768907d0 8,21-23,54,100
+tests/utils/test_event_loop_stalls.py
+  s_27878fb276b595::t_2c1d9a768907d0 1-39
+openswe/resources/prompts/tools/request_rollout_check.md
+  s_27878fb276b595::t_2c1d9a768907d0 1,3
+tests/threads/test_thread_status.py
+  s_27878fb276b595::t_2c1d9a768907d0 9,72-100
+ui/src/features/reviews/components/RequestHumanReview.tsx
+  s_27878fb276b595::t_2c1d9a768907d0 33,41-46,67-76,89,91-101,104-105,107-111,117-125,134,138
+mda/uv.lock
+  s_27878fb276b595::t_7a2ff4551580c3 3,6,241-274,575,586,588,642,647,649,654,665,667,1171,1185,1187,1238,1243,1245,1351,1368,1589
+pnpm-lock.yaml
+  s_27878fb276b595::t_49b3a8ef7199be 75-76,101-102,4159-4160,6337-6341,7009,7796,8884,8898,8961,10322,12804-12806
+uv.lock
+  s_27878fb276b595::t_bcbfd858a6050e 11-12,15,837,848,850,991,996,998,1003,1014,1016,1849,1863,1865,1870,1876,1878,1927,1933,1935,1955,1960,1962,2010,2020,2022,2027,2046,2052,2068,2070,2088,2097,2099,2123,2134,2136,2141,2150,2152,2577,2587-2588,2593-2594,2600-2602,2665,2670-2699,2701,2706,2711,2713,2718,2723-2724,2731,2733,2738,2745,2747,2752,2760,2762,2767,2776,2778,2783,2788,2790,2795,2802,2804,2809,2815,2817,2822,2824,2826,3699,3701,3703
+vendor/README.md
+  s_27878fb276b595::t_6f7610991b8c10 10
+vendor/managed-deepagents-sdk/Cargo.lock
+  s_27878fb276b595::t_b096dc9e3381fb 73-83,213-214,321-332,349-354,361-369,459-464,566-576,583-593,614,635-646,656-657,721-726,1004-1012,1109-1114,1160-1163,1173-1174,1314-1400,1679-1687,1697-1735,1766,1802-1807,1814-1823,1832-1851,1866-1875,1898-1903,2196,2200-2208,2415-2423,2563,2567-2577,2587-2597,2610-2615,2757-2765,3030-3035,3075-3094
+vendor/managed-deepagents-sdk/UPSTREAM
+  s_27878fb276b595::t_24c43c29353ae3 1
+vendor/managed-deepagents-sdk/crates/mda/Cargo.toml
+  s_27878fb276b595::t_0486d709de9b09 26-37,51-55,66-69
+vendor/managed-deepagents-sdk/crates/mda/README.md
+  s_27878fb276b595::t_e4ba82a1c972c3 133-136,194-199,212-228
+vendor/managed-deepagents-sdk/crates/mda/src/channel/mod.rs
+  s_27878fb276b595::t_542088010f4337 374-376
+vendor/managed-deepagents-sdk/crates/mda/src/chat/mod.rs
+  s_27878fb276b595::t_3fd6b1ee81e2b1 28,30,32,40,48-51,109-114,117-118,124-130,162-165,177-185,198,201-210,217,236-238,245,271-390,392-393,515
+vendor/managed-deepagents-sdk/crates/mda/src/chat/tests.rs
+  s_27878fb276b595::t_283a34f05c876e 290,319,471,509,557,584-682
+vendor/managed-deepagents-sdk/crates/mda/src/child.rs
+  s_27878fb276b595::t_93c79f28514268 17-18,20,23-24,30-33,210-323,619-689
+vendor/managed-deepagents-sdk/crates/mda/src/cli_output/chat.rs
+  s_27878fb276b595::t_61bebc7a228a4b 132-150,286-297
+vendor/managed-deepagents-sdk/crates/mda/src/compile/local_packages.rs
+  s_27878fb276b595::t_1f72742834cc7d 106,171,300,321
+vendor/managed-deepagents-sdk/crates/mda/src/compile/manifest.rs
+  s_27878fb276b595::t_e06434858eac1c 13,15,919,923
+vendor/managed-deepagents-sdk/crates/mda/src/compile/mod.rs
+  s_27878fb276b595::t_0c282264315585 21,433,537-539,541,760,780,846-847,944,966,1479
+vendor/managed-deepagents-sdk/crates/mda/src/compile/requirements.rs
+  s_27878fb276b595::t_afdb7b054e87eb 16,25-26,466-476,490-500,523-533,574,577-580,741,750-762,772-790,821-833,835-838,840-846,860-872,874-877,879-885,912-924,926-929,931-936,981-985,987-993
+vendor/managed-deepagents-sdk/crates/mda/src/compile/runtime.rs
+  s_27878fb276b595::t_7b896b90ba916a 89
+vendor/managed-deepagents-sdk/crates/mda/src/compile/sandbox_recipe.rs
+  s_27878fb276b595::t_c9f59c02f249fb 7,58-60,119,124-131,141,173,205-263,371,423-438,483-530,572
+vendor/managed-deepagents-sdk/crates/mda/src/compile/static_extract.rs
+  s_27878fb276b595::t_e8ebd472d21de5 20-21,144-157,159-162
+vendor/managed-deepagents-sdk/crates/mda/src/compile/tests.rs
+  s_27878fb276b595::t_d3e097e01a3c62 3740-3741,3812,4458,5459-5486
+vendor/managed-deepagents-sdk/crates/mda/src/connection/mod.rs
+  s_27878fb276b595::t_129cc3312fea73 50,642-643,661-670,725-735,756-758,859-861,1310-1321,1375-1379,1381-1394,1397,1885-2019,2753,3103,3125
+vendor/managed-deepagents-sdk/crates/mda/src/delete/mod.rs
+  s_27878fb276b595::t_c23ddc1cfb6b5b 60,168,206,225
+vendor/managed-deepagents-sdk/crates/mda/src/dependencies.rs
+  s_27878fb276b595::t_98c532b92182e5 70,113
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/bake.rs
+  s_27878fb276b595::t_1cc4f976805a45 21-22,25-26,53-61,138,164,301,357-359,509-510,535,561,606,623,724,733,743-746,772-782
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/channel_setup.rs
+  s_27878fb276b595::t_78fa985789f75d 37,119
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/helpers.rs
+  s_27878fb276b595::t_4bdb28b772c1b0 352-353,360,376-379,544,908,915-917,924,928,1087,1146-1161,1165-1172,1174-1181,1189,1198,1202-1205,1763,1770,1773,1781,1785,1792,1802,1825
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/image.rs
+  s_27878fb276b595::t_524810b1e812bc 8,10,202,205
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/mod.rs
+  s_27878fb276b595::t_a3b593a2d521bc 57,64-65,86-87,143-147,157-164,172,205,207-221,271-274,276-277,280-281,290,301,306,316,346-347,365-366,376-377,382-383,404-405,435-455,461,470,491,515-524,540-544,550,570-572,579-580,600,625,670-671,673-676,830-835,1136,1411,1670,1676-1686,1707,1744-1786,1854,1868,1881,1896,2060,2079,2135,2163-2165,2170,2220,2233-2238,2258-2260,2264,2286-2322,2420-2434,2444,2472-2475,2490,2496,2517,2667,2876,2879-2883,3051,3076,3084-3131,3145,3165,3190,3211,3236,3262,3802-3817
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/prepare.rs
+  s_27878fb276b595::t_6a88a568deffcb 50,91,104,201,213,229,237,313,322
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/trigger_channels.rs
+  s_27878fb276b595::t_00b59f6700672d 11,18,416,433,438,440-444,452-569,796-871
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/upsell.rs
+  s_27878fb276b595::t_f6bf19dd46a38e 110-111
+vendor/managed-deepagents-sdk/crates/mda/src/dev/mod.rs
+  s_27878fb276b595::t_68469d3e499d30 36,44,49,62-64,69-70,163,195,201-202,215,222-227,255,257-260,309-320,339-340,352-353,357,362-366,381-382,386,428,449,465,471,481,761-768,773,775,778-781,844,850-854,859-861,873-876,933-939,941,1044,1525-1528,1538-1540,1555,1593,1688-1747,1788-1795,1869-1886,1889-1905,1908-1910,1912-1941,1943-1947,2145-2151,2455,2457-2460,2486-2537,2682-2683,2691,2700,2713-2717,2730-2733,2738-2760,3109,3596-3598,3600-3604,3606-3615,3618-3620,3624,3626,3628-3631,3633,3636-3637
+vendor/managed-deepagents-sdk/crates/mda/src/dev/schedules.rs
+  s_27878fb276b595::t_d74c9e7a3c6fbe 40,126-129,132-133
+vendor/managed-deepagents-sdk/crates/mda/src/error.rs
+  s_27878fb276b595::t_6e127e0596f2dc 1-3,32-79,91-93,121-140,260-336
+vendor/managed-deepagents-sdk/crates/mda/src/init/env.rs
+  s_27878fb276b595::t_566cd74b1ddb2b 3-4,21-24,39-56,58-60
+vendor/managed-deepagents-sdk/crates/mda/src/init/mod.rs
+  s_27878fb276b595::t_f8d7d35bfa31b5 542-544,566,572-590
+vendor/managed-deepagents-sdk/crates/mda/src/init/scaffold.rs
+  s_27878fb276b595::t_195a7d8fce5193 11,136,165
+vendor/managed-deepagents-sdk/crates/mda/src/interrupt.rs
+  s_27878fb276b595::t_3ef603ca937964 30-33,39-40,47-53,59-67,91-119,124-136,155-163
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/agents.rs
+  s_27878fb276b595::t_deeab5dbf90f18 1,5,48-69,83-90,94-104,112-130
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/login.rs
+  s_27878fb276b595::t_1ee761114290b3 497,573-576,584,588-589
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/mod.rs
+  s_27878fb276b595::t_ebd3b2026a7c8c 55,57,429-462,1025-1038
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/snapshots.rs
+  s_27878fb276b595::t_fe57f7b5709f2c 196
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/trigger_server.rs
+  s_27878fb276b595::t_4078fd2de4df75 11,28,33-41,103-152,180-196,205-209,395-441,581-651
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/workspaces.rs
+  s_27878fb276b595::t_b58f87ac8c8e58 10,66,78-87,194-214,251-264,436-462
+vendor/managed-deepagents-sdk/crates/mda/src/logs/mod.rs
+  s_27878fb276b595::t_80f1f8be02bb0a 34,73,98-99
+vendor/managed-deepagents-sdk/crates/mda/src/main.rs
+  s_27878fb276b595::t_c0f570726f6662 26-27,91-94,519-522,792-803,805-815,825,829,836,929,943,955,964-977,1017,1024,1060,1075,1093,1104,1572-1599,1901-1904
+vendor/managed-deepagents-sdk/crates/mda/src/project.rs
+  s_27878fb276b595::t_7faf278d5363d3 98-105,142,185,195-331,723-725,730-818
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract.rs
+  s_27878fb276b595::t_6878897225dbdd 15,17-18,55-63,69-72
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/command.rs
+  s_27878fb276b595::t_723336076f1001 6
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/delivery.rs
+  s_27878fb276b595::t_c958c687cb90a0 1-59
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/event.rs
+  s_27878fb276b595::t_3f1fc1bae77601 11-15,21,29,51-52,55,57,59-78,81-82,93-95,99-100,104,118-120,125-127,132-146,154,159,181,185-186,213,217-218,231,235-236,251,255-256,267-289
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/exit.rs
+  s_27878fb276b595::t_7199296a4b89a2 1-133
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/facts.rs
+  s_27878fb276b595::t_b22d608ec7966d 1-15,18,21-24,26-28,30-31,33-34,36-39,44-68,71-107,115-116,122-127,130-143,146-147,151-181,184-191,194-205,223-242,247-249,251
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/metadata.rs
+  s_27878fb276b595::t_cc9dab1cecbbcc 13,18,22,27,32,34,44-45,50,57
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/mod.rs
+  s_27878fb276b595::t_d6c267b0da581b 1-2,5,7,12,14,17-18,20-23,26
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/otel_logger.rs
+  s_27878fb276b595::t_a8370606759cbc 1-739
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/stage.rs
+  s_27878fb276b595::t_5fc8670f0caa1e 1-175
+vendor/managed-deepagents-sdk/crates/mda/src/termination.rs
+  s_27878fb276b595::t_8e55690a385f33 7-9,47
+vendor/managed-deepagents-sdk/crates/mda/src/toolchain.rs
+  s_27878fb276b595::t_a84de221086cfe 12
+vendor/managed-deepagents-sdk/crates/mda/tests/prompt_escapes.rs
+  s_27878fb276b595::t_67271c3943426b 71-72
+vendor/managed-deepagents-sdk/packages/pypi/pyproject.toml
+  s_27878fb276b595::t_be0722eb41fdff 7,27
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/http.py
+  s_27878fb276b595::t_e277d1e7125512 102-104,112,279,346-348,375-377,439-441,443,463-467,479-481,545-547,586,589,597-599,607,639,643,662,677-679,688,719-724
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/schedule_delivery.py
+  s_27878fb276b595::t_5c504d0428c12f 110,112,120-124,182,209,229,238,266
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/http.py
+  s_27878fb276b595::t_1fdbf255dd638f 57,327,340-347,366,412
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/types.py
+  s_27878fb276b595::t_a4aed63ca28a38 138
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_concurrency/__init__.py
+  s_27878fb276b595::t_c9ba6501b8ed5c 1-6
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_concurrency/batch_processor.py
+  s_27878fb276b595::t_199e8b52ac481a 1,5,7,9,11,13,16-17,19-45,48,50,52-53,55-58,60,63,65-66,69,72-78,81,85-106,108,111-113,115-121,123-125,128-130
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_concurrency/deadline.py
+  s_27878fb276b595::t_977b8d527d9340 1-37
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connections.py
+  s_27878fb276b595::t_ea54fdd2c0d0cd 135,647-649,651
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_http_status.py
+  s_27878fb276b595::t_e0b966dbc3621b 1-50
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_identity_auth.py
+  s_27878fb276b595::t_3f501ba3603d1b 958-969
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_identity_http.py
+  s_27878fb276b595::t_0e85a517cf6a61 40,214-223,244,342
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_ingress.py
+  s_27878fb276b595::t_4c292fdefa06cc 23,29-37,61-62,70,79-115
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_ingress_runs.py
+  s_27878fb276b595::t_240aaee89410f0 24-28,50,64-70,299,310-311
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_log.py
+  s_27878fb276b595::t_52aa144b66f23c 1-7,12,15-20,36-41,43-53,55-76,112-115,117
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_loopback.py
+  s_27878fb276b595::t_3f0b234acfb34d 52-60,79
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/__init__.py
+  s_27878fb276b595::t_afecfeb36f30d6 4,11
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/mounts.py
+  s_27878fb276b595::t_f01c392a7178b7 5-6,8,31,79,255-258,260-262,265-267,270-271,275-276,287-288,308-309,320-322,324,328-330,332,336-337,344-345,358-359,377-378,390-391,401-402,412-414,417-423,425-428,441-454,487-493,502-503,505,507-575
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_resilience/__init__.py
+  s_27878fb276b595::t_145af38946ab8b 1-5
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_resilience/retry.py
+  s_27878fb276b595::t_6cbddc252a56af 1-60
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_run_input.py
+  s_27878fb276b595::t_827e73e0d5eb8f 31-37,102,111,122,128-133,151,160,172,178-183,235-254
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_runtime_schedules.py
+  s_27878fb276b595::t_864f489cb92d96 27-30,194
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/lifecycle.py
+  s_27878fb276b595::t_823d4bae9b7662 1-67
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/metadata.py
+  s_27878fb276b595::t_dbb537433da859 45-49
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/otel/__init__.py
+  s_27878fb276b595::t_8974c31728c6dd 1-41
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/otel/context.py
+  s_27878fb276b595::t_568cd147d950b9 1-166
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/otel/exporter.py
+  s_27878fb276b595::t_c34a5b1183704c 1-312
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/otel/otlp.py
+  s_27878fb276b595::t_8832890838ecec 1-58
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/otel/truncate.py
+  s_27878fb276b595::t_adaff4ae241cff 1-48
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/run_wrapper.py
+  s_27878fb276b595::t_6f98255cd3949c 11,21,23-24,31-32,35-37,44,46-47,52-53,105,111,118-119,122,125-138
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/transport/posthog.py
+  s_27878fb276b595::t_b09aea719c9536 14-18,20,26-45,50-51,64,69,84-88,96-97,102-116,119-130,134-152,155-160,168,172-173,177-181,183-185,187-189
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_27878fb276b595::t_974370734489df 338,352-353,596-598,607-609,614,652-654
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/define_deep_agent.py
+  s_27878fb276b595::t_1570f91840f151 10,123,155-162,199,218-229
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/namespaces.py
+  s_27878fb276b595::t_86563775a9c7f5 18,125,159
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/runtime.py
+  s_27878fb276b595::t_05aa3fa24b8747 24,36,40,105,121-123,707,725,729,821,846,848-854,923-956,958-959,961,963-983,986-999,1010-1060,1108-1109,1123,1251-1264,1276,1282,1345-1346,1350,1353-1355,1480,1646,1908-1918,1929-1932,1936-1938,1940-1942,1946-1966,1980,1992,2132,2135-2136,2143,2154-2155,2158,2160,2170,2176,2185,2191,2202,2204,2208,2220,3050-3051
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/sandbox.py
+  s_27878fb276b595::t_1b7bd8bd287e9f 99,199-212
+vendor/managed-deepagents-sdk/packages/pypi/uv.lock
+  s_27878fb276b595::t_7fc90d3b77a1b2 8,113,214,216,218,1135,1149,1151,1171,1176,1178,1242,1260,1262,1267,1309
+vendor/mda-changes/2026-10-24-mda-0-10-on-sdk-0-9-5.md
+  s_27878fb276b595::t_3ae9f723a06c2c 1-8
+vendor/mda-changes/2026-10-24-telemetry-channel-import-cycle.md
+  s_27878fb276b595::t_27f0f006164fdd 1-7
+vendor/mda-changes/2026-10-25-browser-hidpi.md
+  s_27878fb276b595::t_c226313e07da60 1,3,5,9,13,17
+vendor/mda-changes/2026-10-26-openswe-graph-inputs.md
+  s_27878fb276b595::t_8544f608ed71ab 1-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d600c27fbc63a72209b9982047842b9f05726aa6",
+  "prompts": {},
+  "sessions": {
+    "s_27878fb276b595": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ee8f61-55f2-484d-a39a-c3b1cad86d8d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
