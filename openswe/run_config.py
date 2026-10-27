@@ -228,6 +228,14 @@ class RunConfig(BaseModel):
         """Parse the running graph's own ``configurable``."""
         return cls.from_config(get_config())
 
+    @classmethod
+    def running_thread_id(cls) -> str:
+        """The thread of the agent run this code runs inside, or "" outside one."""
+        try:
+            return cls.from_runtime().thread_id or ""
+        except RuntimeError:
+            return ""
+
     def dump(self) -> dict[str, Any]:
         """The JSON value to store, preserving exactly the keys that were set.
 
