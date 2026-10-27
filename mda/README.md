@@ -104,7 +104,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 |---|---|
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 
 The backend:

@@ -11,6 +11,7 @@ import httpx2
 import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
+from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -138,7 +139,10 @@ def backend_calls(
 
 
 async def _run(
-    store: InMemoryStore, thread_id: str, context: dict[str, object]
+    store: InMemoryStore,
+    thread_id: str,
+    context: dict[str, object],
+    messages: list[tuple[str, str]] | None = None,
 ) -> CompiledStateGraph:
     graph = await compile_managed_agent_async(
         agent.agent,
@@ -150,7 +154,7 @@ async def _run(
         async_subagent_graphs=_WORKERS,
     )
     await graph.ainvoke(
-        {"messages": [("user", "Review it")]},
+        {"messages": messages or [("user", "Review it")]},
         _thread(thread_id),
         # The run context as the Agent Server hands it over, which LangGraph reads into the schema.
         context=context,  # ty: ignore[invalid-argument-type]
@@ -281,7 +285,7 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     assert len([operation for _, _, operation in backend_calls if operation]) == 5
     interpreter = next(
         middleware
-        for middleware in agent._parts(agent.GraphInputs()).middleware
+        for middleware in agent._parts("agent").middleware
         if isinstance(middleware, RunCodeInterpreter)
     )
     assert not interpreter._registry._slots
@@ -361,7 +365,7 @@ async def test_failed_code_run_releases_its_interpreter(
 
     interpreter = next(
         middleware
-        for middleware in agent._parts(agent.GraphInputs()).middleware
+        for middleware in agent._parts("agent").middleware
         if isinstance(middleware, RunCodeInterpreter)
     )
     assert any(operation == "lookup:grant" for _, _, operation in backend_calls)
@@ -458,6 +462,7 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
 
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "build_model", build)
     monkeypatch.setattr("rt.middleware.build_model", build)
     monkeypatch.setattr("rt.run_tools.build_model", build)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
@@ -492,6 +497,69 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
         ("Bearer token-0", "operation_0:grant-0"),
         ("Bearer token-1", "operation_1:grant-1"),
     ]
+
+
+async def test_each_run_compacts_a_long_conversation_with_its_own_model(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """deepagents summarizes with the model its graph is built with, so a graph built with
+    a placeholder summarized every run's conversation with that placeholder."""
+    summarized_by: list[str | None] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        if messages[0].text.startswith(DEEPAGENTS_DEFAULT_SUMMARY_PROMPT[:40]):
+            summarized_by.append(model.name)
+            reply = AIMessage(content="summary")
+        else:
+            reply = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    def build(spec: ModelSpec, **kwargs: object) -> GenericFakeChatModel:
+        return GenericFakeChatModel(
+            messages=iter([]), name=spec.model_id, profile={"max_input_tokens": 40_000}
+        )
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "build_model", build)
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.run_tools.build_model", build)
+    monkeypatch.setattr(
+        agent,
+        "_DEFAULT_MODEL",
+        GenericFakeChatModel(
+            messages=iter([]), name="placeholder", profile={"max_input_tokens": 40_000}
+        ),
+    )
+    store = InMemoryStore()
+    history: list[tuple[str, str]] = [("user", "history " * 600) for _ in range(40)]
+
+    def catalog(model_id: str) -> Catalog:
+        return _catalog("web_search", "grant").model_copy(
+            update={
+                "models": RunModels(
+                    model=ModelSpec(model_id=model_id, kwargs={}),
+                    subagent_model=ModelSpec(model_id=f"{model_id}-child", kwargs={}),
+                    use_gateway=False,
+                )
+            }
+        )
+
+    first = await _run(
+        store, "openai", _context("agent", "token-0", catalog("openai:gpt-test")), history
+    )
+    second = await _run(
+        store, "anthropic", _context("agent", "token-1", catalog("anthropic:test")), history
+    )
+    again = await _run(
+        store, "openai-again", _context("agent", "token-2", catalog("openai:gpt-test")), history
+    )
+
+    assert summarized_by == ["openai:gpt-test", "anthropic:test", "openai:gpt-test"]
+    # One graph per model, shared by every run on it.
+    assert again.nodes["model"] is first.nodes["model"]
+    assert second.nodes["model"] is not first.nodes["model"]
 
 
 async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
