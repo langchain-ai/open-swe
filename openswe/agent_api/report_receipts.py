@@ -32,6 +32,8 @@ _CLAIM_LEASE: Final = timedelta(minutes=10)
 RETAINED: Final = timedelta(days=7)
 PURGE_JOB: Final = "agent_report_receipt_purge"
 PURGE_SCHEDULE: Final = "23 4 * * *"
+# Small enough that each delete is a short transaction and a short burst of WAL.
+_PURGE_BATCH: Final = 5_000
 
 
 class ReportReceipt(Base):
@@ -141,9 +143,27 @@ class ReportReceipts:
 
 
 async def purge_report_receipts() -> int:
-    """Forget the keys of reports recorded longer ago than any run sends one again."""
-    async with postgres.transaction() as conn:
-        result = await conn.execute(
-            delete(ReportReceipt).where(ReportReceipt.created_at < func.now() - RETAINED)
-        )
-    return result.rowcount
+    """Forget the keys of reports recorded longer ago than any run sends one again.
+
+    Deletes in batches, each its own transaction, so a day's worth of keys never
+    holds one long transaction or lands as one burst of WAL.
+    """
+    cls = ReportReceipt
+    cutoff = func.now() - RETAINED
+    purged = 0
+    while True:
+        async with postgres.transaction() as conn:
+            result = await conn.execute(
+                delete(cls).where(
+                    cls.id.in_(
+                        select(cls.id)
+                        .where(cls.created_at < cutoff)
+                        .order_by(cls.created_at)
+                        .limit(_PURGE_BATCH)
+                        .with_for_update(skip_locked=True)
+                    )
+                )
+            )
+        purged += result.rowcount
+        if result.rowcount < _PURGE_BATCH:
+            return purged
