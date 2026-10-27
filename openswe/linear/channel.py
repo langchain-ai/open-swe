@@ -18,7 +18,7 @@ from managed_deepagents import EndpointAnswer, EndpointEvent, EndpointThread
 from pydantic import JsonValue
 from typing_extensions import TypedDict
 
-from openswe.linear.session import LinearSessionTurn
+from openswe.linear.session import LinearDecline, LinearSessionTurn
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -69,11 +69,12 @@ async def linear_channel_event(
     request: Request,
     call: LinearChannelCall,
     background_tasks: BackgroundTasks,
-) -> EndpointAnswer | None:
+) -> EndpointAnswer | LinearDecline | None:
     """The run a Linear event starts, or ``None`` to start nothing.
 
-    An agent session turn starts the run it prepares; ``None`` there declines, and
-    the channel tells the session. Issue events run Linear automations.
+    An agent session turn starts the run it prepares, or declines with what the
+    channel tells the session, such as that it names no repository. Issue events
+    run Linear automations.
     """
     event = call["event"]
     key, payload, delivery_id = event["key"], event["payload"], event["deliveryId"]
@@ -87,8 +88,10 @@ async def linear_channel_event(
         raise HTTPException(status_code=422, detail="Invalid Linear event")
     await _record(request, payload, delivery_id)
     turn = LinearSessionTurn.parse(key, cast(Any, payload))
-    if turn is not None:
+    if isinstance(turn, LinearSessionTurn):
         return await turn.prepare_run(thread_id)
+    if turn is not None:
+        return turn
     if key in _AUTOMATION_KEYS:
         background_tasks.add_task(_launch_automations, payload, delivery_id)
     return None
