@@ -1,13 +1,15 @@
 """Retries a synchronous subagent's ``task`` call through a provider's passing failures.
 
-A subagent has no fallback model, so retrying the delegated task is how it
-recovers; an error the model can fix, such as a prompt too long, is its result.
+A subagent's failed model call fails its ``task`` call, so retrying the delegated
+task is how it recovers; an error the model can fix, such as a prompt too long, is its result.
 """
 
 import json
 
 import httpx2
 from langchain.agents.middleware import ToolRetryMiddleware
+
+from rt.model_calls import http_status
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
 _RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
@@ -34,19 +36,10 @@ def _error_body(exc: Exception) -> dict[str, object]:
     return {}
 
 
-def _status_code(exc: Exception) -> int | None:
-    status = getattr(exc, "status_code", None)
-    if isinstance(status, int):
-        return status
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None)
-    return status if isinstance(status, int) else None
-
-
 def _error_fields(exc: Exception) -> dict[str, object]:
     body = _error_body(exc)
     out: dict[str, object] = {}
-    status = _status_code(exc)
+    status = http_status(exc)
     if status is not None:
         out["status_code"] = status
     for key in ("type", "code", "message"):
@@ -63,7 +56,7 @@ def _is_httpx_transport_error(exc: Exception) -> bool:
 
 
 def task_retry_on(exc: Exception) -> bool:
-    status = _status_code(exc)
+    status = http_status(exc)
     if isinstance(status, int) and (status in _RETRY_HTTP_STATUS_CODES or status >= 500):
         return True
     return exc.__class__.__name__ in _TRANSIENT_ERROR_NAMES or _is_httpx_transport_error(exc)

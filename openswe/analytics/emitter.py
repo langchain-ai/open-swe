@@ -122,8 +122,8 @@ async def run_started(
         RunStartedPayload(
             configured_model_id=model_id,
             configured_effort=effort,
-            # Configuration alone is not an observation; routing, fallback, and
-            # subagents may execute other models. Effective attribution waits
+            # Configuration alone is not an observation; routing and subagents
+            # may execute other models. Effective attribution waits
             # for an authoritative provider signal and stays unknown here.
             effective_model_id=None,
             model_attribution_quality="configured" if model_id else "unavailable",

@@ -7811,6 +7811,17 @@
             ],
             "title": "Error"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "requested_at": {
             "format": "date-time",
             "title": "Requested At",
@@ -7857,6 +7868,7 @@
           "started_at",
           "completed_at",
           "error",
+          "reason",
           "checkpoint"
         ],
         "title": "TurnView",

@@ -11,14 +11,15 @@ from uuid import UUID
 import anthropic
 import httpx
 import httpx2
-import openai
 import pytest
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.language_models.fake_chat_models import (
     FakeListChatModel,
     GenericFakeChatModel,
@@ -60,6 +61,7 @@ from rt.backend import (
 from rt.file_tools import FileToolsMiddleware
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
+from rt.provider_recovery import Backoff, ProviderRecovery
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
@@ -79,6 +81,7 @@ from runtime_api.loop import (
     PREPARE,
     AfterAgent,
     BeforeModel,
+    Done,
     Inbox,
     InboxItems,
     InboxReceipt,
@@ -569,46 +572,6 @@ class _StalledAnthropic(ChatAnthropic):
     ) -> ChatResult:
         await asyncio.sleep(60)
         raise AssertionError("cancelled by the deadline")
-
-
-async def test_a_stalled_model_call_goes_to_the_fallback_model(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    fallback = _RecordingAnthropic(model_name="claude-sonnet-5-5", api_key="test-key", sent=[])
-    built = {
-        "anthropic:claude-opus-5-5": _StalledAnthropic(model_name="claude-opus-5-5", api_key="k"),
-        "anthropic:claude-sonnet-5-5": fallback,
-    }
-    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
-    backend = _run_backend(invocation_id="invocation-1")
-
-    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
-            return PhaseResult()
-        return BeforeModel(
-            call=ModelCall(
-                system_prompt="You are Open SWE.",
-                model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
-                fallback=ModelSpec(model_id="anthropic:claude-sonnet-5-5", kwargs={}),
-            )
-        )
-
-    _answering(monkeypatch, backend, phase)
-    middleware = cast(
-        list[AgentMiddleware],
-        [
-            BackendRunMiddleware(backend),
-            *model_call_guards(timeout_seconds=0.05),
-        ],
-    )
-    graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
-
-    result = await graph.ainvoke({"messages": [HumanMessage("hi")]})
-
-    assert result["messages"][-1].content == "done"
-    assert fallback.sent
 
 
 async def test_a_stalled_subagent_call_answers_with_the_timeout() -> None:
@@ -1495,50 +1458,172 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     assert backend.invocation_id == "worker-invocation"
 
 
-@pytest.mark.parametrize(
-    ("status", "message", "retries"),
-    [
-        (400, "No tool output found for function call call_1", False),
-        (400, "No tool call found for function call output call_1", False),
-        (400, "unexpected `tool_use_id` found in `tool_result` blocks", False),
-        (400, "tool_use ids were found without `tool_result` blocks", False),
-        (400, "context window exceeded", True),
-        (500, "No tool output found for function call", True),
-    ],
-)
-async def test_mda_does_not_retry_tool_pairing_errors(
-    monkeypatch: pytest.MonkeyPatch, status: int, message: str, retries: bool
-) -> None:
-    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+_PROVIDER_REQUEST = httpx2.Request("POST", "https://provider.invalid")
 
+
+class _StatusInCode(Exception):
+    """As google-genai's own errors carry the HTTP status."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(f"{code} UNAVAILABLE")
+        self.code = code
+
+
+def _reporting_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[OpenSweBackend, list[tuple[str, dict[str, JsonValue]]]]:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    model = FakeListChatModel(responses=["done"])
-    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
-    response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.invalid"))
-    error = (
-        anthropic.BadRequestError(message, response=response, body={})
-        if "tool_use" in message
-        else openai.APIStatusError(message, response=response, body={})
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.provider_recovery.run_id", lambda: "run-1")
+    monkeypatch.setattr(
+        "rt.middleware.build_model",
+        lambda *args, **kwargs: FakeListChatModel(responses=["unused"]),
     )
-    handler = AsyncMock(side_effect=[error, ModelResponse(result=[AIMessage(content="fallback")])])
+    backend = _run_backend("token", invocation_id="run")
+    reported: list[tuple[str, dict[str, JsonValue]]] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        reported.append((name, body))
+        return Done()
+
+    _answering(monkeypatch, backend, answer)
+    return backend, reported
+
+
+def _opus_request() -> ModelRequest:
     state: RunState = {
         "messages": [],
         "open_swe_call": ModelCall(
             system_prompt="test",
-            model=None,
-            fallback=ModelSpec(model_id="fallback", kwargs={}),
-            use_gateway=False,
+            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
+            use_gateway=True,
         ).model_dump(mode="json"),
     }
-    request = ModelRequest(model=model, messages=[], state=state)
-    middleware = BackendRunMiddleware(_run_backend("token", invocation_id="run"))
-    if retries:
-        response = await middleware.awrap_model_call(request, handler)
-        assert response.result[0].content == "fallback"
-    else:
-        with pytest.raises(type(error)) as caught:
-            await middleware.awrap_model_call(request, handler)
-        assert caught.value is error
+    return ModelRequest(model=FakeListChatModel(responses=["unused"]), messages=[], state=state)
+
+
+_OVERLOADED = anthropic.APIStatusError(
+    "Overloaded",
+    response=httpx2.Response(529, request=_PROVIDER_REQUEST),
+    body={"type": "error", "error": {"type": "overloaded_error"}},
+)
+
+
+async def test_a_provider_outage_waits_for_the_same_model_and_says_so_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, reported = _reporting_backend(monkeypatch)
+    recovery = ProviderRecovery(backend, Backoff(initial_seconds=0))
+    answer = ModelResponse(result=[AIMessage(content="done")])
+    handler = AsyncMock(
+        side_effect=[_OVERLOADED, httpx2.ReadTimeout("timed out"), _OVERLOADED, answer]
+    )
+
+    from rt.model_budget import ModelCallAttempt
+
+    async def invoke(request: ModelRequest) -> ModelResponse:
+        return await ModelCallAttempt(request).call(lambda: handler(request))
+
+    response = await BackendRunMiddleware(backend, recovery=recovery).awrap_model_call(
+        _opus_request(), invoke
+    )
+
+    assert response is answer
+    assert len({id(call.args[0].model) for call in handler.await_args_list}) == 1
+    assert reported == [
+        (
+            "model_recovery",
+            {
+                "run_id": "run-1",
+                "waiting": waiting,
+                "code": "provider_overloaded" if waiting else None,
+                "model_id": "anthropic:claude-opus-5-5",
+                "via_gateway": True,
+            },
+        )
+        for waiting in (True, False)
+    ]
+
+
+class _QuotaSpent(Exception):
+    status_code = 429
+    body: Mapping[str, object] = {"error": {"code": "insufficient_quota"}}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        anthropic.AuthenticationError(
+            "invalid x-api-key",
+            response=httpx2.Response(401, request=_PROVIDER_REQUEST),
+            body={"type": "error", "error": {"type": "authentication_error"}},
+        ),
+        anthropic.BadRequestError(
+            "prompt is too long",
+            response=httpx2.Response(400, request=_PROVIDER_REQUEST),
+            body={"type": "error", "error": {"type": "invalid_request_error"}},
+        ),
+        _QuotaSpent("You exceeded your current quota"),
+        # Our own bug, whatever it says.
+        KeyError("overloaded"),
+    ],
+)
+async def test_a_failure_that_is_not_an_outage_never_waits(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    backend, reported = _reporting_backend(monkeypatch)
+    handler = AsyncMock(side_effect=error)
+
+    with pytest.raises(type(error)):
+        await BackendRunMiddleware(
+            backend, recovery=ProviderRecovery(backend, Backoff(initial_seconds=0))
+        ).awrap_model_call(_opus_request(), handler)
+
+    assert handler.await_count == 1
+    assert "model_recovery" not in {path for path, _ in reported}
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (_OVERLOADED, "provider_overloaded"),
+        # A client or gateway can let the HTTP library's failure through unwrapped.
+        (httpx2.ReadTimeout("timed out", request=_PROVIDER_REQUEST), "provider_timeout"),
+        (httpx.ConnectError("refused"), "provider_unavailable"),
+        # google-genai: a typed LangChain error, or the SDK's own with its status in `code`.
+        (ModelRateLimitError("429 RESOURCE_EXHAUSTED"), "provider_rate_limited"),
+        (_StatusInCode(503), "provider_unavailable"),
+        (
+            httpx2.HTTPStatusError("503", request=_PROVIDER_REQUEST, response=httpx2.Response(503)),
+            "provider_unavailable",
+        ),
+    ],
+)
+async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, code: str
+) -> None:
+    backend, reported = _reporting_backend(monkeypatch)
+    # The wait for the provider to recover has run out.
+    recovery = ProviderRecovery(backend, Backoff(give_up_after_seconds=0))
+
+    with pytest.raises(type(error)) as caught:
+        await BackendRunMiddleware(backend, recovery=recovery).awrap_model_call(
+            _opus_request(), AsyncMock(side_effect=error)
+        )
+
+    assert caught.value is error
+    assert reported == [
+        (
+            "model_failure",
+            {
+                "run_id": "run-1",
+                "code": code,
+                "error_type": type(error).__name__,
+                "model_id": "anthropic:claude-opus-5-5",
+                "via_gateway": True,
+            },
+        )
+    ]
 
 
 async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(

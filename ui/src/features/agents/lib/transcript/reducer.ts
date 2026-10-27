@@ -101,6 +101,8 @@ export interface TranscriptTurnState {
   requestedAt: string
   startedAt: string | null
   error: string | null
+  /** Why a failed turn failed, in words for the person; null where unknown. */
+  reason: string | null
   items: ReadonlyArray<TurnItem>
   /** Bumped whenever this turn or anything it holds changed; the memo key. */
   revision: number
@@ -252,6 +254,7 @@ function turnStates(
       requestedAt: row.requested_at,
       startedAt: row.started_at ?? null,
       error: row.error,
+      reason: row.reason ?? null,
       items: orderItems(
         Object.values(messages).filter(
           (message) => message.turnId === row.turn_id
@@ -417,6 +420,7 @@ function ensureTurn(
     requestedAt: occurredAt,
     startedAt: state === "running" ? occurredAt : null,
     error: null,
+    reason: null,
     items: [],
     revision: 0,
   }
@@ -574,15 +578,23 @@ function putToolCall(
   addItem(draft, turn, { kind: "tool", id: call.toolCallId })
 }
 
+const TRANSIENT_NOTICES = [
+  "conversation_offloading",
+  "provider_recovery",
+] as const satisfies ReadonlyArray<NoticeKind>
+
 /**
- * Offloading describes what a run is doing right now, so it dies with its turn
- * — the snapshot drops it for a settled turn, and so does the live stream.
+ * Offloading and a provider wait describe what a run is doing right now, so
+ * they die with their turn — the snapshot drops them for a settled turn, and
+ * so does the live stream.
  */
 function dropTransientNotices(draft: Draft, turnId: string): void {
-  const notice = draft.state.notices["conversation_offloading"]
-  if (!notice || notice.turnId !== turnId) return
+  const ended = TRANSIENT_NOTICES.filter(
+    (kind) => draft.state.notices[kind]?.turnId === turnId
+  )
+  if (!ended.length) return
   const notices = { ...draft.state.notices }
-  delete notices["conversation_offloading"]
+  for (const kind of ended) delete notices[kind]
   draft.state = { ...draft.state, notices }
 }
 
@@ -662,7 +674,11 @@ export function applyEvent(
       const payload = event.payload
       const turn = draft.state.turns[payload.turn_id]
       if (!turn) break
-      patchTurn(draft, turn, { state: "failed", error: payload.error })
+      patchTurn(draft, turn, {
+        state: "failed",
+        error: payload.error,
+        reason: payload.reason ?? null,
+      })
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: settledStatus(draft, "error") }
       break
@@ -810,6 +826,34 @@ export function staleWorkspaceNotice(
     workspaceName: typeof name === "string" ? name : "workspace",
     capturedAt: typeof capturedAt === "string" ? capturedAt : null,
   }
+}
+
+export interface ProviderWait {
+  /** Who the run is waiting on, as the backend named them. */
+  provider: string | null
+  modelId: string | null
+  viaGateway: boolean
+}
+
+/** The model provider the running turn is waiting on to recover, if it is. */
+export function providerWaitNotice(
+  state: TranscriptState
+): ProviderWait | null {
+  const notice = state.notices["provider_recovery"]
+  if (notice?.data["waiting"] !== true) return null
+  const provider = notice.data["provider"]
+  const modelId = notice.data["model_id"]
+  return {
+    provider: typeof provider === "string" ? provider : null,
+    modelId: typeof modelId === "string" ? modelId : null,
+    viaGateway: notice.data["via_gateway"] === true,
+  }
+}
+
+/** Why the newest turn failed, when it failed and the backend said why. */
+export function failureReason(state: TranscriptState): string | null {
+  const newest = state.turns[state.turnOrder[state.turnOrder.length - 1] ?? ""]
+  return newest?.state === "failed" ? newest.reason : null
 }
 
 export function isOffloading(state: TranscriptState): boolean {

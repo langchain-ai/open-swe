@@ -19,12 +19,12 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, AnyMessage, get_buffer_string
+from langchain_core.messages import AnyMessage, get_buffer_string
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
 from pydantic import TypeAdapter
 
-from rt.model_budget import ModelCallBudget
+from rt.model_budget import ModelCallAttempt
 
 _update = TypeAdapter(dict[str, object])
 
@@ -43,13 +43,12 @@ class SummarizationStateMiddleware(AgentMiddleware):
 class PreparedConversation:
     """Accumulate compaction commands locally, including across a smaller-window fallback."""
 
-    def __init__(self, request: ModelRequest, budget: ModelCallBudget) -> None:
+    def __init__(self, request: ModelRequest, attempt: ModelCallAttempt) -> None:
         self._request = request
-        self._budget = budget
+        self._attempt = attempt
         self._state = dict(request.state)
         self._state["messages"] = list(request.messages)
         self._updates: dict[str, object] = {}
-        self.provider_failure: Exception | None = None
 
     async def prepare(
         self, request: ModelRequest, rejected: Exception | None = None
@@ -62,14 +61,16 @@ class PreparedConversation:
                 messages=get_buffer_string(messages, format="xml")
             )
 
-            async def invoke() -> AIMessage:
-                return await request.model.ainvoke(
+            async def invoke() -> ModelResponse:
+                response = await request.model.ainvoke(
                     prompt,
                     stream=False,
                     config={"metadata": {"lc_source": "summarization", **internal_call_metadata()}},
                 )
+                return ModelResponse(result=[response])
 
-            return (await self._budget.call(invoke, streaming=False)).text.strip()
+            response = await self._attempt.call(invoke, streaming=False)
+            return response.result[0].text.strip()
 
         compact = create_summarization_middleware(request.model, backend, summarizer=summarize)
         selected: ModelRequest | None = None
@@ -110,11 +111,7 @@ class PreparedConversation:
         async def invoke() -> ModelResponse:
             return await handler(request)
 
-        try:
-            return await self._budget.call(invoke)
-        except Exception as exc:
-            self.provider_failure = exc
-            raise
+        return await self._attempt.call(invoke)
 
     def finish(self, response: ModelResponse) -> ModelResponse | ExtendedModelResponse:
         if not self._updates:

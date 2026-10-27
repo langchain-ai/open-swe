@@ -12,7 +12,14 @@ import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
@@ -541,3 +548,64 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     assert instructed == {"agent": True, "reviewer": False}
     browser = mda_browser._browser_name("thread:browsed")
     assert browsers == [(browser, False), (browser, True)]
+
+
+async def test_concurrent_runs_compact_with_their_own_authenticated_models(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    summaries: list[str] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        assert model.name != "placeholder"
+        if len(messages) == 1 and isinstance(messages[0], HumanMessage):
+            summaries.append(model.name or "")
+            response = AIMessage("summary")
+        else:
+            response = AIMessage("done")
+        return ChatResult(generations=[ChatGeneration(message=response)])
+
+    def build(spec: ModelSpec, **kwargs: object) -> GenericFakeChatModel:
+        model = _calling()
+        model.name = spec.model_id
+        model.profile = {"max_input_tokens": 20000}
+        return model
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.run_tools.build_model", build)
+    placeholder = _calling()
+    placeholder.name = "placeholder"
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", placeholder)
+    history = [HumanMessage("history " * 1000, id=f"h-{i}") for i in range(20)]
+
+    async def run(index: int) -> None:
+        catalog = _catalog("lookup", f"grant-{index}").model_copy(
+            update={
+                "models": RunModels(
+                    model=ModelSpec(model_id=f"run-{index}", kwargs={}),
+                    subagent_model=ModelSpec(model_id=f"child-{index}", kwargs={}),
+                    use_gateway=True,
+                ),
+            }
+        )
+        graph = await compile_managed_agent_async(
+            agent.agent,
+            _thread(f"summary-{index}"),
+            runtime=_ExecutionRuntime(
+                access_context="threads.create_run",
+                store=InMemoryStore(),
+                context=_context("agent", f"summary-token-{index}", catalog),
+            ),
+            report_telemetry=False,
+            async_subagent_graphs=_WORKERS,
+        )
+        await graph.ainvoke(
+            {"messages": history},
+            _thread(f"summary-{index}"),
+            context=_context("agent", f"summary-token-{index}", catalog),  # ty: ignore[invalid-argument-type]
+        )
+
+    await asyncio.gather(run(0), run(1))
+    assert sorted(summaries) == ["run-0", "run-1"]

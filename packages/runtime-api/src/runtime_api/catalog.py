@@ -25,8 +25,6 @@ class ModelSpec(BaseModel):
     kwargs: dict[str, JsonValue]
     # Whether the model reads images; a call to one that does not goes to the vision model.
     reads_images: bool = True
-    # Another provider's model, tried once when a call to this one fails.
-    fallback: ModelSpec | None = None
 
 
 class RunModels(BaseModel):

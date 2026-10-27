@@ -18,6 +18,7 @@ until a run receives it.
 """
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
@@ -62,8 +63,6 @@ class ModelCall(BaseModel):
     # What a call to that model goes to instead when the conversation holds an image:
     # None where the model reads images itself.
     vision: ModelSpec | None = None
-    # Another provider's model, tried once when a call to ``model`` fails.
-    fallback: ModelSpec | None = None
     use_gateway: bool = False
 
 
@@ -142,6 +141,47 @@ class BrowserReport(RunRequest):
 
     browser: str
     opened: bool = True
+
+
+type ModelFailureCode = Literal[
+    "provider_overloaded",
+    "provider_rate_limited",
+    "provider_unavailable",
+    "provider_timeout",
+    "context_too_long",
+    "model_unavailable",
+]
+
+
+class ModelFailure(RunRequest):
+    """A model call that failed at its provider, classified while the error was intact.
+
+    The run then ends with that error, whose class name is all its end reports; the
+    backend keeps this for the reply that tells the person why.
+    """
+
+    code: ModelFailureCode
+    # The exception's class name, as the run's end reports it.
+    error_type: str
+    # provider:model, when the call named its model.
+    model_id: str | None = None
+    # Whether the call went through the LangSmith Gateway, which can fail it too.
+    via_gateway: bool = False
+
+
+class ModelRecovery(RunRequest):
+    """The run's model calls started or stopped waiting for their provider to recover.
+
+    ``waiting`` is sent when the first call starts waiting and again, false, when
+    none waits any longer; the person is told the first time a run waits.
+    """
+
+    waiting: bool
+    # Why the provider failed the call that started the wait.
+    code: ModelFailureCode | None = None
+    # provider:model, the model the run keeps waiting for.
+    model_id: str | None = None
+    via_gateway: bool = False
 
 
 class InboxItems(BaseModel):
@@ -230,6 +270,13 @@ TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the box gone: the backend tells the person.
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
+# A model call failed at its provider: the backend keeps why for the run's failure reply.
+MODEL_FAILURE = Endpoint("model_failure", ModelFailure, Done, seconds=LOOP_CALL_SECONDS)
+# The run's model calls started or stopped waiting out a provider outage: the backend
+# shows it, and tells the person once per run, which its notice receipt keeps true.
+MODEL_RECOVERY = Endpoint(
+    "model_recovery", ModelRecovery, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
 # Classifies the task the conversation asks for; only reads, so it is safe to send again.

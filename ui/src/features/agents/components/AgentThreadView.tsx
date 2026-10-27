@@ -67,7 +67,10 @@ import {
   pendingSenderName,
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
-import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
+import type {
+  ProviderWait,
+  QueuedTurn,
+} from "@/features/agents/lib/transcript/reducer"
 import type {
   ComposerSubmission,
   RestoredDraft,
@@ -131,6 +134,15 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       Open in Slack
     </Button>
   )
+}
+
+function providerWaitText(wait: ProviderWait): string {
+  const provider = wait.provider ?? "The model provider"
+  const who = wait.viaGateway
+    ? `${provider} (or the LangSmith Gateway in front of it)`
+    : provider
+  const model = wait.modelId?.split(":").slice(1).join(":") || "the same model"
+  return `${who} isn't answering, so this run is waiting for it to recover and keeps retrying ${model} instead of switching models. It picks up where it left off as soon as the provider answers.`
 }
 
 export function AgentThreadView({
@@ -797,11 +809,32 @@ export function AgentThreadView({
                 ) : undefined
               }
             >
-              The last run hit an error before it could finish. Send another
-              message to retry.
+              {(source.kind === "transcript" && source.failureReason) ||
+                "The last run hit an error before it could finish. Send another message to retry."}
             </Banner>
           </div>
         )}
+        {source.kind === "transcript" &&
+          source.providerWait &&
+          source.isRunning && (
+            <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
+              <Banner
+                intent="warning"
+                action={
+                  <Button
+                    color="secondary"
+                    variant="underlined"
+                    size="md"
+                    onClick={() => void stopRun()}
+                  >
+                    Stop run
+                  </Button>
+                }
+              >
+                {providerWaitText(source.providerWait)}
+              </Banner>
+            </div>
+          )}
         {source.kind === "transcript" && source.workspaceStale && (
           <div
             hidden={dismissedWarning === workspaceWarningKey}

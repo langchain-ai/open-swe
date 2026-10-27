@@ -74,6 +74,8 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       subagentMessages: subagentTranscript,
       subagentTask: task,
       workspaceStale: transcript.workspaceStale,
+      providerWait: transcript.providerWait,
+      failureReason: transcript.failureReason,
       startRun,
       stop,
       hasOlder: transcript.hasOlder,

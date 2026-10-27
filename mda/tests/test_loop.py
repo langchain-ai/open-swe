@@ -31,8 +31,7 @@ from runtime_api.endpoint import Delivery
 from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
-_FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-_FAST = ModelSpec(model_id="fireworks:kimi", kwargs={}, reads_images=False, fallback=_FALLBACK)
+_FAST = ModelSpec(model_id="fireworks:kimi", kwargs={}, reads_images=False)
 _VISION = ModelSpec(model_id="google_genai:gemini-3.8-flash", kwargs={})
 _MODELS = RunModels(
     model=_MAIN, subagent_model=_MAIN, use_gateway=True, routes={"fast": _FAST}, vision=_VISION
@@ -158,7 +157,6 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     }
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
-    assert planned.call.fallback == _FALLBACK
     assert planned.call.use_gateway is True
     assert [message.content for message in messages_from_dict(planned.messages)] == [context]
     assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]

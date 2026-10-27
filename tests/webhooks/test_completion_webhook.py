@@ -277,3 +277,47 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-1", "status": status})
     assert set_status.await_args.args == ("C1", "123.45", "Waiting for background tasks…")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("via_gateway", "named"),
+    [
+        (False, "Anthropic was overloaded"),
+        # The gateway can fail the call itself, so the provider alone is not blamed.
+        (True, "Anthropic or the LangSmith Gateway in front of it was overloaded"),
+    ],
+)
+async def test_provider_failure_reported_by_the_run_names_the_provider_everywhere(
+    monkeypatch: pytest.MonkeyPatch, via_gateway: bool, named: str
+) -> None:
+    metadata = _slack_metadata()
+    metadata["last_model_error"] = {
+        "run_id": "run-1",
+        "error_type": "APIStatusError",
+        "code": "provider_overloaded",
+        "model_id": "anthropic:claude-opus-5-5",
+        "via_gateway": via_gateway,
+    }
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
+    monkeypatch.setattr(
+        completion.index, "get", AsyncMock(return_value=SimpleNamespace(metadata=metadata))
+    )
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    settle = AsyncMock(return_value=None)
+    monkeypatch.setattr(completion, "settle_run_turn", settle)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": "error",
+            "error": {"error": "APIStatusError", "message": ""},
+        }
+    )
+
+    for said in (reply.await_args.args[2], settle.await_args.kwargs["reason"]):
+        assert named in said
+        assert "not a problem with your task" in said

@@ -311,7 +311,7 @@ async def pr_merge_rate_by_model(
         "metric": "pr_outcomes_by_opening_invocation_configured_model",
         "definition": (
             "PR-open-date cohorts grouped by the opening invocation's configured model. "
-            "Routing, provider fallback, subagents, and later invocations may use other models; "
+            "Routing, subagents, and later invocations may use other models; "
             "this metric does not allocate independent model credit."
         ),
         "maturity_days": days,

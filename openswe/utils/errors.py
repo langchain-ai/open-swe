@@ -6,10 +6,6 @@ from typing import Any
 
 _MAX_BODY_CHARS = 2000
 
-# Thread-metadata key holding the classification of the run's last model error,
-# written while the exception is intact and read back by the completion webhook.
-LAST_MODEL_ERROR_KEY = "last_model_error"
-
 # Exception class names, the only failure signal the run-completion webhook gets:
 # the platform serializes the class name but scrubs the message of any exception
 # type outside its allowlist.

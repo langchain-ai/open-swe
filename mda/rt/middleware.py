@@ -62,18 +62,20 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import InboxSpec
+from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
     BEFORE_MODEL,
     INBOX,
+    MODEL_FAILURE,
     PREPARE,
     Inbox,
     InboxRead,
     InboxReceipt,
     ModelCall,
+    ModelFailure,
     ModelResult,
     PhaseResult,
     Prepare,
@@ -92,8 +94,10 @@ from rt.backend import (
     subagent_of,
 )
 from rt.loop import RunLoop
-from rt.model_budget import model_fallback
+from rt.model_budget import provider_attempts
+from rt.model_calls import provider_failure_code
 from rt.models import build_model
+from rt.provider_recovery import ProviderRecovery
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import TurnTrace
 
@@ -272,9 +276,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+        *,
+        recovery: ProviderRecovery | None = None,
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
+        # Shared with the run's subagents, which wait out the same outage.
+        self._recovery = recovery or ProviderRecovery(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
@@ -399,7 +407,15 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=own)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
-            return await handler(request)
+            models = self._backend.run.catalog.models
+            with provider_attempts(
+                partial(
+                    self._recovery.call,
+                    model=models.model if models is not None else None,
+                    via_gateway=models is not None and models.use_gateway,
+                )
+            ):
+                return await handler(request)
         planned = ModelCall.model_validate(raw)
         existing = request.system_message.text if request.system_message is not None else ""
         system_prompt = planned.system_prompt
@@ -415,13 +431,39 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
-        fallback = (
-            partial(build_model, planned.fallback, use_gateway=planned.use_gateway)
-            if planned.fallback is not None
-            else None
+        try:
+            with provider_attempts(
+                partial(self._recovery.call, model=model, via_gateway=planned.use_gateway)
+            ):
+                return await handler(request)
+        except Exception as exc:
+            await self._report_model_failure(model, exc, via_gateway=planned.use_gateway)
+            raise
+
+    async def _report_model_failure(
+        self, model: ModelSpec | None, exc: Exception, *, via_gateway: bool
+    ) -> None:
+        """Tell the backend why the provider failed, which the run's end alone cannot."""
+        code = provider_failure_code(exc)
+        model_id = model.model_id if model is not None else None
+        logger.warning(
+            "Model call failed",
+            exc_info=exc,
+            extra={"model_call_failure": {"model_id": model_id, "code": code}},
         )
-        with model_fallback(fallback):
-            return await handler(request)
+        if code is None:
+            return
+        failure = ModelFailure(
+            run_id=run_id(),
+            code=code,
+            error_type=type(exc).__name__,
+            model_id=model_id,
+            via_gateway=via_gateway,
+        )
+        try:
+            await call(self._backend, MODEL_FAILURE, failure)
+        except BackendCallError:
+            logger.warning("Could not tell the backend why the model call failed", exc_info=True)
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

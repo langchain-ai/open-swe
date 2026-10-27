@@ -271,7 +271,6 @@ class RunLoop:
                 hidden_tools=self._hidden(current),
                 model=model,
                 vision=None if model.reads_images else self._models.vision,
-                fallback=model.fallback,
                 use_gateway=self._models.use_gateway,
             ),
         )

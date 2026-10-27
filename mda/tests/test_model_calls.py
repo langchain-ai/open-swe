@@ -1,8 +1,9 @@
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
+from functools import partial
 from typing import Protocol, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import httpx2
 import openai
@@ -31,15 +32,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.middleware import BackendRunMiddleware, ModelCall
-from rt.model_budget import model_fallback
+from rt.model_budget import ModelCallAttempt, provider_attempts
 from rt.model_calls import (
     ModelCallTimeoutError,
-    ModelCallTimeoutMiddleware,
     OpenAIPromptCachingMiddleware,
     ReplayableHistoryMiddleware,
     model_call_guards,
 )
 from rt.models import ModelSpec, build_model
+from rt.provider_recovery import Backoff, ProviderRecovery
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -192,11 +193,9 @@ async def test_a_hanging_model_call_fails_as_a_timeout() -> None:
         await asyncio.sleep(60)
         raise AssertionError("cancelled by the deadline")
 
+    request = ModelRequest(model=_ANTHROPIC, messages=[])
     with pytest.raises(ModelCallTimeoutError) as raised:
-        await ModelCallTimeoutMiddleware(timeout_seconds=0.01).awrap_model_call(
-            cast(ModelRequest, MagicMock()), hang
-        )
-    # The retry and the fallback both act on TimeoutError.
+        await ModelCallAttempt(request, timeout_seconds=0.01).call(lambda: hang(request))
     assert isinstance(raised.value, TimeoutError)
 
 
@@ -212,7 +211,6 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
         system_prompt="prompt",
         model=ModelSpec(model_id="fireworks:kimi", kwargs={}),
         vision=ModelSpec(model_id="openai:gpt", kwargs={}),
-        fallback=None,
         use_gateway=False,
     )
     image = [{"type": "image", "url": "https://example.com/screenshot.png"}]
@@ -238,6 +236,7 @@ class _RuntimeModel(FakeListChatModel):
     failures: int = 0
     attempts: int = 0
     summaries: int = 0
+    summary_failures: int = 0
     received: list[list[BaseMessage]] = []
 
     def bind_tools(self, *args: object, **kwargs: object) -> BaseChatModel:
@@ -253,6 +252,8 @@ class _RuntimeModel(FakeListChatModel):
     ) -> AIMessage:
         if config and config.get("metadata", {}).get("lc_source") == "summarization":
             self.summaries += 1
+            if self.summaries <= self.summary_failures:
+                raise httpx2.ReadTimeout("summary provider unavailable")
             return AIMessage("summary")
         return await super().ainvoke(input, config, stop=stop, **kwargs)
 
@@ -266,14 +267,14 @@ class _RuntimeModel(FakeListChatModel):
         self.attempts += 1
         self.received.append(messages)
         if self.attempts <= self.failures:
-            raise TimeoutError("provider unavailable")
+            raise httpx2.ReadTimeout("provider unavailable")
         return ChatResult(generations=[ChatGeneration(message=AIMessage("done"))])
 
 
 class _RuntimeRoute(AgentMiddleware):
-    def __init__(self, model: BaseChatModel, fallback: BaseChatModel | None = None) -> None:
+    def __init__(self, model: BaseChatModel, recovery: ProviderRecovery | None = None) -> None:
         self.model = model
-        self.fallback = fallback
+        self.recovery = recovery
         self.preparations = 0
         self.reports = 0
 
@@ -283,9 +284,11 @@ class _RuntimeRoute(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         self.preparations += 1
-        fallback = self.fallback
-        with model_fallback((lambda: fallback) if fallback is not None else None):
+        if self.recovery is None:
             result = await handler(request.override(model=self.model))
+        else:
+            with provider_attempts(partial(self.recovery.call, model=None, via_gateway=False)):
+                result = await handler(request.override(model=self.model))
         self.reports += 1
         return result
 
@@ -293,9 +296,14 @@ class _RuntimeRoute(AgentMiddleware):
 async def test_final_routed_compaction_survives_provider_retries_and_checkpoint_resume(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("rt.model_budget.retry_delay", lambda *_: 0.0)
-    model = _RuntimeModel(responses=["unused"], failures=1, profile={"max_input_tokens": 5000})
-    route = _RuntimeRoute(model)
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = Run(RunContext()).backend
+    recovery = ProviderRecovery(backend, Backoff(initial_seconds=0))
+    monkeypatch.setattr(recovery, "_tell", AsyncMock())
+    model = _RuntimeModel(
+        responses=["unused"], failures=1, summary_failures=1, profile={"max_input_tokens": 5000}
+    )
+    route = _RuntimeRoute(model, recovery)
     graph = create_deep_agent(
         _RuntimeModel(responses=["unused"], profile={"max_input_tokens": 1000000}),
         checkpointer=InMemorySaver(),
@@ -304,36 +312,16 @@ async def test_final_routed_compaction_survives_provider_retries_and_checkpoint_
     config: RunnableConfig = {"configurable": {"thread_id": "routed"}}
     messages = [HumanMessage("history " * 300, id=f"h-{i}") for i in range(20)]
     first = await graph.ainvoke({"messages": messages}, config)
-    assert model.summaries == 1
+    assert model.summaries == 2
     assert model.attempts == 2
     assert sum(data["content"].count("## Summarized at") for data in first["files"].values()) == 1
     checkpoint = await graph.aget_state(config)
     assert checkpoint.values["_summarization_event"]["cutoff_index"] > 0
     assert len(model.received[-1]) < len(messages)
     resumed = await graph.ainvoke({"messages": [HumanMessage("next")]}, config)
-    assert model.summaries == 1
+    assert model.summaries == 2
     assert sum(data["content"].count("## Summarized at") for data in resumed["files"].values()) == 1
     assert route.preparations == route.reports == 2
-
-
-async def test_smaller_fallback_is_compacted_without_replaying_outer_hooks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("rt.model_budget.retry_delay", lambda *_: 0.0)
-    monkeypatch.setattr("rt.model_calls.retry_delay", lambda *_: 0.0)
-    primary = _RuntimeModel(responses=["unused"], failures=2, profile={"max_input_tokens": 1000000})
-    fallback = _RuntimeModel(responses=["unused"], failures=1, profile={"max_input_tokens": 5000})
-    route = _RuntimeRoute(primary, fallback)
-    graph = create_deep_agent(primary, middleware=[route, *model_call_guards()])
-    messages = [HumanMessage("history " * 300, id=f"h-{i}") for i in range(20)]
-    result = await graph.ainvoke({"messages": messages})
-    assert result["messages"][-1].content == "done"
-    assert primary.summaries == 0
-    assert fallback.summaries == 1
-    assert primary.attempts == fallback.attempts == 2
-    assert sum(data["content"].count("## Summarized at") for data in result["files"].values()) == 1
-    assert len(fallback.received[-1]) < len(primary.received[-1])
-    assert route.preparations == route.reports == 1
 
 
 async def test_openai_affinity_is_scoped_to_actual_provider_and_preserves_overrides() -> None:
@@ -374,43 +362,26 @@ async def test_openai_affinity_is_scoped_to_actual_provider_and_preserves_overri
 class _InterruptedStream(_RuntimeModel):
     async def _astream(self, *args: object, **kwargs: object) -> AsyncIterator[ChatGenerationChunk]:
         yield ChatGenerationChunk(message=AIMessageChunk(content="partial"))
-        raise TimeoutError("interrupted stream")
+        raise httpx2.ReadTimeout("interrupted stream")
 
 
-async def test_partial_stream_is_not_retried_or_sent_to_fallback() -> None:
+async def test_partial_stream_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     primary = _InterruptedStream(responses=["unused"])
-    fallback = _RuntimeModel(responses=["unused"])
-    route = _RuntimeRoute(primary, fallback)
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    recovery = ProviderRecovery(Run(RunContext()).backend, Backoff(initial_seconds=0))
+    told = AsyncMock()
+    monkeypatch.setattr(recovery, "_tell", told)
+    route = _RuntimeRoute(primary, recovery)
     graph = create_deep_agent(primary, middleware=[route, *model_call_guards()])
     emitted: list[str] = []
-    with pytest.raises(TimeoutError, match="interrupted stream"):
+    with pytest.raises(httpx2.ReadTimeout, match="interrupted stream"):
         async for chunk, _ in graph.astream(
             {"messages": [HumanMessage("go")]}, stream_mode="messages"
         ):
             assert isinstance(chunk, AIMessageChunk)
             emitted.append(chunk.text)
     assert emitted == ["partial"]
-    assert fallback.attempts == 0
-
-
-@pytest.mark.parametrize("status", [400, 401, 429, 503])
-async def test_only_transient_provider_errors_retry(
-    monkeypatch: pytest.MonkeyPatch, status: int
-) -> None:
-    monkeypatch.setattr("rt.model_budget.retry_delay", lambda *_: 0.0)
-    from rt.model_budget import ModelCallBudget
-
-    response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.invalid"))
-    error = openai.APIStatusError("provider failed", response=response, body=None)
-    handler = AsyncMock(side_effect=[error, "recovered"])
-    budget = ModelCallBudget()
-    if status in {429, 503}:
-        assert await budget.call(handler) == "recovered"
-    else:
-        with pytest.raises(openai.APIStatusError) as raised:
-            await budget.call(handler)
-        assert raised.value is error
-        assert handler.await_count == 1
+    told.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -430,47 +401,19 @@ async def test_provider_retry_override_cannot_multiply_attempts(
     assert model.model_dump()["max_retries"] == 0
 
 
-async def test_shared_deadline_bounds_retry_after_and_cancellation_propagates() -> None:
-    from rt.model_budget import ModelCallBudget
+async def test_each_provider_attempt_has_its_own_deadline_and_cancellation_propagates() -> None:
+    request = ModelRequest(model=_ANTHROPIC, messages=[])
 
-    response = httpx2.Response(
-        429,
-        headers={"Retry-After": "60"},
-        request=httpx2.Request("POST", "https://provider.invalid"),
-    )
-    error = openai.APIStatusError("rate limited", response=response, body=None)
-    attempts = AsyncMock(side_effect=error)
-
-    async def limited(request: ModelRequest) -> ModelResponse:
-        return await ModelCallBudget().call(attempts)
+    async def hang() -> ModelResponse:
+        await asyncio.sleep(60)
+        raise AssertionError("deadline did not cancel")
 
     with pytest.raises(ModelCallTimeoutError):
-        await ModelCallTimeoutMiddleware(0.01).awrap_model_call(
-            ModelRequest(model=_ANTHROPIC, messages=[]), limited
-        )
-    assert attempts.await_count == 1
+        await ModelCallAttempt(request, 0.01).call(hang)
     cancelled = AsyncMock(side_effect=asyncio.CancelledError)
     with pytest.raises(asyncio.CancelledError):
-        await ModelCallBudget().call(cancelled)
+        await ModelCallAttempt(request).call(cancelled)
     assert cancelled.await_count == 1
-
-
-async def test_budget_caps_summary_and_generation_requests_together(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from rt.model_budget import ModelCallBudget
-
-    monkeypatch.setattr("rt.model_budget.retry_delay", lambda *_: 0.0)
-    budget = ModelCallBudget(max_attempts=3)
-    assert await budget.call(AsyncMock(return_value="summary"), streaming=False) == "summary"
-    failure = TimeoutError("generation failed")
-    generation = AsyncMock(side_effect=failure)
-    with pytest.raises(TimeoutError) as raised:
-        await budget.call(generation)
-    assert raised.value is failure
-    assert generation.await_count == 2
-    assert budget.remaining == 0
-    assert not budget.can_retry(failure)
 
 
 async def test_final_prompt_and_tool_schema_alone_trigger_compaction() -> None:
@@ -528,3 +471,146 @@ async def test_provider_context_rejection_retains_one_compaction_recovery() -> N
     assert result["messages"][-1].content == "done"
     assert model.summaries == 1
     assert model.attempts == 2
+
+
+async def test_sync_task_subagent_compacts_with_its_selected_model() -> None:
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import ToolCall
+    from langchain_core.tools import tool
+
+    @tool
+    async def history() -> str:
+        """Read historical context."""
+        return "historical context " * 600
+
+    class Child(_RuntimeModel):
+        async def _agenerate(
+            self,
+            messages: list[BaseMessage],
+            stop: list[str] | None = None,
+            run_manager: AsyncCallbackManagerForLLMRun | None = None,
+            **kwargs: object,
+        ) -> ChatResult:
+            self.attempts += 1
+            if self.attempts <= 8:
+                reply = AIMessage(
+                    "", tool_calls=[ToolCall(name="history", args={}, id=f"read-{self.attempts}")]
+                )
+            else:
+                reply = AIMessage("child done")
+            return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    class Parent(GenericFakeChatModel):
+        def bind_tools(self, *args: object, **kwargs: object) -> BaseChatModel:
+            return self
+
+    child = Child(responses=["unused"], profile={"max_input_tokens": 12000})
+    parent = Parent(
+        messages=iter(
+            [
+                AIMessage(
+                    "",
+                    tool_calls=[
+                        ToolCall(
+                            name="task",
+                            args={
+                                "subagent_type": "general-purpose",
+                                "description": "Read the history",
+                            },
+                            id="delegate",
+                        )
+                    ],
+                ),
+                AIMessage("parent done"),
+            ]
+        )
+    )
+    graph = create_deep_agent(
+        parent,
+        subagents=[
+            {
+                "name": "general-purpose",
+                "description": "Investigate",
+                "system_prompt": "Investigate",
+                "model": child,
+                "tools": [history],
+                "middleware": [_RuntimeRoute(child), *model_call_guards(subagent=True)],
+            }
+        ],
+        middleware=[*model_call_guards()],
+    )
+    result = await graph.ainvoke({"messages": [HumanMessage("delegate")]})
+    assert result["messages"][-1].content == "parent done"
+    assert child.summaries >= 1
+
+
+async def test_recovery_deadlines_restart_per_attempt_and_give_up_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    recovery = ProviderRecovery(Run(RunContext()).backend, Backoff(initial_seconds=0))
+    notices = AsyncMock()
+    monkeypatch.setattr(recovery, "_tell", notices)
+    monkeypatch.setattr("rt.provider_recovery.run_id", lambda: "run")
+    request = ModelRequest(model=_ANTHROPIC, messages=[])
+    calls = 0
+
+    async def generate() -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(60)
+        await asyncio.sleep(0.005)
+        return ModelResponse(result=[AIMessage("recovered")])
+
+    with provider_attempts(partial(recovery.call, model=None, via_gateway=False)):
+        result = await ModelCallAttempt(request, 0.02).call(generate)
+    assert result.result[0].text == "recovered"
+    assert calls == 2
+    assert [call.args[0].waiting for call in notices.await_args_list] == [True, False]
+    expired = ProviderRecovery(recovery.backend, Backoff(give_up_after_seconds=0))
+    error = httpx2.ReadTimeout("unavailable")
+    handler = AsyncMock(side_effect=error)
+    with provider_attempts(partial(expired.call, model=None, via_gateway=False)):
+        with pytest.raises(httpx2.ReadTimeout) as raised:
+            await ModelCallAttempt(request).call(handler)
+    assert raised.value is error
+    assert handler.await_count == 1
+
+
+async def test_concurrent_summary_recovery_cancellation_keeps_run_notices_balanced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    recovery = ProviderRecovery(Run(RunContext()).backend, Backoff(initial_seconds=0))
+    notices = AsyncMock()
+    monkeypatch.setattr(recovery, "_tell", notices)
+    monkeypatch.setattr("rt.provider_recovery.run_id", lambda: "run")
+    request = ModelRequest(model=_ANTHROPIC, messages=[])
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = asyncio.Event()
+    counts = [0, 0]
+
+    async def summary(index: int) -> ModelResponse:
+        counts[index] += 1
+        if counts[index] == 1:
+            raise httpx2.ReadTimeout("summary unavailable")
+        entered[index].set()
+        await release.wait()
+        return ModelResponse(result=[AIMessage("summary")])
+
+    with provider_attempts(partial(recovery.call, model=None, via_gateway=False)):
+        first = asyncio.create_task(
+            ModelCallAttempt(request).call(lambda: summary(0), streaming=False)
+        )
+        second = asyncio.create_task(
+            ModelCallAttempt(request).call(lambda: summary(1), streaming=False)
+        )
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in entered)), timeout=1)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert [call.args[0].waiting for call in notices.await_args_list] == [True]
+        release.set()
+        await second
+    assert [call.args[0].waiting for call in notices.await_args_list] == [True, False]
