@@ -10,7 +10,7 @@ import agent
 import httpx2
 import pytest
 from deepagents.backends import FilesystemBackend, StateBackend
-from deepagents.backends.protocol import ExecuteResponse
+from deepagents.backends.protocol import ExecuteResponse, WriteResult
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -238,22 +238,29 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
 
 
-@pytest.mark.parametrize("snapshot", [None, "selected-box"])
 async def test_large_tool_results_remain_readable_with_or_without_a_box(
     monkeypatch: pytest.MonkeyPatch,
     backend_calls: BackendCalls,
     operation_results: dict[str, str],
     tmp_path: Path,
-    snapshot: str | None,
 ) -> None:
     content = "\n".join(f"result line {i}: " + "x" * 100 for i in range(2000))
     operation_results["lookup:grant"] = content
-    disk = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
-    box = MagicMock(spec=StateBackend)
-    box.id = "selected-box"
-    box.awrite = disk.awrite
-    box.aread = disk.aread
-    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", lambda *args, **kwargs: box)
+
+    def resolve(
+        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
+    ) -> StateBackend:
+        snapshot = str(sandbox.options["snapshot_id"])
+        root = tmp_path / snapshot
+        root.mkdir(exist_ok=True)
+        disk = FilesystemBackend(root_dir=root, virtual_mode=True)
+        box = MagicMock(spec=StateBackend)
+        box.id = snapshot
+        box.awrite = disk.awrite
+        box.aread = disk.aread
+        return box
+
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
     results: dict[str, ToolMessage] = {}
 
     async def generate(
@@ -293,19 +300,67 @@ async def test_large_tool_results_remain_readable_with_or_without_a_box(
 
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    store = InMemoryStore()
+    graphs: list[CompiledStateGraph] = []
+    for snapshot in (None, "selected-box-a", "selected-box-b", None):
+        results.clear()
+        graphs.append(
+            await _run(
+                store,
+                f"large-result-{len(graphs)}",
+                _context("reviewer", "token", _catalog("lookup", "grant", snapshot=snapshot)),
+            )
+        )
+        assert "read" in results
+        if snapshot is not None:
+            saved = tmp_path / snapshot / "large_tool_results" / "lookup"
+            assert saved.read_text() == content
+    assert all(graph.nodes["model"] is graphs[0].nodes["model"] for graph in graphs)
+    assert not (tmp_path / "large_tool_results" / "lookup").exists()
+    assert not any(hook.startswith("files.") for hook, _, _ in backend_calls)
+
+
+@pytest.mark.parametrize("failure", [OSError("storage unavailable"), WriteResult(error="full")])
+async def test_boxless_eviction_failure_returns_truncated_content(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_calls: BackendCalls,
+    operation_results: dict[str, str],
+    failure: OSError | WriteResult,
+) -> None:
+    content = "large result " * 20000
+    operation_results["lookup:grant"] = content
+    write = AsyncMock(
+        side_effect=failure if isinstance(failure, OSError) else None,
+        return_value=failure if isinstance(failure, WriteResult) else None,
+    )
+    monkeypatch.setattr(StateBackend, "awrite", write)
+    results: list[ToolMessage] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        results.extend(message for message in messages if isinstance(message, ToolMessage))
+        reply = (
+            AIMessage(content="done")
+            if results
+            else AIMessage(content="", tool_calls=[ToolCall(name="lookup", args={}, id="lookup")])
+        )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
     await _run(
         InMemoryStore(),
-        "large-result",
-        _context("reviewer", "token", _catalog("lookup", "grant", snapshot=snapshot)),
+        "failed-eviction",
+        _context("reviewer", "token", _catalog("lookup", "grant")),
     )
 
-    assert "read" in results
-    saved = tmp_path / "large_tool_results" / "lookup"
-    if snapshot is None:
-        assert not saved.exists()
-    else:
-        assert saved.read_text() == content
-    assert not any(hook.startswith("files.") for hook, _, _ in backend_calls)
+    assert len(results) == 1
+    assert results[0].status == "success"
+    assert results[0].text.startswith(content[:1000])
+    assert len(results[0].text) < len(content)
+    assert "truncated: storage unavailable" in results[0].text
+    assert "This run has no sandbox" not in results[0].text
 
 
 @pytest.mark.parametrize("code_mode", [False, True])

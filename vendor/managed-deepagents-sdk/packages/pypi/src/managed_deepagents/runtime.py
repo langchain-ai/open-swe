@@ -63,6 +63,13 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.middleware.async_subagents import _NEST_UNDER_PARENT
+from deepagents.middleware.filesystem import (
+    NUM_CHARS_PER_TOKEN,
+    FilesystemMiddleware,
+    _extract_text_from_message,
+)
+from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph as CompiledAgent
 from langgraph_sdk import get_client
@@ -1237,6 +1244,14 @@ def _compile_managed_agent(
             else None,
         )
 
+    if sandbox_backend is not None:
+        merged["middleware"] = [
+            _OptionalSandboxFilesystemMiddleware(
+                sandbox_backend, backend=cast("BackendProtocol", merged["backend"])
+            ),
+            *cast("list[AgentMiddleware]", merged.get("middleware") or []),
+        ]
+
     # Author ``metadata`` is not a create_deep_agent kwarg — apply it on the
     # compiled runnable so LangSmith root runs carry prompt provenance, etc.
     metadata = merged.pop("metadata", None)
@@ -1916,6 +1931,39 @@ def _ambient_runtime() -> object:
     return configurable.get("__pregel_runtime")
 
 
+class _OptionalSandboxFilesystemMiddleware(FilesystemMiddleware):
+    def __init__(self, sandbox: _LazyManagedSandboxBackend, *, backend: BackendProtocol) -> None:
+        super().__init__(backend=backend)
+        self._sandbox = sandbox
+
+    @property
+    def name(self) -> str:
+        return "FilesystemMiddleware"
+
+    async def _aprocess_large_message(
+        self, message: ToolMessage, resolved_backend: BackendProtocol
+    ) -> tuple[ToolMessage, bool]:
+        if self._sandbox.has_sandbox():
+            return await super()._aprocess_large_message(message, resolved_backend)
+        limit = self._tool_token_limit_before_evict
+        content = _extract_text_from_message(message)
+        if not limit or len(content) <= NUM_CHARS_PER_TOKEN * limit:
+            return message, False
+        try:
+            processed, evicted = await super()._aprocess_large_message(message, resolved_backend)
+            if evicted:
+                return processed, True
+            logger.warning("Could not offload a box-less tool result; truncating content")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Could not offload a box-less tool result; truncating content", error=exc)
+        return message.model_copy(
+            update={
+                "content": content[: NUM_CHARS_PER_TOKEN * limit]
+                + "\n[Tool result truncated: storage unavailable.]"
+            }
+        ), False
+
+
 class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     """Lazy sandbox backend with frozen per-instance ``configurable``.
 
@@ -1946,6 +1994,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         return _LazyManagedSandboxBackend(
             self._source, resolve_runtime_configurable(runtime), runtime
         )
+
+    def has_sandbox(self) -> bool:
+        """Whether this run selected a sandbox, without opening it."""
+        from managed_deepagents.sandbox import selected_for  # noqa: PLC0415
+
+        runtime = self._runtime if self._runtime is not None else _ambient_runtime()
+        return selected_for(self._source.sandbox, runtime) is not None
 
     def _sandbox(self) -> SandboxDefinition:
         """The box of the run this backend acts for, as ``_openswe_select`` picks it."""
@@ -2052,13 +2107,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         return self._call(lambda backend: backend.write(file_path, content))
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        from managed_deepagents.sandbox import selected_for  # noqa: PLC0415
-
-        runtime = self._runtime if self._runtime is not None else _ambient_runtime()
-        if (
-            file_path.startswith("/large_tool_results/")
-            and selected_for(self._source.sandbox, runtime) is None
-        ):
+        if file_path.startswith("/large_tool_results/") and not self.has_sandbox():
             return await StateBackend().awrite(file_path, content)
         return await self._acall(lambda backend: backend.awrite(file_path, content))
 
