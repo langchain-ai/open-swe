@@ -152,10 +152,8 @@ def _discovery_slots() -> asyncio.Semaphore:
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     try:
-        async with _discovery_slots():
-            return await asyncio.wait_for(
-                _discover_tools(record, namespace), timeout=_TIMEOUT_SECONDS
-            )
+        async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
+            return await _discover_tools(record, namespace)
     except Exception as exc:
         # The shared cache logs refresh failures, so redact before handing errors to it.
         raise ValueError(_discovery_error(exc)) from None

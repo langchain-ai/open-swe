@@ -88,6 +88,17 @@ async def test_discovery_caps_active_requests(monkeypatch):
     assert peak == 8
 
 
+async def test_discovery_deadline_includes_waiting_for_capacity(monkeypatch):
+    monkeypatch.setattr(runtime, "_DISCOVERY_CONCURRENCY", 1)
+    monkeypatch.setattr(runtime, "_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[SEARCH]))
+    record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
+    async with runtime._discovery_slots():
+        with pytest.raises(ValueError, match="discovery timed out"):
+            await asyncio.wait_for(runtime.discover_tools(record, ("ns",)), 1)
+    assert await runtime.discover_tools(record, ("ns",)) == [SEARCH]
+
+
 @pytest.mark.parametrize(
     ("raised", "message"),
     [
