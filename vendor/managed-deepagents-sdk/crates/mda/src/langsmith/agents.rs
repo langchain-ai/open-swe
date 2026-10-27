@@ -17,7 +17,7 @@ impl Client {
         deployment_id: &str,
     ) -> Result<Option<String>> {
         let Some(page) = self.request_optional(
-            self.platform_base()?,
+            self.platform_base(),
             Method::GET,
             "/api/v1/agents",
             &[
@@ -49,7 +49,7 @@ impl Client {
     /// Tracing project of `agent_id`'s LOCAL environment, creating the agent
     /// or the environment when missing.
     pub(crate) fn local_environment_project(&self, agent_id: &str) -> Result<String> {
-        let base = self.platform_base()?;
+        let base = self.platform_base();
         let path = format!("/api/v1/agents/{agent_id}/environments");
         let local = json!({ "environment": "LOCAL" });
         let environment =
@@ -103,10 +103,7 @@ mod tests {
                 })
                 .collect()
         });
-        (
-            Client::new_with_platform(&url, Some(&url), "key", Some("tenant".into())).unwrap(),
-            handle,
-        )
+        (Client::for_test(&url), handle)
     }
 
     #[test]

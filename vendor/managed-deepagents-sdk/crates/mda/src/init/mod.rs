@@ -50,9 +50,6 @@ pub struct Blueprint {
     pub language: Language,
     /// System prompt for `instructions.md`. The starter prompt when absent.
     pub instructions: Option<String>,
-    /// Whether to declare managed user identity. Starter projects enable it
-    /// because an identity declaration is required for deployment.
-    pub identity: bool,
     /// Model the agent is defined with. The starter model when absent.
     pub model: Option<String>,
     /// Write the managed sandbox declaration.
@@ -72,7 +69,6 @@ impl Blueprint {
             name: name.into(),
             language,
             instructions: None,
-            identity: true,
             model: None,
             sandbox: true,
             memory: None,
@@ -122,8 +118,6 @@ impl MemoryChoice {
 /// Outcome of creating a new project, returned for reporting.
 #[derive(Debug)]
 pub struct InitSummary {
-    /// Language selected for the new project.
-    pub language: Language,
     /// Directory the project was created in.
     pub root: PathBuf,
     /// Files created, in creation order.
@@ -401,9 +395,7 @@ mod tests {
     fn scaffold_creates_typescript_project() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("myAgent");
-        let summary = scaffold(&dir, "myAgent", &blueprint(Language::TypeScript), None).unwrap();
-
-        assert_eq!(summary.language, Language::TypeScript);
+        scaffold(&dir, "myAgent", &blueprint(Language::TypeScript), None).unwrap();
 
         let agent = fs::read_to_string(dir.join("agent.ts")).unwrap();
         assert!(agent.contains("defineDeepAgent"));
@@ -469,9 +461,7 @@ mod tests {
     fn scaffold_creates_python_project() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("myAgent");
-        let summary = scaffold(&dir, "myAgent", &blueprint(Language::Python), None).unwrap();
-
-        assert_eq!(summary.language, Language::Python);
+        scaffold(&dir, "myAgent", &blueprint(Language::Python), None).unwrap();
 
         let agent = fs::read_to_string(dir.join("agent.py")).unwrap();
         assert!(agent.contains("define_deep_agent"));

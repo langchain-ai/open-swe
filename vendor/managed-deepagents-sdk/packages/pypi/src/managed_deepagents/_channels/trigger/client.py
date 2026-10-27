@@ -13,6 +13,10 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal, Protocol, TypedDict
 
+from pydantic import TypeAdapter, ValidationError
+
+from managed_deepagents._channels.trigger.types import TriggerStartedThread
+
 if TYPE_CHECKING:
     from http.client import HTTPMessage
     from typing import IO
@@ -166,11 +170,21 @@ class TriggerClient(TriggerClientLike):
             raise TriggerClientError(operation) from None
 
 
+_THREAD = TypeAdapter(TriggerStartedThread)
+
+
 def _parse_action_response(response: object) -> TriggerChannelActionResponse:
     response_id = response.get("id") if isinstance(response, dict) else None
     if not isinstance(response_id, str) or not response_id.strip():
         raise TriggerClientError("actions")
-    return {"id": response_id}
+    parsed: TriggerChannelActionResponse = {"id": response_id}
+    try:
+        thread = _THREAD.validate_python(response, strict=True)
+    except ValidationError:
+        return parsed
+    if thread["channel_id"].strip() and thread["source_thread_key"].strip():
+        parsed["thread"] = thread
+    return parsed
 
 
 def create_trigger_client(
