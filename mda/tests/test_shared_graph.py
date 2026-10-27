@@ -497,9 +497,9 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
 async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, browsers: Browsers, tmp_path: Path
 ) -> None:
-    """The coding agent gets the browser's tools and instructions but no browser_handoff,
-    and its first browse reports the browser it named when the run started; the
-    reviewer has no browser."""
+    """The coding agent gets the browser's tools, recording included, and its instructions
+    but no browser_handoff, and its first browse reports the browser it named when the
+    run started; the reviewer has no browser."""
     offered: dict[str, set[str]] = {}
     instructed: dict[str, bool] = {}
 
@@ -539,7 +539,7 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     await _run(store, "browsed", _context("agent", "agent", _catalog("lookup", "grant")))
     await asyncio.sleep(0)
 
-    tools = {"browser_run", "browser_snapshot", "browser_screenshot"}
+    tools = {"browser_run", "browser_snapshot", "browser_screenshot", "browser_record"}
     assert tools <= offered["agent"] and "browser_handoff" not in offered["agent"]
     assert not {name for name in offered["reviewer"] if name.startswith("browser_")}
     assert instructed == {"agent": True, "reviewer": False}
