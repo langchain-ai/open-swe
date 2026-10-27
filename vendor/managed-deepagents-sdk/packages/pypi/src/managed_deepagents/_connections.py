@@ -461,6 +461,20 @@ def resolve_agent_auth_context(
     )
 
 
+def resolve_external_principal_id(identity: ResolvePrincipalIdentity) -> str:
+    """Resolve an external identity to its Agent Auth principal with the deployment's key."""
+    config = _resolve_agent_auth_config(None)
+    agent_auth = AgentAuth(
+        AgentAuthContext(
+            base_url=config.base_url,
+            principal_id="",
+            api_key=config.api_key,
+            workspace_id=config.workspace_id,
+        )
+    )
+    return agent_auth.resolve_principal(identity)
+
+
 CHANNEL_THREAD_USER_CONNECTION_ERROR = (
     "user-owned connections are unavailable when resuming a channel's "
     "conversation from outside that channel: it holds content from outside "

@@ -569,12 +569,13 @@ it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
 `team_id` is their own workspace: in a Slack Connect channel, someone from
 another organization keeps theirs. It is `None` rather than guessed when
 Trigger Server names no one, such as an older Trigger Server or a bot's
-message.
+message, or when the check below fails.
 
-> **Not yet an identity check.** Trigger Server sends `actor` as a plain
-> field of the delivery, and MDA doesn't yet verify the key that delivery
-> comes with, only that it has one. Use `actor` to address or describe the
-> sender, not to decide what they may do or which of your accounts they are.
+> **Checked against the signed principal.** Trigger Server sends `actor` as
+> a plain field of the delivery. MDA asks Agent Auth for this user's principal
+> in the app's workspace and keeps `actor` only when it matches the principal
+> Agent Auth signed for the delivery. `id` is checked this way. A Slack Connect
+> guest's own team is not.
 
 Every channel's events carry `actor` in this shape, a `ChannelActor`
 (`SlackActor`, `GitHubActor` or `LinearActor`): `provider` and `id`, plus the

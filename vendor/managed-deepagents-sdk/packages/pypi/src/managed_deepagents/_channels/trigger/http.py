@@ -24,7 +24,11 @@ from typing import (
     cast,
 )
 
-from managed_deepagents._agent_auth_http import missing_workspace_connection_slug
+from managed_deepagents._agent_auth_http import (
+    CredentialStoreError,
+    missing_workspace_connection_slug,
+)
+from managed_deepagents._channels.actor import SlackActor
 from managed_deepagents._channels.binding import binding_with_messages
 from managed_deepagents._channels.context import (
     normalized_user_prompt_response,
@@ -76,6 +80,7 @@ from managed_deepagents._channels.trigger.types import (
     parse_trigger_channel_event,
     trigger_event_actor,
 )
+from managed_deepagents._connections import resolve_external_principal_id
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
 from managed_deepagents._ingress_runs import lookup_status, rejected_as_busy
 from managed_deepagents._log import logger
@@ -85,6 +90,7 @@ from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 if TYPE_CHECKING:
     from langgraph_sdk.schema import Interrupt
 
+    from managed_deepagents._agent_auth import ResolvePrincipalIdentity
     from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http.types import (
@@ -501,6 +507,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
     identity_context_issuer: str | None = None,
+    resolve_principal: Callable[[ResolvePrincipalIdentity], str] | None = None,
 ) -> object:
     """Validate a Trigger message and enqueue its Agent Server run."""
     # TODO: Validate Trigger's platform-signed x-service-key JWT (not presence).
@@ -538,9 +545,6 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             logger.safe_error_label(error),
         )
         return _json_response({"error": "invalid channel identity_context"}, status_code=400)
-    # Who the delivery came from, as Trigger Server names them; never logged.
-    # Only as trusted as the service key, which is checked for presence alone.
-    actor = trigger_event_actor(event)
 
     set_log_attributes(
         {
@@ -566,6 +570,11 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             cancel_runs=cancel_runs,
             conversation_thread=conversation_thread,
         )
+
+    # Who the delivery came from; never logged.
+    actor = await _verified_event_actor(
+        event, user_id, resolve_principal or resolve_external_principal_id
+    )
 
     try:
         client = (
@@ -1260,6 +1269,47 @@ async def _principal_for_event(
         key=identity_context_key,
         issuer=identity_context_issuer,
     )
+
+
+async def _verified_event_actor(
+    event: TriggerChannelEvent,
+    principal_id: str,
+    resolve_principal: Callable[[ResolvePrincipalIdentity], str],
+) -> ChannelActor | None:
+    """The delivery's actor when Agent Auth keys it on the signed principal.
+
+    Trigger Server does not sign ``actor``, so one that does not match is dropped.
+    """
+    actor = trigger_event_actor(event)
+    team = _slack_install_team(event["source_thread_key"])
+    if not isinstance(actor, SlackActor) or team is None:
+        return None
+    identity: ResolvePrincipalIdentity = {"provider": "slack", "issuer": team, "subject": actor.id}
+    try:
+        resolved = await asyncio.to_thread(resolve_principal, identity)
+    except (CredentialStoreError, OSError, ValueError) as error:
+        logger.warning("channel actor unverified (%s)", logger.safe_error_label(error))
+        return None
+    if _same_uuid(resolved, principal_id):
+        return actor
+    logger.warning("channel actor does not match identity_context")
+    return None
+
+
+def _slack_install_team(source_thread_key: str) -> str | None:
+    """The workspace the Slack app is installed in, which keys its users' principals."""
+    match source_thread_key.split(":"):
+        case ["slack", "v1", _app, team, *_] if team.strip():
+            return team
+        case _:
+            return None
+
+
+def _same_uuid(value: str, expected: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == expected
+    except ValueError:
+        return False
 
 
 def _resolve_assistant_id(override: str | None) -> str:
