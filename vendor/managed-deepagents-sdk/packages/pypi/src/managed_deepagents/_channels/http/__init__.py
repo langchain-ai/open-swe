@@ -81,6 +81,9 @@ class HttpChannel(Channel):
         self.messaging = self._build_messaging if post is not None else None
         #: Internal: the notice a paused run posts as it ends (GitHub, Linear).
         self.paused_notice: PausedNotice | None = None
+        #: Internal: the ``mda/`` agent connections the channel's setup
+        #: provides, such as ``mda/github-token``, so deploy knows them.
+        self.agent_connections: list[str] = []
 
     def _build_messaging(self, _env: Mapping[str, str]) -> _HttpReplyTransport | None:
         if self.post is None:
@@ -93,7 +96,7 @@ class HttpChannel(Channel):
         return await handle_http_request(ctx, self)
 
     def requirements(self, name: str) -> ChannelManifest:
-        return {
+        manifest: ChannelManifest = {
             "name": name,
             "provider": self.kind,
             "eventsPath": f"/channels/{name}/events",
@@ -102,6 +105,9 @@ class HttpChannel(Channel):
             "requiredEnv": [],
             "providerConfig": self.provider_config,
         }
+        if self.agent_connections:
+            manifest["agentConnections"] = list(self.agent_connections)
+        return manifest
 
 
 class _HttpReplyTransport:

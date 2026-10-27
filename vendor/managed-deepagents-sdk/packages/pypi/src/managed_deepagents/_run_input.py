@@ -11,6 +11,7 @@ from langgraph._internal._constants import CONFIG_KEY_CHECKPOINTER, CONFIG_KEY_R
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import StateSnapshot
 from langsmith import get_tracing_context, tracing_context
 
 from managed_deepagents._channels.binding import (
@@ -19,7 +20,12 @@ from managed_deepagents._channels.binding import (
     _current_routing,
     resolve_channel_binding,
 )
-from managed_deepagents._channels.delivery import INPUT_SOURCE, deliver_run_result
+from managed_deepagents._channels.delivery import (
+    INPUT_SOURCE,
+    deliver_run_result,
+    delivers_result,
+)
+from managed_deepagents._channels.run_output import RunOutput, _current_output
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents._managed_thread import RunThread, _current_thread, build_run_thread
 from managed_deepagents._memory.async_util import await_if_needed
@@ -59,7 +65,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     """Remove ingress transport before native context conversion, on every execution.
 
     Each step sees the run's channel and thread; when the stream ends, the run's
-    result goes to its thread origin.
+    result goes to its thread origin, or a scheduled run's ``deliver_to``.
     """
 
     replicate_traces: bool = True
@@ -94,17 +100,18 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         thread = run_thread(binding, self.config, config)
         merged = _merged(self.config, config)
         log = run_log_context(self.config, config)
+        output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
         iterator = super().stream(input, config, context=context, **kwargs)
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread)
+                tokens = _enter_step(binding, routing, thread, output)
                 log_token = enter_log_context(log)
                 try:
                     with self._tracing(config):
                         item = next(iterator)
                 except StopIteration:
-                    self._deliver(thread, merged)
+                    self._deliver(thread, merged, routing, output)
                     return
                 finally:
                     exit_log_context(log_token)
@@ -130,17 +137,18 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         thread = run_thread(binding, self.config, config)
         merged = _merged(self.config, config)
         log = run_log_context(self.config, config)
+        output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
         iterator = super().astream(input, config, context=context, **kwargs)
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread)
+                tokens = _enter_step(binding, routing, thread, output)
                 log_token = enter_log_context(log)
                 try:
                     with self._tracing(config):
                         item = await anext(iterator)
                 except StopAsyncIteration:
-                    await self._adeliver(thread, merged)
+                    await self._adeliver(thread, merged, routing, output)
                     return
                 finally:
                     exit_log_context(log_token)
@@ -154,9 +162,18 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             finally:
                 exit_log_context(log_token)
 
-    def _deliver(self, thread: RunThread, merged: RunnableConfig) -> None:
-        """Send the finished stream's result to the run's thread origin."""
-        if thread.origin is None or not self._keeps_state(merged):
+    def _deliver(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput | None,
+    ) -> None:
+        """Send the finished stream's result to the run's thread origin or ``deliver_to``."""
+        if not delivers_result(thread, merged, routing):
+            return
+        if output is not None:
+            await_if_needed(self._deliver_output(thread, merged, routing, output))
             return
         # The run may have started from a named checkpoint; read the thread's latest.
         latest = _history_config(merged)
@@ -164,31 +181,76 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         boundary = next(iter(history), None)
         await_if_needed(
             deliver_run_result(
-                thread.origin,
+                thread,
                 merged,
                 self.get_state(latest),
                 boundary,
+                routing=routing,
                 subagent=_lead_thread_id(self.config, merged) is not None,
             )
         )
 
-    async def _adeliver(self, thread: RunThread, merged: RunnableConfig) -> None:
-        if thread.origin is None or not self._keeps_state(merged):
+    async def _adeliver(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput | None,
+    ) -> None:
+        if not delivers_result(thread, merged, routing):
+            return
+        if output is not None:
+            await self._deliver_output(thread, merged, routing, output)
             return
         latest = _history_config(merged)
         boundary = None
         async for snapshot in self.aget_state_history(latest, filter=_INPUT, limit=1):
             boundary = snapshot
         await deliver_run_result(
-            thread.origin,
+            thread,
             merged,
             await self.aget_state(latest),
             boundary,
+            routing=routing,
             subagent=_lead_thread_id(self.config, merged) is not None,
         )
 
+    async def _deliver_output(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput,
+    ) -> None:
+        """Deliver a stateless scheduled run's answer to its ``deliver_to``.
+
+        It has no thread to read back, so its answer is what its agent ended
+        with. A stateless run with a thread origin posts nothing, as before.
+        """
+        if thread.origin is not None or output.messages is None:
+            return
+        final = StateSnapshot(
+            values={"messages": output.messages},
+            next=(),
+            config=merged,
+            metadata=None,
+            created_at=None,
+            parent_config=None,
+            tasks=(),
+            interrupts=(),
+        )
+        await deliver_run_result(
+            thread,
+            merged,
+            final,
+            None,
+            routing=routing,
+            subagent=_lead_thread_id(self.config, merged) is not None,
+            stateless=True,
+        )
+
     def _keeps_state(self, config: RunnableConfig) -> bool:
-        """Whether the run's state can be read back; Agent Server runs always keep it."""
+        """Whether the run's state can be read back; a stateless run's cannot."""
         checkpointer = config["configurable"].get(CONFIG_KEY_CHECKPOINTER, self.checkpointer)
         return isinstance(checkpointer, BaseCheckpointSaver)
 
@@ -197,22 +259,30 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
 _INPUT = {"source": INPUT_SOURCE}
 
 _StepTokens = tuple[
-    Token[ChannelBinding | None], Token[Mapping[str, object] | None], Token[RunThread | None]
+    Token[ChannelBinding | None],
+    Token[Mapping[str, object] | None],
+    Token[RunThread | None],
+    Token[RunOutput | None],
 ]
 
 
 def _enter_step(
-    binding: ChannelBinding | None, routing: Mapping[str, object] | None, thread: RunThread
+    binding: ChannelBinding | None,
+    routing: Mapping[str, object] | None,
+    thread: RunThread,
+    output: RunOutput | None,
 ) -> _StepTokens:
     return (
         _current_channel.set(binding),
         _current_routing.set(routing),
         _current_thread.set(thread),
+        _current_output.set(output),
     )
 
 
 def _exit_step(tokens: _StepTokens) -> None:
-    channel, routing, thread = tokens
+    channel, routing, thread, output = tokens
+    _current_output.reset(output)
     _current_thread.reset(thread)
     _current_routing.reset(routing)
     _current_channel.reset(channel)

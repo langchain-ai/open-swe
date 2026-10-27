@@ -395,8 +395,10 @@ fn run_session(
         client,
         workspace_id.as_deref(),
         &connector_requirements,
+        &channel_requirements,
         &mcp_connections,
     )?;
+    warn_unprovided_reserved_connections(&connector_requirements, &channel_requirements)?;
     let channel_setup = ChannelSetup::prepare(
         &channel_requirements,
         opts.wait,
@@ -1797,6 +1799,7 @@ pub(crate) fn ensure_workspace_connections(
     client: &langsmith::Client,
     workspace_id: Option<&str>,
     connector_requirements: &compile::ConnectorRequirements,
+    channel_requirements: &compile::ChannelRequirements,
     mcp_connections: &[compile::McpConnectionEntry],
 ) -> Result<()> {
     let referenced = compile::referenced_connection_slugs(connector_requirements);
@@ -1816,9 +1819,13 @@ pub(crate) fn ensure_workspace_connections(
         .into_iter()
         .map(|connection| (connection.slug.clone(), connection))
         .collect();
-    for mcp in
-        missing_user_owned_mcp_connections(connector_requirements, &existing, mcp_connections)?
-    {
+    let provided = compile::channel_provided_connections(channel_requirements);
+    for mcp in missing_user_owned_mcp_connections(
+        connector_requirements,
+        &provided,
+        &existing,
+        mcp_connections,
+    )? {
         let created = connection::create_discovered_mcp_connection(client, &mcp.slug, &mcp.url)?;
         log::success(format!(
             "Created MCP connection '{}' through OAuth discovery",
@@ -1826,7 +1833,25 @@ pub(crate) fn ensure_workspace_connections(
         ))?;
         existing.insert(mcp.slug.clone(), created);
     }
-    validate_workspace_connections_for_manifest(connector_requirements, &existing)
+    validate_workspace_connections_for_manifest(connector_requirements, &provided, &existing)
+}
+
+/// Warn about `mda/` agent connections the project reads that none of its
+/// channels provides: deploy goes on, but reading one fails at runtime.
+pub(crate) fn warn_unprovided_reserved_connections(
+    connector_requirements: &compile::ConnectorRequirements,
+    channel_requirements: &compile::ChannelRequirements,
+) -> Result<()> {
+    for slug in
+        compile::unprovided_reserved_connections(connector_requirements, channel_requirements)
+    {
+        log::warning(format!(
+            "'{slug}' is reserved for a channel's app, but no channel in this project provides \
+             it, so reading it will fail. Add the channel that provides it, or use another \
+             connection."
+        ))?;
+    }
+    Ok(())
 }
 
 /// Select only missing, uniquely declared user-owned MCP connections.
@@ -1835,10 +1860,11 @@ pub(crate) fn ensure_workspace_connections(
 /// ambiguous MCP slug fails before deploy creates any remote resources.
 fn missing_user_owned_mcp_connections<'a>(
     requirements: &compile::ConnectorRequirements,
+    provided: &BTreeMap<String, String>,
     existing: &BTreeMap<String, ConnectionSummary>,
     mcp_connections: &'a [compile::McpConnectionEntry],
 ) -> Result<Vec<&'a compile::McpConnectionEntry>> {
-    validate_connection_ownership(requirements)?;
+    validate_connection_ownership(requirements, provided)?;
     let mut missing = Vec::new();
     for slug in compile::user_connections_from_connector_requirements(requirements) {
         if existing.contains_key(&slug) {
@@ -1875,9 +1901,10 @@ fn missing_user_owned_mcp_connections<'a>(
 /// report it on a listed row, and runtime ownership lives on credentials.
 pub(crate) fn validate_workspace_connections_for_manifest(
     requirements: &compile::ConnectorRequirements,
+    provided: &BTreeMap<String, String>,
     existing: &BTreeMap<String, ConnectionSummary>,
 ) -> Result<()> {
-    validate_connection_ownership(requirements)?;
+    validate_connection_ownership(requirements, provided)?;
     let agent_slugs = compile::agent_connections_from_connector_requirements(requirements);
     let user_slugs = compile::user_connections_from_connector_requirements(requirements);
 
@@ -1903,12 +1930,16 @@ pub(crate) fn validate_workspace_connections_for_manifest(
     )
 }
 
-fn validate_connection_ownership(requirements: &compile::ConnectorRequirements) -> Result<()> {
+/// `provided` is what [`compile::channel_provided_connections`] returns.
+fn validate_connection_ownership(
+    requirements: &compile::ConnectorRequirements,
+    provided: &BTreeMap<String, String>,
+) -> Result<()> {
     let agent_slugs = compile::agent_connections_from_connector_requirements(requirements);
     let user_slugs = compile::user_connections_from_connector_requirements(requirements);
     if let Some(error) = user_slugs
         .iter()
-        .find_map(|slug| compile::reserved_user_connection_error(slug))
+        .find_map(|slug| compile::reserved_user_connection_error(slug, provided))
     {
         bail!(error);
     }
@@ -3431,8 +3462,13 @@ mod tests {
             BTreeMap::from([("mcp".to_string(), json!({ "userConnections": ["notion"] }))]);
         let entries = [mcp_connection("notion", "notion")];
 
-        let selected =
-            missing_user_owned_mcp_connections(&requirements, &BTreeMap::new(), &entries).unwrap();
+        let selected = missing_user_owned_mcp_connections(
+            &requirements,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &entries,
+        )
+        .unwrap();
 
         assert_eq!(selected, vec![&entries[0]]);
     }
@@ -3444,8 +3480,13 @@ mod tests {
         let existing = BTreeMap::from([("notion".into(), oauth_connection_row("notion"))]);
         let entries = [mcp_connection("notion", "notion")];
 
-        let selected =
-            missing_user_owned_mcp_connections(&requirements, &existing, &entries).unwrap();
+        let selected = missing_user_owned_mcp_connections(
+            &requirements,
+            &BTreeMap::new(),
+            &existing,
+            &entries,
+        )
+        .unwrap();
 
         assert!(selected.is_empty());
     }
@@ -3459,9 +3500,14 @@ mod tests {
             mcp_connection("shared", "linear"),
         ];
 
-        let error = missing_user_owned_mcp_connections(&requirements, &BTreeMap::new(), &entries)
-            .unwrap_err()
-            .to_string();
+        let error = missing_user_owned_mcp_connections(
+            &requirements,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &entries,
+        )
+        .unwrap_err()
+        .to_string();
 
         assert!(error.contains("mcp::notion"), "{error}");
         assert!(error.contains("mcp::linear"), "{error}");
@@ -3473,8 +3519,13 @@ mod tests {
         let requirements =
             BTreeMap::from([("other".to_string(), json!({ "userConnections": ["acme"] }))]);
 
-        let selected =
-            missing_user_owned_mcp_connections(&requirements, &BTreeMap::new(), &[]).unwrap();
+        let selected = missing_user_owned_mcp_connections(
+            &requirements,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+        )
+        .unwrap();
 
         assert!(selected.is_empty());
     }
@@ -3485,7 +3536,12 @@ mod tests {
             BTreeMap::from([("mcp".to_string(), json!({ "userConnections": ["notion"] }))]);
         let existing = BTreeMap::from([("notion".into(), oauth_connection_row("notion"))]);
 
-        assert!(validate_workspace_connections_for_manifest(&requirements, &existing).is_ok());
+        assert!(validate_workspace_connections_for_manifest(
+            &requirements,
+            &BTreeMap::new(),
+            &existing
+        )
+        .is_ok());
     }
 
     #[test]
@@ -3502,7 +3558,12 @@ mod tests {
             ("notion".into(), connection_row("notion", "user")),
         ]);
 
-        assert!(validate_workspace_connections_for_manifest(&requirements, &existing).is_ok());
+        assert!(validate_workspace_connections_for_manifest(
+            &requirements,
+            &BTreeMap::new(),
+            &existing
+        )
+        .is_ok());
     }
 
     #[test]
@@ -3520,7 +3581,8 @@ mod tests {
         ]);
 
         let error =
-            validate_workspace_connections_for_manifest(&requirements, &existing).unwrap_err();
+            validate_workspace_connections_for_manifest(&requirements, &BTreeMap::new(), &existing)
+                .unwrap_err();
 
         assert!(error.to_string().contains("'tavily'"), "{error}");
         assert!(error.to_string().contains("agent-owned"), "{error}");
@@ -3540,8 +3602,12 @@ mod tests {
             }),
         )]);
 
-        let error = validate_workspace_connections_for_manifest(&requirements, &BTreeMap::new())
-            .unwrap_err();
+        let error = validate_workspace_connections_for_manifest(
+            &requirements,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -3558,6 +3624,24 @@ mod tests {
     }
 
     #[test]
+    fn connection_validation_names_the_channel_that_provides_a_reserved_connection() {
+        let requirements = BTreeMap::from([(
+            "mcp".to_string(),
+            json!({ "userConnections": ["mda/github-token"] }),
+        )]);
+        let provided = BTreeMap::from([("mda/github-token".to_string(), "github".to_string())]);
+
+        let error =
+            validate_workspace_connections_for_manifest(&requirements, &provided, &BTreeMap::new())
+                .unwrap_err();
+
+        assert!(
+            error.to_string().contains("the github channel's app"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn connection_validation_rejects_ambiguous_manifest_ownership() {
         let requirements = BTreeMap::from([(
             "mcp".to_string(),
@@ -3569,7 +3653,8 @@ mod tests {
         let existing = BTreeMap::new();
 
         let error =
-            validate_workspace_connections_for_manifest(&requirements, &existing).unwrap_err();
+            validate_workspace_connections_for_manifest(&requirements, &BTreeMap::new(), &existing)
+                .unwrap_err();
 
         assert!(error.to_string().contains("'shared'"), "{error}");
         assert!(

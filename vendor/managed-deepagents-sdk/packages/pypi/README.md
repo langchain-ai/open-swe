@@ -400,6 +400,20 @@ Supply only the matching payload. Native JSON has no extra provider or payload
 wrapper. The channel helper has no `address`, `update`, or destination override.
 A post sends an additional message; the normal final agent reply remains automatic.
 
+On Slack, `post(message, new_thread=True)` posts at top level in the same
+conversation instead, which starts a new Slack thread. Replies in it continue a
+thread of their own, also without a mention in thread mode. Add `run=` to start
+a run there at once, with a channel handler's run input, as the current run's
+person. The result also has `thread_id` and, on Slack, the message `url`:
+
+```python
+posted = await origin.channel.post(
+    {"type": "content", "content": "Haiku about mango"},
+    new_thread=True,
+    run={"messages": [*history, HumanMessage("Go on.")]},
+)
+```
+
 When a run with a thread origin ends, MDA posts the run's answers to that
 origin. A Studio resume of a channel thread answers in the channel, and the
 run that a finished async task starts posts only its new answers. A run that
@@ -1503,8 +1517,10 @@ current thread. When a schedule is created in a thread with a channel origin,
 such as a Slack thread, each run posts its final answer to that channel. A
 same-thread schedule posts to the thread's origin when it runs, so it follows
 the thread's latest channel conversation. A new-thread schedule posts a new
-message in the channel conversation it was created from. Runtime schedules stay
-when you deploy again.
+message in the channel conversation it was created from. On Slack, that message
+starts a new Slack thread, with the run's answer or, when it waits on a
+decision, with a notice. Replies and decisions in that Slack thread continue the
+run's thread. Runtime schedules stay when you deploy again.
 
 A user schedule can run as another person in the thread. Pass one of
 `runtime.thread.participants` as `run_as`. The schedule still belongs to you:

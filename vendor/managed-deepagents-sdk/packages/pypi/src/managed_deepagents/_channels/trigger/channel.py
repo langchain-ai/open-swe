@@ -15,6 +15,7 @@ from managed_deepagents._channels.reactions import (
     ReactionChoice,
     is_emoji_name,
 )
+from managed_deepagents._channels.slack_connections import SLACK_BOT_TOKEN_SLUG
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor
@@ -220,6 +221,8 @@ class TriggerSlackChannel(Channel):
             "autoReply": self.reply != "none",
             "requiredPermissions": [],
             "requiredEnv": [],
+            # Deploy provides the app's bot token at this name.
+            "agentConnections": [SLACK_BOT_TOKEN_SLUG],
             "providerConfig": provider_config,
         }
 
@@ -297,7 +300,10 @@ async def _run_handler(
     messages, as to a message's own.
     """
     from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
-    from managed_deepagents._channels.run_input import normalize_run_input  # noqa: PLC0415
+    from managed_deepagents._channels.run_input import (  # noqa: PLC0415
+        InvalidRunInput,
+        normalize_run_input,
+    )
     from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
         with_slack_rich_content,
     )
@@ -311,6 +317,10 @@ async def _run_handler(
         return TriggerMessageDecision(outcome.type)
     try:
         run_input = normalize_run_input(outcome.input)
+    except InvalidRunInput as error:
+        # MDA's own reason, bounded, unlike a raised exception's message.
+        logger.error("slack handler returned invalid run input: %s", error.reason)
+        return TriggerMessageDecision("failed")
     except TypeError as error:
         logger.error(
             "slack handler returned invalid run input (%s)", logger.safe_error_label(error)

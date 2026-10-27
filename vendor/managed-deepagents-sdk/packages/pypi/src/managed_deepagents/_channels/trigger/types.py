@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Literal, TypeAlias, TypedDict, cast
+from typing import Annotated, Literal, NotRequired, TypeAlias, TypedDict, cast
 from uuid import UUID
 
 from langgraph_sdk.schema import Interrupt
@@ -18,6 +18,9 @@ from pydantic import (
 )
 
 from managed_deepagents._channels.actor import ChannelActor, SlackActor
+from managed_deepagents._channels.types import (
+    JsonValue,  # noqa: TC001 - pydantic reads it at runtime
+)
 
 TRIGGER_SERVICE_KEY_HEADER = "x-service-key"
 
@@ -176,6 +179,9 @@ class TriggerChannelPostAction(_TriggerChannelActionBase):
 
     type: Literal["post"]
     message: TriggerChannelActionMessage
+    #: On a post that starts a thread, Trigger runs later replies in it, and
+    #: their input starts after this post.
+    follow_thread: NotRequired[bool]
 
 
 class TriggerChannelReactAction(_TriggerChannelActionBase):
@@ -188,8 +194,18 @@ class TriggerChannelReactAction(_TriggerChannelActionBase):
 TriggerChannelActionRequest = TriggerChannelPostAction | TriggerChannelReactAction
 
 
+class TriggerStartedThread(TypedDict):
+    """The Trigger target of a thread a top-level post started."""
+
+    channel_id: str
+    address: dict[str, JsonValue]
+    source_thread_key: str
+
+
 class TriggerChannelActionResponse(TypedDict):
     id: str
+    #: The thread the post started, when it was a top-level post.
+    thread: NotRequired[TriggerStartedThread]
 
 
 TriggerChannelRuntimeEventType = Literal[
@@ -463,6 +479,7 @@ __all__ = [
     "TriggerChannelSlackUserPromptResponseEvent",
     "TriggerChannelUserPromptResponseEvent",
     "TriggerChannelUserPromptResponseInteraction",
+    "TriggerStartedThread",
     "parse_trigger_channel_event",
     "trigger_event_actor",
 ]

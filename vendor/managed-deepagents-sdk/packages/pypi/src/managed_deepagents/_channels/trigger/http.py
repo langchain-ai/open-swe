@@ -50,6 +50,7 @@ from managed_deepagents._channels.trigger.identity_context import (
 )
 from managed_deepagents._channels.trigger.ingress import (
     cancel_ingress_thread_runs,
+    conversation_thread_id,
     ingress_resume_target,
     ingress_thread_exists,
     ingress_thread_interrupts,
@@ -261,6 +262,16 @@ class CancelThreadRunsFn(Protocol):
     ) -> int: ...
 
 
+class ConversationThreadFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        source_provider: str,
+        source_thread_key: str,
+        user_id: str,
+    ) -> str: ...
+
+
 def _assert_never(_event: Never) -> NoReturn:
     """Reject an unsupported event at the provider boundary."""
     raise ValueError("unsupported channel event")
@@ -344,6 +355,7 @@ def _interrupt_correlation_id(value: object) -> str | None:
 async def _may_start_in(
     event: TriggerChannelMessageEvent,
     *,
+    thread_id: str,
     user_id: str,
     source_provider: str,
     only_continues_thread: OnlyContinuesThreadFn | None,
@@ -356,7 +368,7 @@ async def _may_start_in(
         return True
     try:
         return await (thread_exists or ingress_thread_exists)(
-            thread_id=_thread_id(event["source_thread_key"]),
+            thread_id=thread_id,
             source_provider=source_provider,
             source_thread_key=event["source_thread_key"],
             user_id=user_id,
@@ -372,6 +384,7 @@ async def _may_start_in(
 async def _start_event_run(
     *,
     event: TriggerChannelRunEvent,
+    thread_id: str,
     assistant_id: str,
     source_provider: str,
     channel_name: str,
@@ -389,7 +402,6 @@ async def _start_event_run(
     A prompt response resumes ``answered_interrupt``, the interrupt it answers,
     and otherwise starts a turn, as a message does.
     """
-    thread_id = _thread_id(event["source_thread_key"])
     context: dict[str, object] = {}
     binding = trigger_channel_binding(provider=source_provider, name=channel_name, event=event)
     if event["type"] == "user_prompt_response" and answered_interrupt is not None:
@@ -475,6 +487,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     thread_exists: ThreadExistsFn | None = None,
     newer_run: NewerRunFn | None = None,
     resume_target: ResumeTargetFn | None = None,
+    conversation_thread: ConversationThreadFn | None = None,
     observe_agent: ObserveAgentFn | None = None,
     cancel_runs: CancelThreadRunsFn | None = None,
     trigger_client: TriggerClientLike | None = None,
@@ -551,6 +564,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             source_provider=source_provider,
             user_id=user_id,
             cancel_runs=cancel_runs,
+            conversation_thread=conversation_thread,
         )
 
     try:
@@ -582,8 +596,17 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         logger.error("%s is not configured", ASSISTANT_ID_ENV)
         return _json_response({"error": "channel runtime is not configured"}, status_code=500)
 
+    try:
+        thread_id = await (conversation_thread or conversation_thread_id)(
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+        )
+    except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
+        logger.error("channel thread could not be found (%s)", logger.safe_error_label(error))
+        return _start_failed_response()
     thread: TriggerChannelThread = {
-        "id": _thread_id(event["source_thread_key"]),
+        "id": thread_id,
         "source_thread_key": event["source_thread_key"],
     }
 
@@ -627,6 +650,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         try:
             return await _start_event_run(
                 event=event,
+                thread_id=thread["id"],
                 assistant_id=resolved_assistant_id,
                 source_provider=source_provider,
                 channel_name=channel_name,
@@ -695,6 +719,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
 
     if event["type"] == "message" and not await _may_start_in(
         event,
+        thread_id=thread["id"],
         user_id=user_id,
         source_provider=source_provider,
         only_continues_thread=only_continues_thread,
@@ -814,6 +839,7 @@ async def _cancel_event_runs(
     source_provider: str,
     user_id: str,
     cancel_runs: CancelThreadRunsFn | None,
+    conversation_thread: ConversationThreadFn | None,
 ) -> object:
     """Stop the source thread's runs; each run's observer reports ``run.cancelled``.
 
@@ -821,8 +847,13 @@ async def _cancel_event_runs(
     filter confines the cancel to this source conversation.
     """
     try:
+        thread_id = await (conversation_thread or conversation_thread_id)(
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+        )
         cancelled = await (cancel_runs or cancel_ingress_thread_runs)(
-            thread_id=_thread_id(event["source_thread_key"]),
+            thread_id=thread_id,
             source_provider=source_provider,
             source_thread_key=event["source_thread_key"],
             user_id=user_id,
@@ -1205,10 +1236,6 @@ def _missing_connection_failure_message(error: Exception) -> str | None:
         "An agent developer can configure it with "
         f"`mda connections create {slug} --project <project>`, then try again."
     )
-
-
-def _thread_id(source_thread_key: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, source_thread_key))
 
 
 class _MissingIdentityContextError(ValueError):
