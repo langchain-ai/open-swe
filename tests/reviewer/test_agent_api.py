@@ -123,9 +123,9 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         raise AssertionError("A call around a model call never plans the run")
 
     classify = AsyncMock(return_value="fast")
-    refresh = AsyncMock(return_value=False)
+    refresh = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
-    monkeypatch.setattr(graph_module, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
     run = RUN.model_copy(update={"assistant_id": "agent"})
@@ -149,8 +149,8 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     )
     # A thread in no task gets no task context.
     assert context == {"instructions": "", "message": None}
-    assert refreshed == {}
-    refresh.assert_awaited_once_with(run.thread_id)
+    assert refreshed == {"expires_at": None}
+    refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
 
 
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
@@ -348,6 +348,40 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         await session.rejoin_preparation(None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
+@pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
+async def test_operation_respects_open_tool_argument_schemas(additional: JsonValue) -> None:
+    from langchain_core.tools import StructuredTool
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    schema: dict[str, JsonValue] = {"type": "object", "properties": {}}
+    if additional is not None:
+        schema["additionalProperties"] = additional
+
+    async def homebase(**arguments: JsonValue) -> str:
+        return json.dumps(arguments)
+
+    tool = StructuredTool.from_function(
+        coroutine=homebase, name="homebase", description="Homebase tool", args_schema=schema
+    )
+    session = RunSession(ToolSurface(tools={tool.name: tool}), {}, None, started_here=True)
+    arguments: dict[str, JsonValue] = {"commit": "abc123"}
+
+    result = await session.operation(
+        RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
+    )
+
+    if additional is True or isinstance(additional, dict):
+        assert result.status == "success"
+        assert isinstance(result.content, str)
+        assert json.loads(result.content) == arguments
+    else:
+        assert result.status == "error"
+        assert result.content == "Unexpected arguments for homebase: commit"
 
 
 def test_run_token_round_trips_the_signed_run() -> None:

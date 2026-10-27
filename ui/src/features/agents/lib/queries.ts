@@ -58,6 +58,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  backgroundOutput: (threadId: string, taskId: string) =>
+    ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -990,6 +992,21 @@ export function useAgentThreadBackgroundWork(threadId: string) {
   })
 }
 
+/** Output is not pushed, so it is polled while someone reads it. */
+export function useAgentThreadBackgroundOutput(
+  threadId: string,
+  taskId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundOutput(threadId, taskId),
+    queryFn: () => agentsApi.getThreadBackgroundOutput(threadId, taskId),
+    enabled,
+    refetchInterval: 5_000,
+    retry: false,
+  })
+}
+
 export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.branchDiff(threadId),
@@ -1035,21 +1052,30 @@ export function useAgentThreadWorkingTreeDiff(
 
 export function useWorkflowApprovals(
   threadId: string,
-  options: { pollWhileActive?: boolean } = {}
+  { pollWhileActive = false }: { pollWhileActive?: boolean } = {}
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
-    refetchInterval: (query) =>
-      options.pollWhileActive ||
-      query.state.data?.approvals.some(
+    refetchInterval: (current) =>
+      pollWhileActive ||
+      current.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
         ? 3000
         : false,
     retry: false,
   })
+  const previous = useRef({ threadId, pollWhileActive })
+  const refetch = query.refetch
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { threadId, pollWhileActive }
+    if (was.threadId === threadId && was.pollWhileActive && !pollWhileActive)
+      void refetch()
+  }, [threadId, pollWhileActive, refetch])
+  return query
 }
 
 export function useWorkflowApprovalDecision(threadId: string) {

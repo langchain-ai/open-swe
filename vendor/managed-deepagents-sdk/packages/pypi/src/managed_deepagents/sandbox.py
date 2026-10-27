@@ -87,7 +87,6 @@ class SandboxDefinition:
         "snapshot",
         "image_name",
         "template_name",
-        "scope",
     )
 
     #: Options that shape how MDA resolves the box rather than the create request.
@@ -96,6 +95,7 @@ class SandboxDefinition:
         "_openswe_thread_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
+        "_openswe_select",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -109,13 +109,13 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
     definition. A fixed definition reuses one sandbox per thread; a dynamic
     entrypoint may select a different definition for a run.
     """
-    if "scope" in options and options["scope"] != "thread":
+    if "scope" in options:
         raise TypeError(
-            'sandbox scope is managed as "thread". Remove scope or pass the legacy value "thread".'
+            "sandbox scope was removed: sandbox reuse is always one box per thread. "
+            "Remove scope from the sandbox declaration."
         )
 
     normalized = {**options}
-    normalized.pop("scope", None)
 
     managed = [key for key in SandboxDefinition.MANAGED_OPTION_KEYS if key in normalized]
     if managed:
@@ -193,6 +193,20 @@ def owning_thread(options: Mapping[str, object]) -> str | None:
     """The thread whose box a definition uses, when not the run's own."""
     thread_id = options.get("_openswe_thread_id")
     return thread_id if isinstance(thread_id, str) else None
+
+
+def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefinition | None:
+    """The box ``runtime``'s run uses: what ``_openswe_select`` picks for it, else ``sandbox``.
+
+    None when the run has no box.
+    """
+    select = sandbox.options.get("_openswe_select")
+    if not callable(select):
+        return sandbox
+    selected = select(runtime)
+    if selected is not None and not isinstance(selected, SandboxDefinition):
+        raise TypeError("_openswe_select must return define_sandbox(...) or None")
+    return selected
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:

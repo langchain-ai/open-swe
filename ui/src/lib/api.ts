@@ -232,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  /** How the server labels this user's messages; empty until they have a name. */
+  display_name?: string
   email: string | null
   avatar_url: string | null
   user_id?: string | null
@@ -474,8 +476,12 @@ export interface ManagedToolsMissingCredential {
 }
 
 export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
   name: string
   tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
 }
 
 export interface ManagedToolsGatewayStatus {
@@ -1779,6 +1785,11 @@ export const api = {
           : ""
       }`,
       { method: "POST" }
+    ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),

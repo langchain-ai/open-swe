@@ -31,7 +31,6 @@ from pydantic import GetPydanticSchema
 from pydantic_core import core_schema
 from typing_extensions import TypeVar as DefaultTypeVar
 
-from managed_deepagents._channels.binding import resolve_runtime_channel
 from managed_deepagents._channels.runtime import RuntimeChannel  # noqa: TC001 - dataclass schema
 from managed_deepagents._identity_runtime import (
     RuntimeConfigLike,
@@ -39,6 +38,7 @@ from managed_deepagents._identity_runtime import (
     resolve_runtime_configurable,
     sanitize_configurable,
 )
+from managed_deepagents._managed_thread import ManagedThread, current_run_thread, no_thread
 from managed_deepagents._runtime_schedules import RuntimeSchedules
 from managed_deepagents.identity import ManagedServerInfo  # noqa: TC001 - dataclass schema
 
@@ -57,6 +57,7 @@ class ManagedRuntimeExtras(TypedDict, total=False):
     """Managed fields and sanitized configuration for native runtimes."""
 
     server_info: ManagedServerInfo
+    thread: ManagedThread
     channel: RuntimeChannel | None
     configurable: Mapping[str, object]
     config: RunnableConfig
@@ -70,6 +71,8 @@ class ManagedRuntime(Runtime[ContextT], Generic[ContextT]):  # ty: ignore[invali
     """Native middleware runtime with exact authored context and managed fields."""
 
     server_info: ManagedServerInfo | None = None  # ty: ignore[invalid-attribute-override]
+    thread: ManagedThread = field(default_factory=no_thread)
+    #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
     schedules: RuntimeSchedules = field(default_factory=RuntimeSchedules)
@@ -80,6 +83,8 @@ class ManagedToolRuntime(ToolRuntime[_ContextT, _StateT], Generic[_ContextT, _St
     """Native tool runtime; type parameters follow context, then state."""
 
     server_info: ManagedServerInfo | None = None  # ty: ignore[invalid-mutable-override]
+    thread: ManagedThread = field(default_factory=no_thread)
+    #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
     schedules: RuntimeSchedules = field(default_factory=RuntimeSchedules)
@@ -104,12 +109,17 @@ class ManagedToolRuntime(ToolRuntime[_ContextT, _StateT], Generic[_ContextT, _St
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class _ManagedExecutionRuntime(_ExecutionRuntime[_AppContextT | None], Generic[_AppContextT]):
+    thread: ManagedThread = field(default_factory=no_thread)
+    #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class _ManagedReadRuntime(_ReadRuntime[_AppContextT | None], Generic[_AppContextT]):
+    #: Graph inspection is not a run, so it has no thread.
+    thread: None = None
+    #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
 
@@ -118,16 +128,16 @@ ManagedServerRuntime = _ManagedExecutionRuntime[_AppContextT] | _ManagedReadRunt
 
 
 def adapt_server_runtime(
-    runtime: ServerRuntime[Any], context: object, channel: RuntimeChannel | None
+    runtime: ServerRuntime[Any], context: object, thread: ManagedThread | None
 ) -> ManagedServerRuntime[Any]:
-    runtime_type = (
-        _ManagedExecutionRuntime if isinstance(runtime, _ExecutionRuntime) else _ManagedReadRuntime
-    )
     values = {field.name: getattr(runtime, field.name) for field in fields(runtime) if field.init}
-    if isinstance(runtime, _ExecutionRuntime):
-        values["context"] = context
-    values["channel"] = channel
-    return runtime_type(**values)
+    if not isinstance(runtime, _ExecutionRuntime):
+        return _ManagedReadRuntime(**values)
+    values["context"] = context
+    if thread is not None:
+        values["thread"] = thread
+        values["channel"] = thread.origin.channel if thread.origin is not None else None
+    return _ManagedExecutionRuntime(**values)
 
 
 ManagedDeepAgentRuntime = ManagedToolRuntime
@@ -140,6 +150,7 @@ __all__ = [
     "ManagedToolRuntime",
     "adapt_managed_runtime",
     "managed_runtime_overrides",
+    "thread_overrides",
     "with_managed_runtime",
     "wrap_tools_with_managed_runtime",
 ]
@@ -161,7 +172,6 @@ def managed_runtime_overrides(
     ``schedules`` is bound to the original runtime's trusted caller.
     """
     overrides: ManagedRuntimeExtras = {
-        "channel": None,
         "backend": None,
         "schedules": RuntimeSchedules(runtime),
     }
@@ -171,15 +181,7 @@ def managed_runtime_overrides(
     server_info = build_managed_server_info(runtime, configurable)
     if server_info is not None:
         overrides["server_info"] = server_info
-    existing_channel = getattr(runtime, "channel", None)
-    if existing_channel is not None:
-        overrides["channel"] = existing_channel
-    else:
-        from_binding = resolve_runtime_channel(
-            getattr(runtime, "context", None), configurable, include_lead=True
-        )
-        if from_binding is not None:
-            overrides["channel"] = from_binding
+    overrides.update(thread_overrides(runtime, configurable))
     if isinstance(configurable, Mapping):
         sanitized = sanitize_configurable(configurable)
         if len(sanitized) != len(configurable):
@@ -189,6 +191,21 @@ def managed_runtime_overrides(
             elif hasattr(runtime, "configurable"):
                 overrides["configurable"] = sanitized
     return overrides
+
+
+def thread_overrides(
+    runtime: object, configurable: Mapping[str, object] | None
+) -> ManagedRuntimeExtras:
+    """``thread``, and the deprecated ``channel`` alias of its origin's channel."""
+    existing = getattr(runtime, "thread", None)
+    if isinstance(existing, ManagedThread) and existing.id:
+        thread = existing
+    else:
+        thread = current_run_thread(runtime, configurable).thread
+    return {
+        "thread": thread,
+        "channel": thread.origin.channel if thread.origin is not None else None,
+    }
 
 
 @overload

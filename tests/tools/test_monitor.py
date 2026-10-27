@@ -226,6 +226,35 @@ async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_runnin
     assert (work.commands, work.monitors) == ([], [])
 
 
+async def test_dashboard_shows_no_output_of_another_threads_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from openswe import background_tasks
+    from openswe.threads import background_work
+
+    metadata = {"sandbox_id": "sandbox-a", "running_background_tasks": ["cmd-mine"]}
+    monkeypatch.setattr(
+        background_work, "_readable_thread_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(background_work, "_assert_thread_promptable", lambda *_: None)
+    monkeypatch.setattr(background_work, "connect_sandbox", AsyncMock(return_value=object()))
+    # A sandbox shared by a parent thread holds its commands too.
+    monkeypatch.setattr(
+        background_tasks,
+        "thread_tasks",
+        AsyncMock(return_value=[{"task_id": "cmd-mine", "status": "running"}]),
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await background_work.get_dashboard_thread_background_output(
+            "thread-1", "cmd-theirs", "alice"
+        )
+
+    assert refused.value.status_code == 404
+
+
 class FakeThreads:
     """An Agent Server thread whose metadata and messages live in memory."""
 

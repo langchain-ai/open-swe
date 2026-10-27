@@ -1861,6 +1861,7 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "id": channel,
         "name": name,
         "name_normalized": name,
+        "num_members": 3,
         "is_channel": not channel.startswith("D"),
         "is_private": False,
         "is_im": channel.startswith("D"),

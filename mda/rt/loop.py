@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
 
@@ -30,6 +31,7 @@ from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    Catalog,
     CliResultRules,
     LoopRules,
     ModelSpec,
@@ -60,7 +62,14 @@ from runtime_api.loop import (
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend, git_trace, human_messages, run_call
+from rt.backend import (
+    BackendCallError,
+    OpenSweBackend,
+    RunLocal,
+    git_trace,
+    human_messages,
+    run_call,
+)
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -68,6 +77,17 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
+# Held state: when the box's GitHub token next needs replacing. It lives in the thread's
+# checkpoint, so it holds for the next run on whichever backend replica serves it.
+_GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
+# A token is replaced this long before it expires. The backend never hands out one with
+# less left, so a replacement is not due again at once.
+_GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
+# A thread whose box has no GitHub proxy is asked again after this long.
+_GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
+# A refresh that failed is tried again after this long, so a failure that keeps happening
+# does not hold up every model call.
+_GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 
@@ -140,6 +160,15 @@ def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     return held if isinstance(held, Mapping) else {}
 
 
+def _moment(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _normalized(route: str) -> str:
     return "fast" if route == "fast_alt" else route
 
@@ -188,27 +217,30 @@ class _Turn:
 class RunLoop:
     """What happens around each of the run's model calls, as its ``LoopRules`` say."""
 
-    def __init__(self, backend: OpenSweBackend, rules: LoopRules, models: RunModels) -> None:
+    def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        self._rules = rules
-        self._run_models = models
-        # Models the run calls by id, such as one a person asked for, as the backend sets them.
-        self._chosen: dict[tuple[str, str | None], ModelSpec] = {}
+        # Models each run calls by id, such as one a person asked for, as the backend sets them.
+        self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
+
+    @staticmethod
+    def runs(catalog: Catalog) -> bool:
+        """Whether a run planned with ``catalog`` runs its loop here, not in the backend's phases."""
+        return catalog.loop is not None and catalog.models is not None
 
     @property
     def rules(self) -> LoopRules:
         """The run's rules; a launched worker's own once it adopted its run, not its coordinator's."""
-        adopted = self._backend.adopted
-        return adopted.loop if adopted is not None and adopted.loop is not None else self._rules
+        rules = self._backend.run.catalog.loop
+        if rules is None:
+            raise BackendCallError("The run's catalog names no loop rules")
+        return rules
 
     @property
     def _models(self) -> RunModels:
-        adopted = self._backend.adopted
-        return (
-            adopted.models
-            if adopted is not None and adopted.models is not None
-            else self._run_models
-        )
+        models = self._backend.run.catalog.models
+        if models is None:
+            raise BackendCallError("The run's catalog names no models")
+        return models
 
     @property
     def looks_at_answers(self) -> bool:
@@ -218,15 +250,13 @@ class RunLoop:
         held = _held(state)
         if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        if self.rules.refresh_github_proxy:
-            self._backend.reports.notify(REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+        update = await self._github_proxy(held)
         context = await self._task_context()
         added: list[BaseMessage] = []
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in _visible(state)
         ):
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
-        update: dict[str, JsonValue] = {}
         route = await self._route(held, [*_visible(state), *added])
         if route is not None:
             update["model_route"] = route
@@ -256,6 +286,30 @@ class RunLoop:
             if isinstance(message.artifact, dict) and message.artifact.get(CLIENT_CALL_PENDING):
                 return True
         return False
+
+    async def _github_proxy(self, held: Mapping[str, object]) -> dict[str, JsonValue]:
+        """Put a new GitHub token on the box once the one there is about to expire.
+
+        The call is awaited, so the model's first command never runs on an expired
+        token. A failure leaves the run going and the call is made again a minute later.
+        """
+        if not self.rules.refresh_github_proxy:
+            return {}
+        now = datetime.now(UTC)
+        due = _moment(held.get(_GITHUB_PROXY_DUE))
+        if due is not None and now < due:
+            return {}
+        try:
+            refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+        except Exception:
+            logger.warning("Could not refresh the box's GitHub token", exc_info=True)
+            return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
+        due = (
+            refreshed.expires_at - _GITHUB_PROXY_WINDOW
+            if refreshed.expires_at is not None
+            else now + _GITHUB_PROXY_RECHECK
+        )
+        return {_GITHUB_PROXY_DUE: due.isoformat()}
 
     async def _task_context(self) -> TaskContext:
         if not self.rules.task_coordination:
@@ -289,10 +343,11 @@ class RunLoop:
 
     async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
         key = (model_id, effort if isinstance(effort, str) else None)
-        if key not in self._chosen:
+        chosen = self._chosen.get(self._backend.run)
+        if key not in chosen:
             choice = ChosenModel(run_id=run_id(), model_id=key[0], effort=key[1])
-            self._chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
-        return self._chosen[key]
+            chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
+        return chosen[key]
 
     async def _model_for(self, held: Mapping[str, object]) -> ModelSpec:
         """The run's own model, a route's, or the one a person asked for."""

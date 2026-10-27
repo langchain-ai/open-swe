@@ -121,6 +121,7 @@ from runtime_api.loop import (
     BrowserReport,
     ChosenModel,
     Done,
+    GitHubProxyRefreshed,
     Inbox,
     InboxItems,
     InboxRead,
@@ -182,7 +183,6 @@ from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings, sign_runtime_token
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
-from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -198,7 +198,11 @@ from openswe.prompts import common_prompt, prompt
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
-from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
+from openswe.sandboxes.lifecycle import (
+    bind_mda_sandbox,
+    reconnect_replaced_sandbox,
+    refresh_thread_github_proxy,
+)
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
@@ -691,7 +695,7 @@ async def run_operation(
         return OperationResult(
             content=f"{request.name} is not one of this run's operations", status="error"
         )
-    unexpected = set(request.arguments) - set(_properties(tool))
+    unexpected = _unexpected_arguments(tool, request.arguments)
     if unexpected:
         return OperationResult(
             content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
@@ -979,17 +983,12 @@ class TokenRun:
 
         return await self.in_run("task_context", read)
 
-    async def refresh_github_proxy(self, _request: RunRequest) -> Done:
-        try:
-            await maybe_refresh_proxy_token(self.run.thread_id)
-        except Exception:
-            # The box's next GitHub call says so if the token went stale; the run goes on.
-            logger.warning(
-                "Failed to refresh GitHub proxy token",
-                extra={"agent_thread_id": self.run.thread_id},
-                exc_info=True,
-            )
-        return Done()
+    async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
+        cfg = RunConfig.from_config(self.config)
+        expires_at = await refresh_thread_github_proxy(
+            self.run.thread_id, workspace_slug=cfg.workspace_slug
+        )
+        return GitHubProxyRefreshed(expires_at=expires_at)
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
@@ -1131,9 +1130,13 @@ def _json_or_text(value: object) -> JsonValue:
         return str(value)
 
 
-def _properties(tool: BaseTool) -> Mapping[str, object]:
-    properties = tool_parameters(tool).get("properties")
-    return properties if isinstance(properties, Mapping) else {}
+def _unexpected_arguments(tool: BaseTool, arguments: Mapping[str, JsonValue]) -> set[str]:
+    schema = tool_parameters(tool)
+    additional = schema.get("additionalProperties")
+    if additional is True or isinstance(additional, Mapping):
+        return set()
+    properties = schema.get("properties")
+    return set(arguments) - (set(properties) if isinstance(properties, Mapping) else set())
 
 
 def _operation_result(outcome: ToolMessage | Command, request_id: str) -> OperationResult:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Generic, Literal
 
 from typing_extensions import TypedDict, TypeVar
 
+from managed_deepagents._channels.actor import GitHubActor, GitHubEndpointActor
 from managed_deepagents._channels.github_schema import (
     GitHubPayload,
     SupportedEventKey,
@@ -24,7 +25,7 @@ from managed_deepagents._channels.github_schema import (
     _StatusPayload,
     _WorkflowPayload,
 )
-from managed_deepagents._channels.http.endpoint import EndpointEvent, EndpointRequest, EventEndpoint
+from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
 from managed_deepagents._channels.run_input import ChannelRunResult
 
 if TYPE_CHECKING:
@@ -67,6 +68,11 @@ class GitHubEvent(Generic[_Payload]):
     or pull request's title and body; an edit lists only the handles it added.
     As on GitHub, code, quotes and HTML comments mention no one. Empty for
     events that write no text, such as a push or a label."""
+
+    @property
+    def actor(self) -> GitHubActor:
+        """The ``sender``, in the shape every channel's ``actor`` has."""
+        return GitHubActor(id=str(self.sender.id), name=self.sender.login, type=self.sender.type)
 
 
 @dataclass(frozen=True)
@@ -152,15 +158,24 @@ class GitHubEndpointFields(TypedDict, total=False):
     """Absent for events without an action, such as ``push``."""
     repository: _EndpointRepository
     sender: _EndpointSender
+    actor: GitHubEndpointActor
+    """As ``GitHubEvent.actor``: the ``sender``, in the shape every channel's actor has."""
     mentions: list[str]
     """As ``GitHubEvent.mentions``: the handles the event's own text mentions."""
 
 
-class GitHubEndpointEvent(
-    EndpointEvent[_Key, _EventPayload], GitHubEndpointFields, Generic[_Key, _EventPayload]
-):
-    """The event a GitHub channel sends its endpoint: its key, delivery ID and
-    payload, with the fields of ``GitHubEndpointFields``."""
+class GitHubEndpointEvent(GitHubEndpointFields, Generic[_Key, _EventPayload]):
+    """The event a GitHub channel sends its endpoint: ``EndpointEvent``'s key,
+    delivery ID and payload, with the fields of ``GitHubEndpointFields``.
+
+    The three are declared here rather than inherited from ``EndpointEvent``:
+    pydantic doesn't carry a subclass's type parameters into an inherited
+    generic TypedDict, so the key wouldn't pick the payload's type.
+    """
+
+    key: _Key
+    deliveryId: str
+    payload: _EventPayload
 
 
 GitHubEndpointRequest = (
