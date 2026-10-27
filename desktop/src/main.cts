@@ -1020,11 +1020,11 @@ function migrateStoredConfig() {
   }
 }
 
-function isSessionCookieFor(url, cookie) {
+function isBackendSessionCookie(cookie) {
   return (
-    Boolean(url) &&
+    Boolean(backendUrl) &&
     cookie.name === SESSION_COOKIE_NAME &&
-    cookie.domain.replace(/^\./, "") === new URL(url).hostname
+    cookie.domain.replace(/^\./, "") === new URL(backendUrl).hostname
   );
 }
 
@@ -1034,7 +1034,7 @@ async function shareBackendSession() {
   session.defaultSession.cookies.on(
     "changed",
     (_event, cookie, cause, removed) => {
-      if (!isSessionCookieFor(backendUrl, cookie)) return;
+      if (!isBackendSessionCookie(cookie)) return;
       if (removed && cause === "overwrite") return;
       try {
         if (removed) unshareSession(configPath(), backendUrl, cookie.value);
@@ -1081,7 +1081,7 @@ async function loadAlternativeEnvironments() {
   if (!url) return;
   let environments = [];
   try {
-    const response = await backendFetch(desktopEnvironmentsUrl(url), {
+    const response = await fetch(desktopEnvironmentsUrl(url), {
       signal: AbortSignal.timeout(10_000),
     });
     if (response.ok)
@@ -1092,18 +1092,6 @@ async function loadAlternativeEnvironments() {
   if (url !== primaryBackendUrl) return;
   alternativeEnvironments = environments;
   createMenu();
-}
-
-function watchAlternativeEnvironments() {
-  session.defaultSession.cookies.on(
-    "changed",
-    (_event, cookie, cause, removed) => {
-      if (removed && cause === "overwrite") return;
-      if (isSessionCookieFor(primaryBackendUrl, cookie))
-        void loadAlternativeEnvironments();
-    },
-  );
-  void loadAlternativeEnvironments();
 }
 
 /** Point the app at `url` and reload it there, dropping the last backend's page state. */
@@ -1914,7 +1902,7 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    watchAlternativeEnvironments();
+    void loadAlternativeEnvironments();
     if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({

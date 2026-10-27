@@ -7,7 +7,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from openswe.config import ENV
-from openswe.dashboard.deps import SESSION_DEP
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +44,6 @@ def alternative_environments() -> list[DesktopEnvironment]:
     return environments
 
 
-@router.get("/desktop/environments", dependencies=[SESSION_DEP])
+@router.get("/desktop/environments")
 async def api_desktop_environments() -> DesktopEnvironments:
     return DesktopEnvironments(environments=alternative_environments())
