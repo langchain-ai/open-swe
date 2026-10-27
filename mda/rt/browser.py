@@ -9,8 +9,9 @@ again once the agent first browses, so the panel opens on its own.
 import asyncio
 import contextlib
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langgraph.runtime import Runtime
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import BrowserMiddleware, BrowserState
@@ -32,8 +33,10 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         # Every graph has the middleware, so all of them share one shape; only the
         # coding agent's has a browser.
         self._enabled = enabled
-        if not enabled:
-            self.tools = []
+        # No browser_handoff: Open SWE runs only what its backend signs, so MDA's watcher
+        # cannot start the run that tells the agent the user handed the browser back.
+        self.tools = [tool for tool in self.tools if enabled and tool.name != "browser_handoff"]
+        self._arguments.pop("browser_handoff", None)
         # (browser name, whether it is opened) already reported, or being reported.
         self._reported: set[tuple[str, bool]] = set()
         self._reporting: dict[tuple[str, bool], asyncio.Task[None]] = {}
@@ -51,6 +54,16 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     async def aafter_agent(self, state: BrowserState, runtime: Runtime) -> None:
         if self._enabled:
             await super().aafter_agent(state, runtime)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[None],
+        handler: Callable[[ModelRequest[None]], Awaitable[ModelResponse[object]]],
+    ) -> ModelResponse[object]:
+        # The browser's instructions only where its tools are.
+        if not self._enabled:
+            return await handler(request)
+        return await super().awrap_model_call(request, handler)
 
     async def _share(
         self, session: object, name: str, key: str, runtime: ManagedToolRuntime
