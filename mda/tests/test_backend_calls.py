@@ -587,6 +587,11 @@ async def test_outbox_keeps_results_when_checkpoint_messages_cannot_restore_them
     await restored.drain()
     await backend.outbox.drain()
     assert received == messages_to_dict([result]) * 2
+    if not namespace:
+        # A process that never held the result, on a checkpoint that no longer holds it,
+        # lets the report go rather than failing every later step of the thread.
+        orphaned = Outbox(backend)
+        assert orphaned.carried({"messages": [], OUTBOX_KEY: saved}) == dict.fromkeys(saved)
 
 
 class _RecordingAnthropic(ChatAnthropic):
