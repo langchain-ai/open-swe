@@ -53,6 +53,7 @@ from managed_deepagents._channels.http.provider import (
 )
 from managed_deepagents._channels.http.studio import interrupted_notice, pending_decision
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
@@ -65,6 +66,7 @@ if TYPE_CHECKING:
         HttpFinishedDelivery,
         JsonValue,
     )
+    from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
 
 _MAX_SAFE_INTEGER = 9007199254740991
@@ -77,6 +79,7 @@ def github_channel(
     multitask_strategy: MultitaskStrategy = "enqueue",
     on_finish: EventFinished[GitHubEvent, GitHubChannelThread] | None = None,
     on_received: EventReceived[GitHubEvent, GitHubChannelThread] | None = None,
+    resolve_user: ResolveUser | None = None,
 ) -> HttpChannel:
     """Options for ``channels.github(...)``: App scope and event handlers that start runs.
 
@@ -188,6 +191,7 @@ def github_channel(
     channel.paused_notice = _post_paused_notice
     # Deploy provides the App's token at this name.
     channel.agent_connections = [GITHUB_TOKEN_SLUG]
+    channel.resolve_user = checked_resolve_user("channels.github", resolve_user)
     return channel
 
 
@@ -357,6 +361,7 @@ async def _parse(
         "type": "message",
         "message": message,
         "raw_event": snapshot,
+        "actor": parsed_event.actor,
         "response": response,
     }
 

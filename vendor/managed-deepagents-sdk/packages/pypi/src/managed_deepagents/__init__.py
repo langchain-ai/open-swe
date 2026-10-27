@@ -97,6 +97,11 @@ if TYPE_CHECKING:
         LinearSessionPromptedEvent,
         LinearTeam,
     )
+    from managed_deepagents._channels.resolve_user import (
+        ResolveUser,
+        ResolveUserRequest,
+        ResolveUserResult,
+    )
     from managed_deepagents._channels.run_input import (
         ChannelRunInput,
         ChannelRunOptions,
@@ -320,6 +325,9 @@ _EXPORTS: dict[str, str] = {
     "PostedChannelMessage": "managed_deepagents._channels.types",
     "PromptResponse": "managed_deepagents.run_context",
     "RemoteMcpServerConfig": "managed_deepagents._connectors.mcp",
+    "ResolveUser": "managed_deepagents._channels.resolve_user",
+    "ResolveUserRequest": "managed_deepagents._channels.resolve_user",
+    "ResolveUserResult": "managed_deepagents._channels.resolve_user",
     "RuntimeChannel": "managed_deepagents._channels.runtime",
     "RuntimeSchedules": "managed_deepagents._runtime_schedules",
     "SandboxDefinition": "managed_deepagents.sandbox",
@@ -521,6 +529,9 @@ __all__ = [
     "PostedChannelMessage",
     "PromptResponse",
     "RemoteMcpServerConfig",
+    "ResolveUser",
+    "ResolveUserRequest",
+    "ResolveUserResult",
     "RuntimeChannel",
     "RuntimeSchedules",
     "SandboxDefinition",

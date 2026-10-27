@@ -122,7 +122,7 @@ class ConnectionNotFoundError(LookupError):
 _SLUG_PATTERN = re.compile(r"[a-z0-9]+(?:[-/][a-z0-9]+)*")
 _MAX_SLUG_LENGTH = 64
 _DEV_CREDENTIAL_PREFIX = "MDA_DEV_"
-_TRUSTED_BACKEND_PROVIDER = "trusted_backend"
+TRUSTED_BACKEND_PROVIDER = "trusted_backend"
 
 
 #: Env var naming the LangSmith platform API that serves Agent Auth.
@@ -647,7 +647,7 @@ def _external_identity_for_resolve(
     workspace = (workspace_id or "").strip()
     return (
         {
-            "provider": _TRUSTED_BACKEND_PROVIDER,
+            "provider": TRUSTED_BACKEND_PROVIDER,
             "issuer": workspace,
             "subject": trusted_subject.strip(),
         }

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
+    from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.types import JsonValue, MessageContent
 
@@ -205,6 +206,8 @@ class _MessageResultRequired(TypedDict):
 class HttpChannelMessageResult(_MessageResultRequired, total=False):
     response: Response
     raw_event: JsonValue
+    #: The verified sender, which ``resolve_user`` maps to one of your users.
+    actor: ChannelActor
 
 
 class _IgnoreResultRequired(TypedDict):
