@@ -103,6 +103,39 @@ async def test_private_routes_deny_nonowner_before_side_effects(private_thread, 
     client.runs.cancel_many.assert_not_awaited()
 
 
+async def test_private_detail_names_owner_without_exposing_thread(private_thread):
+    _, client = private_thread
+    with pytest.raises(HTTPException) as exc:
+        await handlers.get_dashboard_thread("private-thread", "bob")
+    assert exc.value.status_code == 403
+    assert "Ask @alice to share it with the workspace" in exc.value.detail
+    client.threads.update.assert_not_awaited()
+    client.runs.list.assert_not_awaited()
+
+
+@pytest.mark.parametrize("source", ["review_chat", "incidents_agent", "internal"])
+def test_private_explanation_does_not_expose_hidden_sources(source):
+    with pytest.raises(HTTPException) as exc:
+        summary.assert_thread_readable(
+            {"source": source, "visibility": "private", "owner_login": "alice"},
+            "bob",
+            explain_private=True,
+        )
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "thread not found"
+
+
+def test_private_explanation_without_owner_or_authenticated_viewer():
+    metadata = {"source": "dashboard", "visibility": "private"}
+    with pytest.raises(HTTPException) as exc:
+        summary.assert_thread_readable(metadata, "bob", explain_private=True)
+    assert exc.value.status_code == 403
+    assert "Ask the owner" in exc.value.detail
+    with pytest.raises(HTTPException) as exc:
+        summary.assert_thread_readable(metadata, explain_private=True)
+    assert exc.value.status_code == 404
+
+
 async def test_admin_can_view_but_not_open_terminal(private_thread):
     thread, _ = private_thread
     thread["metadata"]["sandbox_id"] = "sbx"

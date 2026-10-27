@@ -161,7 +161,7 @@ async def get_dashboard_thread(
             raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email, explain_private=True)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
