@@ -13,6 +13,7 @@ from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.http import GitHubClient, GitHubError, or_none
+from openswe.github.pull_request_activity import note_pull_request_activity
 from openswe.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
@@ -203,6 +204,7 @@ async def api_request_human_review(
     )
     if not result.success:
         raise HTTPException(409, result.error)
+    await note_pull_request_activity(owner, repo, number, login, "human-review-requested")
     return result
 
 
@@ -226,4 +228,12 @@ async def api_dismiss_human_review_request(
     by = mention(person) if person is not None else f"@{login}"
     if not await ReviewCard(request).dismiss_by(by, (body or HumanReviewDismissBody()).reason):
         raise HTTPException(409, "This review request is already closed")
+    await note_pull_request_activity(
+        owner,
+        repo,
+        number,
+        login,
+        "human-review-dismissed",
+        text=(body or HumanReviewDismissBody()).reason,
+    )
     return HumanReviewDismissResult(request_id=str(request.id))

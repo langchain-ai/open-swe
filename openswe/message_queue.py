@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, Identity, delete, select
+from sqlalchemy import BigInteger, Identity, delete, exists, not_, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 MAX_QUEUED_MESSAGES = 100
 
 type QueuedContent = str | list[JsonObject] | JsonObject
+
+# Marks a note queued as context for the thread's next run, which it must not start.
+PASSIVE_KEY = "passive"
 
 
 class QueuedMessage(Base):
@@ -72,6 +75,21 @@ class QueuedMessage(Base):
             logger.warning(
                 "Dropped the oldest queued messages over the cap",
                 extra={"message_queue": {"thread_id": thread_id, "dropped": len(dropped)}},
+            )
+
+    @classmethod
+    async def awaits_run(cls, thread_id: str) -> bool:
+        """Whether anything queued for ``thread_id`` asks for a run, beyond notes for the next one."""
+        async with postgres.session() as session:
+            return bool(
+                await session.scalar(
+                    select(
+                        exists().where(
+                            cls.thread_id == thread_id,
+                            not_(cls.content.contains({PASSIVE_KEY: True})),
+                        )
+                    )
+                )
             )
 
     @classmethod

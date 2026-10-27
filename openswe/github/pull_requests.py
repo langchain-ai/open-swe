@@ -59,7 +59,7 @@ from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
 from openswe.utils.json_types import JsonObject, thread_metadata
-from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.thread_ops import langgraph_client, queue_note_for_thread
 
 logger = logging.getLogger(__name__)
 
@@ -382,6 +382,19 @@ class PullRequest(Base):
             if all(link.thread_id != thread_id for link in self.threads):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
+
+    async def note_for_threads(self, note: str) -> None:
+        """Queue ``note`` for each linked agent thread's next run, starting none."""
+        for thread_id in await self.linked_threads():
+            if not await queue_note_for_thread(thread_id, note):
+                logger.warning(
+                    "Could not queue a pull request note for a linked thread",
+                    extra={
+                        "pr_repo_full_name": self.repo_full_name,
+                        "pr_number": self.number,
+                        "agent_thread_id": thread_id,
+                    },
+                )
 
     async def discover_threads(self) -> Sequence[str] | None:
         """Agent threads whose metadata still points at this PR, oldest first.

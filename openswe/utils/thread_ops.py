@@ -12,7 +12,7 @@ import logging
 from langgraph_sdk import get_client
 
 from openswe.config import ENV
-from openswe.message_queue import QueuedContent, QueuedMessage
+from openswe.message_queue import PASSIVE_KEY, QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -41,3 +41,8 @@ async def queue_message_for_thread(thread_id: str, message_content: QueuedConten
     except Exception:
         logger.exception("Failed to queue message for thread %s", thread_id)
         return False
+
+
+async def queue_note_for_thread(thread_id: str, note: str) -> bool:
+    """Queue ``note`` as context for the thread's next run without starting one."""
+    return await queue_message_for_thread(thread_id, {"text": note, PASSIVE_KEY: True})

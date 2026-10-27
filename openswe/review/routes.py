@@ -15,6 +15,7 @@ from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.pull_request_activity import note_pull_request_activity
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
@@ -275,6 +276,14 @@ async def api_change_pull_request_label(
 ) -> None:
     async with _as_viewer(session, owner, repo) as repository:
         await change.apply(repository.pull_request(pr_number))
+    await note_pull_request_activity(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
+        "label-added" if change.selected else "label-removed",
+        label=change.name,
+    )
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
@@ -326,7 +335,9 @@ async def api_re_review(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_re_review(owner, repo, pr_number, session["sub"])
+    result = await trigger_re_review(owner, repo, pr_number, session["sub"])
+    await note_pull_request_activity(owner, repo, pr_number, session["sub"], "re-review")
+    return result
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/scout")
@@ -381,7 +392,18 @@ async def api_post_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PostedReviewComment:
     async with _as_viewer(session, owner, repo) as repository:
-        return await PostedReviewComment.post(repository.pull_request(pr_number), comment)
+        posted = await PostedReviewComment.post(repository.pull_request(pr_number), comment)
+    await note_pull_request_activity(
+        owner,
+        repo,
+        pr_number,
+        session["sub"],
+        "inline-comment",
+        text=comment.body,
+        path=comment.path,
+        line=comment.line,
+    )
+    return posted
 
 
 class PullRequestReviewSubmit(BaseModel):
@@ -399,12 +421,16 @@ async def api_submit_pull_request_review(
     session: dict[str, Any] = SESSION_DEP,
 ) -> SubmittedReview:
     async with _as_viewer(session, owner, repo) as repository:
-        return await SubmittedReview.submit(
+        submitted = await SubmittedReview.submit(
             repository.pull_request(pr_number),
             login=session["sub"],
             event=review.event,
             body=review.body.strip(),
         )
+    await note_pull_request_activity(
+        owner, repo, pr_number, session["sub"], "review", text=review.body, event=review.event
+    )
+    return submitted
 
 
 @asynccontextmanager

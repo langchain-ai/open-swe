@@ -1420,9 +1420,9 @@ async def dispatch_pending_follow_ups(
 
     A message steered into a run after its last model call is still waiting in
     the store; the new run's first model call picks it up. Returns the run id,
-    or ``None`` when nothing was waiting.
+    or ``None`` when nothing but notes for the next run was waiting.
     """
-    if not await QueuedMessage.for_thread(thread_id):
+    if not await QueuedMessage.awaits_run(thread_id):
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(

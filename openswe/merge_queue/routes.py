@@ -15,6 +15,7 @@ from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.pull_request_activity import note_pull_request_activity
 from openswe.github.pull_requests import PullRequest
 from openswe.merge_queue import controller
 from openswe.merge_queue.git import SHA
@@ -207,6 +208,9 @@ async def request_merge(body: MergeIntent, access: QueueAccess = ACCESS) -> Requ
         str(body.request_key),
         actor=access.user.id,
         dependencies=body.dependencies,
+    )
+    await note_pull_request_activity(
+        access.repo.owner, access.repo.name, body.number, access.user.github_login, "merge-queued"
     )
     return RequestView.model_validate(requested)
 

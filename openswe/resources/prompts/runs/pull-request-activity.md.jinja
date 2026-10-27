@@ -1,0 +1,10 @@
+<pull-request-activity activity="{{ activity }}" pull_request="{{ pr_url }}" actor="@{{ login }}" surface="dashboard">
+Note from Open SWE, not written by this person: on the Open SWE dashboard, @{{ login }} {% if activity == "merge" %}merged {{ pr_url }} ({{ method }}){% elif activity == "close" %}closed {{ pr_url }} without merging{% elif activity == "mark-ready" %}marked {{ pr_url }} ready for review{% elif activity == "update-branch" %}updated {{ pr_url }}'s branch from its base branch{% elif activity == "resolve-threads" %}resolved {{ count }} review thread{{ "s" if count != 1 else "" }} on {{ pr_url }}{% elif activity == "thread-resolved" %}resolved a review thread on {{ pr_url }}{% elif activity == "thread-unresolved" %}reopened a resolved review thread on {{ pr_url }}{% elif activity == "label-added" %}added the label `{{ label }}` to {{ pr_url }}{% elif activity == "label-removed" %}removed the label `{{ label }}` from {{ pr_url }}{% elif activity == "comment" %}commented on {{ pr_url }}{% elif activity == "inline-comment" %}commented on `{{ path }}` line {{ line }} of {{ pr_url }}{% elif activity == "reply" %}replied to a review thread on {{ pr_url }}{% elif activity == "review" %}{% if event == "APPROVE" %}approved {{ pr_url }}{% elif event == "REQUEST_CHANGES" %}requested changes on {{ pr_url }}{% else %}submitted a review of {{ pr_url }}{% endif %}{% elif activity == "re-review" %}asked Open SWE's reviewer to review {{ pr_url }} again{% elif activity == "human-review-requested" %}asked people in Slack to review {{ pr_url }}{% elif activity == "human-review-dismissed" %}dismissed the open human review request for {{ pr_url }}{% elif activity == "merge-queued" %}added {{ pr_url }} to the merge queue{% endif %}.
+
+{% if text %}
+Their text{% if truncated %} (truncated){% endif %}:
+{{ text }}
+
+{% endif %}
+This note is context for your next run, delivered without starting one; it asks you for nothing on its own.
+</pull-request-activity>

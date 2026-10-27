@@ -33,3 +33,14 @@ async def test_queued_messages_show_who_sent_what_and_refresh_their_thread(regis
     ]
     topic = Topic.THREAD_QUEUES.keyed("thread-1")
     assert await outbox.invalidated_since({topic: 5}) == {topic}
+
+
+@pytest.mark.asyncio
+async def test_queued_notes_wait_for_the_next_run_without_asking_for_one(registry_db) -> None:
+    await thread_ops.queue_note_for_thread("thread-1", "Alice merged the PR")
+
+    assert await QueuedMessage.awaits_run("thread-1") is False
+
+    await thread_ops.queue_message_for_thread("thread-1", {"text": "Ping"})
+
+    assert await QueuedMessage.awaits_run("thread-1") is True
