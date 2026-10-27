@@ -105,7 +105,7 @@ from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles
 from rt.tools import STATE_KEY, cited, run_id, tool_report
-from rt.tracing import TurnTrace
+from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +217,8 @@ class DescribedToolsMiddleware(AgentMiddleware):
     which binds the request's tools to ``eval`` before this rewrites them.
     """
 
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
         self._offered = RunLocal[dict[tuple[int, str], tuple[BaseTool, BaseTool]]](dict)
@@ -305,6 +307,8 @@ def turn_trace(run: Run) -> TurnTrace:
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     state_schema = RunState
 
@@ -604,6 +608,8 @@ class ReportRepliesMiddleware(AgentMiddleware):
     counts it by, and the report goes out in line behind the tool calls it follows.
     """
 
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
 
@@ -702,6 +708,8 @@ class RuntimeToolsMiddleware(AgentMiddleware):
     is around the checks it applies; ``reported_elsewhere`` names them.
     """
 
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, backend: OpenSweBackend, reported_elsewhere: Collection[str]) -> None:
         self._backend = backend
         self._served = frozenset(reported_elsewhere)
@@ -722,6 +730,8 @@ class IncidentEvidenceMiddleware(AgentMiddleware):
     The report the run writes cites what it found by evidence id, so each result
     carries the id the backend recorded it under.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
@@ -810,6 +820,8 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
     started after all is returned, and of two such threads only the first to register
     becomes the worker, the other refused and stopped.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend

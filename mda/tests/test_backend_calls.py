@@ -1653,11 +1653,15 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         assert caught.value is error
 
 
+@pytest.mark.parametrize("managed", [False, True])
 async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
     monkeypatch: pytest.MonkeyPatch,
+    managed: bool,
 ) -> None:
-    """Every hook the turn calls, tool reports answered after their call closed included,
-    names a span of the turn's trace, so the backend's spans nest in it."""
+    """Backend hooks retain their trace position without copying payloads or metadata."""
+    from managed_deepagents._managed_middleware import wrap_middleware_with_managed_runtime
+    from rt.run_tools import RunModelCallLimit
+
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     request = httpx2.Request("POST", "https://backend.invalid")
@@ -1684,9 +1688,9 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
     backend = _run_backend(invocation_id="turn")
 
     @tool
-    async def look() -> str:
+    async def look(text: str) -> str:
         """Look around."""
-        return "seen"
+        return text
 
     # One list of differently-stated middleware, as the runtime assembles it.
     middleware = cast(
@@ -1694,13 +1698,19 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
         [
             BackendRunMiddleware(backend),
             RuntimeToolsMiddleware(backend, reported_elsewhere=()),
+            RunModelCallLimit(backend, 10),
         ],
     )
+    if managed:
+        middleware = wrap_middleware_with_managed_runtime(middleware)
     graph = create_agent(
         model=GenericFakeChatModel(
             messages=iter(
                 [
-                    AIMessage(content="", tool_calls=[ToolCall(name="look", args={}, id="call-1")]),
+                    AIMessage(
+                        content="",
+                        tool_calls=[ToolCall(name="look", args={"text": "seen"}, id="call-1")],
+                    ),
                     AIMessage(content="done"),
                 ]
             )
@@ -1726,3 +1736,17 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
         assert root.endswith(str(turn.id)) and span, hook
         assert "langsmith-project=turns" in headers["baggage"], hook
         assert "metadata" not in headers["baggage"], hook
+    created = [call.kwargs for call in traced.create_run.call_args_list]
+    hooks = [
+        run
+        for run in created
+        if str(run["name"]).startswith(
+            ("BackendRunMiddleware.", "RuntimeToolsMiddleware.", "RunModelCallLimit.")
+        )
+    ]
+    assert hooks
+    assert all(run["inputs"] == {} for run in hooks)
+    models = [run for run in created if run["run_type"] == "llm"]
+    tools = [run for run in created if run["run_type"] == "tool" and run["name"] == "look"]
+    assert models and tools
+    assert all(run["inputs"] for run in [*models, *tools])

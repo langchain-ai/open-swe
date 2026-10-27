@@ -5,6 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
+from langchain.agents.middleware import TracePolicy, omit_payload
 from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
 from langchain_core.runnables.config import ensure_config
 from langchain_core.tracers.langchain import LangChainTracer
@@ -23,6 +24,9 @@ def _ended(task: asyncio.Task[None]) -> None:
     _ENDING.discard(task)
     if task.cancelled():
         logger.warning("A turn's trace was not reconciled before the runtime stopped")
+
+
+MIDDLEWARE_TRACE_POLICY = TracePolicy(process_inputs=omit_payload)
 
 
 class TurnTrace:

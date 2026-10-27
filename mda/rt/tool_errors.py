@@ -27,6 +27,7 @@ from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
 from rt.backend import OpenSweBackend
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ _SLOW_CALL_SECONDS: Final = 5
 
 
 class ToolErrorMiddleware(AgentMiddleware):
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
 

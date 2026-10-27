@@ -31,6 +31,7 @@ from runtime_api.operations import RunRequest
 from rt.backend import BackendCallError, OpenSweBackend, RunContext, current_run
 from rt.box_setup import box_setup
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,8 @@ async def opened_sandbox(runtime: Runtime) -> str | None:
 
 class ReplaceSandboxMiddleware(AgentMiddleware):
     """Carry out ``recreate_sandbox`` for the box MDA owns."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
