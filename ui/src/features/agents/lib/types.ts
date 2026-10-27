@@ -134,10 +134,7 @@ export interface ToolExecutionChunk {
    * show the subagent's nested activity.
    */
   subagentNamespace?: Array<string>
-  /**
-   * The tool calls a `code` chunk's code made, in order. When present the row
-   * shows them instead of the code's raw output.
-   */
+  /** The tool calls a `code` chunk's code made, shown alongside its source and output. */
   calls?: Array<ToolExecutionChunk>
 }
 

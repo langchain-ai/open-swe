@@ -41,6 +41,53 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("shows eval code and lazily loaded output alongside its nested calls", async () => {
+    const code = 'console.log("counting"); await tools.ls({ path: "/" })'
+    const { container } = render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "eval-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "eval",
+                title: "Eval",
+                toolKind: "code",
+                status: "completed",
+                input: { code },
+                output: "<stdout>\ncount",
+                loadOutput: async () =>
+                  '<stdout>\ncounting <files>\n</stdout>\n<result>{"count":2}</result>',
+                calls: [
+                  {
+                    kind: "tool-execution",
+                    toolCallId: "ls",
+                    title: "ls",
+                    toolKind: "read",
+                    status: "completed",
+                    input: { path: "/" },
+                    output: "README.md",
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }))
+    expect(container.textContent).toContain(code)
+    expect(screen.getByRole("button", { name: "List /" })).toBeTruthy()
+    expect(await screen.findByText("counting <files>")).toBeTruthy()
+    expect(container.textContent).toContain('"count": 2')
+    expect(screen.queryByText(/<result>/)).toBeNull()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
