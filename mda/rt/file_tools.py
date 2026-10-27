@@ -41,6 +41,7 @@ from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.backend import OpenSweBackend, RunLocal
+from rt.box_setup import box_setup
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.middleware import reported
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
@@ -220,9 +221,11 @@ class FileToolsMiddleware(AgentMiddleware):
         return request.override(tool_call={**request.tool_call, "args": arguments})
 
     async def _observed(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
-        """``handler``, after the turn's starting fingerprint when the call may change a checkout."""
+        """``handler``, once the box is ready and the turn's starting fingerprint taken, when the
+        call may change a checkout."""
         if request.tool_call["name"] not in OBSERVED_TOOLS:
             return await handler(request)
+        await box_setup(self._backend.run).done()
         git = turn_git(self._backend.run)
         await git.changing()
         started = time.time_ns()

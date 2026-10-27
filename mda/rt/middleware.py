@@ -96,6 +96,7 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
+from rt.box_setup import box_setup
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.models import build_model
@@ -361,13 +362,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         update = await self._before_agent(state, runtime)
         held = {**state.get(STATE_KEY, {}), **_held(update)}
-        # Without a box of MDA's, the thread's files are the backend's to reach.
-        files = (
-            getattr(runtime, "backend", None)
-            if self._in_box
-            else RemoteFiles(self._backend, run_id)
-        )
-        turn_git(self._backend.run).start(files, held.get("work_dir"))
+        run = self._backend.run
+        if self._in_box:
+            files = getattr(runtime, "backend", None)
+            box_setup(run).start(files)
+        else:
+            # Without a box of MDA's, the thread's files are the backend's to reach.
+            files = RemoteFiles(self._backend, run_id)
+        turn_git(run).start(files, held.get("work_dir"))
         return self._carrying(state, update)
 
     @property

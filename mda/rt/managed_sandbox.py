@@ -29,6 +29,7 @@ from runtime_api.loop import SANDBOX_REPLACED
 from runtime_api.operations import RunRequest
 
 from rt.backend import BackendCallError, OpenSweBackend, RunContext, current_run
+from rt.box_setup import box_setup
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -111,10 +112,10 @@ class ReplaceSandboxMiddleware(AgentMiddleware):
             create = SandboxCreate.model_validate(reply.get("replace"))
         except ValidationError:
             return result
+        files = getattr(request.runtime, "backend", None)
         try:
-            replacement = await replace_sandbox(
-                getattr(request.runtime, "backend", None), definition(create, spec.thread_id)
-            )
+            replacement = await replace_sandbox(files, definition(create, spec.thread_id))
+            box_setup(self._backend.run).start(files)
             await call(self._backend, SANDBOX_REPLACED, RunRequest(run_id=run_id()))
         except Exception as exc:
             logger.warning("Could not replace the thread's sandbox", exc_info=True)
