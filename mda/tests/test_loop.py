@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 import pytest
 from langchain.agents import create_agent
@@ -25,7 +26,7 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, PhaseResult, Route, TaskContext
+from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
@@ -45,6 +46,8 @@ _REPLY = ReplyRules(
     nudge=[_NUDGE],
     nudge_sender=_GUARD,
 )
+
+_TOKEN_EXPIRES = datetime(2999, 1, 1, 12, tzinfo=UTC)
 
 type Calls = list[tuple[str, dict[str, JsonValue]]]
 
@@ -104,7 +107,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         monkeypatch,
         {
             "task_context": TaskContext(instructions="You coordinate the task.", message=context),
-            "refresh_github_proxy": Done(),
+            "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
         },
         rules,
     )
@@ -124,7 +127,10 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         "Walk the reviewer through it.\n\nYou coordinate the task."
     )
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
-    assert planned.update == {"model_route": "fast"}
+    assert planned.update == {
+        "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",
+        "model_route": "fast",
+    }
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
     assert planned.call.fallback == _FALLBACK
@@ -132,11 +138,17 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert [message.content for message in messages_from_dict(planned.messages)] == [context]
     assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]
 
-    # The task's context the model still sees is not added again.
+    # The task's context the model still sees is not added again, and a token with time
+    # left is not replaced.
     again = await loop.before_model(
-        _state(HumanMessage(content=context, id="task-context:1"), model_route="fast")
+        _state(
+            HumanMessage(content=context, id="task-context:1"),
+            model_route="fast",
+            github_proxy_refresh_at=planned.update["github_proxy_refresh_at"],
+        )
     )
     assert again.messages == []
+    assert [name for name, _ in calls].count("refresh_github_proxy") == 1
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
