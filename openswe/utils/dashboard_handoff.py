@@ -17,6 +17,9 @@ RELAYED_FROM_KEY = "relayed_from_thread_id"
 # Where a dashboard message carries its replies: beside the content, so they
 # survive both the transcript and the SDK stream paths.
 REPLIES_KEY = "replies"
+# Stamped by the backend on something a person did in the app rather than typed: it
+# counts as their intervention, but like a relay it must not move the conversation to Web.
+ACTION_KEY = "action"
 
 _CONTEXT_LIMIT = 4_000
 _SELECTION_LIMIT = 20_000
@@ -64,8 +67,9 @@ def dashboard_input_context(
     sender_id: str,
     relayed_from: str | None,
     replies: Sequence[PassageReply] = (),
+    action: str | None = None,
 ) -> InputMessageContext:
-    """The envelope of a dashboard send: typed on Web, or relayed by another agent thread."""
+    """The envelope of a dashboard send: typed on Web, relayed by another agent thread, or an action taken in the app."""
     data: dict[str, FieldValue | FieldValues | list[FieldValues]] = {}
     if replies:
         data["reply"] = [reply.fields() for reply in replies]
@@ -73,6 +77,9 @@ def dashboard_input_context(
     if relayed_from is not None:
         context["surface"] = "automation"
         data["relayed_from_thread"] = relayed_from
+    if action is not None:
+        context["surface"] = "automation"
+        data["action"] = action
     if data:
         context["data"] = data
     return context

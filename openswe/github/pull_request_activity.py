@@ -46,6 +46,7 @@ async def note_pull_request_activity(
         pull_request = await PullRequest.load(owner, repo, number)
         text = text.strip()
         await pull_request.note_for_threads(
+            login,
             prompt(
                 "runs/pull-request-activity",
                 activity=activity,
@@ -54,7 +55,7 @@ async def note_pull_request_activity(
                 text=text[:_MAX_TEXT],
                 truncated=len(text) > _MAX_TEXT,
                 **details,
-            )
+            ),
         )
     except Exception:
         logger.exception(

@@ -8,6 +8,7 @@ from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import ReplySurface
 from openswe.threads.inbox import Taken, ThreadInbox
+from openswe.utils.thread_ops import queue_action_for_thread
 
 
 def _envelope(message: RunMessage) -> str:
@@ -65,6 +66,20 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+
+
+@pytest.mark.asyncio
+async def test_an_action_waits_for_the_next_run_as_the_persons_input(registry_db: None) -> None:
+    await queue_action_for_thread("thread-1", "octocat", "pull-request-activity", "Merged it")
+
+    assert await QueuedMessage.awaits_run("thread-1") is False
+    taken = await _read("slack")
+
+    assert taken.reply_surface is None
+    envelopes = "".join(_envelope(message) for message in taken.messages)
+    assert 'kind="human"' in envelopes
+    assert 'surface="automation"' in envelopes
+    assert 'action="pull-request-activity"' in envelopes
 
 
 @pytest.mark.asyncio

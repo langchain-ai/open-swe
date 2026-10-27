@@ -13,6 +13,7 @@ from langgraph_sdk import get_client
 
 from openswe.config import ENV
 from openswe.message_queue import PASSIVE_KEY, QueuedContent, QueuedMessage
+from openswe.utils.dashboard_handoff import ACTION_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -46,3 +47,16 @@ async def queue_message_for_thread(thread_id: str, message_content: QueuedConten
 async def queue_note_for_thread(thread_id: str, note: str) -> bool:
     """Queue ``note`` as context for the thread's next run without starting one."""
     return await queue_message_for_thread(thread_id, {"text": note, PASSIVE_KEY: True})
+
+
+async def queue_action_for_thread(thread_id: str, login: str, action: str, note: str) -> bool:
+    """Queue what ``login`` did in the app as their input to the thread's next run, starting none."""
+    return await queue_message_for_thread(
+        thread_id,
+        {
+            "text": note,
+            "sender": {"id": f"github:{login}", "platform": "github", "github_login": login},
+            ACTION_KEY: action,
+            PASSIVE_KEY: True,
+        },
+    )
