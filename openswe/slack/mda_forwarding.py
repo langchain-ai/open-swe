@@ -124,9 +124,13 @@ async def owned_thread(channel_id: str, root_ts: str) -> str | None:
 
 
 async def claim_conversation(
-    app_id: str, team_id: str, channel_id: str, root_ts: str
+    app_id: str, team_id: str, channel_id: str, root_ts: str, *, owner_login: str | None = None
 ) -> str | None:
-    """Make a new Slack conversation MDA's: its thread id, or ``None`` if another thread holds it."""
+    """Make a new Slack conversation MDA's: its thread id, or ``None`` if another thread holds it.
+
+    ``owner_login`` is the GitHub login of the person who started it, who may prompt the
+    thread while it is still private.
+    """
     if not (app_id and team_id and channel_id and root_ts):
         return None
     thread_id = mda_thread_id(app_id, team_id, channel_id, root_ts)
@@ -134,10 +138,11 @@ async def claim_conversation(
         await bind_slack_thread_id(channel_id, root_ts, thread_id)
     except SlackThreadMappingError:
         return None
-    # Private until the run's metadata says who may see it: nothing else names an owner yet.
-    await adopt_channel_run(
-        thread_id, CHANNEL, metadata={"visibility": "private", "source": "slack"}
-    )
+    # Private to the person who started it until the run's metadata says who may see it.
+    metadata: dict[str, JsonValue] = {"visibility": "private", "source": "slack"}
+    if owner_login:
+        metadata["owner_login"] = owner_login
+    await adopt_channel_run(thread_id, CHANNEL, metadata=metadata)
     return thread_id
 
 

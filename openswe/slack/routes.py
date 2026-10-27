@@ -867,7 +867,11 @@ async def slack_webhook(
                 background_tasks.add_task(link_needed.prompt, channel_id, thread_ts)
                 return accepted("Slack account link requested")
             mda_thread_id = await mda_forwarding.claim_conversation(
-                envelope.api_app_id, team_id or "", channel_id, root_ts
+                envelope.api_app_id,
+                team_id or "",
+                channel_id,
+                root_ts,
+                owner_login=await service.slack_login(user_id),
             )
         if mda_thread_id is not None and not mda_forwarding.trigger_server_takes(event.subtype):
             # Trigger Server would drop it, and the thread is MDA's, so nothing can run it.

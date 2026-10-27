@@ -3,10 +3,12 @@ import time
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from openswe.slack import mda_forwarding
 from openswe.slack.request import SlackRequest
 from openswe.threads import index, router
+from openswe.webhooks.common import ThreadRecord
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -115,13 +117,18 @@ async def test_a_claimed_conversation_is_private_until_its_run_says_otherwise(
     local = AsyncMock()
     # The Agent Server's own copy of the thread, as a stand-in.
     monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
-    thread_id = await mda_forwarding.claim_conversation("A1", "T1", "C9", "9.1")
+    thread_id = await mda_forwarding.claim_conversation("A1", "T1", "C9", "9.1", owner_login="ada")
 
     assert thread_id == mda_forwarding.mda_thread_id("A1", "T1", "C9", "9.1")
     thread = await index.get(thread_id)
     assert thread is not None
     assert thread.metadata["visibility"] == "private"
     assert thread.metadata["source"] == "slack"
+    # The person who started it may prompt it; the run's own access check passes.
+    assert thread.metadata["owner_login"] == "ada"
+    assert ThreadRecord(exists=True, metadata=thread.metadata).authorize("ada")
+    with pytest.raises(HTTPException):
+        ThreadRecord(exists=True, metadata=thread.metadata).authorize("someone-else")
     assert thread.metadata["channel"] == "slack"
     local.create.assert_awaited_once_with(thread_id, thread.metadata)
     # Another app's conversation can't take the Slack thread now.
