@@ -28,8 +28,9 @@ from runtime_api.endpoint import call
 from runtime_api.loop import SANDBOX_REPLACED
 from runtime_api.operations import RunRequest
 
-from rt.backend import BackendCallError, OpenSweBackend, RunContext
+from rt.backend import BackendCallError, OpenSweBackend, RunContext, current_run
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,13 @@ EXECUTE_TIMEOUT_SECONDS: Final = 300
 def _selected(runtime: object) -> SandboxDefinition | None:
     """The box the run in ``runtime`` uses, as its catalog says; None without one of MDA's."""
     context = getattr(runtime, "context", None)
-    if not isinstance(context, RunContext):
-        return None
     try:
-        spec = context.run().planned.sandbox
+        # A hook's backend is bound to the run's configurable, not its runtime, so it
+        # carries no run context: the run in progress is the one it acts for.
+        run = context.run() if isinstance(context, RunContext) else current_run()
+        spec = run.planned.sandbox
     except BackendCallError:
-        # Not started yet, so nothing may open a box for it.
+        # Not started yet, or not an Open SWE run, so nothing may open a box for it.
         return None
     return None if spec is None else definition(spec.create, spec.thread_id)
 
@@ -90,6 +92,8 @@ async def opened_sandbox(runtime: Runtime) -> str | None:
 
 class ReplaceSandboxMiddleware(AgentMiddleware):
     """Carry out ``recreate_sandbox`` for the box MDA owns."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend

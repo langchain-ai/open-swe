@@ -5,7 +5,7 @@ use serde::Serialize;
 /// The command and flag names that are safe to report.
 #[derive(Clone, Default, Serialize)]
 pub struct CommandInvocation {
-    pub(super) command_path: String,
+    pub(crate) command_path: String,
     pub(super) flags_present: Vec<String>,
 }
 
@@ -27,16 +27,6 @@ impl CommandInvocation {
             command_path: command_names.join(" "),
             flags_present: flag_names,
         })
-    }
-
-    /// The complete command below `mda`, such as `channel init slack`.
-    pub fn command_path(&self) -> &str {
-        &self.command_path
-    }
-
-    /// The flag names written by the caller, without their values.
-    pub fn flags_present(&self) -> &[String] {
-        &self.flags_present
     }
 }
 
@@ -96,7 +86,7 @@ mod tests {
 
         let analytics = CommandInvocation::from_matches(&command, &matches).unwrap();
 
-        assert_eq!(analytics.command_path(), "one two three four");
+        assert_eq!(analytics.command_path, "one two three four");
     }
 
     #[test]
@@ -146,7 +136,7 @@ mod tests {
         let analytics = CommandInvocation::from_matches(&command, &matches).unwrap();
 
         assert_eq!(
-            serde_json::to_value(analytics.flags_present()).unwrap(),
+            serde_json::to_value(&analytics.flags_present).unwrap(),
             json!(["model"])
         );
     }

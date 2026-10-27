@@ -5,26 +5,21 @@ description: Drive this checkout's dashboard (`ui/`) against the shared preview 
 
 # Dashboard against preview
 
-`pnpm run dev:prod` serves this checkout's `ui/` from Vite and proxies the API to a
-deployment with a real session, so every page shows real threads. Point it at preview,
-never production:
+`pnpm run dev:prod` serves this checkout's `ui/` from Vite and proxies the API to a deployment with a real session, so every page shows real threads.
+Point it at preview, never production:
 
 ```bash
 DASHBOARD_API_URL=https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app pnpm run dev:prod
 ```
 
-The first run opens the user's browser for a GitHub handoff. When they are signed in
-to GitHub it completes on its own, and the session is cached in
-`~/.cache/open-swe/dev-session.json` for a week. If `pnpm` fails with
-`No version is set for shim: pnpm`, run it as
-`mise exec pnpm@<version> -- pnpm run dev:prod`, taking the version from
-`packageManager` in `package.json`.
+The first run opens the user's browser for a GitHub handoff.
+When they are signed in to GitHub it completes on its own, and the session is cached in `~/.cache/open-swe/dev-session.json` for a week.
+If `pnpm` fails with `No version is set for shim: pnpm`, run it as `mise exec pnpm@<version> -- pnpm run dev:prod`, taking the version from `packageManager` in `package.json`.
 
 ## Browser pane
 
-The in-app Browser pane needs a launch configuration that starts the server; one that
-only names a URL is refused. Write `.claude/launch.json` (leave it uncommitted), then
-`preview_start` `dashboard-preview`:
+The in-app Browser pane needs a launch configuration that starts the server; one that only names a URL is refused.
+Write `.claude/launch.json` (leave it uncommitted), then `preview_start` `dashboard-preview`:
 
 ```json
 {
@@ -41,20 +36,19 @@ only names a URL is refused. Write `.claude/launch.json` (leave it uncommitted),
 }
 ```
 
-Vite holds port 3000 strictly: stop any `dev:prod` you started from Bash first. The
-`ego-browser` skill works too, and it carries the user's real login for both preview
-and production.
+Vite holds port 3000 strictly: stop any `dev:prod` you started from Bash first.
+The `ego-browser` skill works too, and it carries the user's real login for both preview and production.
 
 ## The session is real
 
-Reading is free. A message sent from the composer starts a real run, and opening a
-pull request's review page creates its chat thread. Ask the user before either.
+Reading is free.
+A message sent from the composer starts a real run, and opening a pull request's review page creates its chat thread.
+Ask the user before either.
 
 ## Finding a thread to test on
 
-Only threads with `transcript: "v2"` read the transcript log; older ones answer
-`/transcript` with 404 and go through the SDK stream. Rank candidates by size from the
-page:
+Only threads with `transcript: "v2"` read the transcript log; older ones answer `/transcript` with 404 and go through the SDK stream.
+Rank candidates by size from the page:
 
 ```js
 const { items } = await (await fetch("/dashboard/api/threads/page?limit=40")).json()
@@ -85,13 +79,11 @@ Each `preview_eval` times out after 30 seconds, so keep the wait under that.
 
 ## Before and after
 
-Measure the branch, then put the base branch's version of each changed file in place,
-reload, and measure again:
+Measure the branch, then put the base branch's version of each changed file in place, reload, and measure again:
 
 ```bash
 git diff main --name-only -- ui/src | grep -v test | while read f; do git show "main:$f" > "$f"; done
 ```
 
 Vite picks the files up; navigate to `/agents` with a full reload before measuring.
-Restore with `git checkout HEAD -- ui/src` and check `git status` is clean before you
-commit.
+Restore with `git checkout HEAD -- ui/src` and check `git status` is clean before you commit.

@@ -8,7 +8,6 @@ from typing import Any
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
-from openswe.config import ENV
 from openswe.credential_scope import private_credential_login
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.thread_token import (
@@ -36,22 +35,6 @@ class GitHubUserAuthRequired(RuntimeError):
         self.source = source
         self.github_login = github_login
         super().__init__(f"GitHub authentication required for {source} user '{github_login}'")
-
-
-LANGSMITH_API_KEY = ENV.LANGSMITH_API_KEY.get()
-X_SERVICE_AUTH_JWT_SECRET = ENV.X_SERVICE_AUTH_JWT_SECRET.get()
-USER_ID_API_KEY_MAP = ENV.USER_ID_API_KEY_MAP.get()
-
-
-def is_bot_token_only_mode() -> bool:
-    """Check if we're in bot-token-only mode.
-
-    This is the case when LANGSMITH_API_KEY is set (deployed) but neither
-    X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning we
-    can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
-    installation token is used for all git operations instead.
-    """
-    return bool(LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP)
 
 
 def _cache_resolved_github_token(

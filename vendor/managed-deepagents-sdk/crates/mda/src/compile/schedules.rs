@@ -23,6 +23,8 @@ pub(crate) type ScheduleCrons = BTreeMap<String, Value>;
 pub(super) struct ScheduleReadContext<'a> {
     pub source_root: &'a Path,
     pub assistant_id: &'a str,
+    /// The file-derived names of the channels the project declares.
+    pub channels: &'a [String],
 }
 
 /// Read every direct child of `schedules/` for the project's language and turn
@@ -55,14 +57,19 @@ pub(super) fn read_schedule_crons(
         };
         crons.insert(
             name.clone(),
-            schedule_cron(&name, &config, context.assistant_id)?,
+            schedule_cron(&name, &config, context.assistant_id, context.channels)?,
         );
     }
 
     Ok(crons)
 }
 
-fn schedule_cron(name: &str, config: &Value, assistant_id: &str) -> Result<Value> {
+fn schedule_cron(
+    name: &str,
+    config: &Value,
+    assistant_id: &str,
+    channels: &[String],
+) -> Result<Value> {
     let object = config
         .as_object()
         .ok_or_else(|| anyhow!("schedule '{name}' must be a configuration object"))?;
@@ -105,9 +112,16 @@ fn schedule_cron(name: &str, config: &Value, assistant_id: &str) -> Result<Value
     {
         bail!("schedule '{name}' context keys `channel` and `mda_*` are reserved");
     }
+    let mode = thread_mode(object.get("thread"), name)?;
     let mut schedule = json!({ "name": name });
-    if let Some(deliver_to) = object.get("deliverTo").or_else(|| object.get("deliver_to")) {
+    let deliver_to = object.get("deliverTo").or_else(|| object.get("deliver_to"));
+    if let Some(deliver_to) = deliver_to {
         schedule["deliver_to"] = deliver_to.clone();
+    }
+    let opens_thread =
+        matches!(mode, ThreadMode::Ephemeral) && starts_conversation(deliver_to, channels);
+    if opens_thread {
+        schedule["new_thread"] = Value::Bool(true);
     }
     context.insert("mda_schedule".to_string(), schedule);
     cron_entry.insert("context".to_string(), Value::Object(context));
@@ -120,11 +134,12 @@ fn schedule_cron(name: &str, config: &Value, assistant_id: &str) -> Result<Value
         cron_entry.insert("timezone".to_string(), Value::String(timezone.to_string()));
     }
 
-    match thread_mode(object.get("thread"), name)? {
+    match mode {
         ThreadMode::Ephemeral => {
+            let completed = if opens_thread { "keep" } else { "delete" };
             cron_entry.insert(
                 "on_run_completed".to_string(),
-                Value::String("delete".to_string()),
+                Value::String(completed.to_string()),
             );
         }
         ThreadMode::Persistent(id) => {
@@ -133,6 +148,29 @@ fn schedule_cron(name: &str, config: &Value, assistant_id: &str) -> Result<Value
     }
 
     Ok(Value::Object(cron_entry))
+}
+
+/// Whether a run's `deliverTo` starts a conversation in a declared channel,
+/// whose replies continue the run's thread. Other deliveries keep no thread.
+fn starts_conversation(deliver_to: Option<&Value>, channels: &[String]) -> bool {
+    let Some(target) = deliver_to else {
+        return false;
+    };
+    let declared = target
+        .get("channel")
+        .and_then(Value::as_str)
+        .is_some_and(|channel| channels.iter().any(|name| name == channel));
+    let posts = target
+        .get("autoPost")
+        .or_else(|| target.get("auto_post"))
+        .and_then(Value::as_bool)
+        != Some(false);
+    let conversation = target
+        .get("to")
+        .and_then(|to| to.get("type"))
+        .and_then(Value::as_str)
+        == Some("provider_conversation");
+    declared && posts && conversation
 }
 
 fn string_field<'a>(object: &'a Map<String, Value>, key: &str, name: &str) -> Result<&'a str> {
@@ -187,11 +225,12 @@ mod tests {
     use super::schedule_cron;
 
     fn cron(config: Value) -> Value {
-        schedule_cron("daily", &config, "agent").expect("schedule should compile")
+        schedule_cron("daily", &config, "agent", &["slack".to_string()])
+            .expect("schedule should compile")
     }
 
     fn cron_error(config: Value) -> String {
-        schedule_cron("daily", &config, "agent")
+        schedule_cron("daily", &config, "agent", &[])
             .expect_err("schedule should be rejected")
             .to_string()
     }
@@ -219,6 +258,7 @@ mod tests {
         assert_eq!(entry["input"], json!({ "topic": "news" }));
         assert_eq!(entry["thread_id"], "daily-thread");
         assert!(entry.get("on_run_completed").is_none());
+        assert!(entry["context"]["mda_schedule"].get("new_thread").is_none());
     }
 
     #[test]
@@ -231,6 +271,45 @@ mod tests {
                 cron(config)["context"]["mda_schedule"],
                 json!({ "name": "daily", "deliver_to": { "channel": "slack" } })
             );
+        }
+    }
+
+    #[test]
+    fn conversation_deliver_to_keeps_its_ephemeral_thread() {
+        let entry = cron(json!({
+            "cron": "0 9 * * *",
+            "prompt": "Summarize",
+            "deliverTo": {
+                "channel": "slack",
+                "to": { "type": "provider_conversation", "conversationId": "C1" },
+            },
+        }));
+        assert_eq!(entry["on_run_completed"], "keep");
+
+        assert_eq!(entry["context"]["mda_schedule"]["new_thread"], true);
+
+        for deliver_to in [
+            json!({
+                "channel": "slack",
+                "to": { "type": "provider_thread", "conversationId": "C1", "threadId": "1.2" },
+            }),
+            json!({
+                "channel": "other",
+                "to": { "type": "provider_conversation", "conversationId": "C1" },
+            }),
+            json!({
+                "channel": "slack",
+                "to": { "type": "provider_conversation", "conversationId": "C1" },
+                "autoPost": false,
+            }),
+        ] {
+            let entry = cron(json!({
+                "cron": "0 9 * * *",
+                "prompt": "Summarize",
+                "deliverTo": deliver_to,
+            }));
+            assert_eq!(entry["on_run_completed"], "delete");
+            assert!(entry["context"]["mda_schedule"].get("new_thread").is_none());
         }
     }
 

@@ -13,6 +13,9 @@ from pydantic import JsonValue
 
 from openswe import event_claims
 from openswe.agent_api import catalogs
+from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
+from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
+from openswe.agent_api.report_receipts import purge_report_receipts
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
@@ -183,6 +186,11 @@ async def _slack_channel_directory(_job: Job) -> None:
     await sync_directory()
 
 
+@WORKER.register(REPORT_RECEIPT_PURGE)
+async def _report_receipt_purge(_job: Job) -> None:
+    logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -206,6 +214,9 @@ async def start_jobs() -> None:
         ),
         lambda: queue.schedule(
             catalogs.PRUNE_JOB, cron=catalogs.PRUNE_SCHEDULE, key=catalogs.PRUNE_JOB
+        ),
+        lambda: queue.schedule(
+            REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
     ]
     for step in steps:

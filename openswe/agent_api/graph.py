@@ -18,7 +18,8 @@ import (``runtime_api``):
   ``model_choice``, ``task_context``, ``refresh_github_proxy``,
   ``reply_on_behalf``) and at the run's end (``run_ended``,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
-  reports of each reply and tool call, the work of the run's tools (``operation``,
+  reports of each reply and tool call, which arrive with those notices in ordered
+  batches (``reports``) and are recorded once per key, the work of the run's tools (``operation``,
   ``check_shell``, the ``files`` calls), and the box MDA keeps
 - a run still served from its plan (``RunParts.legacy``: a requested offload, an
   incident; or a token from before operations were granted) has its phases (``before_model``, ``after_model``, ``after_agent``) and
@@ -29,6 +30,7 @@ middleware. A call made from inside a subagent names the namespace of its ``task
 calls, so its tool calls and replies land under the subagent.
 """
 
+import asyncio
 import base64
 import logging
 import time
@@ -121,6 +123,7 @@ from runtime_api.loop import (
     BrowserReport,
     ChosenModel,
     Done,
+    GitHubProxyRefreshed,
     Inbox,
     InboxItems,
     InboxRead,
@@ -153,9 +156,11 @@ from runtime_api.operations import (
     ShellVerdict,
     ToolEvidence,
 )
+from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.skills import SKILLS, RunSkills
 
 from openswe.agent_api import catalogs
+from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.failures import OperationFailure
 from openswe.agent_api.git_metadata import (
     BASELINE,
@@ -178,12 +183,12 @@ from openswe.agent_api.loop import (
     run_hooks,
 )
 from openswe.agent_api.operations import Injections, invoke
+from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings, sign_runtime_token
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
-from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -199,7 +204,11 @@ from openswe.prompts import common_prompt, prompt
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
-from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
+from openswe.sandboxes.lifecycle import (
+    bind_mda_sandbox,
+    reconnect_replaced_sandbox,
+    refresh_thread_github_proxy,
+)
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
@@ -978,17 +987,12 @@ class TokenRun:
 
         return await self.in_run("task_context", read)
 
-    async def refresh_github_proxy(self, _request: RunRequest) -> Done:
-        try:
-            await maybe_refresh_proxy_token(self.run.thread_id)
-        except Exception:
-            # The box's next GitHub call says so if the token went stale; the run goes on.
-            logger.warning(
-                "Failed to refresh GitHub proxy token",
-                extra={"agent_thread_id": self.run.thread_id},
-                exc_info=True,
-            )
-        return Done()
+    async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
+        cfg = RunConfig.from_config(self.config)
+        expires_at = await refresh_thread_github_proxy(
+            self.run.thread_id, workspace_slug=cfg.workspace_slug
+        )
+        return GitHubProxyRefreshed(expires_at=expires_at)
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
@@ -1044,6 +1048,44 @@ class TokenRun:
             self.run.thread_id
         )
         return Done()
+
+    async def reports(self, request: Reports) -> ReportsTaken:
+        """Record the run's reports and notices in order, each key once.
+
+        Stops at the first it cannot take now, so none is recorded before one made
+        before it: one that failed, or one another delivery is still recording.
+        """
+        receipts = ReportReceipts(self.run.thread_id)
+        replies: list[dict[str, JsonValue]] = []
+        for item in request.items:
+            claim = (
+                await receipts.claim(item.key) if REPORTED[item.endpoint] != "idempotent" else None
+            )
+            if isinstance(claim, Recording):
+                break
+            if isinstance(claim, Recorded):
+                replies.append(claim.reply)
+                continue
+            try:
+                with traced_under(item.trace):
+                    answered = await self.graph.api(
+                        self.run, item.endpoint, item.request.model_dump(mode="json")
+                    )
+            except BaseException as exc:
+                if claim is not None:
+                    await asyncio.shield(receipts.release(claim))
+                if not isinstance(exc, Exception):
+                    raise
+                logger.exception(
+                    "An MDA report was not recorded",
+                    extra={"endpoint": item.endpoint, "report_key": item.key},
+                )
+                return ReportsTaken(replies=replies, refused=f"{type(exc).__name__}: {exc}")
+            reply = _json_object.validate_python(answered)
+            if claim is not None:
+                await receipts.keep(claim, item.key, reply)
+            replies.append(reply)
+        return ReportsTaken(replies=replies)
 
 
 class RemoteGraph:
@@ -1305,6 +1347,7 @@ RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)
+RUN_CALLS.serve(REPORTS, TokenRun.reports)
 # The work of a run's tools, answered from its token unless the run is still served
 # from its plan (``RunParts.legacy``, or a token without grants).
 TOOL_CALLS: Final = Handlers[TokenRun]()

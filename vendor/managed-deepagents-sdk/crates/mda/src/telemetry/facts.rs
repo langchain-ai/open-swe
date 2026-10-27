@@ -20,7 +20,8 @@ use serde::Serialize;
 
 // TODO: move LangSmith URL and key resolution out of `deploy` so telemetry
 // does not depend on a command module.
-use crate::deploy::{client_without_prompt, env_file, helpers};
+use crate::deploy::langsmith_context::LangSmithEndpoints;
+use crate::deploy::{client_without_prompt, env_file};
 use crate::langsmith::{AuthIdentity, Client};
 
 use super::command::CommandInvocation;
@@ -94,13 +95,14 @@ fn langsmith_target(matches: &ArgMatches) -> (String, Option<Client>) {
         project_dir.join(".env")
     };
     let env = env_file::parse_env_file(&env_path);
-    let (default_host, _) = helpers::resolve_langsmith_api_bases(&env);
-    let host = host_url
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(default_host);
-    let platform = helpers::resolve_platform_api_url(&host, &env);
-    let client = client_without_prompt(&env, &host, &platform, workspace_id.as_deref());
-    (platform, client)
+    let endpoints = LangSmithEndpoints::resolve(&env, host_url.as_deref());
+    let client = client_without_prompt(
+        &env,
+        &endpoints.host_url,
+        &endpoints.platform_api_url,
+        workspace_id.as_deref(),
+    );
+    (endpoints.platform_api_url, client)
 }
 
 /// Who is running the command, as verified by LangSmith.
@@ -243,7 +245,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let client = Client::new_with_platform(&base, Some(&base), "test-key", None).unwrap();
+        let client = Client::for_test(&base);
 
         refresh_identity(&client);
 

@@ -92,15 +92,15 @@ fn is_co_located_test_module(path: &Path) -> bool {
 /// Whether `path` is a plugin module directly under the project's top-level
 /// `directory`.
 ///
-/// Discovery is name-agnostic for real connector filenames: any module directly
-/// under the root `connectors/` with a supported extension is a candidate.
-/// Python package initializers (`__init__.py`) and co-located unit-test modules
-/// (`*.test.ts`, `test_*.py`, …) are excluded.
+/// Discovery is name-agnostic for real plugin filenames: any module directly
+/// under the root `directory` (e.g. `channels/`) with a supported extension is
+/// a candidate. Python package initializers (`__init__.py`) and co-located
+/// unit-test modules (`*.test.ts`, `test_*.py`, …) are excluded.
 ///
-/// The parent must be exactly `connectors` (not merely *named* `connectors`), so
-/// a nested `connectors/` directory anywhere else in the tree (for example a
+/// The parent must be exactly `directory` (not merely *named* like it), so a
+/// nested directory of the same name anywhere else in the tree (for example a
 /// vendored package under `.venv/.../site-packages/`) is never misdiscovered as
-/// a project connector.
+/// a project plugin.
 fn is_plugin_module(path: &Path, directory: &str, language: Language) -> bool {
     if path.parent() != Some(Path::new(directory)) {
         return false;
@@ -118,13 +118,10 @@ fn is_plugin_module(path: &Path, directory: &str, language: Language) -> bool {
     }
 }
 
-/// Locate every connector *candidate* module directly under `connectors/`,
-/// sorted by path for deterministic generated output.
-///
-/// Discovery is name-agnostic on filenames. Compile then keeps only modules
-/// that expose the required named `connector` export; the
-/// runtime collectors still check brand and hooks.
-pub(super) fn find_connector_entries(project: &Project) -> Vec<PathBuf> {
+/// Modules directly under the removed top-level `connectors/` layout. Compile
+/// rejects the ones that still export a `connector` so an old MCP declaration
+/// is not silently dropped from the deployment.
+pub(super) fn find_legacy_connector_entries(project: &Project) -> Vec<PathBuf> {
     find_plugin_entries(project, "connectors")
 }
 
@@ -150,8 +147,8 @@ pub(super) fn find_mcp_entry(project: &Project) -> Option<PathBuf> {
 }
 
 /// Locate every channel *candidate* module directly under `channels/`, sorted
-/// by path for deterministic generated output. Uses the same extension,
-/// initializer, and co-located-test rules as connector discovery.
+/// by path for deterministic generated output. Package initializers and
+/// co-located unit tests are skipped.
 pub(super) fn find_channel_entries(project: &Project) -> Vec<PathBuf> {
     find_plugin_entries(project, "channels")
 }
@@ -192,9 +189,9 @@ pub(super) fn misspelled_channel_directory_warning(project: &Project) -> Option<
 }
 
 /// Language source modules that are direct children of `dir` (e.g. `schedules/`).
-/// Unlike connectors, Python `__init__.py` and co-located tests are included
+/// Unlike channels, Python `__init__.py` and co-located tests are included
 /// when present — callers that need plugin filtering should use
-/// [`find_connector_entries`] instead.
+/// [`find_channel_entries`] instead.
 pub(super) fn language_dir_entries(project: &Project, dir: &str) -> Vec<PathBuf> {
     project
         .files
@@ -265,13 +262,25 @@ pub(in crate::compile) fn find_memory_entry(project: &Project) -> Option<PathBuf
         .find(|candidate| project.files.contains(candidate))
 }
 
-/// Locate the root `browser.py` that exports the named `browser` declaration,
-/// if the project opts into browser use. Python only: the TypeScript SDK has
-/// no browser tools.
+/// Candidate root `browser` modules for `language`, in priority order.
+///
+/// Browser use is opt-in: a project with none of these gets no browser.
+/// Package-dir forms are intentionally unsupported, matching the memory entry
+/// candidates above.
+fn browser_entry_candidates(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::TypeScript => &["browser.ts", "browser.tsx", "browser.mts", "browser.cts"],
+        Language::Python => &["browser.py"],
+    }
+}
+
+/// Locate the root `browser` module that exports the named `browser`
+/// declaration, if the project opts into browser use.
 pub(in crate::compile) fn find_browser_entry(project: &Project) -> Option<PathBuf> {
-    let candidate = PathBuf::from("browser.py");
-    (project.language == Language::Python && project.files.contains(&candidate))
-        .then_some(candidate)
+    browser_entry_candidates(project.language)
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| project.files.contains(candidate))
 }
 
 /// Read `sandbox/setup.sh`, if present.
@@ -333,15 +342,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn top_level_connector_modules_are_discovered() {
+    fn top_level_plugin_modules_are_discovered() {
         assert!(is_plugin_module(
-            Path::new("connectors/mcp.py"),
-            "connectors",
+            Path::new("channels/slack.py"),
+            "channels",
             Language::Python
         ));
         assert!(is_plugin_module(
-            Path::new("connectors/mcp.ts"),
-            "connectors",
+            Path::new("channels/slack.ts"),
+            "channels",
             Language::TypeScript
         ));
     }
@@ -361,26 +370,26 @@ mod tests {
     }
 
     #[test]
-    fn package_initializers_are_not_connectors() {
+    fn package_initializers_are_not_plugins() {
         assert!(!is_plugin_module(
-            Path::new("connectors/__init__.py"),
-            "connectors",
+            Path::new("channels/__init__.py"),
+            "channels",
             Language::Python
         ));
     }
 
     #[test]
-    fn nested_connectors_directories_are_not_discovered() {
-        // A vendored package under a virtualenv also has a `connectors/` dir; it
-        // must never be treated as one of the project's connectors.
+    fn nested_plugin_directories_are_not_discovered() {
+        // A vendored package under a virtualenv also has a `channels/` dir; it
+        // must never be treated as one of the project's channels.
         assert!(!is_plugin_module(
-            Path::new(".venv/lib/python3.13/site-packages/managed_deepagents/connectors/mcp.py"),
-            "connectors",
+            Path::new(".venv/lib/python3.13/site-packages/managed_deepagents/channels/slack.py"),
+            "channels",
             Language::Python
         ));
         assert!(!is_plugin_module(
-            Path::new("src/connectors/foo.py"),
-            "connectors",
+            Path::new("src/channels/foo.py"),
+            "channels",
             Language::Python
         ));
     }
@@ -388,43 +397,43 @@ mod tests {
     #[test]
     fn non_module_extensions_are_ignored() {
         assert!(!is_plugin_module(
-            Path::new("connectors/readme.md"),
-            "connectors",
+            Path::new("channels/readme.md"),
+            "channels",
             Language::Python
         ));
     }
 
     #[test]
-    fn co_located_test_modules_are_not_connectors() {
+    fn co_located_test_modules_are_not_plugins() {
         assert!(!is_plugin_module(
-            Path::new("connectors/mcp.test.ts"),
-            "connectors",
+            Path::new("channels/slack.test.ts"),
+            "channels",
             Language::TypeScript
         ));
         assert!(!is_plugin_module(
-            Path::new("connectors/mcp.spec.ts"),
-            "connectors",
+            Path::new("channels/slack.spec.ts"),
+            "channels",
             Language::TypeScript
         ));
         assert!(!is_plugin_module(
-            Path::new("connectors/test_mcp.py"),
-            "connectors",
+            Path::new("channels/test_slack.py"),
+            "channels",
             Language::Python
         ));
         assert!(!is_plugin_module(
-            Path::new("connectors/mcp_test.py"),
-            "connectors",
+            Path::new("channels/slack_test.py"),
+            "channels",
             Language::Python
         ));
         // Real plugins must still be discovered.
         assert!(is_plugin_module(
-            Path::new("connectors/mcp.ts"),
-            "connectors",
+            Path::new("channels/slack.ts"),
+            "channels",
             Language::TypeScript
         ));
         assert!(is_plugin_module(
-            Path::new("connectors/mcp.py"),
-            "connectors",
+            Path::new("channels/slack.py"),
+            "channels",
             Language::Python
         ));
     }
@@ -488,7 +497,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            find_connector_entries(&project),
+            find_legacy_connector_entries(&project),
             vec![PathBuf::from("connectors/mcp.ts")]
         );
     }
