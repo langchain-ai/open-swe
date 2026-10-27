@@ -1340,6 +1340,31 @@ async def test_queue_dashboard_authorization(
         for pending in (third, fourth):
             assert (await client.delete(f"{path}/requests/{pending.id}")).status_code == 204
         assert (await client.get(path)).json()["items"] == []
+        await queue.set_paused(True, actor=operator.id)
+        await queue.enable_native_observation()
+        queue_controller.config = queue_controller.config.model_copy(
+            update={"mode": "native", "check_app_id": 456}
+        )
+        assert (await client.patch(f"{path}/pause", json={"paused": True})).status_code == 204
+        assert (await client.get(path)).json()["paused"] is True
+        assert (await client.post(f"{path}/requests", json=body)).status_code == 409
+        assert (await client.delete(f"{path}/requests/{missing}")).status_code == 409
+        assert (
+            await client.patch(f"{path}/requests/{missing}/priority", json={"priority": 1})
+        ).status_code == 409
+        permission = "read"
+        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
+        client.cookies.set(
+            "osw_session",
+            issue_session(
+                login=author.github_login,
+                email=author.email,
+                avatar_url=None,
+                user_id=str(author.id),
+            ),
+        )
+        permission = "write"
+        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
         async with postgres.session() as session:
             await session.execute(
                 update(WorkspaceRow)
@@ -1348,3 +1373,356 @@ async def test_queue_dashboard_authorization(
             )
         await controller.start_queue()
         assert (await client.get(path)).status_code == 404
+
+
+def native_snapshot(
+    numbers: tuple[int, ...] = (1, 2, 3), *, main: str = "a" * 40, age: int = 90
+) -> NativeQueueSnapshot:
+    from tests.merge_queue.test_queue_controller import native_response
+
+    response = native_response(numbers, main)
+    for entry in response["mergeQueue"]["entries"]["nodes"]:
+        entry["enqueuedAt"] = (datetime.now(UTC) - timedelta(seconds=age)).isoformat()
+    return NativeQueueSnapshot.model_validate(response)
+
+
+async def enable_native_validation(
+    queue: MergeQueue, *, cap: int = 3, collection: int = 60
+) -> tuple[QueuePolicy, Lease, User]:
+    await queue.enable_native_observation()
+    async with postgres.session() as session:
+        operator = User(display_name="Queue operator")
+        session.add(operator)
+    await queue.set_paused(False, actor=operator.id)
+    policy = QueuePolicy(
+        checks={},
+        max_batch_size=cap,
+        collection_seconds=collection,
+        validation=ValidationPolicy(dispatch_actor_id=123, deadline_seconds=120),
+    )
+    return policy, await claim(queue), operator
+
+
+async def test_native_selection_survives_restart_and_recovers_ac_before_def(queue):
+    policy, lease, _ = await enable_native_validation(queue)
+    work = await queue.prepare_native_validation(
+        native_snapshot((1, 2, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert work is not None and work.dispatch
+    initial = work.request
+    restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+    assert restarted is not None
+
+    queue = restarted
+    duplicate = await queue.prepare_native_validation(
+        native_snapshot((1, 2, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert duplicate is not None and not duplicate.dispatch and duplicate.request == initial
+    await queue.finish_native_validation(
+        duplicate, {"error": "B breaks smoke"}, lease, succeeded=False
+    )
+    assert (
+        await queue.prepare_native_validation(
+            native_snapshot((1, 2, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
+        )
+        is None
+    )
+    recovered = await queue.prepare_native_validation(
+        native_snapshot((1, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert recovered is not None and recovered.dispatch
+    assert recovered.batch.id == initial.batch_id
+    assert recovered.request.candidate_sha == list(native_snapshot((1, 3)).candidates)[-1]
+    assert recovered.request.attempt_id != initial.attempt_id
+    await queue.bind_validation_run(recovered.attempt.id, 42, lease)
+    await queue.finish_native_validation(
+        recovered,
+        {
+            **recovered.request.model_dump(mode="json"),
+            "run_id": 42,
+            "run_attempt": 1,
+            "tested_sha": recovered.request.candidate_sha,
+        },
+        lease,
+        succeeded=True,
+    )
+    assert await queue.authorize_native_result(recovered, native_snapshot((1, 3, 4, 5, 6)), lease)
+    await queue.record_native_landing(recovered, lease)
+    next_work = await queue.prepare_native_validation(
+        native_snapshot((4, 5, 6), main=recovered.request.candidate_sha),
+        600,
+        lease,
+        policy=policy,
+        trust="trusted-policy",
+    )
+    assert next_work is not None and next_work.dispatch
+    assert next_work.batch.id != initial.batch_id
+    assert (
+        next_work.request.candidate_sha
+        == list(native_snapshot((4, 5, 6), main=recovered.request.candidate_sha).candidates)[-1]
+    )
+    history = await queue.history(initial.batch_id)
+    assert history.batch.state == "landed"
+    assert [attempt.state for attempt in history.attempts] == ["failed", "succeeded"]
+
+
+@pytest.mark.parametrize(
+    ("cap", "age", "selected"), [(1, 0, True), (3, 0, False), (3, 90, True), (3, 700, False)]
+)
+async def test_native_partial_batches_obey_collection_and_github_deadline(
+    queue, cap, age, selected
+):
+    policy, lease, _ = await enable_native_validation(queue, cap=cap)
+    work = await queue.prepare_native_validation(
+        native_snapshot((1,), age=age), 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert (work is not None) == selected
+
+
+@pytest.mark.parametrize(
+    "fault", ["head", "review", "base", "pause", "deadline", "lease", "batch_deadline"]
+)
+async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault):
+    policy, lease, operator = await enable_native_validation(queue)
+    snapshot = native_snapshot()
+    work = await queue.prepare_native_validation(
+        snapshot, 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert work is not None
+    await queue.bind_validation_run(work.attempt.id, 42, lease)
+    await queue.finish_native_validation(
+        work,
+        {
+            **work.request.model_dump(mode="json"),
+            "run_id": 42,
+            "run_attempt": 1,
+            "tested_sha": work.request.candidate_sha,
+        },
+        lease,
+        succeeded=True,
+    )
+    if fault in {"head", "review"}:
+        assert snapshot.queue is not None
+        first, *rest = snapshot.queue.entries.nodes
+        pull = first.pull.model_copy(
+            update={"head_sha": "f" * 40}
+            if fault == "head"
+            else {"review_decision": "REVIEW_REQUIRED"}
+        )
+        snapshot = snapshot.model_copy(
+            update={
+                "queue": snapshot.queue.model_copy(
+                    update={
+                        "entries": snapshot.queue.entries.model_copy(
+                            update={"nodes": (first.model_copy(update={"pull": pull}), *rest)}
+                        )
+                    }
+                )
+            }
+        )
+    elif fault == "base":
+        snapshot = native_snapshot(main="f" * 40)
+    elif fault == "pause":
+        await queue.set_paused(True, actor=operator.id)
+    elif fault in {"deadline", "batch_deadline"}:
+        async with postgres.session() as session:
+            row = Attempt if fault == "deadline" else Batch
+            await session.execute(
+                update(row)
+                .where(row.id == (work.attempt.id if fault == "deadline" else work.batch.id))
+                .values(deadline=func.clock_timestamp() - timedelta(seconds=1))
+            )
+        assert (
+            await queue.prepare_native_validation(
+                native_snapshot((1, 2, 3, 4)), 600, lease, policy=policy, trust="trusted-policy"
+            )
+            is None
+        )
+        assert (await queue.history(work.batch.id)).batch.state == "active"
+    elif fault == "lease":
+        await queue.release(lease)
+        await claim(queue)
+        with pytest.raises(LeaseLost):
+            await queue.authorize_native_result(work, snapshot, lease)
+        return
+    assert not await queue.authorize_native_result(work, snapshot, lease)
+
+
+@pytest.mark.parametrize(
+    "fault", ["replay", "revoked", "issuer", "capacity", "timeout", "allgreen"]
+)
+async def test_native_runtime_rechecks_evidence_after_lost_success_response(
+    queue: MergeQueue, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    import hmac
+    import json
+
+    from pydantic import SecretStr
+
+    from openswe.github.queue import Artifact, ValidationJob, ValidationRun
+    from openswe.merge_queue import dispatch
+    from openswe.merge_queue.native import NativeQueueRuntime
+    from openswe.merge_queue.validation_contract import ValidationRequest
+
+    policy, lease, _ = await enable_native_validation(queue)
+    await queue.release(lease)
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    config = QueueConfiguration(
+        workspace_id=queue.workspace_id,
+        repository="acme/widgets",
+        repository_id=42,
+        mode="native",
+        dispatch_url="https://dispatcher.example/api/v1/merge-queue/dispatch",
+        workflow_digest="a" * 64,
+        check_app_id=456,
+        operator_emails=frozenset({"operator@example.com"}),
+        policy=policy,
+    )
+    repo = Mock(spec=RepoClient)
+    repo.native_queue = AsyncMock(return_value=native_snapshot((1, 2, 3, 4, 5, 6)))
+    repo.branch_rules = AsyncMock(
+        return_value=[
+            {
+                "type": "merge_queue",
+                "parameters": {
+                    "merge_method": "MERGE",
+                    "grouping_strategy": "HEADGREEN",
+                    "max_entries_to_build": 3,
+                    "max_entries_to_merge": 3,
+                    "min_entries_to_merge": 1,
+                    "check_response_timeout_minutes": 10,
+                },
+            },
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [{"context": "merge-queue", "integration_id": 456}],
+                },
+            },
+        ]
+    )
+    sent: list[httpx2.Request] = []
+    lose_response = True
+
+    def deliver(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        report = request.url.path.endswith("/check-reports")
+        prefix = b"check-report:" if report else b""
+        assert (
+            request.headers["X-Merge-Queue-Signature"]
+            == hmac.digest(b"s" * 32, prefix + request.content, "sha256").hex()
+        )
+        if report:
+            body = json.loads(request.content)
+            assert body["dispatch_body"].encode() == next(
+                item.content for item in reversed(sent) if item.url.path.endswith("/dispatch")
+            )
+            if body["state"] == "success" and lose_response:
+                return httpx2.Response(502)
+        return httpx2.Response(204)
+
+    monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(deliver))
+
+    @asynccontextmanager
+    async def open_repo(_queue: MergeQueue) -> AsyncIterator[RepoClient]:
+        yield repo
+
+    async def reconcile() -> None:
+        worker = NativeQueueRuntime(
+            queue.id,
+            42,
+            open_repo,
+            config=config,
+            dispatcher=DispatchGateway(str(config.dispatch_url), SecretStr("s" * 32)),
+        )
+        await worker.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
+
+    if fault in {"issuer", "capacity", "timeout", "allgreen"}:
+        rules = repo.branch_rules.return_value
+        if fault == "issuer":
+            rules[1]["parameters"]["required_status_checks"][0]["integration_id"] = 999
+        elif fault == "capacity":
+            rules[0]["parameters"]["max_entries_to_merge"] = 2
+        elif fault == "timeout":
+            rules[0]["parameters"]["check_response_timeout_minutes"] = 2
+        else:
+            rules[0]["parameters"]["grouping_strategy"] = "ALLGREEN"
+        with pytest.raises(ValueError):
+            await reconcile()
+        assert sent == []
+        return
+    revoke = fault == "revoked"
+    await reconcile()
+    request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
+    run = ValidationRun(
+        id=42,
+        actor_id=123,
+        triggering_actor_id=123,
+        repository=request.repository,
+        head_repository=request.repository,
+        head_branch="main",
+        head_sha=request.workflow_sha,
+        path=".github/workflows/merge_queue_validate.yml",
+        event="workflow_dispatch",
+        display_title=request.title,
+        run_attempt=1,
+        status="completed",
+        conclusion="success",
+    )
+    repo.validation_runs = AsyncMock(return_value=(run,))
+    repo.validation_run = AsyncMock(return_value=run)
+    repo.validation_jobs = AsyncMock(
+        return_value=tuple(
+            ValidationJob(
+                id=index,
+                run_id=42,
+                run_attempt=1,
+                name=name,
+                status="completed",
+                conclusion="success",
+            )
+            for index, name in enumerate(("candidate-smoke", "candidate-result"), 1)
+        )
+    )
+    repo.validation_artifacts = AsyncMock(
+        return_value=(
+            Artifact(
+                id=7,
+                name=f"merge-queue-result-{request.attempt_id}-1",
+                expired=False,
+            ),
+        )
+    )
+    repo.artifact_json = AsyncMock(
+        return_value={
+            **request.model_dump(mode="json"),
+            "run_id": 42,
+            "run_attempt": 1,
+            "tested_sha": request.candidate_sha,
+        }
+    )
+    with pytest.raises(httpx2.HTTPStatusError):
+        await reconcile()
+    assert (await queue.history(request.batch_id)).attempts[0].state == "succeeded"
+    lose_response = False
+    if revoke:
+        repo.validation_run.return_value = run.model_copy(update={"run_attempt": 2})
+    await reconcile()
+    assert (await queue.history(request.batch_id)).attempts[0].state == (
+        "failed" if revoke else "succeeded"
+    )
+    assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == 1
+    successes = [
+        r
+        for r in sent
+        if r.url.path.endswith("/check-reports") and json.loads(r.content)["state"] == "success"
+    ]
+    assert len(successes) == (1 if revoke else 2)
+    if revoke:
+        repo.native_queue.return_value = native_snapshot((1, 3, 4, 5, 6))
+        await reconcile()
+        recovered = ValidationRequest.model_validate(json.loads(sent[-2].content)["contract"])
+        assert recovered.batch_id == request.batch_id
+        assert recovered.candidate_sha == list(native_snapshot((1, 3)).candidates)[-1]
+    else:
+        assert successes[0].content == successes[1].content
