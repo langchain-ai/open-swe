@@ -408,6 +408,12 @@ async def test_a_run_waiting_on_its_provider_tells_the_person_once(
     assert snapshot is not None
     assert [(n.kind, n.data["waiting"]) for n in snapshot.notices] == [("provider_recovery", True)]
 
+    # With no open turn to keep a receipt on, each wait would read as the first.
+    unturned = ProviderWait(run_id="run-2", waiting=True, code="provider_overloaded")
+    await unturned.report(config)
+    await unturned.report(config)
+    told.assert_awaited_once()
+
 
 async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(
     registry_db: None,

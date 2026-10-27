@@ -98,6 +98,7 @@ class ProviderWait(BaseModel):
     The dashboard shows the wait on the run's turn until it ends; the person is
     told where the run started the first time it waits, once per run, which the
     turn's notice receipt keeps true across replicas and a run resumed elsewhere.
+    A run with no open turn has no receipt to keep that by, so it is not told.
     """
 
     run_id: str | None
@@ -144,7 +145,7 @@ class ProviderWait(BaseModel):
                 data,
                 command_id=f"provider_recovery:{self.run_id}:announced",
             )
-            if first is not False:
+            if first:
                 await notify_run_source(config, self.message, what="provider_recovery")
                 return
         await note_on_run_turn(
