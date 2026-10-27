@@ -122,7 +122,7 @@ from openswe.middleware.require_user_reply import (
     reply_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.stale_workspace import warn_stale_workspace
+from openswe.middleware.stale_workspace import queue_stale_workspace_notice
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.model_request import (
@@ -1375,7 +1375,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
         del github_token
         if stale_workspace := take_stale_boot(self._thread_id):
-            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
+            queue_stale_workspace_notice(self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):

@@ -476,8 +476,12 @@ export interface ManagedToolsMissingCredential {
 }
 
 export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
   name: string
   tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
 }
 
 export interface ManagedToolsGatewayStatus {
@@ -1781,6 +1785,11 @@ export const api = {
           : ""
       }`,
       { method: "POST" }
+    ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),

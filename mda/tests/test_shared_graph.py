@@ -38,6 +38,7 @@ from runtime_api.reports import Reports
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
 type BackendCalls = list[tuple[str, str, str | None]]
+type Prepared = list[JsonValue]
 
 
 def _thread(thread_id: str) -> ManagedRunConfig:
@@ -87,7 +88,13 @@ def _calling(*calls: ToolCall) -> GenericFakeChatModel:
 
 
 @pytest.fixture
-def backend_calls(monkeypatch: pytest.MonkeyPatch) -> BackendCalls:
+def prepared() -> Prepared:
+    """The box each run reported as it prepared."""
+    return []
+
+
+@pytest.fixture
+def backend_calls(monkeypatch: pytest.MonkeyPatch, prepared: Prepared) -> BackendCalls:
     """Every call the runs make on the backend: its endpoint, its bearer and, for an
     operation, the name and grant it was called with."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
@@ -102,6 +109,8 @@ def backend_calls(monkeypatch: pytest.MonkeyPatch) -> BackendCalls:
         hook = url.rsplit("/", 1)[-1]
         operation = f"{json['name']}:{json['grant']}" if hook == "operation" else None
         calls.append((hook, headers["Authorization"], operation))
+        if hook == "prepare":
+            prepared.append(json.get("sandbox_id"))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
         if hook == "reports":
@@ -182,10 +191,10 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
 
 
 async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
-    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
 ) -> None:
-    """The graph is compiled once, yet each run's shell reaches its own thread's box,
-    with the options its own catalog gives."""
+    """The graph is compiled once, yet each run opens its own thread's box before it
+    prepares, and its shell reaches that box, with the options its own catalog gives."""
     opened: set[tuple[object, object]] = set()
 
     def resolve(
@@ -218,6 +227,7 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     )
 
     assert second.nodes["model"] is first.nodes["model"]
+    assert prepared == ["box-thread-1", "box-thread-2"]
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
 
 
