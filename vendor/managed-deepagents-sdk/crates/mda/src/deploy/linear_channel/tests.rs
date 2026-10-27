@@ -11,13 +11,13 @@ use crate::langsmith::{ApiError, ApiKey};
 const WEBHOOK: &str = "https://agent.example/channels/linear/events";
 const REDIRECT: &str = "https://api.smith.example/v1/agent-auth/oauth/callback";
 
-fn channel(events: &[&str]) -> LinearChannel {
+fn channel(sessions: bool) -> LinearChannel {
     let manifest = json!({
         "name": "linear",
         "provider": "linear",
         "autoReply": true,
         "eventsPath": "/channels/linear/events",
-        "providerConfig": { "events": events },
+        "providerConfig": super::manifest::provider_config(sessions),
     });
     prepare(
         &ChannelRequirements::from([("linear".to_string(), manifest)]),
@@ -31,7 +31,7 @@ fn channel(events: &[&str]) -> LinearChannel {
 }
 
 fn sessions() -> LinearChannel {
-    channel(&["AgentSessionEvent.created", "AgentSessionEvent.prompted"])
+    channel(true)
 }
 
 fn credentials() -> AppCredentials {
@@ -315,17 +315,15 @@ fn creates_and_installs_a_new_app_from_a_filled_in_page() {
 
 #[test]
 fn fills_in_the_configured_name_and_description() {
-    let manifest = json!({
+    let mut manifest = json!({
         "name": "linear",
         "provider": "linear",
         "eventsPath": "/channels/linear/events",
-        "providerConfig": {
-            "events": ["AgentSessionEvent.created"],
-            "app": {
-                "name": "Triage Bot",
-                "description": "Triages new issues.",
-            },
-        },
+        "providerConfig": super::manifest::provider_config(true),
+    });
+    manifest["providerConfig"]["app"] = json!({
+        "name": "Triage Bot",
+        "description": "Triages new issues.",
     });
     let channel = prepare(
         &ChannelRequirements::from([("linear".to_string(), manifest)]),
@@ -729,7 +727,7 @@ fn warns_about_a_grant_status_it_does_not_know_and_keeps_the_app() {
 #[test]
 fn sets_up_nothing_without_handled_events() {
     let mut env = Fake::new();
-    run_setup(&mut env, &channel(&[])).unwrap();
+    run_setup(&mut env, &channel(false)).unwrap();
     assert_eq!(env.calls.len(), 1);
     assert!(env.calls[0].starts_with("info The Linear channel handles no events"));
 }

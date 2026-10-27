@@ -110,6 +110,9 @@ struct SlackManifest {
     auto_reply: bool,
     required_permissions: Vec<String>,
     required_env: Vec<String>,
+    /// Read by the connection checks, not by setup.
+    #[serde(default)]
+    agent_connections: Option<serde_json::Value>,
     provider_config: SlackProviderConfig,
 }
 
@@ -253,6 +256,7 @@ pub(crate) fn prepare(
         auto_reply: _auto_reply,
         required_permissions,
         required_env,
+        agent_connections: _agent_connections,
         provider_config,
     } = serde_json::from_value(value.clone()).context("Slack channel configuration is invalid.")?;
     if !required_permissions.is_empty() {

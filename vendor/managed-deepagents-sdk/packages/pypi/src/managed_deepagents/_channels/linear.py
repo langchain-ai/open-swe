@@ -25,10 +25,8 @@ from managed_deepagents._channels.http.provider import (
     EventHandlerOutcome,
     channel_name,
     check_event_keys,
-    defined_fields,
     event_snapshot,
     finish_events,
-    handled_event_keys,
     read_deployment_secret,
     reset_deployment_secrets,
     resolve_endpoints,
@@ -41,7 +39,11 @@ from managed_deepagents._channels.http.studio import (
     studio_url,
 )
 from managed_deepagents._channels.http.types import ChannelName
-from managed_deepagents._channels.linear_connections import linear_app_connection_slug
+from managed_deepagents._channels.linear_app_setup import linear_app_setup
+from managed_deepagents._channels.linear_connections import (
+    LINEAR_TOKEN_SLUG,
+    linear_app_connection_slug,
+)
 from managed_deepagents._channels.linear_graphql import (
     LinearAppUser,
     OutgoingActivity,
@@ -165,11 +167,13 @@ def linear_channel(
         _endpoint_fields,
     )
     check_event_keys("Linear", handlers, SUPPORTED_EVENT_KEYS)
-    filters = _Filters(teams=_teams(app), ignore_bots=ignore_bots, sessions=sessions)
-    events = handled_event_keys(handlers) + (sorted(SESSION_EVENT_KEYS) if sessions else [])
-    provider_config: dict[str, JsonValue] = {"events": sorted(set(events))}
-    if app is not None:
-        provider_config["app"] = _app_config(app)
+    app_setup = linear_app_setup(handlers, app, sessions=sessions)
+    teams = (
+        frozenset(team.strip().lower() for team in app["teams"])
+        if app is not None and "teams" in app
+        else None
+    )
+    filters = _Filters(teams=teams, ignore_bots=ignore_bots, sessions=sessions)
 
     def name() -> str:
         return channel_name(channel)
@@ -199,11 +203,14 @@ def linear_channel(
                 id=delivery["thread_id"], channel=ChannelName(name=name())
             ),
         ),
-        provider_config=provider_config,
+        # mda deploy sets up the Linear app from this.
+        provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
         reply=reply,
     )
     channel.paused_notice = _notify_paused
+    # Deploy provides the app's token at this name.
+    channel.agent_connections = [LINEAR_TOKEN_SLUG]
     if app is not None and "icon" in app:
         # Served at /channels/{name}/icon; deploy points the app's icon at it.
         channel.icon = validate_channel_icon_path(app["icon"], "Linear app.icon")
@@ -217,63 +224,6 @@ class _Filters:
         self.teams = teams
         self.ignore_bots = ignore_bots
         self.sessions = sessions
-
-
-_APP_OPTION_KEYS = ("name", "description", "icon", "teams")
-_FORBIDDEN_IN_NAME = re.compile(r"linear|https?://", re.IGNORECASE)
-_APP_NAME_MIN_CHARS = 2
-_APP_NAME_MAX_CHARS = 80
-_APP_DESCRIPTION_MAX_CHARS = 1000
-
-
-def _check_app_display(app: LinearAppOptions) -> None:
-    """Check how the app looks against Linear's rules, before deploy sends it."""
-    name = app.get("name")
-    if name is not None and (
-        not _APP_NAME_MIN_CHARS <= len(name.strip()) <= _APP_NAME_MAX_CHARS
-        or _FORBIDDEN_IN_NAME.search(name)
-    ):
-        raise ValueError('Linear app.name must be 2-80 characters, without "Linear" or a URL')
-    description = app.get("description")
-    if description is not None and not (0 < len(description.strip()) <= _APP_DESCRIPTION_MAX_CHARS):
-        raise ValueError("Linear app.description must be 1-1000 characters")
-    icon = app.get("icon")
-    if icon is not None:
-        validate_channel_icon_path(icon, "Linear app.icon")
-
-
-def _app_config(app: LinearAppOptions) -> dict[str, JsonValue]:
-    """The app options deploy reads, in the manifest's spelling."""
-    name = app.get("name")
-    description = app.get("description")
-    return defined_fields(
-        {
-            "name": name.strip() if name is not None else None,
-            "description": description.strip() if description is not None else None,
-            "icon": validate_channel_icon_path(app["icon"], "Linear app.icon")
-            if "icon" in app
-            else None,
-            "teams": list(app["teams"]) if "teams" in app else None,
-        }
-    )
-
-
-def _teams(app: LinearAppOptions | None) -> frozenset[str] | None:
-    """The team keys the channel is limited to, after checking the app options."""
-    # A misspelled option would silently widen what starts runs.
-    unknown = sorted(set(app or {}) - set(_APP_OPTION_KEYS))
-    if unknown:
-        raise ValueError(
-            f"unknown Linear app option {', '.join(unknown)}; use {', '.join(_APP_OPTION_KEYS)}"
-        )
-    if app is not None:
-        _check_app_display(app)
-    if app is None or "teams" not in app:
-        return None
-    teams = frozenset(team.strip().lower() for team in app["teams"])
-    if not teams or "" in teams:
-        raise ValueError("Linear app.teams must list team keys; omit it to allow every team")
-    return teams
 
 
 async def _linear_webhook_secret() -> str | None:

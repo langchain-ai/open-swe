@@ -35,7 +35,8 @@ use super::{
     ensure_channel_requirements_secrets, ensure_connector_requirements_secrets,
     ensure_ingress_secret, ensure_model_api_key, ensure_project, ensure_workspace_connections,
     link_context_repo_to_agent, recipe_spec_from_project, schedule_cron_request, sync_context_hub,
-    trigger_channels, ChannelSetup, ContextStrategy, EmittedRequirements, WorkspaceSecretKeys,
+    trigger_channels, warn_unprovided_reserved_connections, ChannelSetup, ContextStrategy,
+    EmittedRequirements, WorkspaceSecretKeys,
 };
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
@@ -270,8 +271,10 @@ fn run_inner(
         &client,
         ctx.workspace_id.as_deref(),
         &connector_requirements,
+        &channel_requirements,
         &mcp_connections,
     )?;
+    warn_unprovided_reserved_connections(&connector_requirements, &channel_requirements)?;
     // Validation only: setup needs the live deployment.
     let channel_setup = ChannelSetup::prepare(
         &channel_requirements,

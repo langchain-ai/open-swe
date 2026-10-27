@@ -74,13 +74,18 @@ def _content_as_text(content: object) -> str:
 QUIET_REPLY = "[quiet]"
 #: Message field (``additional_kwargs`` key) deepagents uses for a task notification.
 NOTIFICATION_KEY = "deepagents_notification"
+#: Message field MDA uses the same way, for a notification of its own such as a
+#: browser handoff ending.
+MDA_NOTIFICATION_KEY = "mda_notification"
 
 
 def is_task_notification(message: object) -> bool:
-    """Whether a message is a deepagents task notification rather than the user's."""
+    """Whether a message is a deepagents or MDA notification rather than the user's."""
     extra = _field(message, "additional_kwargs")
-    return (isinstance(message, Mapping) and NOTIFICATION_KEY in message) or (
-        isinstance(extra, Mapping) and NOTIFICATION_KEY in extra
+    return any(
+        (isinstance(message, Mapping) and key in message)
+        or (isinstance(extra, Mapping) and key in extra)
+        for key in (NOTIFICATION_KEY, MDA_NOTIFICATION_KEY)
     )
 
 
@@ -175,6 +180,7 @@ def _field(message: object, name: str) -> object:
 
 
 __all__ = [
+    "MDA_NOTIFICATION_KEY",
     "NOTIFICATION_KEY",
     "QUIET_REPLY",
     "extract_assistant_text",

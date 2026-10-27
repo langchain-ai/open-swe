@@ -1000,10 +1000,10 @@ fn apply_watch_action(
             features.has_skills = summary.has_skills;
             features.schedule_crons = summary.schedule_crons.clone();
             *hub_fingerprint = hub_inputs_fingerprint(&project.root, classify_ctx);
-            // Only Python builds async subagent graphs, so only Python graph sets change.
-            features.graphs_changed = project.language == Language::Python
-                && langgraph_graph_keys(prior_langgraph.as_deref())
-                    != langgraph_graph_keys(fs::read(&langgraph_path).ok().as_deref());
+            // `langgraph dev` reads its graphs only at startup, so a new or removed
+            // async subagent graph needs a restart.
+            features.graphs_changed = langgraph_graph_keys(prior_langgraph.as_deref())
+                != langgraph_graph_keys(fs::read(&langgraph_path).ok().as_deref());
 
             // TypeScript: if deps are stale, stash the freshly written
             // langgraph.json and restore the previous one immediately so
@@ -1788,6 +1788,9 @@ fn ensure_dev_workspace_connections(
         &client,
         ctx.workspace_id.as_deref(),
         connector_requirements,
+        // `mda dev` does not load channels, so names under mda/ get the
+        // generic wording.
+        &compile::ChannelRequirements::new(),
         &[],
     )
 }

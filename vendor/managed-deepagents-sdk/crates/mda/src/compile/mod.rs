@@ -58,10 +58,11 @@ pub(crate) use memory::{declare_memory_snippet, resolve_memory};
 pub(crate) use memory::{MemoryLayers, MemorySummary};
 pub(crate) use model::read_agent_model;
 pub(crate) use requirements::{
-    agent_connections_from_connector_requirements, connection_owner_policy_for_slug,
-    emit_channel_requirements_for_entries, emit_connector_requirements_for_entries,
-    emit_mcp_connection_entries_for_entries, referenced_connection_slugs,
-    required_env_from_connector_requirements, reserved_user_connection_error,
+    agent_connections_from_connector_requirements, channel_provided_connections,
+    connection_owner_policy_for_slug, emit_channel_requirements_for_entries,
+    emit_connector_requirements_for_entries, emit_mcp_connection_entries_for_entries,
+    referenced_connection_slugs, required_env_from_connector_requirements,
+    reserved_user_connection_error, unprovided_reserved_connections,
     user_connections_from_connector_requirements, ChannelRequirements, ConnectorRequirements,
     McpConnectionEntry,
 };
@@ -70,8 +71,8 @@ pub(crate) use sandbox_recipe::{
 };
 
 use discovery::{
-    agent_import_specifier, find_browser_entry, find_identity_entry, find_memory_entry,
-    misspelled_channel_directory_warning, project_has_skills, read_instructions,
+    agent_import_specifier, entry_stem_name, find_browser_entry, find_identity_entry,
+    find_memory_entry, misspelled_channel_directory_warning, project_has_skills, read_instructions,
     sandbox_import_specifier,
 };
 use entry::{
@@ -125,12 +126,12 @@ pub(crate) const LANGGRAPH_API_VERSION_ENV: &str = "MDA_LANGGRAPH_API_VERSION";
 
 /// Default langgraph-api version stem forced into compiled `langgraph.json`
 /// image pins. Override with [`LANGGRAPH_API_VERSION_ENV`].
-pub(crate) const LANGGRAPH_API_VERSION: &str = "0.18.0.dev9";
+pub(crate) const LANGGRAPH_API_VERSION: &str = "0.18.0.dev12";
 
 /// In-memory runtime `mda dev` pairs with [`LANGGRAPH_API_VERSION`]. A pre-release
 /// Agent Server pulls a pre-release runtime, which uv only accepts when pinned
 /// explicitly, so this moves together with the version above.
-pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.38.0.dev9";
+pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.38.0.dev12";
 
 /// Resolve the langgraph-api version stem for `_INTERNAL_docker_tag`.
 ///
@@ -371,6 +372,11 @@ const IDENTITY_EXPORT: &str = "identity";
 /// Canonical export name for the root memory declaration, in both languages.
 const MEMORY_EXPORT: &str = "memory";
 const BROWSER_EXPORT: &str = "browser";
+/// Graph key of the browser handoff watcher, whose run waits out a handoff; the
+/// runtime's `HANDOFF_WATCHER_GRAPH` names it too.
+const BROWSER_HANDOFF_GRAPH: &str = "mda-browser-handoff";
+/// The generated entry's export of that graph, in both languages.
+const BROWSER_HANDOFF_EXPORT: &str = "browser_handoff_watcher";
 
 /// Basename (without extension) of the generated managed custom-auth module.
 const AUTH_STEM: &str = "_mda_auth";
@@ -681,14 +687,12 @@ fn compile_inner(
             "async subagents are not supported in eval: there is no Agent Server to launch them on"
         );
     }
-    // Served Python agents also get an async general-purpose subagent; eval has no
-    // Agent Server to launch it on, and TypeScript doesn't build async subagents.
-    let async_subagents = if project.language == Language::Python
-        && !matches!(context, RuntimeContext::Eval { .. })
-    {
-        agent.served_async_subagents()
+    // Served agents also get an async general-purpose subagent; eval has no
+    // Agent Server to launch it on.
+    let async_subagents = if matches!(context, RuntimeContext::Eval { .. }) {
+        Vec::new()
     } else {
-        agent.async_subagents.clone()
+        agent.served_async_subagents()
     };
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
@@ -800,11 +804,15 @@ fn compile_inner(
         agent.is_factory,
     )?);
     if agent.unreadable_subagents > 0 {
+        let rule = project.language.ident(
+            "An async subagent (`async: true`) must be an object literal, or a name \
+             bound to one, in `subagents: [...]`.",
+            "An async subagent (`\"async\": True`) must be a dict literal, or a name \
+             bound to one, in `subagents=[...]`. Annotate a name spread there that holds \
+             only sync subagents as `list[SubAgent]`.",
+        );
         warnings.push(format!(
-            "{} subagent entr{} in {} could not be read without running it. An async \
-             subagent (`\"async\": True`) must be a dict literal, or a name bound to one, \
-             in `subagents=[...]`. Annotate a name spread there that holds only sync \
-             subagents as `list[SubAgent]`.",
+            "{} subagent entr{} in {} could not be read without running it. {rule}",
             agent.unreadable_subagents,
             if agent.unreadable_subagents == 1 {
                 "y"
@@ -861,7 +869,7 @@ fn compile_inner(
         }
     };
 
-    // Browser use is opt-in (Python only). Eval trials never get a browser.
+    // Browser use is opt-in. Eval trials never get a browser.
     let browser_import = match context {
         RuntimeContext::Eval { .. } => None,
         RuntimeContext::Local { .. } | RuntimeContext::ContextHub { .. } => {
@@ -905,8 +913,8 @@ fn compile_inner(
             channels_import: channels_import.as_deref(),
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
-            browser_import: browser_import.as_deref(),
             async_subagents: &async_subagents,
+            browser_import: browser_import.as_deref(),
         },
     );
     write_if_changed(&out_dir.join(&entry_file), entry_source.as_bytes())
@@ -956,7 +964,7 @@ fn compile_inner(
         };
 
     let graph = format!("./{}:agent", to_unix_path(&entry_file));
-    let extra_graphs: Vec<(String, String)> = async_subagents
+    let mut extra_graphs: Vec<(String, String)> = async_subagents
         .iter()
         .map(|subagent| {
             let export = &subagent.export;
@@ -966,11 +974,27 @@ fn compile_inner(
             )
         })
         .collect();
+    // `browser_handoff` starts a run of this graph to wait for the user to hand
+    // the browser back, then wake the agent.
+    if browser_import.is_some() {
+        if assistant_id == BROWSER_HANDOFF_GRAPH {
+            bail!("agent name `{BROWSER_HANDOFF_GRAPH}` is reserved for browser use");
+        }
+        extra_graphs.push((
+            BROWSER_HANDOFF_GRAPH.to_string(),
+            format!("./{}:{BROWSER_HANDOFF_EXPORT}", to_unix_path(&entry_file)),
+        ));
+    }
+    let channel_names = channel_entries
+        .iter()
+        .map(|rel| entry_stem_name(rel, "channel"))
+        .collect::<Result<Vec<_>>>()?;
     let schedule_crons = read_schedule_crons(
         project,
         ScheduleReadContext {
             source_root: out_dir,
             assistant_id: &assistant_id,
+            channels: &channel_names,
         },
     )?;
     if identity_import.is_none() && !schedule_crons.is_empty() {
@@ -1482,6 +1506,11 @@ fn is_typescript_source(rel: &Path) -> bool {
 #[cfg(test)]
 mod api_version_tests {
     use super::*;
+
+    #[test]
+    fn default_is_0_18_0_dev12() {
+        assert_eq!(LANGGRAPH_API_VERSION, "0.18.0.dev12");
+    }
 
     #[test]
     fn resolve_falls_back_to_default_when_unset() {

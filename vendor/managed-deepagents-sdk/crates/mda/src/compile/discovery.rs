@@ -262,13 +262,25 @@ pub(in crate::compile) fn find_memory_entry(project: &Project) -> Option<PathBuf
         .find(|candidate| project.files.contains(candidate))
 }
 
-/// Locate the root `browser.py` that exports the named `browser` declaration,
-/// if the project opts into browser use. Python only: the TypeScript SDK has
-/// no browser tools.
+/// Candidate root `browser` modules for `language`, in priority order.
+///
+/// Browser use is opt-in: a project with none of these gets no browser.
+/// Package-dir forms are intentionally unsupported, matching the memory entry
+/// candidates above.
+fn browser_entry_candidates(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::TypeScript => &["browser.ts", "browser.tsx", "browser.mts", "browser.cts"],
+        Language::Python => &["browser.py"],
+    }
+}
+
+/// Locate the root `browser` module that exports the named `browser`
+/// declaration, if the project opts into browser use.
 pub(in crate::compile) fn find_browser_entry(project: &Project) -> Option<PathBuf> {
-    let candidate = PathBuf::from("browser.py");
-    (project.language == Language::Python && project.files.contains(&candidate))
-        .then_some(candidate)
+    browser_entry_candidates(project.language)
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| project.files.contains(candidate))
 }
 
 /// Read `sandbox/setup.sh`, if present.

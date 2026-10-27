@@ -25,7 +25,14 @@ from managed_deepagents._identity_runtime import _field
 from managed_deepagents.run_context import ChannelContext
 
 if TYPE_CHECKING:
-    from managed_deepagents._channels.types import ChannelEvent, ChannelInfo, JsonValue
+    from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.types import (
+        ChannelEvent,
+        ChannelInfo,
+        ChannelMessage,
+        JsonValue,
+        PostedChannelThread,
+    )
     from managed_deepagents._thread_record import StoredChannel
 
 SLACK_BOT_TOKEN_ENV = "SLACK_BOT_TOKEN"  # noqa: S105 - environment variable name
@@ -162,9 +169,13 @@ def runtime_channel(
 ) -> RuntimeChannel:
     """A binding's runtime facts, with ``post`` bound to its route."""
     transport = None
+    start_thread = None
     if binding["transport"] == "trigger_server":
         from managed_deepagents._channels.trigger.client import (  # noqa: PLC0415 - lazy transport
             create_trigger_client,
+        )
+        from managed_deepagents._channels.trigger.conversation import (  # noqa: PLC0415 - lazy transport
+            start_trigger_conversation,
         )
         from managed_deepagents._channels.trigger.transport import (  # noqa: PLC0415 - lazy transport
             TriggerTransport,
@@ -173,6 +184,11 @@ def runtime_channel(
         client = create_trigger_client()
         if client is not None:
             transport = TriggerTransport(client)
+
+            async def start_thread(
+                message: ChannelMessage, run: ChannelRunResult | None
+            ) -> PostedChannelThread:
+                return await start_trigger_conversation(client, binding, message, run)
     else:
         transport = messaging_transport_for_name(binding["name"])
         if transport is None and transport_factory is not None:
@@ -184,6 +200,7 @@ def runtime_channel(
         raw_event=binding.get("raw_event"),
         target=binding["target"],
         transport=cast("ChannelMessagingAdapter | None", transport),
+        start_thread=start_thread,
     )
 
 

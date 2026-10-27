@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
@@ -28,6 +29,7 @@ from managed_deepagents._ingress_runs import (
     start_ingress_run,
 )
 from managed_deepagents._loopback import resolve_loopback_api_url
+from managed_deepagents._thread_record import THREAD_CONVERSATION_METADATA
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
@@ -153,6 +155,32 @@ def _parked_interrupts(thread: object) -> list[PendingInterrupt]:
                 seen.add(interrupt_id)
                 pending.append(Interrupt(id=interrupt_id, value=entry.get("value")))
     return pending
+
+
+async def conversation_thread_id(
+    *, source_provider: str, source_thread_key: str, user_id: str
+) -> str:
+    """The thread a Trigger conversation runs on.
+
+    The thread a scheduled run handed to it, else the one its source thread key names.
+    """
+    client = _create_trigger_ingress_loopback_client(
+        {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
+    )
+    handed = await client.threads.search(
+        metadata={THREAD_CONVERSATION_METADATA: source_thread_key}, limit=1
+    )
+    thread_id = handed[0].get("thread_id") if handed else None
+    return (
+        thread_id
+        if isinstance(thread_id, str) and thread_id
+        else source_thread_id(source_thread_key)
+    )
+
+
+def source_thread_id(source_thread_key: str) -> str:
+    """The thread id a source thread key names."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, source_thread_key))
 
 
 class ResumeTarget(TypedDict):

@@ -138,6 +138,13 @@ class PostedChannelMessage(PostedChannelMessageRequired, total=False):
     url: str
 
 
+class PostedChannelThread(PostedChannelMessage):
+    """A post that started a new provider thread."""
+
+    thread_id: str
+    """The LangGraph thread replies in the new provider thread run on."""
+
+
 class ChannelError(Exception):
     """Typed channel failure with a stable machine-readable code."""
 
