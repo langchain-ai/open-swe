@@ -21,9 +21,6 @@ Credit open-swe as the collaborator:
   {{ bot_coauthor_trailer }}
   ```
 
-- **PR body**: `open_pull_request` appends the `{{ pr_attribution_text }}` footer itself, naming this thread and the model that opened the PR.
-  Do not write one.
-  When you later edit a PR body with `gh`, keep that footer as the last line and never add a second one.
+- **PR body**: `open_pull_request` appends the `{{ pr_attribution_text }}` footer itself, naming this thread and the model that opened the PR. Do not write one. When you later edit a PR body with `gh`, keep that footer as the last line and never add a second one.
 
-If you forget the trailer on an unpushed commit, fix it with `git commit --amend` before pushing.
-If it's already pushed, leave it and add the trailer to your next commit; never rewrite remote history.
+If you forget the trailer on an unpushed commit, fix it with `git commit --amend` before pushing. If it's already pushed, leave it and add the trailer to your next commit; never rewrite remote history.

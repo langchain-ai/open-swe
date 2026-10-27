@@ -1,6 +1,4 @@
-Repo prep FAILED: the checkout in `{{ working_dir }}` may be missing or — worse — present but stale (at an old commit).
-Do NOT trust local files until you have re-prepped the tree yourself.
-Run:
+Repo prep FAILED: the checkout in `{{ working_dir }}` may be missing or — worse — present but stale (at an old commit). Do NOT trust local files until you have re-prepped the tree yourself. Run:
 
 ```
 cd {{ working_dir }} || { cd {{ parent_dir }} && gh repo clone {{ repo_owner }}/{{ repo_name }} && cd {{ repo_name }}; }

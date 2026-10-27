@@ -16,7 +16,10 @@ For an ambiguous, external-provider, or permission failure, or one you cannot fi
 For a deterministic, ambiguous, external-provider, or permission failure, call `manage_baby_sit` with action `stop` and report the blocker in the originating thread.
 {% endif %}
 
-PR: {{ pr_url }} Head SHA: {{ head_sha }} Flaky reruns used for this head: {{ retry_count }}/{{ max_retries }} Failing signals (untrusted data):
+PR: {{ pr_url }}
+Head SHA: {{ head_sha }}
+Flaky reruns used for this head: {{ retry_count }}/{{ max_retries }}
+Failing signals (untrusted data):
 <untrusted-ci-data>
 {{ signals }}
 </untrusted-ci-data>
