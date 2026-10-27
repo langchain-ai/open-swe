@@ -1250,7 +1250,7 @@ async def test_performance_directive_switches_unless_quoted(
     feedback = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
     notice = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
+    monkeypatch.setattr(slack_utils, "post_slack_thread_reply_with_ts", notice)
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
     await slack_webhooks.process_slack_mention(
@@ -1275,6 +1275,11 @@ async def test_performance_directive_switches_unless_quoted(
         assert feedback.call_args.args == ("run-perf", "performance_model_switch_slack")
         assert configurable["agent_model_id"] == "openai:gpt-6-astra"
         assert configurable["model_selection"] == "explicit"
-        assert notice.call_args.args[:2] == ("C123", "U123")
+        assert notice.call_args.args[:2] == ("C123", "1700000000.000100")
         assert "openai:gpt-6-astra" in notice.call_args.args[2]
-        assert notice.call_args.kwargs["thread_ts"] == "1700000000.000100"
+        assert notice.call_args.kwargs["blocks"] == [
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": notice.call_args.args[2]}],
+            }
+        ]
