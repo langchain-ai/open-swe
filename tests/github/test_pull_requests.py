@@ -320,3 +320,26 @@ async def test_description_backfill_preserves_lifecycle_and_concurrent_edits(
     )
     newer = await PullRequest.get("lc", "repo", 8)
     assert newer is not None and newer.body == "Webhook edit"
+
+
+async def test_activity_skips_the_threads_github_already_tells(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(PullRequest, "discover_threads", AsyncMock(return_value=[]))
+    await PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        opening_head_sha="abc123",
+        threads=[
+            pull_requests.ThreadLink(
+                thread_id="opener", source=pull_requests.AGENT_OPENED_LINK_SOURCE
+            )
+        ],
+    ).save()
+    stored = await (await PullRequest.load("lc", "repo", 7)).link_thread("fixer")
+
+    assert await stored.threads_to_tell("merge", "") == ["opener", "fixer"]
+    assert await stored.threads_to_tell("comment", "Looks good") == ["fixer"]
+    assert await stored.threads_to_tell("inline-comment", "Rename this") == ["opener", "fixer"]
+    assert await stored.threads_to_tell("review", "@open-swe please fix") == []

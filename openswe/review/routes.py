@@ -424,7 +424,11 @@ async def api_submit_pull_request_review(
             body=review.body.strip(),
         )
     await PullRequest(owner=owner, repo=repo, number=pr_number).note_activity(
-        session["sub"], "review", text=review.body, event=review.event
+        session["sub"],
+        "review",
+        text=review.body,
+        event=review.event,
+        comments=submitted.comments,
     )
     return submitted
 

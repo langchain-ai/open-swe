@@ -18,7 +18,7 @@ from urllib.parse import urljoin, urlparse
 import httpx2
 from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
@@ -402,6 +402,7 @@ class SubmittedReview(BaseModel):
     id: int
     html_url: str
     state: str
+    comments: list[PendingReviewComment] = Field(default_factory=list, exclude=True)
 
     @classmethod
     async def submit(
@@ -412,7 +413,11 @@ class SubmittedReview(BaseModel):
         if event != "APPROVE" and not body and not (pending and pending.comments):
             raise HTTPException(422, "a comment or change request needs a body or line comments")
         if pending is not None:
-            return cls.model_validate(await pull.submit_review(pending.id, event=event, body=body))
+            submitted = cls.model_validate(
+                await pull.submit_review(pending.id, event=event, body=body)
+            )
+            submitted.comments = pending.comments
+            return submitted
         review: dict[str, object] = {"event": event, "commit_id": await pull.head_sha()}
         if body:
             review["body"] = body

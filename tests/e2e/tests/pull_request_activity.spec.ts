@@ -72,33 +72,27 @@ test("dashboard pull request actions wait for the PR thread's next run", async (
   await markReady.click();
   await expect(markReady).toHaveCount(0);
 
-  await expect.poll(() => queuedCount(page, threadId)).toBe(2);
+  // GitHub's own webhook wakes the thread that opened the PR for the comment,
+  // so only the action GitHub does not tell it about waits on its queue.
+  await expect.poll(() => queuedCount(page, threadId)).toBe(1);
   await page.waitForTimeout(3_000);
+  expect(await queuedCount(page, threadId)).toBe(1);
   expect(await threadRuns(page, threadId)).toEqual({ runs, idle: true });
 
   await page.goto(`/agents/${threadId}`);
   await dismissOnboardingIfShown(page);
   const queued = page.getByTestId("queued-message");
-  await expect(queued).toHaveCount(2);
-  await expect(queued.first()).toContainText(
-    "@alice commented on https://github.com/fakeorg/demo/pull/1",
-  );
-  await expect(queued.first()).toContainText(COMMENT);
-  await expect(queued.last()).toContainText(
+  await expect(queued).toHaveCount(1);
+  await expect(queued).toContainText(
     "@alice marked https://github.com/fakeorg/demo/pull/1 ready for review",
   );
-  await queued.last().scrollIntoViewIfNeeded();
+  await queued.scrollIntoViewIfNeeded();
   await page.screenshot({
     path: test.info().outputPath("queued-pull-request-activity.png"),
   });
 
-  // The next run, started as any other would be, reads both before its first model call.
+  // The next run, started as any other would be, reads it before its first model call.
   await typeIntoComposer(page, "Anything else before merge?");
-  await waitForStateToContain(
-    page,
-    threadId,
-    'action=\\"pull-request-comment\\"',
-  );
   await waitForStateToContain(
     page,
     threadId,
@@ -111,7 +105,7 @@ test("dashboard pull request actions wait for the PR thread's next run", async (
   await page.reload();
   const delivered = page
     .getByTestId("user-message")
-    .filter({ hasText: "@alice commented on" });
+    .filter({ hasText: "@alice marked" });
   await expect(delivered).toBeVisible({ timeout: 30_000 });
   await delivered.scrollIntoViewIfNeeded();
   await page.screenshot({

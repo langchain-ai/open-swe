@@ -5,4 +5,11 @@ Their text{% if truncated %} (truncated){% endif %}:
 {{ text }}
 
 {% endif %}
-Open SWE recorded this action; @{{ login }} did not type this message. It reached you without starting a run and asks you for nothing on its own.
+{% if comments is defined and comments %}
+Their line comments:
+{% for comment in comments %}
+- `{{ comment.path }}`{% if comment.line %} line {{ comment.line }}{% endif %}: {{ comment.body[:4000] }}
+{% endfor %}
+
+{% endif %}
+Open SWE recorded this action; @{{ login }} did not type this message. It reached you without starting a run{% if not text and not (comments is defined and comments) %} and asks you for nothing on its own{% endif %}.
