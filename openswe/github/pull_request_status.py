@@ -462,6 +462,18 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without a head commit")
         return sha
 
+    async def merge_base(self, head_sha: str) -> str:
+        """Where ``head_sha`` meets the base branch as it is now.
+
+        The pull's ``base.sha`` can predate ``head_sha``: read right after a push
+        that merged the base branch in, it still names the older base.
+        """
+        base = (await self.pull()).get("base")
+        ref = base.get("ref") if isinstance(base, dict) else None
+        if not isinstance(ref, str) or not ref:
+            raise ValueError("GitHub answered the pull request without a base branch")
+        return await self.repo.merge_base(ref, head_sha)
+
     async def files(self, *, max_pages: int = 1, count: int | None = None) -> list[dict[str, Any]]:
         """Changed files, up to ``max_pages`` pages of 100.
 
