@@ -37,7 +37,11 @@ _RETRY_DELAYS_SECONDS = (1.0, 5.0)
 """An event endpoint's pauses before trying again: three attempts in all."""
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 """The largest answer read; run input may carry images."""
-_ANSWER_SHAPE = "event endpoint answer must be null or { input, context?, metadata?, webhook? }"
+_ANSWER_SHAPE = (
+    "event endpoint answer must be null, { decline } or { input, context?, metadata?, webhook? }"
+)
+_DECLINE_MAX_LENGTH = 2000
+"""The longest ``decline`` text, in characters: a few sentences, as a reply holds them."""
 SERVICE_SECRET_ENV = "MDA_SERVICE_SECRET"  # noqa: S105 - an env var's name
 """The deployment's env var holding the secret it shares with your services:
 every endpoint request is signed with it, as Standard Webhooks does.
@@ -158,7 +162,22 @@ class EndpointAnswer(TypedDict):
     """A URL the Agent Server POSTs the finished run to; see ``ChannelRunOptions``."""
 
 
-_ANSWER: TypeAdapter[EndpointAnswer | None] = TypeAdapter(EndpointAnswer | None)
+@with_config(ConfigDict(extra="forbid"))
+class _EndpointDecline(TypedDict):
+    decline: str
+
+
+_ANSWER: TypeAdapter[EndpointAnswer | _EndpointDecline | None] = TypeAdapter(
+    EndpointAnswer | _EndpointDecline | None
+)
+
+
+@dataclass(frozen=True)
+class EndpointDeclined:
+    """An endpoint's ``{"decline": message}`` answer: start nothing, and tell the
+    person why where the channel can, such as the Linear agent session."""
+
+    message: str
 
 
 def signature_headers(
@@ -208,7 +227,9 @@ class _ChannelThread(Protocol):
 
 _Event = TypeVar("_Event", bound=_ChannelEvent)
 
-EndpointHandler = Callable[[_Event, _ChannelThread], Awaitable["ChannelRunResult | None"]]
+EndpointHandler = Callable[
+    [_Event, _ChannelThread], Awaitable["ChannelRunResult | EndpointDeclined | None"]
+]
 """The handler an endpoint stands for; see :func:`endpoint_handler`."""
 
 EventFields = Callable[[_Event], Mapping[str, object]]
@@ -241,7 +262,9 @@ def endpoint_handler(
     event ``fields`` beside the payload and an ``httpx.Request``'s
     headers, signed when the deployment has ``MDA_SERVICE_SECRET``, and
     starts the run the service answers with: ``{"input",
-    "context"?, "metadata"?, "webhook"?}``. ``null`` or HTTP 204 starts nothing. A
+    "context"?, "metadata"?, "webhook"?}``. ``null`` or HTTP 204 starts nothing;
+    ``{"decline": "<text>"}`` starts nothing too, and the Linear channel tells the
+    session that text instead of its own line. A
     network error before the answer, HTTP 429 or a 5xx is tried again, up to three
     attempts. Any other answer, one cut off, a redirect, or no answer within 60
     seconds fails the handler, as a handler that raises does. The URL is https,
@@ -253,7 +276,9 @@ def endpoint_handler(
     """
     client = EndpointClient(endpoint, label, "event endpoint")
 
-    async def handler(event: _Event, thread: _ChannelThread) -> ChannelRunResult | None:
+    async def handler(
+        event: _Event, thread: _ChannelThread
+    ) -> ChannelRunResult | EndpointDeclined | None:
         interrupted = bool(getattr(thread, "interrupted", False))
         # The channel's own fields can't stand in for the ones every event has.
         sent_event: dict[str, object] = {
@@ -427,14 +452,21 @@ async def _bounded_json(response: httpx.Response, name: str) -> JsonValue:
         raise RuntimeError(f"{name} answer is not JSON") from None
 
 
-def _run_result(body: JsonValue) -> ChannelRunResult | None:
-    """The run the answer names; the channel checks the input and options as a handler's."""
+def _run_result(body: JsonValue) -> ChannelRunResult | EndpointDeclined | None:
+    """The run the answer names, or its decline; the channel checks the input
+    and options as a handler's."""
     try:
         answer = _ANSWER.validate_python(body)
     except ValidationError:
         raise RuntimeError(_ANSWER_SHAPE) from None
     if answer is None:
         return None
+    if "decline" in answer:
+        text = cast("_EndpointDecline", answer)["decline"]
+        # Non-blank and short, as Linear shows it; never logged.
+        if not text.strip() or len(text) > _DECLINE_MAX_LENGTH:
+            raise RuntimeError(_ANSWER_SHAPE)
+        return EndpointDeclined(text)
     options: ChannelRunOptions = {}
     if "context" in answer:
         options["context"] = answer["context"]
