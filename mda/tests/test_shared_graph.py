@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import importlib
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
@@ -7,10 +8,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
+import deepagents.graph as deepagents_graph
 import httpx2
 import pytest
 from deepagents.backends import StateBackend
-from deepagents.backends.protocol import ExecuteResponse
+from deepagents.backends.protocol import BackendProtocol, ExecuteResponse
+from deepagents.middleware.summarization import SummarizationMiddleware
+from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -24,6 +29,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import JsonValue
 from rt.backend import Run, current_run
+from rt.models import _build
 from rt.run_tools import RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
@@ -541,3 +547,46 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     assert instructed == {"agent": True, "reviewer": False}
     browser = mda_browser._browser_name("thread:browsed")
     assert browsers == [(browser, False), (browser, True)]
+
+
+async def test_main_and_sync_subagent_summarization_use_gateway_credentials(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    summaries: list[SummarizationMiddleware] = []
+    create_summary = deepagents_graph.create_summarization_middleware
+
+    def summarization(model: BaseChatModel, backend: BackendProtocol) -> SummarizationMiddleware:
+        middleware = create_summary(model, backend)
+        summaries.append(middleware)
+        return middleware
+
+    async def generate(
+        model: ChatAnthropic, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        assert model.anthropic_api_url == "https://gateway.invalid/anthropic"
+        assert model.anthropic_api_key.get_secret_value() == "gateway-test-key"
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="summary"))])
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-test-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.invalid")
+    monkeypatch.setattr(deepagents_graph, "create_summarization_middleware", summarization)
+    monkeypatch.setattr(ChatAnthropic, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", agent._DEFAULT_MODEL)
+    _build.cache_clear()
+    importlib.reload(agent)
+    try:
+        await compile_managed_agent_async(
+            agent.agent,
+            _thread("compaction"),
+            runtime=_ReadRuntime(access_context="threads.read", store=InMemoryStore()),
+            report_telemetry=False,
+            async_subagent_graphs=_WORKERS,
+        )
+        assert len(summaries) == 2
+        for middleware in summaries:
+            assert (
+                await middleware._acreate_summary([AIMessage(content="old history")]) == "summary"
+            )
+    finally:
+        _build.cache_clear()

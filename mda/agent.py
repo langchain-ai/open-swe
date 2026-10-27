@@ -57,6 +57,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
 )
 from rt.model_calls import model_call_guards
+from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles
 from rt.run_tools import (
     RunCodeInterpreter,
@@ -70,12 +71,15 @@ from rt.run_tools import (
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
 from rt.tools import run_id
+from runtime_api.catalog import ModelSpec
 
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
 
-# What the graph is declared with; each run's own model takes its place per call.
-_DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
+# Summarization calls this model directly, outside the per-run model replacement.
+_DEFAULT_MODEL: Final = build_model(
+    ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}), use_gateway=True
+)
 # The in-process graphs' cap on model calls per run, for a catalog that sets none.
 _MODEL_CALL_LIMIT: Final = 5_000
 # A worker's system prompt starts as this agent's; the backend's prepends the rest.
