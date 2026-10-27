@@ -5,6 +5,7 @@ import logging
 from collections.abc import Mapping
 from typing import Final
 
+from langchain.agents.middleware import TracePolicy, omit_payload
 from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
 from langchain_core.runnables.config import ensure_config
 from langchain_core.tracers.langchain import LangChainTracer
@@ -15,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Baggage that describes the span itself rather than where its children belong.
 _SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
+
+
+MIDDLEWARE_TRACE_POLICY = TracePolicy(process_inputs=omit_payload)
 
 
 class TurnTrace:
