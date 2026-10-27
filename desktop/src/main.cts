@@ -1778,8 +1778,8 @@ function createSetupWindow() {
       const value = new URL(targetUrl).searchParams.get("url");
       if (!value) throw new Error("Enter a backend URL");
       const url = storeBackendUrl(value);
-      if (backendUrl && backendUrl !== url)
-        await clearBackendCookies(backendUrl);
+      if (primaryBackendUrl && primaryBackendUrl !== url)
+        await clearBackendCookies(primaryBackendUrl);
       primaryBackendUrl = url;
       alternativeEnvironments = [];
       await connectToBackend(url);
