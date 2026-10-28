@@ -25,10 +25,10 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
+from openswe.slack.allowed_bots import authorized_slack_bot_run
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.records import lookup_slack_thread_id
-from openswe.source_context import SourceContext
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -41,7 +41,7 @@ from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.store import THREADS
-from openswe.threads.summary import SLACK_BOT_TRIGGER_KIND, TRIGGERING_BOT_KEY, thread_is_owner
+from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
@@ -146,7 +146,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
 
 
 async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
-    """Who reads threads: the triggering user, or else the automation whose run this is."""
+    """Who reads threads: the triggering user, else the automation or allowed bot running this."""
     if actor := await _actor(state):
         return actor
     cfg = RunConfig.parse(_config().get("configurable"))
@@ -157,37 +157,14 @@ async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
             name=record.get("name") or "Automation",
             automation=True,
         )
-    slack = cfg.slack_thread
-    if (
-        cfg.source != "slack"
-        or not cfg.thread_id
-        or cfg.github_login
-        or cfg.user_email
-        or slack is None
-        or not slack.location
-        or not slack.team_id
-        or not slack.triggering_bot_id
-    ):
-        return None
-    metadata = thread_metadata(await langgraph_client().threads.get(cfg.thread_id))
-    saved_slack = SourceContext.from_metadata(metadata).slack_thread
-    if (
-        metadata.get("owner_type") != "system"
-        or metadata.get("visibility") != "public"
-        or metadata.get("trigger_kind") != SLACK_BOT_TRIGGER_KIND
-        or metadata.get(TRIGGERING_BOT_KEY) != f"{slack.team_id}:{slack.triggering_bot_id}"
-        or saved_slack is None
-        or saved_slack.location != slack.location
-        or saved_slack.team_id != slack.team_id
-        or saved_slack.triggering_bot_id != slack.triggering_bot_id
-    ):
-        return None
-    return _Actor(
-        login=f"system:slack-automation:{slack.channel_id}",
-        email=None,
-        name="Automation",
-        automation=True,
-    )
+    if bot := await authorized_slack_bot_run(cfg):
+        return _Actor(
+            login=f"system:slack-bot:{bot.team_id}:{bot.bot_id}",
+            email=None,
+            name=bot.name,
+            automation=True,
+        )
+    return None
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:

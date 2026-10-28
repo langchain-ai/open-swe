@@ -1,7 +1,8 @@
 import importlib
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Literal
+from typing import Literal, get_args
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 
 from openswe.input_messages import human_input, person_introduction
 from openswe.message_queue import QueuedMessage
+from openswe.slack import allowed_bots
 
 threads_tool = importlib.import_module("openswe.tools.threads")
 
@@ -403,42 +405,65 @@ async def test_automation_reader_requires_the_automations_own_thread(
     page.assert_not_awaited()
 
 
-def _slack_automation_run(
+_SLACK_BOT = {
+    "channel_id": "C123",
+    "thread_ts": "123.456",
+    "team_id": "T123",
+    "triggering_bot_id": "B123",
+    "triggering_bot_app_id": "A123",
+    "triggering_user_id": "U123",
+}
+
+
+def _slack_bot_run(
     monkeypatch: pytest.MonkeyPatch,
     *,
     metadata_override: dict[str, object] | None = None,
     config_override: dict[str, object] | None = None,
-) -> tuple[dict[str, object], AsyncMock]:
-    slack = {
-        "channel_id": "C123",
-        "thread_ts": "123.456",
-        "team_id": "T123",
-        "triggering_bot_id": "B123",
-    }
+) -> tuple[dict[str, object], AsyncMock, AsyncMock]:
     metadata = {
         "owner_type": "system",
         "visibility": "public",
         "trigger_kind": "slack_bot",
         "triggering_bot": "T123:B123",
-        "source_context": {"slack_thread": slack},
+        "source_context": {"slack_thread": _SLACK_BOT},
         **(metadata_override or {}),
     }
     page = _automation_run(monkeypatch, metadata)
+    monkeypatch.setattr(
+        allowed_bots.THREADS,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(metadata=metadata)),
+    )
+    allowed = AsyncMock(
+        return_value=allowed_bots.AllowedSlackBot(
+            team_id="T123",
+            bot_id="B123",
+            user_id="U123",
+            app_id="A123",
+            name="Engine",
+            created_at=datetime(2026, 9, 9, tzinfo=UTC),
+        )
+    )
+    monkeypatch.setattr(allowed_bots.AllowedSlackBot, "get", allowed)
     configurable: dict[str, object] = {
         "source": "slack",
         "thread_id": "automation-thread",
-        "slack_thread": slack,
+        "slack_thread": _SLACK_BOT,
         **(config_override or {}),
     }
     monkeypatch.setattr(threads_tool, "get_config", lambda: {"configurable": configurable})
-    return configurable, page
+    return configurable, page, allowed
+
+
+_SLACK_BOT_READER = "system:slack-bot:T123:B123"
 
 
 @pytest.mark.parametrize("wakeup", [False, True])
-async def test_slack_automation_finds_pr_work_without_write_privileges(
+async def test_allowed_slack_bot_finds_pr_work_without_write_privileges(
     monkeypatch: pytest.MonkeyPatch, wakeup: bool
 ) -> None:
-    configurable, page = _slack_automation_run(monkeypatch)
+    configurable, page, _ = _slack_bot_run(monkeypatch)
     if wakeup:
         wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
         monkeypatch.setattr(
@@ -472,54 +497,48 @@ async def test_slack_automation_finds_pr_work_without_write_privileges(
     assert result["success"] is True
     assert result["items"][0]["id"] == "implementation"
     assert page.await_args is not None
-    assert page.await_args.args == ("system:slack-automation:C123",)
-    assert page.await_args.kwargs["query"] == pr
+    assert page.await_args.args == (_SLACK_BOT_READER,)
     assert page.await_args.kwargs["include_all"] is True
     assert page.await_args.kwargs["include_private"] is False
     actor = await threads_tool._reader()
     assert actor == threads_tool._Actor(
-        login="system:slack-automation:C123", email=None, name="Automation", automation=True
+        login=_SLACK_BOT_READER, email=None, name="Engine", automation=True
     )
     assert actor.admin is False
-    sent = await threads_tool.manage_thread("implementation", "send_message", message="fix")
+    for action in get_args(threads_tool.ThreadAction):
+        denied = await threads_tool.manage_thread("implementation", action, message="fix")
+        assert denied == {"success": False, "error": threads_tool._NO_WRITER}
     started = await threads_tool.start_thread(title="Fix", instructions="fix", repos=["org/repo"])
-    assert sent["success"] is False
-    assert started["success"] is False
-    assert "cannot message" in sent["error"]
-    assert "cannot message" in started["error"]
+    assert started == {"success": False, "error": threads_tool._NO_WRITER}
 
 
 @pytest.mark.parametrize(
-    ("metadata_override", "config_override"),
+    ("metadata_override", "config_override", "allowlisted"),
     [
-        ({"owner_type": "user"}, {}),
-        ({"visibility": "private"}, {}),
-        ({"trigger_kind": "user"}, {}),
-        ({"triggering_bot": "T123:B999"}, {}),
-        ({"source_context": {}}, {}),
-        (
-            {},
-            {
-                "slack_thread": {
-                    "channel_id": "C999",
-                    "thread_ts": "123.456",
-                    "team_id": "T123",
-                    "triggering_bot_id": "B123",
-                }
-            },
-        ),
-        ({}, {"github_login": "rejected-user"}),
-        ({}, {"thread_id": None}),
+        ({"owner_type": "user"}, {}, True),
+        ({"visibility": "private"}, {}, True),
+        ({"trigger_kind": "user"}, {}, True),
+        ({"triggering_bot": "T123:B999"}, {}, True),
+        ({"source_context": {}}, {}, True),
+        ({}, {"slack_thread": {**_SLACK_BOT, "channel_id": "C999"}}, True),
+        ({}, {"slack_thread": {**_SLACK_BOT, "triggering_bot_app_id": "A999"}}, True),
+        ({}, {"slack_thread": {**_SLACK_BOT, "triggering_user_id": "U999"}}, True),
+        ({}, {"github_login": "rejected-user"}, True),
+        ({}, {"thread_id": None}, True),
+        ({}, {}, False),
     ],
 )
-async def test_slack_automation_requires_persisted_matching_provenance(
+async def test_slack_bot_reader_requires_allowed_bot_on_its_own_public_thread(
     monkeypatch: pytest.MonkeyPatch,
     metadata_override: dict[str, object],
     config_override: dict[str, object],
+    allowlisted: bool,
 ) -> None:
-    _, page = _slack_automation_run(
+    _, page, allowed = _slack_bot_run(
         monkeypatch, metadata_override=metadata_override, config_override=config_override
     )
+    if not allowlisted:
+        allowed.return_value = None
     monkeypatch.setattr(
         threads_tool,
         "enforce_github_login_gate",
@@ -527,8 +546,7 @@ async def test_slack_automation_requires_persisted_matching_provenance(
     )
 
     for result in (await threads_tool.list_threads(), await threads_tool.get_thread("target")):
-        assert result["success"] is False
-        assert "Thread lookup was unavailable" in result["error"]
+        assert result == {"success": False, "error": threads_tool._NO_READER}
     page.assert_not_awaited()
 
 
@@ -579,10 +597,10 @@ class _DetailClient:
 
 
 @pytest.mark.parametrize("visibility", ["public", "private"])
-async def test_slack_automation_inspects_only_public_threads(
+async def test_allowed_slack_bot_inspects_only_public_threads(
     monkeypatch: pytest.MonkeyPatch, visibility: str
 ) -> None:
-    _slack_automation_run(monkeypatch)
+    _slack_bot_run(monkeypatch)
     original_get = threads_tool.langgraph_client().threads.get
     client = _DetailClient()
 
