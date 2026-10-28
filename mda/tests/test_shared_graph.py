@@ -1,8 +1,10 @@
 import asyncio
 import gc
+import threading
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,13 +14,18 @@ import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
+from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
+from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
 from langgraph.config import get_config
+from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
 from langsmith.sandbox import (
@@ -38,7 +45,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
 from rt.backend import Run, current_run
-from rt.run_tools import RunCodeInterpreter
+from rt.run_tools import ModelHandler, RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
     LoopRules,
@@ -723,3 +730,234 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     assert instructed == {"agent": True, "reviewer": False}
     browser = mda_browser._browser_name("thread:browsed")
     assert browsers == [(browser, False), (browser, True)]
+
+
+@pytest.mark.parametrize("cancel", ["none", "task", "masked"])
+async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_terminal(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel: str
+) -> None:
+    entered = asyncio.Event()
+    original = _ThreadREPL.eval_async
+    attempts = 0
+    observed: list[ToolMessage] = []
+
+    async def evaluate(
+        repl: _ThreadREPL,
+        code: str,
+        *,
+        outer_runtime: ToolRuntime | None = None,
+        outer_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> EvalOutcome:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            if cancel != "none":
+                try:
+                    if cancel == "masked":
+                        raise BaseExceptionGroup("worker cancelled", [asyncio.CancelledError()])
+                    await asyncio.Event().wait()
+                except BaseException as exc:
+                    raise ValueError("already closed") from exc
+            await repl.aclose()
+            raise ValueError("engine closed with different wording")
+        return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
+
+    def replies() -> Iterator[AIMessage]:
+        for index, code in enumerate(
+            [
+                "await tools.lookup({})",
+                "await tools.lookup({})",
+                "throw new Error('ordinary eval failure')",
+            ]
+        ):
+            yield AIMessage(
+                content="",
+                tool_calls=[ToolCall(name="eval", args={"code": code}, id=f"eval-{index}")],
+            )
+        yield AIMessage(content="done")
+
+    original_generate = GenericFakeChatModel._agenerate
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        observed[:] = [message for message in messages if isinstance(message, ToolMessage)]
+        return await original_generate(model, messages)
+
+    monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    task = asyncio.create_task(_run(InMemoryStore(), "closed", _context("agent", "token", catalog)))
+    await asyncio.wait_for(entered.wait(), 10)
+    if cancel != "none":
+        if cancel == "task":
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError if cancel == "task" else NodeCancelledError):
+            await task
+        assert not observed
+        assert attempts == 1
+    else:
+        await task
+        assert observed[0].status == "error"
+        assert "found" in observed[1].text
+        assert attempts == 3
+        assert "ordinary eval failure" in observed[2].text
+        assert sum(operation is not None for _, _, operation in backend_calls) == 1
+    interpreter = next(
+        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
+    )
+    assert not interpreter._registry._slots
+    assert not interpreter._slots
+
+
+@pytest.mark.parametrize("failure", ["before_agent", "before_model", "between_steps"])
+async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, failure: str
+) -> None:
+    from rt.browser import ReportedBrowserMiddleware
+    from rt.middleware import BackendRunMiddleware
+
+    interpreter = next(
+        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
+    )
+    original = interpreter.abefore_agent
+
+    async def prepare(*args: object, **kwargs: object) -> dict[str, object] | None:
+        update = await original(*args, **kwargs)
+        assert update is not None
+        interpreter._registry.get(str(update["_quickjs_slot_id"]))
+        return update
+
+    async def later_setup(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("later setup failed")
+
+    async def read_inbox(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("inbox failed")
+
+    monkeypatch.setattr(interpreter, "abefore_agent", prepare)
+    if failure == "before_agent":
+        monkeypatch.setattr(ReportedBrowserMiddleware, "abefore_agent", later_setup)
+    if failure == "before_model":
+        monkeypatch.setattr(BackendRunMiddleware, "_read_inbox", read_inbox)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    context = _context("agent", "cleanup", catalog)
+    if failure == "between_steps":
+        graph = await compile_managed_agent_async(
+            agent.agent,
+            _thread("cleanup"),
+            runtime=_ExecutionRuntime(
+                access_context="threads.create_run", store=InMemoryStore(), context=context
+            ),
+            report_telemetry=False,
+            async_subagent_graphs=_WORKERS,
+        )
+        stream = graph.astream(
+            {"messages": [("user", "hello")]},
+            _thread("cleanup"),
+            context=context,  # ty: ignore[invalid-argument-type]
+            stream_mode="updates",
+        )
+        async for _ in stream:
+            if interpreter._registry._slots:
+                break
+        assert interpreter._registry._slots
+        await stream.aclose()
+    else:
+        with pytest.raises(RuntimeError, match="later setup failed|inbox failed"):
+            await _run(InMemoryStore(), "cleanup", context)
+    assert not interpreter._registry._slots
+    assert not interpreter._slots
+    assert not interpreter._ptc_tools_by_slot
+    assert not interpreter._ptc_prompt_by_slot
+
+
+async def test_recovered_model_failure_preserves_interpreter_state(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    class RecoverModel(AgentMiddleware):
+        async def awrap_model_call(
+            self, request: ModelRequest, handler: ModelHandler
+        ) -> ModelResponse:
+            try:
+                return await handler(request)
+            except RuntimeError as exc:
+                if str(exc) != "recoverable model failure":
+                    raise
+                return await handler(request)
+
+    parts = agent._parts("agent")
+    patched = replace(parts, middleware=[RecoverModel(), *parts.middleware])
+    patched = replace(patched, worker_middleware=patched.middleware)
+    monkeypatch.setattr(agent, "_parts", lambda graph: patched)
+    attempts = 0
+    original = GenericFakeChatModel._agenerate
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:
+            raise RuntimeError("recoverable model failure")
+        if attempts == 4:
+            assert isinstance(messages[-1], ToolMessage)
+            assert "42" in messages[-1].text
+        return await original(model, messages)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(
+        agent,
+        "_DEFAULT_MODEL",
+        GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[ToolCall(name="eval", args={"code": code}, id=f"eval-{i}")],
+                    )
+                    for i, code in enumerate(["var retained = 42", "retained"])
+                ]
+                + [AIMessage(content="done")]
+            )
+        ),
+    )
+    await _run(
+        InMemoryStore(),
+        "recover",
+        _context(
+            "agent",
+            "recover",
+            _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]}),
+        ),
+    )
+
+
+async def test_cancelling_an_eval_its_worker_has_not_started_returns_promptly() -> None:
+    registry = _Registry(
+        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
+    )
+    repl = registry.get("busy")
+    worker_loop = registry._slots["busy"].worker._loop
+    assert worker_loop is not None
+    started = threading.Event()
+    release = threading.Event()
+
+    def block() -> None:
+        started.set()
+        release.wait(5)
+
+    worker_loop.call_soon_threadsafe(block)
+    assert await asyncio.to_thread(started.wait, 5)
+    try:
+        evaluation = asyncio.create_task(repl.eval_async("globalThis.ran = true"))
+        await asyncio.sleep(0)
+        evaluation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(evaluation, 1)
+    finally:
+        release.set()
+    assert (await repl.eval_async("typeof globalThis.ran")).result == "undefined"
+    await registry.aevict("busy")
