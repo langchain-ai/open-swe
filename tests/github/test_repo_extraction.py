@@ -8,6 +8,9 @@ import pytest
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.linear.session import NO_REPOSITORY, LinearSessionTurn
 from openswe.utils.repo import extract_repo_from_text
+from openswe.webhooks.common import ThreadRecord
+
+_NEW_THREAD = ThreadRecord(exists=False, metadata={})
 
 
 class TestExtractRepoFromText:
@@ -19,10 +22,12 @@ class TestExtractRepoFromText:
 
 
 class TestLinearSessionRepository:
-    """A Linear session turn works in the repository its comment names, else a default."""
+    """A Linear session turn works in the repository it names, else the session's, else a default."""
 
     @staticmethod
-    def _turn(body: str, email: str | None = None) -> LinearSessionTurn:
+    def _turn(
+        body: str, email: str | None = None, description: str | None = None
+    ) -> LinearSessionTurn:
         creator = {"id": "user-1", "name": "Test User"}
         if email:
             creator["email"] = email
@@ -35,7 +40,12 @@ class TestLinearSessionRepository:
                 "webhookTimestamp": 1_700_000_000_000,
                 "agentSession": {
                     "id": "session-1",
-                    "issue": {"id": "issue-456", "identifier": "ENG-1", "title": "Test issue"},
+                    "issue": {
+                        "id": "issue-456",
+                        "identifier": "ENG-1",
+                        "title": "Test issue",
+                        "description": description,
+                    },
                     "comment": {"id": "comment-123", "body": body},
                     "creator": creator,
                 },
@@ -48,7 +58,7 @@ class TestLinearSessionRepository:
     async def test_the_comment_names_the_repository(self) -> None:
         with patch("openswe.webhooks.common.is_repo_allowed", return_value=True):
             chosen = await self._turn("please fix this repo:custom-org/custom-repo").repository(
-                "thread-1"
+                _NEW_THREAD
             )
         assert chosen == ({"owner": "custom-org", "name": "custom-repo"}, None)
 
@@ -63,13 +73,13 @@ class TestLinearSessionRepository:
             ),
             patch("openswe.webhooks.common.is_repo_allowed", return_value=True),
         ):
-            chosen = await self._turn("please fix this bug").repository("thread-1")
+            chosen = await self._turn("please fix this bug").repository(_NEW_THREAD)
         assert chosen == ({"owner": "langchain-ai", "name": "open-swe"}, None)
 
     @pytest.mark.asyncio
     async def test_tells_the_session_a_repository_is_outside_the_allowlist(self) -> None:
         with patch("openswe.webhooks.common.is_repo_allowed", return_value=False):
-            chosen = await self._turn("repo:other-org/other-repo").repository("thread-1")
+            chosen = await self._turn("repo:other-org/other-repo").repository(_NEW_THREAD)
         assert chosen == {
             "decline": "I'm not allowed to work in `other-org/other-repo`. Name a repository "
             "Open SWE may work in, or ask your Open SWE admin to allow this one."
@@ -81,7 +91,7 @@ class TestLinearSessionRepository:
             "openswe.webhooks.common.get_workspace_settings",
             AsyncMock(return_value=WorkspaceSettings({})),
         ):
-            chosen = await self._turn("please fix this bug").repository("thread-1")
+            chosen = await self._turn("please fix this bug").repository(_NEW_THREAD)
         assert chosen == NO_REPOSITORY
 
     @staticmethod
@@ -114,15 +124,12 @@ class TestLinearSessionRepository:
         thread_workspace: str | None,
         chosen: tuple[dict[str, str], str | None],
     ) -> None:
+        thread = ThreadRecord(True, {"workspace": thread_workspace} if thread_workspace else {})
         author = self._author(
             {"owner": "zhen", "name": "personal"}, {"owner": "zhen", "name": "global"}
         )
         with (
             patch("openswe.users.User.for_email", AsyncMock(return_value=author)),
-            patch(
-                "openswe.webhooks.common.get_thread_workspace",
-                AsyncMock(return_value=thread_workspace),
-            ),
             patch(
                 "openswe.linear.session.resolve_workspace",
                 AsyncMock(return_value=SimpleNamespace(slug="personal")),
@@ -130,6 +137,30 @@ class TestLinearSessionRepository:
             patch("openswe.webhooks.common.is_repo_allowed", return_value=True),
         ):
             assert (
-                await self._turn("please fix this bug", "zhen@example.com").repository("thread-1")
+                await self._turn("please fix this bug", "zhen@example.com").repository(thread)
                 == chosen
             )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("thread", "description", "name"),
+        [
+            # An earlier turn chose it; the thread recorded it.
+            (ThreadRecord(True, {"repo": {"owner": "acme", "name": "api"}}), None, "api"),
+            # "repo setup" is prose, not a choice; the explicit token is.
+            (_NEW_THREAD, "Fix the repo setup. It crashes in repo:acme/web on login.", "web"),
+        ],
+        ids=["the-thread-remembers", "the-issue-names"],
+    )
+    async def test_a_turn_naming_no_repository_works_where_the_session_does(
+        self, thread: ThreadRecord, description: str | None, name: str
+    ) -> None:
+        with (
+            patch(
+                "openswe.webhooks.common.get_workspace_settings",
+                AsyncMock(return_value=WorkspaceSettings({})),
+            ),
+            patch("openswe.webhooks.common.is_repo_allowed", return_value=True),
+        ):
+            chosen = await self._turn("now add a test", description=description).repository(thread)
+        assert chosen == ({"owner": "acme", "name": name}, None)
