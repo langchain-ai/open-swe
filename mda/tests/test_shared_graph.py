@@ -389,8 +389,9 @@ async def test_code_mode_calls_operations_its_catalog_leaves_out(
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
     replies = [
         AIMessage(content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]),
-        # Called directly too, by the name a search gave.
+        # Called directly too, by the name a search gave, and by one that is no tool.
         AIMessage(content="", tool_calls=[ToolCall(name="withheldLookup", args={}, id="direct")]),
+        AIMessage(content="", tool_calls=[ToolCall(name="noTool", args={}, id="no-tool")]),
         AIMessage(content="done"),
     ]
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(replies)))
@@ -399,6 +400,9 @@ async def test_code_mode_calls_operations_its_catalog_leaves_out(
     await _run(InMemoryStore(), "withheld", _context("agent", "token", catalog))
 
     [evaluated] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "eval"]
+    # The run goes on past a call of no tool, as the tool node answers it.
+    [missing] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "no-tool"]
+    assert missing.status == "error" and "noTool" in missing.text
     assert '<error type="TypeError">notOne is not one of this run' in evaluated.text
     called = [(hook, detail) for hook, _, detail in backend_calls if detail]
     # Found once for the run, then called with the grant the backend gave.
@@ -408,6 +412,7 @@ async def test_code_mode_calls_operations_its_catalog_leaves_out(
         ("operation", "withheld_lookup:found-grant"),
         ("find_operation", "notOne"),
         ("operation", "withheld_lookup:found-grant"),
+        ("find_operation", "noTool"),
     ]
 
 

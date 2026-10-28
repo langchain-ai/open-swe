@@ -209,7 +209,14 @@ class RunToolsMiddleware(AgentMiddleware):
             tools = self._toolsets.get()
             name = request.tool_call["name"]
             tool = tools.by_name.get(name)
-            if tool is None and self._found is not None and tools.catalog.search_tools:
+            # Only a name the backend knows: any other gets the tool node's own answer
+            # for a tool that is not there, which the run recovers from.
+            if (
+                tool is None
+                and self._found is not None
+                and tools.catalog.search_tools
+                and await self._found.find(name) is not None
+            ):
                 tool = self._found.tool(name)
             if tool is not None:
                 request = request.override(tool=tool)
