@@ -16,6 +16,7 @@ from runtime_api.operations import ShellVerdict
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RemoteRun
+from openswe.middleware import git_push
 from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes import connect, state
 from openswe.sandboxes.state import SandboxBackendProxy
@@ -129,10 +130,10 @@ def _clear_backend_cache() -> Any:
 
 
 def test_parse_git_push_supports_git_c_and_cd() -> None:
-    assert guard._parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
+    assert git_push.parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
         repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
     )
-    assert guard._parse_git_push(
+    assert git_push.parse_git_push(
         "cd /repo && git push -u origin HEAD:feature"
     ) == guard.ParsedGitPush(
         repo_dir="/repo",
@@ -141,8 +142,8 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
         remote_ref="feature",
         set_upstream=True,
     )
-    assert guard._parse_git_push("git status && git push") is None
-    assert guard._parse_git_push("git push origin feature; git push origin evil:feature") is None
+    assert git_push.parse_git_push("git status && git push") is None
+    assert git_push.parse_git_push("git push origin feature; git push origin evil:feature") is None
 
 
 @pytest.mark.parametrize(
@@ -156,7 +157,7 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
     ],
 )
 def test_parse_git_push_rejects_unsafe_options(options: str) -> None:
-    assert guard._parse_git_push(f"git -C /repo push {options} origin feature") is None
+    assert git_push.parse_git_push(f"git -C /repo push {options} origin feature") is None
 
 
 async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
@@ -282,7 +283,7 @@ async def test_new_branch_without_shared_remote_history_fails_closed(tmp_path: P
     await backend.git("config user.name Test")
     await backend.git("commit --allow-empty -qm initial")
     head = await backend.git("rev-parse HEAD")
-    assert await guard._new_branch_base(backend, str(tmp_path), head) == ""
+    assert await git_push.new_branch_base(backend, str(tmp_path), head) == ""
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
@@ -356,7 +357,7 @@ async def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
 async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     backend = _Backend()
 
-    with pytest.raises(guard.WorkflowPushInspectionError):
+    with pytest.raises(git_push.PushInspectionError):
         await guard._workflow_change_for_push(
             backend,
             guard.ParsedGitPush(

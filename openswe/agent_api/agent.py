@@ -19,6 +19,7 @@ from openswe.incidents.runtime import (
     IncidentSession,
     load_incident_session,
 )
+from openswe.middleware.confidentiality_guard import ConfidentialityGuardMiddleware
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
@@ -52,7 +53,12 @@ class AgentKind(RunKind):
 
     assistant_id = "agent"
     reporters = (_TRANSCRIPT, record_run_usage)
-    shell_guards = (PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware())
+    # The confidentiality guard reads the push as written, before the workflow guard pins it.
+    shell_guards = (
+        PullRequestCreationGuardMiddleware(),
+        ConfidentialityGuardMiddleware(),
+        WorkflowPushGuardMiddleware(),
+    )
 
     async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
         await agent_catalog(config, surface)
