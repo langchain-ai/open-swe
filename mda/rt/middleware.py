@@ -297,7 +297,8 @@ def _with_run_prompt(
     """The graph's own system prompt, then the run's.
 
     What the graph adds is the same for every run, so it leads and, for Anthropic,
-    ends in a cache breakpoint of its own: the next run reuses it whatever its prompt.
+    ends in a cache breakpoint of its own: a later run with the same tools reuses it
+    whatever its prompt.
     """
     if static is None or not static.content:
         return SystemMessage(content=prompt)

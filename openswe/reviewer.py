@@ -366,7 +366,7 @@ def _escape_for_data_block(text: str) -> str:
 def _format_pr_review_threads(threads: list[dict]) -> str:
     """Render existing PR review threads as an XML-wrapped data block.
 
-    The block goes into the reviewer's system prompt, so the comment bodies
+    The block goes into the reviewer's first user message, so the comment bodies
     inside are attacker-controlled text from the PR (anyone who can comment
     on a PR can put anything in here, including "ignore all previous
     instructions" payloads). We wrap the whole block — and each body
