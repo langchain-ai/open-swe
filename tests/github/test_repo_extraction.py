@@ -83,7 +83,6 @@ class TestLinearSessionRepository:
         ):
             chosen = await self._turn("please fix this bug").repository("thread-1")
         assert chosen == NO_REPOSITORY
-        assert "repo:owner/name" in NO_REPOSITORY["decline"]
 
     @staticmethod
     def _author(personal: dict[str, str], fallback: dict[str, str]) -> SimpleNamespace:

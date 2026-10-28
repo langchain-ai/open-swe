@@ -2894,6 +2894,20 @@
         "title": "LinearChannelCall",
         "type": "object"
       },
+      "LinearDecline": {
+        "description": "An answer that starts nothing and has MDA's Linear channel tell the session why.",
+        "properties": {
+          "decline": {
+            "title": "Decline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decline"
+        ],
+        "title": "LinearDecline",
+        "type": "object"
+      },
       "LinearTrigger": {
         "description": "Fires on issue events in one Linear team.",
         "properties": {
@@ -22996,7 +23010,7 @@
     },
     "/linear/channel/events": {
       "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares; ``None`` there declines, and\nthe channel tells the session. Issue events run Linear automations.",
+        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares, or declines with what the\nchannel tells the session, such as that it names no repository. Issue events\nrun Linear automations.",
         "operationId": "linear_channel_event_linear_channel_events_post",
         "requestBody": {
           "content": {
@@ -23016,6 +23030,9 @@
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/EndpointAnswer"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LinearDecline"
                     },
                     {
                       "type": "null"
