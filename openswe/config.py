@@ -421,6 +421,11 @@ ENV.var(
 )
 ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
+ENV.var(
+    "OPEN_SWE_SUBAGENT_CONCURRENCY",
+    "Positive maximum concurrent task subagents sharing a run's sandbox.",
+    default="3",
+)
 
 # --- Sandboxes ---------------------------------------------------------------------------------
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")

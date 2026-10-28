@@ -544,6 +544,69 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
     ]
 
 
+async def test_a_runs_task_calls_queue_at_its_catalogs_concurrency(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """Subagents share the run's box, so a batch of task calls runs at most the
+    catalog's limit at once and still answers every call."""
+    active = 0
+    peak = 0
+    finished = 0
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        nonlocal active, peak, finished
+        if model.name == "child":
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            finished += 1
+            reply = AIMessage(content="done")
+        elif any(isinstance(message, ToolMessage) for message in messages):
+            reply = AIMessage(content="done")
+        else:
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="task",
+                        args={"subagent_type": "general-purpose", "description": f"Task {i}"},
+                        id=f"task-{i}",
+                    )
+                    for i in range(6)
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    def build(spec: ModelSpec, **kwargs: object) -> GenericFakeChatModel:
+        model = _calling()
+        model.name = spec.model_id
+        return model
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.run_tools.build_model", build)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={
+            "subagent_concurrency": 2,
+            "models": RunModels(
+                model=ModelSpec(model_id="parent", kwargs={}),
+                subagent_model=ModelSpec(model_id="child", kwargs={}),
+                use_gateway=False,
+            ),
+            "subagents": [
+                SubagentSpec(name="general-purpose", description="Run it", system_prompt="")
+            ],
+        }
+    )
+    await _run(InMemoryStore(), "batch", _context("agent", "token", catalog))
+
+    assert (peak, finished) == (2, 6)
+
+
 async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, browsers: Browsers, tmp_path: Path
 ) -> None:

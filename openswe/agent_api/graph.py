@@ -186,6 +186,7 @@ from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
+from openswe.config import ENV
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
@@ -397,6 +398,7 @@ class RunSession:
                 )
                 for subagent in (() if self._delegates else self.surface.subagents)
             ],
+            subagent_concurrency=ENV.OPEN_SWE_SUBAGENT_CONCURRENCY.get_int(3),
             models=self.start_models(),
             # Hidden from the model, as the in-process graph hides them.
             excluded=sorted(excluded),

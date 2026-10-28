@@ -69,7 +69,7 @@ from rt.run_tools import (
     subagent_prompt,
 )
 from rt.skills import RunSkillsMiddleware, SkillFiles
-from rt.task_retry import task_retry
+from rt.task_retry import TaskConcurrencyMiddleware, task_retry
 from rt.tools import run_id
 
 if TYPE_CHECKING:
@@ -218,6 +218,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
             *reports,
             skills,
             files,
+            TaskConcurrencyMiddleware(),
             task_retry(),
             RunToolsMiddleware(toolsets),
             _code_mode(inputs.graph, toolsets, files),

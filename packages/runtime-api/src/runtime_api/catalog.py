@@ -8,7 +8,7 @@ what its middleware does around each model call.
 
 from typing import Literal
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, Field, JsonValue
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -179,6 +179,8 @@ class Catalog(BaseModel):
 
     operations: list[OperationSpec] = []
     subagents: list[SubagentSpec] = []
+    # The most ``task`` subagents that run at once; they share the run's box.
+    subagent_concurrency: int = Field(default=3, gt=0)
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
     # Tools the graph keeps from the model, including MDA's own of the same name.

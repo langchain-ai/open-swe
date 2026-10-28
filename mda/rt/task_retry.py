@@ -1,13 +1,23 @@
-"""Retries a synchronous subagent's ``task`` call through a provider's passing failures.
+"""Bounds and retries a synchronous subagent's ``task`` calls.
 
-A subagent has no fallback model, so retrying the delegated task is how it
-recovers; an error the model can fix, such as a prompt too long, is its result.
+A run's subagents share its box, so its ``task`` calls queue at its catalog's
+limit. A subagent has no fallback model, so retrying the delegated task through a
+provider's passing failures is how it recovers; an error the model can fix, such as
+a prompt too long, is its result.
 """
 
+import asyncio
 import json
+from collections.abc import Awaitable, Callable
 
 import httpx2
-from langchain.agents.middleware import ToolRetryMiddleware
+from langchain.agents.middleware import AgentMiddleware, ToolRetryMiddleware
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
+
+from rt.backend import RunLocal, current_run
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
 _RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
@@ -96,3 +106,24 @@ def task_retry() -> ToolRetryMiddleware:
         initial_delay=1.0,
         max_delay=10.0,
     )
+
+
+class TaskConcurrencyMiddleware(AgentMiddleware):
+    """Queue a run's ``task`` calls for as long as their subagents run in its box."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
+    def __init__(self) -> None:
+        self._slots = RunLocal(
+            lambda: asyncio.Semaphore(current_run().catalog.subagent_concurrency)
+        )
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if request.tool_call["name"] != "task":
+            return await handler(request)
+        async with self._slots.get(current_run()):
+            return await handler(request)
