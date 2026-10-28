@@ -8,6 +8,7 @@ from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
+from runtime_api.loop import VISIBLE_FROM
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
@@ -286,7 +287,7 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
     event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else state.get(VISIBLE_FROM)
     if isinstance(cutoff, int) and cutoff >= 0:
         messages = messages[cutoff:]
     return dynamic_context_hashes_from_messages(messages)
@@ -344,6 +345,19 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
         "role": "user",
         "content": fields.element("dynamic-context", {"kind": kind, "id": entity_id}),
     }
+
+
+def run_context(context_id: str, guidance: str) -> str:
+    """Guidance for the run that can change between turns, kept out of the system prompt.
+
+    The latest block with each ``context_id`` is the one in force, so it is added
+    again only when it changes or the model no longer sees it.
+    """
+    body = guidance.strip().replace("]]>", "]]]]><![CDATA[>")
+    return (
+        f'<dynamic-context kind="run" id="{_xml_attr(context_id)}">'
+        f"<![CDATA[\n{body}\n]]></dynamic-context>"
+    )
 
 
 def person_introduction(person: PersonIdentity) -> RunMessage:
