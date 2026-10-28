@@ -5,21 +5,18 @@ sandbox, without touching its checkout, attaches the diff to the channel when
 the head moved, carries the shared plan and the reader's walk over to that
 head, starts the review scout when the plan is missing lines, records a "Looks
 good" that landed while the previous turn ran, and tells the agent where the
-reader stands. Every model call gets the walkthrough's rules.
+reader stands. The walkthrough's rules join the conversation when they first apply
+or change, and a note that they no longer apply once the walkthrough closes.
 """
 
 import logging
-from collections.abc import Mapping
-from typing import Annotated, Any, NotRequired
+from typing import Any
 
-from langchain.agents.middleware.types import (
-    AgentState,
-    OmitFromOutput,
-)
+from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from openswe.middleware.model_call_shape import CallShape
+from openswe.input_messages import dynamic_context_hash, run_context, visible_dynamic_context_hashes
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.review_guide.advance import approve_click
@@ -39,14 +36,15 @@ from openswe.walkthrough.record import PlanMovedError, Walkthrough
 logger = logging.getLogger(__name__)
 
 
-class ReviewGuideState(AgentState):
-    # Checkpointed, so a run resumed after its before-agent step still has the rules.
-    review_guide_rules: NotRequired[Annotated[str, OmitFromOutput]]
+def _rules_messages(state: AgentState, rules: str) -> list[HumanMessage]:
+    """The walkthrough's rules, unless the model already sees them as they are."""
+    block = run_context("review-guide", rules)
+    if dynamic_context_hash(block) in visible_dynamic_context_hashes(state):
+        return []
+    return [HumanMessage(content=block)]
 
 
-class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
-    state_schema = ReviewGuideState
-
+class ReviewGuideMiddleware(OpenSWEMiddleware):
     def __init__(self, *, thread_id: str, approve_ts: str) -> None:
         super().__init__()
         self._thread_id = thread_id
@@ -54,12 +52,13 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
 
     async def abefore_agent(
         self,
-        state: ReviewGuideState,  # noqa: ARG002
+        state: AgentState,
         runtime: Runtime,  # noqa: ARG002
     ) -> dict[str, Any] | None:
         session = await ReviewGuideSession.get(self._thread_id)
         if session is None or session.closed:
-            return {"review_guide_rules": ""}
+            ended = _rules_messages(state, prompt("review-guide/closed"))
+            return {"messages": ended} if ended else None
         pr = session.pull_request
         head = await fetch_head(pr.owner, pr.repo, pr.number)
         if head is None:
@@ -118,8 +117,10 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 extra={"agent_thread_id": self._thread_id, "pr_number": pr.number},
             )
             return {
-                "review_guide_rules": rules,
-                "messages": [HumanMessage(content=prompt("review-guide/moved-mid-turn"))],
+                "messages": [
+                    *_rules_messages(state, rules),
+                    HumanMessage(content=prompt("review-guide/moved-mid-turn")),
+                ]
             }
         if not workspace.complete:
             await self._plan_in_background(session, head)
@@ -162,8 +163,8 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
             walk, workspace.plan, await session.seen_at(walk.head_sha), workspace.unplanned
         )
         return {
-            "review_guide_rules": rules,
             "messages": [
+                *_rules_messages(state, rules),
                 HumanMessage(
                     content=prompt(
                         "review-guide/state",
@@ -173,7 +174,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                         approved=approved.title if approved else "",
                         status=reader.status(workspace.unplanned, workspace.hunks).model_dump(),
                     )
-                )
+                ),
             ],
         }
 
@@ -209,9 +210,3 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 exc_info=True,
                 extra={"agent_thread_id": self._thread_id, **target.log_extra},
             )
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        rules = state.get("review_guide_rules")
-        return call.appending(rules) if isinstance(rules, str) else call

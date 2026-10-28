@@ -196,8 +196,18 @@ async def test_success_status_deduplicates_cost_refresh(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "error_type", "error_message"),
+    [
+        ("timeout", "TimeoutError", "model timed out"),
+        ("error", "BackendUnavailableError", "after_model failed (HTTPStatusError)"),
+    ],
+)
 async def test_later_failed_run_posts_even_if_prior_run_replied(
     monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    error_type: str,
+    error_message: str,
 ) -> None:
     metadata = _slack_metadata()
     metadata["failure_reply_posted_run_ids"] = ["run-1"]
@@ -214,17 +224,22 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
         {
             "thread_id": "t1",
             "run_id": "run-2",
-            "status": "timeout",
-            "error": {"error": "TimeoutError", "message": "model timed out"},
+            "status": status,
+            "error": {"error": error_type, "message": error_message},
             "metadata": {"invocation_id": "invocation-2"},
         }
     )
 
     assert result["status"] == "ok"
-    trace.assert_awaited_once_with("t1", "invocation-2", "model timed out")
+    trace.assert_awaited_once_with("t1", "invocation-2", error_message)
     reply.assert_awaited_once()
     assert reply.await_args is not None
-    assert f"<{error_url}|LangSmith>" in reply.await_args.args[2]
+    assert reply.await_args.args[:2] == ("C1", "123.45")
+    text = reply.await_args.args[2]
+    assert f"<{error_url}|LangSmith>" in text
+    if error_type == "BackendUnavailableError":
+        assert "backend was interrupted" in text
+        assert "Re-trigger the run" in text
     assert client.threads.updates == [
         {
             "failure_reply_posted_run_id": "run-2",

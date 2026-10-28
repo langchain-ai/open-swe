@@ -10,6 +10,7 @@ none it finishes without a model call.
 import asyncio
 import logging
 import re
+import uuid
 from collections.abc import Mapping
 from functools import partial
 from typing import Any, NotRequired, cast
@@ -23,6 +24,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
@@ -199,6 +201,9 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
+        )
+        run_context = prompt(
+            "review-scout/run-context",
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=checkout.repo_dir,
             carried=bool(workspace.plan.chunks),
@@ -207,10 +212,11 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         if history is not None:
             human_input = prompt("review-scout/human-input", messages=history.messages_block())
-            system_prompt = f"{system_prompt}\n\n{human_input}"
+            run_context = f"{run_context}\n\n{human_input}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
             "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,

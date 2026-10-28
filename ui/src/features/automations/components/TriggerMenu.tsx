@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import type { ReactNode } from "react"
 import {
@@ -103,9 +104,16 @@ export function TriggerMenu({
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <button type="button" aria-label={ariaLabel} className={className}>
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          type="button"
+          aria-label={ariaLabel}
+          className={className}
+        >
           {children}
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
         {onGitHub && (
