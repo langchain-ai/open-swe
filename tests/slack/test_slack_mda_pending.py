@@ -10,7 +10,7 @@ from openswe.slack.request import SlackRequest
 from openswe.threads import index, router
 from openswe.webhooks.common import ThreadRecord
 
-pytestmark = pytest.mark.usefixtures("registry_db")
+pytestmark = [pytest.mark.usefixtures("registry_db"), pytest.mark.mda_lookups]
 
 THREAD = "0b9e2d6c-6a3b-5f0e-9a52-2f3d1c4b5a69"
 
@@ -89,6 +89,38 @@ async def test_a_message_the_channel_took_is_not_reported(replies: AsyncMock) ->
 
     assert await mda_forwarding.report_lost(THREAD, "1.1", "lost") is False
     replies.assert_not_awaited()
+
+
+async def test_a_refused_new_conversation_goes_back_to_the_backend(
+    monkeypatch: pytest.MonkeyPatch, replies: AsyncMock
+) -> None:
+    local = AsyncMock()
+    monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
+    processed = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "process_slack_mention", processed)
+    await index.create(THREAD, runtime="mda", metadata={"channel": "slack", "source": "slack"})
+    await mda_forwarding.bind_slack_thread_id("C1", "1.0", THREAD)
+    await mda_forwarding.remember(_request("A"), None, "1.1")
+
+    taken = await asyncio.gather(*(mda_forwarding.take_back(THREAD, "1.1") for _ in range(3)))
+
+    assert taken.count(True) == 1
+    [(request, repo)] = [call.args for call in processed.await_args_list]
+    assert (request.text, repo) == ("A", None)
+    replies.assert_not_awaited()
+    # The thread is the backend's now, so the conversation's later messages stay here.
+    thread = await index.get(THREAD)
+    assert thread is not None and mda_forwarding.channel_of(thread.metadata) is None
+    local.update.assert_awaited_with(THREAD, {"channel": None})
+    assert await mda_forwarding.owned_thread("C1", "1.0") is None
+
+
+async def test_a_message_the_channel_took_is_not_taken_back(replies: AsyncMock) -> None:
+    await index.create(THREAD, runtime="mda", metadata={"channel": "slack"})
+    await mda_forwarding.remember(_request("A"), None, "1.1")
+    assert await mda_forwarding.recall(THREAD, "1.1") is not None
+
+    assert await mda_forwarding.take_back(THREAD, "1.1") is False
 
 
 async def test_the_sweep_reports_messages_the_channel_never_asked_about(

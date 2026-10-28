@@ -296,13 +296,6 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
-ENV.var(
-    "OPEN_SWE_SLACK_TRIGGER_EVENTS_URL",
-    "LangSmith Trigger Server's Slack events URL, where the backend forwards MDA's Slack "
-    "conversations: on US LangSmith https://api.smith.langchain.com/v1/triggers/webhooks/"
-    "d809e66e-0000-4000-8000-000000000003, the same for every environment. Set it once the "
-    "MDA deployment registered this environment's Slack app. Unset: none go to MDA.",
-)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
