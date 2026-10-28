@@ -319,35 +319,53 @@ async def _status_owner_actor(actor: Actor) -> Actor:
     )
 
 
+@dataclass(frozen=True)
+class WorkerAccess:
+    actor: Actor
+    context: store.TaskContext
+    coordinator_metadata: ThreadMetadata
+
+    async def worker(self, worker_thread_id: str) -> store.TaskDelegation:
+        delegation = await store.TaskDelegation.get(worker_thread_id)
+        membership = await store.TaskMembership.context_for_thread(worker_thread_id)
+        if (
+            self.context.membership.role != "coordinator"
+            or self.context.task.coordinator_thread_id != self.actor.thread_id
+            or delegation is None
+            or delegation.task_id != self.context.task.id
+            or delegation.coordinator_thread_id != self.actor.thread_id
+            or membership is None
+            or membership.task.id != self.context.task.id
+            or membership.membership.role != "worker"
+        ):
+            raise PermissionError("Choose a worker belonging to this task")
+        try:
+            metadata = await thread_metadata(worker_thread_id)
+            if metadata.owner_type != self.coordinator_metadata.owner_type:
+                raise PermissionError("A task's threads share their coordinator's owner")
+            if metadata.owner_type != "system":
+                await self.actor.authorize_owner(worker_thread_id, metadata)
+            if metadata.workspace != self.context.task.workspace.slug:
+                raise PermissionError("The worker no longer belongs to the task's workspace")
+        except NotFoundError:
+            logger.info(
+                "Worker thread creation is incomplete",
+                extra={"worker_thread_id": worker_thread_id},
+            )
+        return delegation
+
+
 async def owned_worker(
     actor: Actor, worker_thread_id: str, *, allow_participants: bool = False
 ) -> tuple[store.Task, store.TaskDelegation]:
     context = await authorized_context(
         actor, coordinator=True, allow_participants=allow_participants
     )
-    delegation = await store.TaskDelegation.get(worker_thread_id)
-    membership = await store.TaskMembership.context_for_thread(worker_thread_id)
-    if (
-        delegation is None
-        or delegation.task_id != context.task.id
-        or delegation.coordinator_thread_id != actor.thread_id
-        or membership is None
-        or membership.task.id != context.task.id
-        or membership.membership.role != "worker"
-    ):
-        raise PermissionError("Choose a worker belonging to this task")
+    metadata = await thread_metadata(actor.thread_id)
     if allow_participants:
-        # Workers run as the coordinator's owner, so they are validated as that owner.
         actor = await _status_owner_actor(actor)
-    try:
-        metadata = await authorized_metadata(actor, worker_thread_id)
-        if metadata.workspace != context.task.workspace.slug:
-            raise PermissionError("The worker no longer belongs to the task's workspace")
-    except NotFoundError:
-        logger.info(
-            "Worker thread creation is incomplete", extra={"worker_thread_id": worker_thread_id}
-        )
-    return context.task, delegation
+    access = WorkerAccess(actor, context, metadata)
+    return context.task, await access.worker(worker_thread_id)
 
 
 def _worker_metadata(
@@ -583,11 +601,16 @@ async def task_status(
 ) -> dict[str, object]:
     actor = await Actor.resolve(actor)
     context = await authorized_context(actor, allow_participants=True)
+    access = None
+    if context.membership.role == "coordinator":
+        access = WorkerAccess(
+            await _status_owner_actor(actor), context, await thread_metadata(actor.thread_id)
+        )
     workers = []
     for delegation in await store.TaskDelegation.for_task(context.task.id):
         try:
-            if context.membership.role == "coordinator":
-                await owned_worker(actor, delegation.worker_thread_id, allow_participants=True)
+            if access is not None:
+                await access.worker(delegation.worker_thread_id)
             else:
                 await authorized_metadata(actor, delegation.worker_thread_id)
         except NotFoundError:
