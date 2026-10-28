@@ -720,7 +720,9 @@ async def control_worker(
     action: Literal["status", "cancel"],
 ) -> dict[str, object]:
     actor = await Actor.resolve(actor)
-    task, delegation = await owned_worker(actor, worker_thread_id, allow_participants=True)
+    task, delegation = await owned_worker(
+        actor, worker_thread_id, allow_participants=action == "status"
+    )
     if action == "cancel":
         await cancel_worker(worker_thread_id)
         delegation.cancelled = True

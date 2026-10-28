@@ -288,7 +288,7 @@ async def test_public_thread_does_not_allow_using_owners_credentials(client: Mag
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
 
 
-@pytest.mark.parametrize("operation", ["message", "status", "cancel"])
+@pytest.mark.parametrize("operation", ["message", "status", "worker_status"])
 @pytest.mark.parametrize("restriction", ["unverified", "private", "admin"])
 async def test_task_participants_require_verified_identity_and_thread_access(
     client: MagicMock, operation: str, restriction: str
@@ -312,8 +312,19 @@ async def test_task_participants_require_verified_identity_and_thread_access(
         elif operation == "status":
             await service.task_status(actor)
         else:
-            await service.control_worker(actor, worker_thread_id="worker", action="cancel")
+            await service.control_worker(actor, worker_thread_id="worker", action="status")
     assert not client.created_runs
+    client.runs.cancel_many.assert_not_awaited()
+
+
+async def test_verified_participant_cannot_cancel_workers(client: MagicMock) -> None:
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.control_worker(
+            service.Actor(COORDINATOR, "participant"), worker_thread_id="worker", action="cancel"
+        )
     client.runs.cancel_many.assert_not_awaited()
 
 
@@ -530,7 +541,10 @@ async def test_control_rejects_worker_from_another_task(
             )
         ),
     )
-    with pytest.raises(PermissionError, match="belonging to this task"):
+    expected = (
+        "thread owner" if as_participant and operation == "cancel" else "belonging to this task"
+    )
+    with pytest.raises(PermissionError, match=expected):
         actor = service.Actor(COORDINATOR, "participant" if as_participant else OWNER)
         if operation == "message":
             await service.message_task_thread(
@@ -666,10 +680,14 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
 
     worker_status = await service.control_worker(actor, worker_thread_id=worker_id, action="status")
     assert worker_status["worker_thread_id"] == worker_id
+    if as_participant:
+        with pytest.raises(PermissionError, match="thread owner"):
+            await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
+        assert client.created_runs[-1]["status"] == "pending"
+    actor = service.Actor(COORDINATOR, OWNER)
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
     assert client.created_runs[-1]["status"] == "interrupted"
-    actor = service.Actor(COORDINATOR, OWNER)
 
     sibling = await launch(actor, "sibling", "Review login fix")
     assert sibling["success"] is True
