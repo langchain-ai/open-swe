@@ -7,10 +7,12 @@ backend call for that user id gets. So one person is one principal on every
 channel, and the dashboard's runs can share it.
 
 The sender maps to a user the way every other ingress maps one
-(``User.for_person``): a linked Slack account, a GitHub account by its numeric
-id, and Linear by email. Anyone else keeps the channel's own principal (``null``):
-the channel endpoints still gate the run and ask the person to connect their
-account, as before.
+(``User.for_person``): a Slack account linked in the sender's own workspace, a
+GitHub user by their numeric id, and a Linear user by email. Anyone else is
+answered ``null``: MDA then runs a verified person as their own GitHub, Linear
+or Slack principal, which owns no user connections, and a bot, an app or a
+sender it couldn't verify as the channel. The channel endpoints still gate the
+run and ask the person to connect their account, as before.
 """
 
 import logging
@@ -18,9 +20,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends
 from managed_deepagents import ResolveUserEndpointRequest
+from managed_deepagents._channels.actor import EndpointActor
 from typing_extensions import TypedDict
 
-from openswe.input_messages import PersonIdentity
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.users import User
 
@@ -38,39 +40,53 @@ class AppUser(TypedDict):
 
 @router.post("/resolve-user")
 async def resolve_user(call: ResolveUserEndpointRequest) -> AppUser | None:
-    """The Open SWE user a channel's verified sender is, or ``None`` for the channel's default."""
+    """The Open SWE user a channel's verified sender is, or ``None`` for MDA's default."""
     actor = call.get("actor")
     if actor is None:
         # The channel couldn't verify who sent it; the channel's principal runs it.
         return None
-    team_id: str | None = None
-    person: PersonIdentity
-    if actor["provider"] == "slack":
-        person = {"id": f"slack:{actor['id']}"}
-        team_id = actor["teamId"]
-    elif actor["provider"] == "github":
-        if actor["type"] != "User":
-            # Bots and organizations run as the channel.
-            return None
-        person = {"id": f"github:{actor['id']}"}
-    else:
-        email = actor.get("email", "")
-        if not email:
-            return None
-        person = {"id": f"linear:{actor['id']}", "email": email}
-    user = await User.for_person(person)
-    if user is None or (team_id is not None and not _same_slack_team(user, actor["id"], team_id)):
-        logger.info(
-            "Channel sender maps to no Open SWE user", extra={"channel_provider": actor["provider"]}
-        )
+    extra = {"channel_provider": actor["provider"]}
+    try:
+        user = await _open_swe_user(actor)
+    except Exception:  # noqa: BLE001 - an error would fail the delivery; null still runs it
+        logger.exception("Could not map a channel sender to an Open SWE user", extra=extra)
+        return None
+    if user is None:
+        logger.info("Channel sender maps to no Open SWE user", extra=extra)
         return None
     return {"type": "user", "id": str(user.id)}
 
 
+async def _open_swe_user(actor: EndpointActor) -> User | None:
+    """The Open SWE user a verified person is; ``None`` for anyone else, on any channel."""
+    if actor["provider"] == "slack":
+        user = await User.for_person({"id": f"slack:{actor['id']}"})
+        same_team = user is not None and _same_slack_team(user, actor["id"], actor["teamId"])
+        return user if same_team else None
+    if actor["provider"] == "github":
+        # Bots and organizations run as the channel.
+        if actor["type"] != "User":
+            return None
+        return await User.for_person({"id": f"github:{actor['id']}"})
+    if actor["provider"] == "linear":
+        # A session's creator or prompting user comes without a type; apps run as the channel.
+        kind = actor.get("type")
+        email = actor.get("email", "")
+        if (kind is not None and kind.lower() != "user") or not email:
+            return None
+        return await User.for_person({"id": f"linear:{actor['id']}", "email": email})
+    return None
+
+
 def _same_slack_team(user: User, slack_user_id: str, team_id: str) -> bool:
-    """Whether the linked Slack account is in the sender's workspace, when both name one."""
-    linked = next(
-        (i for i in user.identities if i.provider == "slack" and i.external_id == slack_user_id),
-        None,
+    """Whether ``user``'s linked Slack account is the sender's, in the sender's workspace.
+
+    A link that names no workspace, as older ones don't, is no one's: the same Slack
+    user id may be someone else in another workspace.
+    """
+    return bool(team_id) and any(
+        identity.provider == "slack"
+        and identity.external_id == slack_user_id
+        and identity.team_id == team_id
+        for identity in user.identities
     )
-    return linked is None or not linked.team_id or linked.team_id == team_id

@@ -185,9 +185,10 @@ MDA's dev server also refuses loopback webhooks, so the completion webhook (`COM
 ## Who a channel's run is for
 
 Before every run a channel starts, MDA asks the backend who its verified sender is (`resolve_user` in `identity.py`, the backend's `POST /mda/resolve-user`, signed with `MDA_SERVICE_SECRET` as the channel endpoints are).
-The backend maps the sender as every other ingress does (`User.for_person`): a linked Slack account in the same workspace, a GitHub account by its numeric id, or a Linear user by email.
+The backend maps the sender as every other ingress does (`User.for_person`): a Slack account linked in the sender's own workspace (a link that names no workspace matches no one), a GitHub user by their numeric id, or a Linear user by email.
 A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
-Anyone else, bots, and a sender the channel couldn't verify keep the channel's own principal (`null`); the channel endpoints still gate the run and ask the person to connect their account.
+Anyone else is answered `null`, as is every sender while the backend can't read its users: MDA runs a verified person as their own GitHub, Linear or Slack principal, which owns no user connections, and a bot, an app or a sender the channel couldn't verify as the channel.
+The channel endpoints still gate the run and ask the person to connect their account.
 
 The backend's own runs and answers on a channel's thread go through MDA's trusted-backend ingress (see [Linear](#linear)).
 One a person started themselves, a dashboard follow-up or answer, runs as the principal that person's channel runs have (`MDA_WORKSPACE_ID`).
