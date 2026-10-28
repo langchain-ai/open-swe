@@ -221,6 +221,7 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
+    call_seconds,
     code_name,
     code_only,
     direct_and_from_code,
@@ -385,6 +386,7 @@ class RunSession:
                     reads=(injections := Injections.of(operations[described.name])).reads,
                     reads_all=injections.reads_all,
                     code_name=code_name(described.name),
+                    seconds=call_seconds(described.name),
                 )
                 for described in self.surface.catalog()
                 if described.name in operations

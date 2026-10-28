@@ -188,7 +188,11 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(server, "record_agent_invocation_usage", usage)
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
     monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
-    monkeypatch.setattr(server, "construct_system_prompt", lambda **kwargs: prompts.append(kwargs))
+    def render(**kwargs: object) -> str:
+        prompts.append(kwargs)
+        return "You code."
+
+    monkeypatch.setattr(server, "construct_system_prompt", render)
     for name in (
         "resolve_triggering_user_identity",
         "load_workspace",

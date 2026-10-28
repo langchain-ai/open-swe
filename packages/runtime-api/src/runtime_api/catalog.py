@@ -53,6 +53,8 @@ class OperationSpec(BaseModel):
     code_name: str | None = None
     # The backend's grant of this operation to this run, sent with each call of it.
     grant: str | None = None
+    # How long a call of it may take, when shorter than a tool call's allowance.
+    seconds: float | None = None
 
 
 class SubagentSpec(BaseModel):

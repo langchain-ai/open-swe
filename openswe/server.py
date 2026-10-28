@@ -35,6 +35,7 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
 )
+from runtime_api.endpoint import QUICK_CALL_SECONDS
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -92,6 +93,7 @@ from openswe.input_messages import (
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.managed import instance_gateway, managed_mcp_source
+from openswe.mcp.runtime import MCPTools, catalog_note
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
@@ -882,12 +884,8 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
 
 async def _mcp_tools_for(
     credential_login: str | None, workspace: str, managed_gateway: str | None
-) -> list[Any]:
-    """Load the run's MCPs by tier: instance, then workspace, then the user's own.
-
-    A later tier's connection replaces a same-named one from the tier before. The
-    instance's LangSmith Managed Tools gateway comes last, used as the private owner.
-    """
+) -> MCPTools:
+    """Load MCPs by precedence: instance, workspace, user, then the private owner's gateway."""
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
@@ -898,7 +896,7 @@ async def _mcp_tools_for(
 
 async def _run_mcp_tools(
     thread_id: str, credential_login: str | None, workspace: str
-) -> tuple[str | None, list[Any]]:
+) -> tuple[str | None, MCPTools]:
     """The instance's Managed Tools gateway and the MCP tools the run may use."""
     managed_gateway = await instance_gateway() if credential_login else None
     async with aphase(thread_id, "factory.mcp_tools"):
@@ -949,6 +947,16 @@ def direct_and_from_code(name: str) -> bool:
 def code_name(name: str) -> str | None:
     """The name code mode calls a tool by, as ``tools.<name>``, if it can."""
     return to_camel_case(name) if callable_from_code(name) else None
+
+
+_QUICK_CALLS = frozenset(
+    {"get_thread", "list_threads", "slack_read_channel_messages", "slack_read_thread_messages"}
+)
+
+
+def call_seconds(name: str) -> float | None:
+    """How long a call of a tool may take, when shorter than a tool call's allowance."""
+    return QUICK_CALL_SECONDS if name in _QUICK_CALLS else None
 
 
 def code_only(name: str) -> bool:
@@ -1488,7 +1496,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 local_checkout=bridged,
                 local_checkout_client=self._bridge_client or "cli",
                 recent_thread_context=recent_thread_context,
-            ),
+            )
+            + catalog_note(self._turn.tool_discovery_failures),
         }
 
 
@@ -1785,7 +1794,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     managed_gateway, mcp_tools = (
-        await mcp_tools_task if mcp_tools_task is not None else (None, list[Any]())
+        await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
     )
 
     slack_tools = [
@@ -1954,6 +1963,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         bridge_client=bridge_client,
         review_guide=guide is not None,
         task_worker=task_coordination is not None and task_coordination.is_worker,
+        tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
     run_preparation = PrepareAgentRunMiddleware(config, turn, repo_instructions=repo_instructions)

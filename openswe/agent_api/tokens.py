@@ -71,6 +71,8 @@ class AgentTurnSettings(BaseModel):
     saved_requested_model: str | None = None
     # The client of a thread bridged to a person's machine.
     bridge_client: BridgeClient | None = None
+    # Why managed tool discovery failed while planning, which the prompt says.
+    tool_discovery_failures: list[str] = []
     # Whether the thread runs a review walkthrough, which pins its checkout in the box.
     review_guide: bool = False
     # Whether the thread is a task worker, which may use its coordinator's box only once

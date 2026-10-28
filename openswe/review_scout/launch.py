@@ -233,26 +233,28 @@ class ReviewScoutTarget(BaseModel):
         return _ScoutRun.model_validate(run).run_id
 
     async def await_walkthrough(self) -> WalkthroughView | None:
-        """This head's walkthrough, running the scout first when it has none yet.
-
-        ``None`` when the scout cannot run or does not finish within
-        ``SCOUT_WAIT_SECONDS``; the reviewer then reviews without it.
-        """
+        """Wait up to SCOUT_WAIT_SECONDS for this head's walkthrough, starting its scout if needed."""
         if not postgres.configured() or not self.base_sha or not self.head_sha:
             return None
-        existing = await self.walkthrough()
-        if existing is not None:
-            return existing
-        run_id = await self.start()
-        # Polled rather than joined: one join request idles for the whole run
-        # and would hit the client's 300s read timeout first.
-        client = dispatch_client()
-        thread_id = await self.current_thread_id()
-        deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
-        while asyncio.get_running_loop().time() < deadline:
-            run = _ScoutRun.model_validate(await client.runs.get(thread_id, run_id))
-            if run.status not in _ACTIVE_STATUSES:
-                return await self.walkthrough()
-            await asyncio.sleep(_POLL_SECONDS)
-        logger.warning("Review scout did not finish in time for the reviewer", extra=self.log_extra)
-        return None
+        try:
+            async with asyncio.timeout(SCOUT_WAIT_SECONDS):
+                existing = await self.walkthrough()
+                if existing is not None:
+                    return existing
+                run_id = await self.start()
+                # Polled rather than joined: one join request idles for the whole run
+                # and would hit the client's 300s read timeout first.
+                client = dispatch_client()
+                thread_id = await self.current_thread_id()
+                while True:
+                    run = _ScoutRun.model_validate(await client.runs.get(thread_id, run_id))
+                    if run.status not in _ACTIVE_STATUSES:
+                        return await self.walkthrough()
+                    await asyncio.sleep(_POLL_SECONDS)
+        except TimeoutError:
+            logger.warning(
+                "Review scout did not finish in time for the reviewer",
+                extra=self.log_extra,
+                exc_info=True,
+            )
+            return None
