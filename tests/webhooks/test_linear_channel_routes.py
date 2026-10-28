@@ -35,11 +35,14 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     return api
 
 
-def _call(key: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _call(key: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
     """What MDA's channel POSTs its endpoint."""
+    thread: dict[str, Any] = {"id": _THREAD, "channel": {"name": "linear"}}
+    if interrupted:
+        thread["interrupted"] = True
     return {
         "event": {"key": key, "deliveryId": "delivery-1", "payload": payload},
-        "thread": {"id": _THREAD, "channel": {"name": "linear"}},
+        "thread": thread,
     }
 
 
@@ -150,6 +153,28 @@ async def test_a_session_turn_starts_the_run_prepared_on_the_sessions_thread(
     (thread_id,) = prepare.await_args.args
     assert thread_id == _THREAD
     app.state.record.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_session_turn_on_an_interrupted_thread_prepares_nothing(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepare = AsyncMock()
+    monkeypatch.setattr(channel.LinearSessionTurn, "prepare_run", prepare)
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "prompted",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "agentSession": {"id": "session-1", "issue": {"id": "issue-1"}},
+        "agentActivity": {"content": {"type": "prompt", "body": "and the docs"}},
+    }
+
+    response = await _post(app, _call("AgentSessionEvent.prompted", payload, interrupted=True))
+
+    # Only tells the channel Open SWE would act: no thread adopted, no run token signed.
+    assert response.json() == {"input": channel._ACTS_WHILE_INTERRUPTED}
+    prepare.assert_not_awaited()
 
 
 @pytest.mark.asyncio

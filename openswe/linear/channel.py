@@ -5,12 +5,13 @@ delivery's signature and age, and POSTs the event it validated, with the thread 
 belongs to, here (``channels.linear`` ``on_event``). The backend decides: an agent
 session turn starts the run it prepares, on the session's thread, with the
 run-complete webhook; issue and comment events start nothing, and are logged and
-run Linear automations. Only the deployment, which holds Open SWE's shared secret,
-may call it.
+run Linear automations. A session turn on a thread that waits on an interrupt
+starts nothing either: its answer only tells the channel Open SWE would act.
+Only the deployment, which holds Open SWE's shared secret, may call it.
 """
 
 import json
-from typing import Any, Literal, cast, get_args
+from typing import Any, Final, Literal, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -35,6 +36,8 @@ LinearEventKey = Literal[
 ]
 _EVENT_KEYS: frozenset[str] = frozenset(get_args(LinearEventKey))
 _AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
+# What the channel starts with while the thread waits: nothing, it only notes Open SWE acts.
+_ACTS_WHILE_INTERRUPTED: Final = "Open SWE was asked while the session waits."
 
 router = APIRouter(prefix="/linear/channel", dependencies=[Depends(require_mda_channel)])
 
@@ -73,28 +76,32 @@ async def linear_channel_event(
     """The run a Linear event starts, or ``None`` to start nothing.
 
     An agent session turn starts the run it prepares, or declines with what the
-    channel tells the session, such as that it names no repository. Issue events
-    run Linear automations.
+    channel tells the session, such as that it names no repository. While the
+    session's thread waits on an interrupt nothing is prepared. Issue events run
+    Linear automations.
     """
-    event = call["event"]
+    event, thread = call["event"], call["thread"]
     key, payload, delivery_id = event["key"], event["payload"], event["deliveryId"]
     if key not in _EVENT_KEYS:
         raise HTTPException(status_code=422, detail="Unsupported Linear event")
     try:
-        thread_id = str(UUID(call["thread"]["id"]))
+        thread_id = str(UUID(thread["id"]))
     except ValueError as error:
         raise HTTPException(status_code=422, detail="Invalid thread") from error
     if not delivery_id or len(json.dumps(payload)) > _MAX_PAYLOAD_CHARS:
         raise HTTPException(status_code=422, detail="Invalid Linear event")
     await _record(request, payload, delivery_id)
-    turn = LinearSessionTurn.parse(key, cast(Any, payload))
-    if isinstance(turn, LinearSessionTurn):
-        return await turn.prepare_run(thread_id)
-    if turn is not None:
-        return turn
     if key in _AUTOMATION_KEYS:
         background_tasks.add_task(_launch_automations, payload, delivery_id)
-    return None
+    turn = LinearSessionTurn.parse(key, cast(Any, payload))
+    if turn is None:
+        return None
+    if thread.get("interrupted"):
+        # Nothing starts while the thread waits; no metadata, images or run token either.
+        return {"input": _ACTS_WHILE_INTERRUPTED}
+    if isinstance(turn, LinearSessionTurn):
+        return await turn.prepare_run(thread_id)
+    return turn
 
 
 async def _launch_automations(payload: dict[str, JsonValue], delivery_id: str) -> None:
