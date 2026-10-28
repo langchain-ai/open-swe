@@ -115,6 +115,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     from openswe.agent_api import agent
     from openswe.agent_api import graph as graph_module
     from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware.model_selection import RouteSelection
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.utils.model import provider_model_kwargs
@@ -122,7 +123,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     async def never_planned(config: object, surface: ToolSurface) -> None:
         raise AssertionError("A call around a model call never plans the run")
 
-    classify = AsyncMock(return_value="fast")
+    classify = AsyncMock(return_value=RouteSelection("fast"))
     refresh = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
@@ -140,7 +141,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     context = await graph.api(run, "task_context", {"run_id": "run-1"})
     refreshed = await graph.api(run, "refresh_github_proxy", {"run_id": "run-1"})
 
-    assert route == {"route": "fast"}
+    assert route == {"route": "fast", "persist": True}
     classify.assert_awaited_once_with("Fix the login")
     assert isinstance(chosen, dict)
     assert chosen["model_id"] == "anthropic:claude-opus-5-5"

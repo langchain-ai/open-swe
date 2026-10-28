@@ -276,6 +276,37 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
     ]
 
 
+async def test_a_route_the_classifier_fell_back_to_is_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "route_model": Route(route="default", persist=False)
+    }
+    backend, calls = _backend(
+        monkeypatch,
+        answers,
+        LoopRules(routing=RoutingRules(mode="auto")),
+    )
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix the login", id="human-1")
+
+    first = await loop.before_model(_state(human))
+    second = await loop.before_model(_state(human, **first.update))
+
+    assert first.call is not None and first.call.model == _MAIN
+    assert "model_route" not in first.update
+    assert [name for name, _ in calls] == ["route_model"]
+    assert second.call is not None and second.call.model == _MAIN
+
+    monkeypatch.setattr("rt.loop.run_id", lambda: "run-2")
+    answers["route_model"] = Route(route="fast")
+    recovered = await loop.before_model(_state(human, **first.update))
+
+    assert recovered.call is not None and recovered.call.model == _FAST
+    assert recovered.update["model_route"] == "fast"
+    assert [name for name, _ in calls] == ["route_model", "route_model"]
+
+
 @pytest.mark.parametrize(
     "state",
     [
