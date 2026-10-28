@@ -23264,7 +23264,7 @@
     },
     "/linear/channel/events": {
       "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares, or declines with what the\nchannel tells the session, such as that it names no repository. Issue events\nrun Linear automations.",
+        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares, or declines with what the\nchannel tells the session, such as that it names no repository. While the\nsession's thread waits on an interrupt nothing is prepared. Issue events run\nLinear automations.",
         "operationId": "linear_channel_event_linear_channel_events_post",
         "requestBody": {
           "content": {
@@ -23314,7 +23314,7 @@
     },
     "/mda/resolve-user": {
       "post": {
-        "description": "The Open SWE user a channel's verified sender is, or ``None`` for the channel's default.",
+        "description": "The Open SWE user a channel's verified sender is, or ``None`` for MDA's default.",
         "operationId": "resolve_user_mda_resolve_user_post",
         "requestBody": {
           "content": {
