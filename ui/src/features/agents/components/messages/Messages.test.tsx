@@ -328,6 +328,13 @@ describe("Messages", () => {
                 },
                 output: "Recorded",
               },
+              {
+                kind: "tool-execution",
+                toolCallId: "ping",
+                title: "ping_service",
+                toolKind: "other",
+                status: "completed",
+              },
             ],
           },
         ]}
@@ -336,6 +343,9 @@ describe("Messages", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Worked/ }))
+    expect(screen.getByText("Ping service").closest("[aria-expanded]")).toBe(
+      null
+    )
     fireEvent.click(
       screen.getByRole("button", {
         name: "Report platform issue Sandbox disconnected",

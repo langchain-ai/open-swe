@@ -21,7 +21,7 @@ import {
   segmentTurn,
 } from "../renderItems"
 import { WorkEntryRow } from "./WorkEntryRow"
-import { describeWorkEntry, latestDiff } from "./workEntry"
+import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
 import { JsonInputEntryBody, ShellEntryBody, ToolCallBody } from "./entryBodies"
 import { ToolResultBody } from "./ToolResultBody"
@@ -94,14 +94,20 @@ function CodeWorkEntry({
       <WorkEntryRow
         entry={entry}
         timestamp={chunk.timestamp}
-        body={({ loadedText, loadError }) => (
-          <ToolCallBody
-            chunk={chunk}
-            loadedText={loadedText}
-            loadError={loadError}
-            input={code && <CodeBlock text={code} language="javascript" />}
-          />
-        )}
+        body={
+          hasToolCallDetail(chunk, Boolean(code))
+            ? ({ loadedText, loadError }) => (
+                <ToolCallBody
+                  chunk={chunk}
+                  loadedText={loadedText}
+                  loadError={loadError}
+                  input={
+                    code && <CodeBlock text={code} language="javascript" />
+                  }
+                />
+              )
+            : undefined
+        }
       />
     )
   }
@@ -146,13 +152,17 @@ function ToolWorkEntry({
     <WorkEntryRow
       entry={entry}
       timestamp={chunk.timestamp}
-      body={({ loadedText, loadError }) => (
-        <JsonInputEntryBody
-          chunk={chunk}
-          loadedText={loadedText}
-          loadError={loadError}
-        />
-      )}
+      body={
+        hasToolCallDetail(chunk, Object.keys(chunk.input ?? {}).length > 0)
+          ? ({ loadedText, loadError }) => (
+              <JsonInputEntryBody
+                chunk={chunk}
+                loadedText={loadedText}
+                loadError={loadError}
+              />
+            )
+          : undefined
+      }
       defaultExpanded={chunk.status === "pending"}
     />
   )

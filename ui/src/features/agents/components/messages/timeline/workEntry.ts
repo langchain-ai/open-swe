@@ -123,6 +123,19 @@ function expandedTextForChunk(
     : output
 }
 
+/** Whether a call's input/output body would show anything when expanded. */
+export function hasToolCallDetail(
+  chunk: ToolExecutionChunk,
+  hasInput: boolean
+): boolean {
+  return (
+    hasInput ||
+    Boolean(chunk.output || chunk.loadOutput) ||
+    chunk.status === "in_progress" ||
+    chunk.status === "pending"
+  )
+}
+
 /** The diff a tool call ultimately produced — the last one wins when a call touched a file repeatedly. */
 export function latestDiff(chunk: ToolExecutionChunk) {
   return chunk.diffs?.length
