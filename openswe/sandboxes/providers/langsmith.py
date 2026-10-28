@@ -37,6 +37,7 @@ from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
+from openswe.workspaces.cloud_identity import federated_cloud
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +368,30 @@ async def _patch_proxy_config(
     )
 
 
+async def _federated_proxy_rules(
+    client: httpx2.AsyncClient, url: str, api: SandboxAPI, sandbox_name: str
+) -> list[dict[str, JsonValue]]:
+    async def get() -> dict[str, JsonValue]:
+        response = await client.get(url, headers=api.headers())
+        api.raise_for_status(response)
+        return _json_object.validate_python(response.json())
+
+    sandbox = await retry_transient_sandbox_errors(
+        get,
+        description=f"proxy config of sandbox {sandbox_name}",
+        max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+        retryable=_is_retryable_proxy_config_error,
+        retry_after=_proxy_config_retry_after,
+    )
+    current = sandbox.get("proxy_config")
+    rules = current.get("rules") if isinstance(current, dict) else None
+    return [
+        rule
+        for rule in (rules if isinstance(rules, list) else [])
+        if isinstance(rule, dict) and federated_cloud(rule)
+    ]
+
+
 async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
@@ -398,16 +423,25 @@ async def configure_sandbox_proxy(
         if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
     ]
     tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
-    proxy_config["rules"] = [
-        *_github_proxy_rules(github_token),
-        *([tools_rule] if tools_rule else []),
-        *preserved_rules,
-    ]
-    payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        await _patch_proxy_config(client, url, payload, api, sandbox_name)
+        # Federation is fixed at creation, including its absence on older boxes, and
+        # LangSmith allows one rule per cloud.
+        federated_rules = await _federated_proxy_rules(client, url, api, sandbox_name)
+        federated_clouds = {rule.get("type") for rule in federated_rules}
+        proxy_config["rules"] = [
+            *_github_proxy_rules(github_token),
+            *([tools_rule] if tools_rule else []),
+            *(
+                rule
+                for rule in preserved_rules
+                if not federated_cloud(rule)
+                and not (isinstance(rule, dict) and rule.get("type") in federated_clouds)
+            ),
+            *federated_rules,
+        ]
+        await _patch_proxy_config(client, url, {"proxy_config": proxy_config}, api, sandbox_name)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
 
