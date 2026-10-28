@@ -183,6 +183,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(graph_module, "bind_mda_sandbox", bound)
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "client", MagicMock(threads=MagicMock(update=updated)))
     monkeypatch.setattr(server, "record_agent_invocation_usage", usage)
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
@@ -708,8 +709,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
-    # A provider MDA declares no box for, so the catalog reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from unittest.mock import AsyncMock
+
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # A thread with no box of MDA's, so the catalog reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.runnables import RunnableConfig

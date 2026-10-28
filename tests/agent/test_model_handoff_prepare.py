@@ -47,6 +47,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     monkeypatch.setattr(server, "store_thread_settings", store)
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
     monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kw: None)
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     for name in (
         "resolve_triggering_user_identity",
         "load_workspace",

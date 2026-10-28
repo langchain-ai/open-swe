@@ -52,34 +52,12 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.4",
 ]
-# Third-party sandbox providers. The registry imports each provider lazily, so
-# these are only needed when SANDBOX_TYPE selects one; `uv sync` alone gives you
-# the langsmith (default) and local providers.
-sandbox-daytona = ["langchain-daytona>=0.0.9"]
-sandbox-modal = ["langchain-modal>=0.0.7"]
-sandbox-runloop = ["langchain-runloop>=0.0.7"]
-# langchain-e2b is pinned: it still declares `deepagents<0.7.0` and caps
-# `wcmatch<11.0`, overridden below until it publishes compatible metadata.
-sandbox-e2b = ["langchain-e2b==0.0.6"]
-sandbox-providers = [
-    "langchain-daytona>=0.0.9",
-    "langchain-modal>=0.0.7",
-    "langchain-runloop>=0.0.7",
-    "langchain-e2b==0.0.6",
-]
 
 # Shared with mda/: the contract between the backend and its MDA runtime.
 [tool.uv.sources]
 open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
 
 [tool.uv]
-# The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.32 keeps the sandbox API backward compatible. Its e2b
-# dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
-# override both transitive bounds until langchain-e2b publishes compatible metadata.
-# Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
-# or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.32", "wcmatch>=11.0"]
 constraint-dependencies = [
     "langgraph-api==0.18.0.dev13",
     "langgraph-runtime-inmem==0.38.0.dev13",
@@ -146,16 +124,8 @@ exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [
-    "daytona",
     "ddtrace",
     "ddtrace.trace",
-    "e2b",
-    "langchain_daytona",
-    "langchain_e2b",
-    "langchain_modal",
-    "langchain_runloop",
-    "modal",
-    "runloop_api_client",
 ]
 
 [tool.ty.terminal]
