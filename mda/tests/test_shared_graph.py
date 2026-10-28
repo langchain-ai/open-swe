@@ -15,15 +15,23 @@ from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMP
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
+from managed_deepagents import (
+    DeepAgentDefinition,
+    ManagedServerRuntime,
+    define_deep_agent,
+    shared_factory,
+)
 from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from managed_deepagents.sandbox import SandboxDefinition
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 from rt.backend import Run, current_run
 from rt.run_tools import RunCodeInterpreter
 from runtime_api.catalog import (
@@ -110,6 +118,7 @@ def backend_calls(
     """Every call the runs make on the backend: its endpoint, its bearer and, for an
     operation, the name and grant it was called with."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr(mda_runtime._SharedDefinitions, "_built", OrderedDict())
     monkeypatch.setattr(mda_runtime._SharedGraphs, "_built", OrderedDict())
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     request = httpx2.Request("POST", "https://backend.invalid")
@@ -193,6 +202,7 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
     assert {bearer for _, bearer, _ in backend_calls} == {"Bearer token-1", "Bearer token-2"}
 
     # Another replica, which never built either graph, reads a thread's state.
+    monkeypatch.setattr(mda_runtime._SharedDefinitions, "_built", OrderedDict())
     monkeypatch.setattr(mda_runtime._SharedGraphs, "_built", OrderedDict())
     read = await compile_managed_agent_async(
         agent.agent,
@@ -560,6 +570,56 @@ async def test_each_run_compacts_a_long_conversation_with_its_own_model(
     # One graph per model, shared by every run on it.
     assert again.nodes["model"] is first.nodes["model"]
     assert second.nodes["model"] is not first.nodes["model"]
+
+
+async def test_a_shared_factory_builds_once_per_inputs_and_never_sees_the_run(
+    backend_calls: BackendCalls,
+) -> None:
+    """The first run on some inputs builds the graph every later run on them shares, so
+    nothing of that run may reach the build: only the inputs do."""
+    builds: list[tuple[str, bool]] = []
+
+    class Inputs(BaseModel):
+        graph: str
+
+    async def inputs(runtime: ManagedServerRuntime) -> Inputs:
+        execution = runtime.execution_runtime
+        context = execution.context if execution is not None else None
+        return Inputs(graph=str((context or {}).get("graph")))
+
+    @shared_factory(inputs)
+    def probe(built_from: Inputs) -> DeepAgentDefinition:
+        try:
+            get_config()
+            sees_run = True
+        except RuntimeError:
+            sees_run = False
+        builds.append((built_from.graph, sees_run))
+        return define_deep_agent(name="probe", model=GenericFakeChatModel(messages=iter([])))
+
+    async def compile_for(graph: str, thread_id: str) -> CompiledStateGraph:
+        context: dict[str, object] = {"graph": graph}
+        # As a run's own config is in progress around the factory.
+        token = var_child_runnable_config.set(_thread(thread_id))
+        try:
+            return await compile_managed_agent_async(
+                probe,
+                _thread(thread_id),
+                runtime=_ExecutionRuntime(
+                    access_context="threads.create_run", store=InMemoryStore(), context=context
+                ),
+                report_telemetry=False,
+            )
+        finally:
+            var_child_runnable_config.reset(token)
+
+    first = await compile_for("agent", "thread-1")
+    second = await compile_for("agent", "thread-2")
+    other = await compile_for("reviewer", "thread-3")
+
+    assert builds == [("agent", False), ("reviewer", False)]
+    assert second.nodes["model"] is first.nodes["model"]
+    assert other.nodes["model"] is not first.nodes["model"]
 
 
 async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(

@@ -25,8 +25,6 @@ The same agent runs as the async ``general-purpose`` subagent, the graph
 worker grant, adopts its own run token, and runs this agent's middleware as it.
 """
 
-import contextvars
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -40,6 +38,7 @@ from managed_deepagents import (
     DeepAgentDefinition,
     ManagedServerRuntime,
     define_deep_agent,
+    shared_factory,
 )
 from pydantic import BaseModel, ConfigDict
 from rt.backend import Graph, OpenSweBackend, RunContext
@@ -167,23 +166,6 @@ async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
     return GraphInputs.of(context.graph, await context.run().plan())
 
 
-def _from_inputs(
-    build: Callable[[GraphInputs], DeepAgentDefinition],
-) -> Callable[[ManagedServerRuntime], Awaitable[DeepAgentDefinition]]:
-    """MDA's factory for a definition built from a run's ``GraphInputs`` alone.
-
-    MDA keeps the graph the first run builds for its inputs and shares it with every
-    later run on them, so ``build`` must see nothing else of that first run: it gets
-    no runtime, and runs in an empty context, where no run is in progress.
-    """
-
-    async def factory(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
-        inputs = await _inputs(runtime)
-        return contextvars.Context().run(build, inputs)
-
-    return factory
-
-
 @dataclass(frozen=True)
 class _Parts:
     """A graph's subagents and middleware, built once and shared by every run."""
@@ -290,9 +272,10 @@ def _parts(graph: Graph) -> _Parts:
     )
 
 
-# `mda build` reads the agent's name without running this factory, so its body
-# stays assignments and one `return define_deep_agent(...)`.
-@_from_inputs
+# MDA builds this once per distinct inputs, from them alone, and shares its graph.
+# `mda build` reads the agent's name without running it, so its body stays
+# assignments and one `return define_deep_agent(...)`.
+@shared_factory(_inputs)
 def agent(inputs: GraphInputs) -> DeepAgentDefinition:
     parts = _parts(inputs.graph)
     sync_subagents: list[SubAgent] = parts.sync_subagents(inputs.sync_subagent_model())
@@ -313,8 +296,6 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
         replicate_traces=False,
         model=inputs.agent_model(),
         context_schema=RunContext,
-        # MDA keys the graph it shares on these: everything above is built from them.
-        _openswe_graph_inputs=inputs.model_dump(mode="json"),
         # The thread's box, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
         # same box. Which box, and whether a run has one, is the run's catalog's: a
