@@ -1711,6 +1711,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("followup", lambda ctx: "E2E_FOLLOWUP" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
         "human_review_resummarize",

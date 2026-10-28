@@ -98,6 +98,12 @@ body.version-mismatch {
 }
 
 @layer utilities {
+  /* Placeholder instructions need readable contrast on every field surface. */
+  input:placeholder-shown::placeholder,
+  textarea:placeholder-shown::placeholder {
+    color: var(--text-secondary);
+  }
+
   /* Menus are opaque: a translucent tint let page content bleed through. */
   .dropdown-glass {
     background: var(--dropdown-glass-background, var(--bg-elevated));

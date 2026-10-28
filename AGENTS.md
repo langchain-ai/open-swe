@@ -28,6 +28,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 
 ## Conventions
 
+- Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
+
 - Async-only.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
 - Strong types in Python and TypeScript.
@@ -44,6 +46,9 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
+- Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
+  Preserve structured messages through delivery instead of wrapping their envelopes again.
+  For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
 - Keep comments minimal and only explain non-obvious reasons.
 - Before asking a clarifying question about Open SWE's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
