@@ -6,7 +6,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
@@ -154,7 +154,7 @@ function Description({
           href={githubUrls.pullRequest(pr)}
           target="_blank"
           rel="noreferrer"
-          className="hover:text-primary hover:underline"
+          className={cn(INHERITED_LINK, "hover:text-primary hover:underline")}
         >
           opened this {createdAt && <RelativeTimestamp value={createdAt} />}
         </MacawLink>

@@ -48,7 +48,7 @@ import { pullRequestKey } from "@/features/reviews/lib/status"
 import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const fileMarks: Record<string, string> = {
   added: "A",
@@ -290,7 +290,7 @@ function FileRow({
       color="secondary"
       variant="plain"
       size="sm"
-      aria-label={file.path}
+      aria-label={`${file.path} +${file.additions} −${file.deletions}`}
       type="button"
       aria-expanded={open}
       onClick={onToggle}
@@ -577,7 +577,10 @@ function CommentCard({
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="hover:text-primary hover:underline"
+              className={cn(
+                INHERITED_LINK,
+                "hover:text-primary hover:underline"
+              )}
             >
               {label}
             </MacawLink>

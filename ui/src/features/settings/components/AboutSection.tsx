@@ -12,6 +12,7 @@ import {
   type SessionUser,
 } from "@/lib/api"
 import { useIsHydrated } from "@/lib/hydration"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 export function AboutSection({ user }: { user: SessionUser }) {
   const [version, setVersion] = useState<string>()
@@ -64,7 +65,10 @@ function CommitValue({ value }: { value: string | null }) {
       href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="underline underline-offset-2 hover:text-primary"
+      className={cn(
+        INHERITED_LINK,
+        "underline underline-offset-2 hover:text-primary"
+      )}
     >
       <IdentityValue value={value} />
     </MacawLink>

@@ -220,7 +220,7 @@ export function AllowedSlackBotsSection({
                             : `Allow ${bot.name}`
                         }
                         onClick={() => allow(bot.user_id)}
-                        className="h-auto w-full justify-start gap-space-3 px-space-2 py-space-2 text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-elevated-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        className="h-auto w-full justify-start gap-space-3 px-space-2 py-space-2 text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-elevated-hover disabled:cursor-not-allowed disabled:bg-transparent disabled:opacity-50"
                       >
                         <span aria-hidden="true">
                           <Avatar

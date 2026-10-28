@@ -8,7 +8,7 @@ import type {
   ConversationAuthor,
   ConversationReviewState,
 } from "@/features/reviews/lib/conversationApi"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { cn, INHERITED_LINK, formatRelativeTime } from "@/lib/utils"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { displayName } from "@/features/reviews/lib/logins"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
@@ -29,7 +29,7 @@ export function ProfileLink({
       href={githubUrls.profile(author)}
       target="_blank"
       rel="noreferrer"
-      className={cn("hover:underline", className)}
+      className={cn(INHERITED_LINK, "hover:underline", className)}
     >
       {displayName(author)}
     </MacawLink>
@@ -136,7 +136,10 @@ export function Byline({
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="shrink-0 text-secondary hover:underline"
+          className={cn(
+            INHERITED_LINK,
+            "shrink-0 text-secondary hover:underline"
+          )}
           title={new Date(createdAt).toLocaleString()}
         >
           {when}

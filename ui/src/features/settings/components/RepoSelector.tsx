@@ -88,7 +88,7 @@ export function RepoSelector({
             disabled={disabled}
             title={selectedRepo ?? undefined}
             className={cn(
-              "max-w-[260px] cursor-pointer gap-space-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+              "max-w-[260px] cursor-pointer gap-space-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:bg-transparent disabled:opacity-60",
               triggerClassName
             )}
           >

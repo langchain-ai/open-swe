@@ -26,7 +26,7 @@ import type {
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -490,7 +490,10 @@ function ChecksRow({
                   href={check.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-w-0 truncate text-primary hover:underline [&>span]:truncate"
+                  className={cn(
+                    INHERITED_LINK,
+                    "min-w-0 truncate text-primary hover:underline [&>span]:truncate"
+                  )}
                 >
                   {check.name}
                 </MacawLink>

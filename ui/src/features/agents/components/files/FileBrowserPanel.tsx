@@ -1,3 +1,4 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import { Input } from "@langchain/macaw-components/Input"
 import { useEffect, useMemo, useRef } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
@@ -213,6 +214,16 @@ export function FileBrowserPanel({
           aria-label="Search files"
           placeholder="Search files"
           spellCheck={false}
+          // Macaw Input has no type="search", so the native clear control is rebuilt here.
+          rightAction={
+            search.value
+              ? {
+                  icon: XIcon,
+                  label: "Clear search",
+                  onClick: () => search.close(),
+                }
+              : undefined
+          }
           onChange={handleSearchChange}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return

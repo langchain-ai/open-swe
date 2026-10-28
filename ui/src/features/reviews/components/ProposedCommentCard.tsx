@@ -117,9 +117,9 @@ export function ProposedCommentCard({
               aria-label={location}
               type="button"
               onClick={onShow}
-              className="h-auto truncate border-0 px-0 font-mono underline-offset-2 hover:underline"
+              className="h-auto max-w-full truncate border-0 px-0 font-mono underline-offset-2 hover:underline"
             >
-              {location}
+              <span className="min-w-0 truncate">{location}</span>
             </Button>
           ) : (
             <span className="font-mono">{location}</span>

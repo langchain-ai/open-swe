@@ -1,6 +1,10 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
+import {
+  useId,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -50,13 +54,14 @@ export function PullRequestCard({
   onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
+  const contentId = useId()
   if (compact) {
     return (
       <Button
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label={`${pr.repo} #${pr.number} ${pr.title}`}
+        aria-labelledby={contentId}
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
@@ -76,7 +81,7 @@ export function PullRequestCard({
             selected ? "bg-brand" : "bg-transparent"
           )}
         />
-        <span className="min-w-0 flex-1">
+        <span id={contentId} className="min-w-0 flex-1">
           <span className="flex items-baseline gap-space-2 text-xs text-secondary">
             <span className="min-w-0 truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>

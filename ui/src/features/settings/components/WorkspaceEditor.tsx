@@ -10,6 +10,7 @@ import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 import { slackChannelHref } from "@/lib/slack-channels"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 export const githubRepoHref: ChipHref = (repo) =>
@@ -132,7 +133,10 @@ function SlackChannelRows({
             href={slackChannelHref(id)}
             target="_blank"
             rel="noopener noreferrer"
-            className="min-w-0 truncate text-xs text-primary hover:underline [&>span]:truncate"
+            className={cn(
+              INHERITED_LINK,
+              "min-w-0 truncate text-xs text-primary hover:underline [&>span]:truncate"
+            )}
           >
             {channelLabel(id)}
           </MacawLink>

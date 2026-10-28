@@ -77,9 +77,10 @@ export function SidebarNav({
             type="button"
             className={cn(
               ROW,
-              "justify-start text-secondary data-[state=open]:bg-surface-level-2-hover",
+              // Match the Link rows' height and hover; Macaw's plain variant adds its own dark hover.
+              "h-auto justify-start text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
               hidden.some((item) => item.to === activeSection) &&
-                cn(SELECTED_ROW, "text-primary")
+                cn(SELECTED_ROW, "text-primary dark:hover:bg-selected-hover")
             )}
           >
             <CaretRightIcon size={16} weight="regular" className="shrink-0" />

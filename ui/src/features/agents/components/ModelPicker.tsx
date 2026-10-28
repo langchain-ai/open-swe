@@ -107,7 +107,9 @@ function OptionRow({
         "h-auto justify-start",
         "w-full gap-space-2 px-space-3 py-space-1 text-left whitespace-nowrap",
         selected ? "text-primary" : "text-secondary",
-        focused && "bg-elevated-hover",
+        focused
+          ? "bg-elevated-hover disabled:bg-elevated-hover"
+          : "disabled:bg-transparent",
         disabled
           ? "cursor-default opacity-40"
           : "cursor-pointer hover:bg-elevated-hover"
@@ -381,7 +383,7 @@ export function ModelPicker({
             aria-haspopup="listbox"
             title={triggerTitle}
             className={cn(
-              "max-w-[220px] cursor-pointer gap-0.5 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+              "max-w-[220px] cursor-pointer gap-0.5 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:bg-transparent disabled:opacity-60",
               triggerClassName
             )}
           >

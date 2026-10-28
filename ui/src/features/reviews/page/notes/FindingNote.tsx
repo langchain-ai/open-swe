@@ -8,7 +8,7 @@ import { copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
   askAboutFinding,
@@ -156,7 +156,10 @@ export function FindingNote({
               {finding.github_review_comment_id !== null && (
                 <MacawLink
                   variant="xs"
-                  className="ml-auto text-secondary hover:text-primary hover:underline"
+                  className={cn(
+                    INHERITED_LINK,
+                    "ml-auto text-secondary hover:text-primary hover:underline"
+                  )}
                   href={githubUrls.pullRequest(
                     pr,
                     `#discussion_r${finding.github_review_comment_id}`

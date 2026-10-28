@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { getDatadogRum } from "@/lib/datadog"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 export interface ErrorReport {
   title: string
@@ -52,7 +53,7 @@ export function ErrorToastBody({
                 href={part}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline"
+                className={cn(INHERITED_LINK, "underline")}
               >
                 Open review card in Slack
               </MacawLink>

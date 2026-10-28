@@ -21,7 +21,7 @@ import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import {
   PULL_REQUEST_STATUS,
   pullRequestPreviewQuery,
@@ -94,7 +94,10 @@ function CheckRow({ check }: { check: PreviewCheck }) {
         {check.url ? (
           <MacawLink
             variant="xs"
-            className="hover:underline"
+            className={cn(
+              INHERITED_LINK,
+              "max-w-full hover:underline [&>span]:truncate"
+            )}
             href={check.url}
             target="_blank"
             rel="noreferrer"

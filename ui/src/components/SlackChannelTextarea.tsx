@@ -1,6 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { useRef, useState, type ComponentProps } from "react"
+import { useId, useRef, useState, type ComponentProps } from "react"
 
 import { SlackChannelRow } from "@/components/SlackChannelCombobox"
 import {
@@ -36,6 +36,7 @@ export function SlackChannelTextarea({
   ...props
 }: SlackChannelTextareaProps) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  const optionIdPrefix = useId()
   const [cursor, setCursor] = useState<number | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [dismissedAt, setDismissedAt] = useState<number | null>(null)
@@ -149,7 +150,7 @@ export function SlackChannelTextarea({
               color="secondary"
               variant="plain"
               size="sm"
-              aria-label={channel.name}
+              aria-labelledby={`${optionIdPrefix}-${channel.id}`}
               key={channel.id}
               type="button"
               role="option"
@@ -166,11 +167,13 @@ export function SlackChannelTextarea({
               }
               onClick={() => insert(channel.id, channel.name)}
             >
-              <SlackChannelRow
-                channel={channel}
-                id={channel.id}
-                recent={recent.includes(channel.id)}
-              />
+              <span id={`${optionIdPrefix}-${channel.id}`} className="contents">
+                <SlackChannelRow
+                  channel={channel}
+                  id={channel.id}
+                  recent={recent.includes(channel.id)}
+                />
+              </span>
             </Button>
           ))}
         </div>

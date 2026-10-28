@@ -264,20 +264,29 @@ function StepList({
                 </span>
               </span>
             </Button>
-            <Checkbox
-              checked={read}
-              aria-label={`Mark step ${step.index} read`}
-              title={read ? "Mark step unread" : "Mark step read"}
-              onCheckedChange={() => markStepRead(step.index)}
-              size="sm"
-              containerClassName="mt-1.5 mr-space-2 shrink-0"
-              className={cn(
-                "transition-opacity focus-visible:opacity-100",
-                offered
-                  ? "border-brand opacity-70"
-                  : "opacity-0 group-hover/step:opacity-100"
+            <span className="relative mt-1.5 mr-space-2 flex shrink-0">
+              <Checkbox
+                checked={read}
+                aria-label={`Mark step ${step.index} read`}
+                title={read ? "Mark step unread" : "Mark step read"}
+                onCheckedChange={() => markStepRead(step.index)}
+                size="sm"
+                className={cn(
+                  "peer transition-opacity focus-visible:opacity-100",
+                  offered
+                    ? "border-brand opacity-70 hover:opacity-100"
+                    : "opacity-0 group-hover/step:opacity-100"
+                )}
+              />
+              {/* Radix draws no check while unchecked; the faint one suggests marking this step read. */}
+              {offered && !read && (
+                <CheckIcon
+                  aria-hidden="true"
+                  weight="bold"
+                  className="pointer-events-none absolute inset-0 m-auto size-3 text-brand-primary opacity-70 peer-hover:opacity-100"
+                />
               )}
-            />
+            </span>
           </li>
         )
       })}

@@ -1163,7 +1163,7 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="h-auto w-full justify-start gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left whitespace-normal text-tertiary hover:text-primary disabled:cursor-wait disabled:opacity-60"
+              className="h-auto w-full justify-start gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left whitespace-normal text-tertiary hover:text-primary disabled:cursor-wait disabled:bg-transparent disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
               {loading ? "Loading…" : "Show more"}
@@ -1281,7 +1281,7 @@ function LoadMoreThreadsOnScroll({
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="h-auto w-full justify-center gap-space-2 py-space-2 whitespace-normal text-tertiary"
+      className="h-auto w-full justify-center gap-space-2 py-space-2 whitespace-normal text-tertiary disabled:bg-transparent"
     >
       {loading ? (
         <Spinner size="xxs" />

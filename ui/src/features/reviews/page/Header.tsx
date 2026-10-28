@@ -26,7 +26,7 @@ import { Link } from "@tanstack/react-router"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
@@ -187,7 +187,10 @@ export function Header({
                 href={githubUrls.repo(pr)}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 hover:text-primary hover:underline max-lg:hidden"
+                className={cn(
+                  INHERITED_LINK,
+                  "shrink-0 hover:text-primary hover:underline max-lg:hidden"
+                )}
               >
                 {pr.owner}/{pr.repo}
               </MacawLink>
@@ -210,7 +213,10 @@ export function Header({
                 href={githubUrls.branch(pr, detail.pr.base_ref)}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary"
+                className={cn(
+                  INHERITED_LINK,
+                  "shrink-0 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary"
+                )}
               >
                 {detail.pr.base_ref}
               </MacawLink>
@@ -237,7 +243,7 @@ export function Header({
                 color="secondary"
                 variant="plain"
                 size="sm"
-                aria-label="Go to the changes"
+                aria-label={`+${detail.pr.additions} −${detail.pr.deletions}`}
                 type="button"
                 title="Go to the changes"
                 onClick={() =>
@@ -258,7 +264,10 @@ export function Header({
                   href={githubUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="hidden shrink-0 hover:text-primary hover:underline xl:inline"
+                  className={cn(
+                    INHERITED_LINK,
+                    "hidden shrink-0 hover:text-primary hover:underline xl:inline"
+                  )}
                 >
                   · opened <RelativeTimestamp value={detail.pr.created_at} />
                 </MacawLink>

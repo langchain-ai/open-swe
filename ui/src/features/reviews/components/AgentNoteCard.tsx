@@ -45,7 +45,7 @@ export function AgentNoteCard({
             onClick={onShow}
             className="h-auto min-w-0 truncate border-0 px-0 font-mono text-secondary underline-offset-2 hover:underline"
           >
-            {location}
+            <span className="min-w-0 truncate">{location}</span>
           </Button>
         ) : (
           <span className="min-w-0 flex-1 truncate text-secondary">

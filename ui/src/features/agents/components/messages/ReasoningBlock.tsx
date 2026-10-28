@@ -57,7 +57,7 @@ export function ReasoningBlock({
         onClick={() => {
           if (!isLive) setUserExpanded((value) => !value)
         }}
-        className="group/reasoning h-auto justify-start gap-space-1 border-0 px-0 text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
+        className="group/reasoning h-auto justify-start gap-space-1 border-0 px-0 text-left text-inherit focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
         aria-expanded={expanded}
         disabled={isLive}
       >

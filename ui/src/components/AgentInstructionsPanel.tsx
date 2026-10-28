@@ -208,7 +208,8 @@ export function AgentInstructionsPanel() {
                     )}
                     onClick={() => setSelected(s.full_name)}
                   >
-                    {s.full_name}
+                    {/* A string child would be wrapped in Macaw's font-normal Text, dropping the selected weight. */}
+                    <span className="min-w-0 truncate">{s.full_name}</span>
                   </Button>
                 </li>
               ))}

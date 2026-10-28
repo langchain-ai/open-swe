@@ -358,7 +358,7 @@ const FileDiffSection = memo(
           color="secondary"
           variant="plain"
           size="sm"
-          aria-label={file.treePath}
+          aria-label={`${file.treePath} +${file.additions} -${file.deletions}`}
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="h-auto w-full justify-start gap-space-2 bg-surface-level-1 px-space-3 py-space-2 text-left whitespace-normal text-inherit hover:bg-surface-level-1-hover"

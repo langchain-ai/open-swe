@@ -658,7 +658,8 @@ export function AutomationEditor({
               onLinear={() =>
                 setDrafts((current) => [...current, linearDraft()])
               }
-              className="flex items-center gap-space-2 self-start rounded-lg border border-dashed border-default px-space-3 py-space-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
+              aria-label="Add trigger"
+              className="flex h-auto items-center gap-space-2 self-start rounded-lg border border-dashed border-default px-space-3 py-space-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary dark:hover:bg-surface-level-1-hover"
             >
               <PlusIcon size={14} weight="regular" />
               Add trigger
@@ -751,8 +752,8 @@ function EventChips<E extends string>({
             className={cn(
               "gap-space-1 rounded-full border px-space-2 py-space-1 disabled:pointer-events-none",
               on
-                ? "border-brand bg-brand-subtle text-primary hover:bg-brand-subtle dark:hover:bg-brand-subtle"
-                : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+                ? "border-brand bg-brand-subtle text-primary hover:bg-brand-subtle disabled:bg-brand-subtle dark:hover:bg-brand-subtle"
+                : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary disabled:bg-transparent"
             )}
           >
             {on && (

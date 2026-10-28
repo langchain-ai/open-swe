@@ -50,7 +50,7 @@ import {
   type MetricAvailability,
 } from "@/lib/usage-diagnostics"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const HELP_TRIGGER_CLASS =
   "cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
@@ -1623,7 +1623,10 @@ function UserCell({
       href={profileUrl}
       target="_blank"
       rel="noreferrer"
-      className="min-w-0 truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&>span]:truncate"
+      className={cn(
+        INHERITED_LINK,
+        "min-w-0 truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&>span]:truncate"
+      )}
     >
       {row.user.name}
     </MacawLink>

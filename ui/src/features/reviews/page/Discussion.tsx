@@ -25,7 +25,7 @@ import {
 } from "@/features/reviews/lib/conversationApi"
 import { sameLogin } from "@/features/reviews/lib/logins"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { threadLocation } from "./findings"
 import {
   Avatar,
@@ -327,7 +327,7 @@ function OpenConversations({
           color="secondary"
           variant="plain"
           size="sm"
-          aria-label="Open conversations"
+          aria-label={`Open conversations ${threads.length}`}
           type="button"
           aria-expanded={!folded}
           onClick={() => setFolded(!folded)}
@@ -503,7 +503,7 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
       color="secondary"
       variant="plain"
       size="sm"
-      aria-label={`${threadLocation(thread)} ${plainFirstLine(comment.body)}`}
+      aria-label={`${threadLocation(thread)} ${plainFirstLine(comment.body)}${thread.resolved ? " Resolved" : ""}`}
       type="button"
       onClick={() => setOpen(true)}
       title={thread.path}
@@ -587,7 +587,10 @@ function ItemBlock({
                 href={said.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="hover:text-primary hover:underline"
+                className={cn(
+                  INHERITED_LINK,
+                  "hover:text-primary hover:underline"
+                )}
               >
                 Said the same {formatWhen(said.created_at)}
               </MacawLink>

@@ -9,7 +9,7 @@ import type {
 } from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import {
   isPlaced,
   threadLine,
@@ -290,7 +290,10 @@ export function ThreadCard({
               target="_blank"
               rel="noreferrer"
               aria-label="View this conversation on GitHub"
-              className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary hover:text-primary hover:underline"
+              className={cn(
+                INHERITED_LINK,
+                "flex shrink-0 items-center gap-space-1 text-xxs text-secondary hover:text-primary hover:underline"
+              )}
             >
               GitHub
               <ArrowSquareOutIcon className="size-3" weight="regular" />
