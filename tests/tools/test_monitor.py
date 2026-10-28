@@ -182,9 +182,7 @@ async def test_spent_wake_budget_holds_monitor_output_on_every_delivery_path(
     await ThreadMonitorDelivery("thread-1", {}, Monitors())._wake([running, ended])
 
     assert stopped == ["mon-running"]
-    assert [match.delivery_id for match in await EventMatch.owed("thread-1", [])] == [
-        "mon-running:1"
-    ]
+    assert [match.delivery_id for match in await EventMatch.owed("thread-1")] == ["mon-running:1"]
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -204,7 +202,7 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
     await delivery._record([ended])
     await delivery._record([ended])
 
-    owed = await EventMatch.owed("thread-1", [])
+    owed = await EventMatch.owed("thread-1")
     assert [match.delivery_id for match in owed] == ["mon-1:1", "mon-1:end"]
     assert "ERROR one" in owed[0].content
     assert "the command failed" in owed[1].content
@@ -226,6 +224,35 @@ async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_runnin
     work = await background_work.get_dashboard_thread_background_work("thread-1", "alice")
 
     assert (work.commands, work.monitors) == ([], [])
+
+
+async def test_dashboard_shows_no_output_of_another_threads_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from openswe import background_tasks
+    from openswe.threads import background_work
+
+    metadata = {"sandbox_id": "sandbox-a", "running_background_tasks": ["cmd-mine"]}
+    monkeypatch.setattr(
+        background_work, "_readable_thread_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(background_work, "_assert_thread_promptable", lambda *_: None)
+    monkeypatch.setattr(background_work, "connect_sandbox", AsyncMock(return_value=object()))
+    # A sandbox shared by a parent thread holds its commands too.
+    monkeypatch.setattr(
+        background_tasks,
+        "thread_tasks",
+        AsyncMock(return_value=[{"task_id": "cmd-mine", "status": "running"}]),
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await background_work.get_dashboard_thread_background_output(
+            "thread-1", "cmd-theirs", "alice"
+        )
+
+    assert refused.value.status_code == 404
 
 
 class FakeThreads:
@@ -311,7 +338,7 @@ async def test_events_past_the_allowance_stop_the_monitors(
 
     await ThreadMonitorDelivery("thread-1", {}, Monitors()).sync()
 
-    owed = await EventMatch.owed("thread-1", [])
+    owed = await EventMatch.owed("thread-1")
     assert len(owed) == budget.MAX_EVENTS
     assert acked == [60]
     assert stopped == {"mon-noisy": budget.EVENTS_SPENT_REASON}

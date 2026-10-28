@@ -8,9 +8,12 @@ from uuid import uuid4
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
-from openswe.slack.breakout_links import mark_broken_out, notify_breakout, source_thread_line
-from openswe.slack.cards import origin_footer
-from openswe.slack.channels import SlackChannel
+from openswe.slack.breakout_links import (
+    breakout_root_blocks,
+    mark_broken_out,
+    notify_breakout,
+    source_thread_line,
+)
 from openswe.slack.client import (
     append_slack_web_link_footer,
     get_active_slack_thread,
@@ -93,9 +96,7 @@ async def _root_text(request: SlackRequest, heading: str) -> str:
 
 
 async def _mark_done(request: SlackRequest, target: str, new_ts: str) -> None:
-    await mark_broken_out(
-        request.channel_id, request.thread_ts, _command_ts(request), target, new_ts
-    )
+    await mark_broken_out(request.channel_id, request.thread_ts, target, new_ts)
 
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
@@ -177,14 +178,7 @@ async def _start(
         new_ts = await post_slack_top_level_message_with_ts(
             target,
             root_text,
-            blocks=block_payload(
-                [
-                    section(root_text),
-                    *await origin_footer(
-                        request.thread_id or "", (request.channel_id, request.thread_ts)
-                    ),
-                ]
-            ),
+            blocks=block_payload([section(root_text)]),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -204,14 +198,7 @@ async def _start(
                 target,
                 new_ts,
                 append_slack_web_link_footer(root_text, web_url),
-                blocks=block_payload(
-                    [
-                        section(append_slack_web_link_footer(root_text, web_url)),
-                        *await origin_footer(
-                            request.thread_id or "", (request.channel_id, request.thread_ts)
-                        ),
-                    ]
-                ),
+                blocks=block_payload(breakout_root_blocks(root_text, web_url)),
                 unfurl_links=False,
                 unfurl_media=False,
             )
@@ -282,7 +269,6 @@ async def process_slack_web(
             await notify_breakout(
                 request.channel_id,
                 request.thread_ts,
-                _command_ts(request),
                 f"<@{request.user_id}> continued in a "
                 f"<{dashboard_thread_url(thread_id)}|private web breakout>.",
             )
@@ -315,15 +301,11 @@ async def process_slack_breakout(
             login=await service.slack_login(request.user_id) if request.user_id else None,
         )
         target = destination.channel_id
-        for channel_id in dict.fromkeys((request.channel_id, target)):
-            channel = await SlackChannel.load(channel_id, use_cache=False)
-            if channel is None or not channel.public:
-                await _tell_sender(
-                    request,
-                    f"<#{channel_id}> is not a public channel. Breakouts only work "
-                    "from and to public channels.",
-                )
-                return
+        if error := await destination.channel_error(
+            request.channel_id, check_audience=not command.channel_id
+        ):
+            await _tell_sender(request, error)
+            return
         if command.instruction:
             await _start(
                 request,

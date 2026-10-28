@@ -1,7 +1,6 @@
 """Standard human review: ask a repository's review channel to review a pull request.
 
-A request is refused while the pull request is closed, a draft, conflicted, or
-failing a required check. People sign up from the card; after
+A request is refused while the pull request is closed or a draft. People sign up from the card; after
 the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
 ``openswe.human_review.picking``), waking an agent to pick when nobody qualifies. The
 pull request, when auto-merge is enabled, merges once every reviewer approves on
@@ -42,6 +41,7 @@ from openswe.github.http import (
     RepoClient,
     or_none,
 )
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -50,7 +50,14 @@ from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
-from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
+from openswe.human_review.picking import (
+    Area,
+    Coverage,
+    Pick,
+    ReviewerAvailability,
+    Wait,
+    choose_reviewer,
+)
 from openswe.human_review.readiness import offer_readiness
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.jobs import queue
@@ -64,7 +71,6 @@ from openswe.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
-    remove_slack_reaction,
 )
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
@@ -190,12 +196,14 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("it is closed")
     if snapshot.draft:
         blockers.append("it is a draft")
-    if snapshot.mergeable is False or snapshot.mergeable_state == "dirty":
-        blockers.append("it has merge conflicts")
-    if snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
-        names = ", ".join(snapshot.failing_checks) or "a required check"
-        blockers.append(f"required checks are failing: {names}")
     return blockers
+
+
+async def _review_author_allowed(author: str) -> bool:
+    return (
+        author.lower() in OPEN_SWE_GITHUB_LOGINS
+        or await User.for_login("github", author) is not None
+    )
 
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
@@ -204,7 +212,7 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if readiness is None:
         return None
     blockers = request_blockers(readiness.snapshot)
-    if await User.for_login("github", readiness.snapshot.author) is None:
+    if not await _review_author_allowed(readiness.snapshot.author):
         blockers.append("its author is not an Open SWE user")
     return blockers
 
@@ -698,10 +706,21 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
-    if not replace and not await PROFILES.allows_auto_human_review(
-        user.github_login or github_login
-    ):
-        return _failure(f"@{github_login} opted out of automatic review picks; pick someone else.")
+    if not replace:
+        if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
+            return _failure(
+                f"@{github_login} opted out of automatic review picks; pick someone else."
+            )
+        availability = await ReviewerAvailability.for_user(user)
+        if availability.out_of_office is True:
+            return _failure(f"@{github_login} is out of office; pick someone else.")
+        now = datetime.now(UTC)
+        if not availability.on_shift(now):
+            return _failure(
+                f"@{github_login} is outside working hours in {availability.zone_name}; "
+                f"their next work day starts at {availability.next_start(now).isoformat()}. "
+                "Pick someone who is on shift instead."
+            )
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
@@ -935,9 +954,7 @@ async def _settle_posted(
             return
         if row.approved_at is not None:
             row.approved_at = None
-            await remove_slack_reaction(
-                row.slack_channel_id, row.slack_message_ts, "white_check_mark"
-            )
+    await ReviewCard(request).update_post_reactions()
     now = datetime.now(UTC)
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
@@ -1006,7 +1023,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     if readiness is None:
         return False
     snapshot = readiness.snapshot
-    if await User.for_login("github", snapshot.author) is None:
+    if not await _review_author_allowed(snapshot.author):
         await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
         return True
     if snapshot.merged:
@@ -1155,7 +1172,7 @@ async def _auto_assign(
     replacing = trigger is not None and trigger.kind in ("declined", "expired")
     if not replacing and (request.reviewers or request.picks):
         return AutoAssignResult("claimed")
-    if await User.for_login("github", request.pull_request.author) is None:
+    if not await _review_author_allowed(request.pull_request.author):
         await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
         return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)

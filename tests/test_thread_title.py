@@ -191,6 +191,10 @@ async def test_generated_title_updates_only_manual_breakout_roots(
     )
     update = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.thread_title.update_slack_message", update)
+    monkeypatch.setattr(
+        "openswe.thread_title.dashboard_thread_url",
+        lambda thread_id: f"https://openswe.langchain.dev/agents/{thread_id}",
+    )
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
@@ -205,7 +209,26 @@ async def test_generated_title_updates_only_manual_breakout_roots(
         update.assert_awaited_once_with(
             "C1",
             "200.0",
-            f"`/breakout`: Review thread title generation{suffix}",
+            f"`/breakout`: Review thread title generation{suffix} "
+            "<https://openswe.langchain.dev/agents/thread-123|Open in Web>",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"`/breakout`: Review thread title generation{suffix}",
+                    },
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": "<https://openswe.langchain.dev/agents/thread-123|Open in Web>",
+                        }
+                    ],
+                },
+            ],
             unfurl_links=False,
             unfurl_media=False,
         )

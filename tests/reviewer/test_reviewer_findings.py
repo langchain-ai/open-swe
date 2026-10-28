@@ -23,6 +23,7 @@ from openswe.review.findings import (
     surface_state_of,
     thread_ids_for_finding,
 )
+from openswe.thread_ids import mda_successor_thread_id
 
 
 def _f(**overrides: Any) -> Finding:
@@ -182,6 +183,21 @@ async def test_concurrent_identical_findings_are_idempotent() -> None:
     assert sum(result["created"] for result in (first, second)) == 1
     assert first["finding"]["id"] == second["finding"]["id"]
     assert len(persisted) == 1
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_successor_reviewer_thread_takes_over_its_predecessors_findings() -> None:
+    successor = mda_successor_thread_id("tid")
+    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("tid", _f(id="f_a"))
+        carried = await list_findings(successor)
+        await append_finding(successor, _f(id="f_b", description="b"))
+        persisted = await list_findings(successor)
+        with pytest.raises(RuntimeError, match="another reviewer thread"):
+            await append_finding("other", _f(id="f_c"))
+
+    assert [f["id"] for f in carried] == ["f_a"]
+    assert [f["id"] for f in persisted] == ["f_a", "f_b"]
 
 
 @pytest.mark.usefixtures("registry_db")

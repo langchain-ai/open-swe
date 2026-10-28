@@ -1,7 +1,7 @@
 """Middleware that retries model calls across a primary and fallback provider.
 
 Wraps the model call. When a model raises a transient provider error (5xx,
-429, connection/timeout, or a ``ModelCallTimeoutMiddleware`` deadline), the
+429, connection/timeout, or a model-call deadline), the
 request is retried, alternating between the
 primary and the configured fallback model with exponential backoff between
 attempts. The fallback is bound to tools by the agent factory on each call,
@@ -57,7 +57,7 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.RateLimitError,
     openai.InternalServerError,
     httpx2.TransportError,
-    # Includes ``ModelCallTimeoutMiddleware``'s deadline: a wedged provider call
+    # Includes a model-call deadline: a wedged provider call
     # is exactly the case where trying the other provider is worthwhile.
     TimeoutError,
 )

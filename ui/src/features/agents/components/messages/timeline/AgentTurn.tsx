@@ -11,6 +11,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
+import { WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
@@ -36,7 +37,6 @@ import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/Ma
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
-import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 
 /**
  * How many entries of a work group stay visible while it is collapsed. One
@@ -44,6 +44,27 @@ import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
  * exploration burst push the reply off screen.
  */
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
+
+/**
+ * How long a reply sits at the end of a live turn before an activity row joins
+ * it. A run usually ends right after its answer lands; showing the row at once
+ * flashed it under the answer and dropped everything below when it went.
+ */
+const TRAILING_ACTIVITY_DELAY_MS = 800
+
+/** True once `condition` has held for `delayMs`; false as soon as it stops. */
+function useHeld(condition: boolean, delayMs: number): boolean {
+  const [held, setHeld] = useState(false)
+  useEffect(() => {
+    if (!condition) return
+    const timer = setTimeout(() => setHeld(true), delayMs)
+    return () => {
+      clearTimeout(timer)
+      setHeld(false)
+    }
+  }, [condition, delayMs])
+  return condition && held
+}
 
 /**
  * One row per edit call, showing only what the call targeted. The diff lives in
@@ -196,13 +217,22 @@ export function AgentTurn({
     }
   }, [isStreaming])
 
-  const segments = useMemo(() => {
-    const split = segmentTurn(renderItems)
-    if (isStreaming && split.at(-1)?.type !== "work") {
-      split.push({ type: "work", key: "work-live", items: [] })
-    }
-    return split
-  }, [isStreaming, renderItems])
+  const settledSegments = useMemo(() => segmentTurn(renderItems), [renderItems])
+  const endsInReply = settledSegments.at(-1)?.type === "reply"
+  const replyHeld = useHeld(
+    !!isStreaming && endsInReply,
+    TRAILING_ACTIVITY_DELAY_MS
+  )
+  const segments = useMemo(
+    () =>
+      isStreaming && (settledSegments.length === 0 || replyHeld)
+        ? [
+            ...settledSegments,
+            { type: "work" as const, key: "work-live", items: [] },
+          ]
+        : settledSegments,
+    [isStreaming, replyHeld, settledSegments]
+  )
   const workSegmentCount = segments.filter((s) => s.type === "work").length
   const liveItemKey = isStreaming ? renderItems.at(-1)?.key : undefined
 
@@ -213,9 +243,12 @@ export function AgentTurn({
     setExpandedFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
   }, [])
 
+  // The answer is what follows the last stretch of work; earlier replies are
+  // commentary the agent wrote along the way.
   const replyText = useMemo(
     () =>
       segments
+        .slice(segments.findLastIndex((s) => s.type === "work") + 1)
         .map((segment) => {
           if (segment.type !== "reply") return ""
           const { item } = segment
@@ -308,6 +341,9 @@ export function AgentTurn({
         )
       }
 
+      case "worker-launch-item":
+        return <WorkerLaunchMessage key={item.key} chunk={item.chunk} />
+
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
 
@@ -390,24 +426,13 @@ export function AgentTurn({
   return (
     <div className="group/turn my-space-2 min-w-0 space-y-space-2">
       {segments.map((segment, index) =>
-        segment.type === "reply" ? (
-          <div
-            key={segment.item.key}
-            title={formatHoverTimestamp(
-              replyTimestamp(segment) ??
-                (!isStreaming && index === segments.length - 1
-                  ? turnEnd
-                  : undefined)
-            )}
-          >
-            {renderItem(segment.item)}
-          </div>
-        ) : (
-          renderWorkSegment(segment, index)
-        )
+        segment.type === "reply"
+          ? renderItem(segment.item)
+          : renderWorkSegment(segment, index)
       )}
 
-      <div className="mt-space-1 flex items-center gap-space-1">
+      {/* As tall as the copy button, which only arrives once the run ends. */}
+      <div className="mt-space-1 flex min-h-5 items-center gap-space-1">
         {replyText && !isStreaming && (
           <CopyIconButton
             copy={replyText}
@@ -431,8 +456,10 @@ export function AgentTurn({
 function replyTimestamp(segment?: TurnSegment): string | undefined {
   if (segment?.type !== "reply") return undefined
   const { item } = segment
-  return "chunk" in item && item.chunk.kind === "tool-execution"
-    ? item.chunk.timestamp
+  if (!("chunk" in item)) return undefined
+  const { chunk } = item
+  return chunk.kind === "tool-execution" || chunk.kind === "text"
+    ? chunk.timestamp
     : undefined
 }
 

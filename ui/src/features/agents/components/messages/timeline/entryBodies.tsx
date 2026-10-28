@@ -1,6 +1,7 @@
 import { memo } from "react"
 
 import { ToolResultBody } from "./ToolResultBody"
+import { formatShellCommand } from "@/features/agents/components/chat/toolExecutionDisplay"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export const ShellEntryBody = memo(function ShellEntryBody({
@@ -14,7 +15,9 @@ export const ShellEntryBody = memo(function ShellEntryBody({
   loadError?: string | null
 }) {
   const command =
-    typeof chunk.input?.command === "string" ? chunk.input.command : ""
+    typeof chunk.input?.command === "string"
+      ? formatShellCommand(chunk.input.command)
+      : ""
   const output = loadedText ?? chunk.output ?? ""
   const pendingOutput = Boolean(chunk.loadOutput) && loadedText == null
 

@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck mda-boundary test tests integration_tests help run dev dev-mda dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
+.PHONY: all format format-check lint typecheck mda-typecheck mda-test test tests integration_tests help run dev dev-mda mda-cli dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli hooks
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -20,8 +20,20 @@ dev: $(if $(POSTGRES_URI),,postgres)
 	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 # The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
-dev-mda:
+dev-mda: mda-cli
 	cd mda && uv run --locked mda dev --port 2025 --no-browser
+
+# The `mda` CLI, built from the vendored SDK (vendor/README.md) into the runtime
+# package mda/ installs, where its `mda` command runs it from. Rebuilt only when its
+# sources change: the vendored build script, missing its .git, always reruns.
+MDA_SDK := vendor/managed-deepagents-sdk
+MDA_CLI := $(MDA_SDK)/packages/pypi/src/managed_deepagents/_binaries/mda
+mda-cli: $(MDA_CLI)
+$(MDA_CLI): $(MDA_SDK)/Cargo.toml $(MDA_SDK)/Cargo.lock $(MDA_SDK)/UPSTREAM $(shell find $(MDA_SDK)/crates -type f)
+	MDA_GIT_SHA=$$(cut -d' ' -f1 $(MDA_SDK)/UPSTREAM) MDA_GIT_DATE=$$(cut -d' ' -f2 $(MDA_SDK)/UPSTREAM) \
+		cargo build --locked --release --manifest-path $(MDA_SDK)/Cargo.toml
+	mkdir -p $(@D)
+	cp $(MDA_SDK)/target/release/mda $@
 
 postgres:
 	docker compose up -d --wait postgres
@@ -76,6 +88,9 @@ install-checkout:
 install:
 	uv sync --extra dev
 
+hooks:
+	prek install
+
 # Single-file `oswe` binary. Bun compiles its own runtime into the output,
 # so the result runs on any machine without Node or Bun installed.
 cli:
@@ -123,13 +138,16 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run ty check openswe tests
+	uv run ty check openswe packages tests
 	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
 
-# The MDA reviewer resolves imports against its own environment alone, so one
-# reaching for the backend (`openswe`) or a database driver fails here.
-mda-boundary:
-	cd mda && uv sync --locked && uv run --with ty==0.0.84 ty check --python .venv --ignore all --error unresolved-import
+# mda/ is its own project: checked and tested against its own environment alone,
+# so an import reaching for the backend (`openswe`) or a database driver fails here.
+mda-typecheck:
+	cd mda && uv sync --locked --group test && uv run --with ty==0.0.84 ty check --python .venv
+
+mda-test:
+	cd mda && uv run --locked --group test pytest $(PYTEST_ARGS)
 
 ######################
 # HELP
@@ -139,6 +157,7 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
 	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where every agent run goes'
+	@echo 'mda-cli                      - build the mda CLI from the vendored SDK (needs cargo)'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'
@@ -151,10 +170,12 @@ help:
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
 	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
+	@echo 'hooks                        - install the prek pre-commit hook'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on openswe/ and tests/'
-	@echo 'mda-boundary                 - check mda imports only its own dependencies'
+	@echo 'mda-typecheck                - type-check mda/ against its own environment'
+	@echo 'mda-test                     - run mda/ tests in its own environment'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

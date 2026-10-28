@@ -11,10 +11,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import {
-  LIVE_CONNECTION,
   MAX_RECONNECT_ATTEMPTS,
   reconnectDelayMs,
 } from "@/features/agents/lib/stream/connection"
+import { useReconnectNotice } from "@/features/agents/lib/stream/useReconnectNotice"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
@@ -59,6 +59,23 @@ function cached(threadId: string): TranscriptState | null {
     if (now - entry.touchedAt > CACHE_TTL_MS) cache.delete(id)
   }
   return cache.get(threadId)?.state ?? null
+}
+
+const snapshots = new Map<string, Promise<TranscriptState>>()
+
+/**
+ * One snapshot fetch per thread at a time: a view remounted while its first
+ * fetch is in flight joins it rather than starting another.
+ */
+function loadSnapshot(threadId: string): Promise<TranscriptState> {
+  let pending = snapshots.get(threadId)
+  if (!pending) {
+    pending = fetchTranscript(threadId)
+      .then(fromSnapshot)
+      .finally(() => snapshots.delete(threadId))
+    snapshots.set(threadId, pending)
+  }
+  return pending
 }
 
 /** The thread was deleted while this client was reading it. */
@@ -116,8 +133,7 @@ export function useThreadTranscript(
     cached(threadId)
   )
   const [error, setError] = useState<unknown>(null)
-  const [connection, setConnection] =
-    useState<StreamConnection>(LIVE_CONNECTION)
+  const { connection, onReconnect, onConnected } = useReconnectNotice()
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
   const stateRef = useRef<TranscriptState | null>(state)
   const olderRequest = useRef<AbortController | null>(null)
@@ -142,24 +158,49 @@ export function useThreadTranscript(
     let stream: TranscriptEventStream | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
     let attempt = 0
+    let frame: number | null = null
+    let deadline: ReturnType<typeof setTimeout> | null = null
+
+    const cancelPublication = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      if (deadline !== null) clearTimeout(deadline)
+      frame = null
+      deadline = null
+    }
+
+    const flush = () => {
+      cancelPublication()
+      if (!disposed && stateRef.current) publish(stateRef.current)
+    }
+
+    const schedulePublication = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(flush)
+      deadline = setTimeout(flush, 50)
+    }
 
     const subscribe = () => {
       const from = stateRef.current?.version ?? 0
       stream = openTranscriptEvents(threadId, from, {
         onOpen: () => {
           attempt = 0
-          setConnection(LIVE_CONNECTION)
+          onConnected()
         },
         onSnapshot: (snapshot) => {
           // The frame carries the newest window, so it is merged rather than
           // swapped in: older pages the reader already loaded are settled and
           // stay.
-          if (!disposed) publish(applySnapshot(stateRef.current, snapshot))
+          if (disposed) return
+          cancelPublication()
+          publish(applySnapshot(stateRef.current, snapshot))
         },
         onSynchronized: () => {
-          if (!disposed) setConnection(LIVE_CONNECTION)
+          if (disposed) return
+          flush()
+          onConnected()
         },
         onDeleted: () => {
+          cancelPublication()
           // The stream is over and there is nothing left to read: drop the
           // cached transcript, surface the failure the way a missing thread
           // already surfaces, and let the sidebar refetch without this thread.
@@ -168,7 +209,7 @@ export function useThreadTranscript(
           stateRef.current = null
           if (disposed) return
           setState(null)
-          setConnection(LIVE_CONNECTION)
+          onConnected()
           setError(new ThreadDeletedError())
           queryClient.removeQueries({
             queryKey: agentThreadKeys.detail(threadId),
@@ -180,7 +221,22 @@ export function useThreadTranscript(
           const current = stateRef.current
           if (!current) return
           const next = applyEvent(current, event)
-          if (next !== current) publish(next)
+          if (next !== current) {
+            stateRef.current = next
+            if (
+              event.event_type === "message.appended" &&
+              !(
+                (event.payload.text &&
+                  !current.messages[event.payload.message_id]?.text) ||
+                (event.payload.reasoning &&
+                  !current.messages[event.payload.message_id]?.reasoning)
+              )
+            ) {
+              schedulePublication()
+            } else {
+              flush()
+            }
+          }
           if (!runTracker) return
           const payload = event.payload
           runTracker.transcriptEvent({
@@ -198,20 +254,17 @@ export function useThreadTranscript(
         },
         onError: (streamError) => {
           if (disposed) return
+          flush()
           stream?.close()
           stream = null
           if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-            setConnection(LIVE_CONNECTION)
+            onConnected()
             setError(streamError)
             return
           }
           attempt += 1
           const delay = reconnectDelayMs(attempt)
-          setConnection({
-            status: "reconnecting",
-            attempt,
-            retryAt: Date.now() + delay,
-          })
+          onReconnect({ attempt, delayMs: delay })
           retry = setTimeout(() => {
             retry = null
             if (!disposed) subscribe()
@@ -223,9 +276,9 @@ export function useThreadTranscript(
     const start = async () => {
       try {
         if (!stateRef.current) {
-          const snapshot = await fetchTranscript(threadId)
+          const loaded = await loadSnapshot(threadId)
           if (disposed) return
-          publish(fromSnapshot(snapshot))
+          publish(loaded)
         }
         threadHydrated(threadId)
         hydration.resolve()
@@ -242,12 +295,25 @@ export function useThreadTranscript(
 
     return () => {
       disposed = true
+      cancelPublication()
       if (retry) clearTimeout(retry)
       stream?.close()
-      const entry = cache.get(threadId)
-      if (entry) entry.touchedAt = Date.now()
+      if (stateRef.current) {
+        cache.set(threadId, {
+          state: stateRef.current,
+          touchedAt: Date.now(),
+        })
+      }
     }
-  }, [hydration, publish, queryClient, runTracker, threadId])
+  }, [
+    hydration,
+    onConnected,
+    onReconnect,
+    publish,
+    queryClient,
+    runTracker,
+    threadId,
+  ])
 
   // The one-time load already resolved by the time a delete can arrive, and a
   // settled promise cannot fail after the fact, so the view is handed a
