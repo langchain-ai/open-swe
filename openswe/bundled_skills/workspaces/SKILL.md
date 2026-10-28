@@ -45,7 +45,7 @@ Optional.
 It is **not** the build; you already did the build by hand.
 It is the record of how to reproduce the image from the base snapshot, and when present a nightly cron replays it on a throwaway sandbox and replaces the image **only if it exits 0**.
 Anything you did by hand that the script does not do therefore shows up as a *failed refresh* on the Workspaces page rather than as silent drift.
-`refresh_workspace_start` runs the same check on demand.
+`snapshotctl(action="rebuild")` runs the same check on demand.
 
 Two consequences:
 
@@ -71,13 +71,14 @@ It runs in three places:
 ## Reading a refresh
 
 A rebuild takes minutes to an hour and runs on a throwaway builder, not the thread's sandbox.
-`refresh_workspace_start` returns `status: "started"` and a `task_id`; it is not done.
-Read it with `background_task("status", task_id)`, which reports the stage reached — `boot`, `setup`, `update`, `capture` — and, while a script is running, a tail of its live `bash -x` trace.
+`snapshotctl(action="rebuild")` returns `status: "started"` and a `task_id`; it is not done.
+Read it with `snapshotctl(action="status")` or `background_task("status", task_id)`, which report the stage reached — `boot`, `setup`, `update`, `capture` — and, while a script is running, a tail of its live `bash -x` trace.
 Check in at intervals; do not poll in a loop.
 
 When it fails: the stage that broke is marked `failed` with its exit code, `error` names the script, and `output` is the log.
 The **previous image stays in place** — runs never drop to the base snapshot because a script broke.
-Fix the script, `publish_workspace` with the new `setup_script`, and run the check again.
+Fix the script with `snapshotctl(action="edit")`, which needs no sandbox and returns the previous values so the edit can be undone, then rebuild again.
+`snapshotctl(action="history")` shows who changed the workspace and when; `stop` cancels a rebuild that is going nowhere.
 
 Logs are written under `/open-swe/environment/logs/` (`setup.log`, `update.log`) with the scripts beside them, and are captured into the image — so any sandbox booted from a workspace's image can read how it was built.
 

@@ -75,9 +75,10 @@ class PlanWorkspace:
         pinned = await checkout.pinned()
         if pinned is None:
             raise PlannerUnavailableError("the checkout is not ready; try again next turn")
-        head_sha = pinned[1]
+        merge_base_sha, head_sha = pinned
         stored = await Walkthrough.get(pull_request.id, with_index=True)
-        if stored is not None and stored.head_sha == head_sha:
+        # A plan carried to this head from an older one keeps the older merge base.
+        if stored is not None and (stored.merge_base_sha, stored.head_sha) == pinned:
             index = stored.diff_index
             if index is None:
                 index = await checkout.index()
@@ -87,7 +88,6 @@ class PlanWorkspace:
         if stored is not None and await _current_head(pull_request) != head_sha:
             raise PlanMovedError("the pull request moved on; start from its new head")
         index = await checkout.index()
-        merge_base_sha = await checkout.merge_base()
         plan = await cls._carry(stored, checkout, head_sha, index)
         if not await Walkthrough.install(
             pull_request.id,

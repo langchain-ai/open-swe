@@ -516,6 +516,30 @@ describe("transcript events", () => {
       payload: { turn_id: "turn-2" },
     })
     expect(ended.status).toBe("idle")
+
+    // A later turn runs: the orphan never will, so it is not shown as queued
+    // behind it.
+    const later = applyEvent(
+      applyEvent(ended, {
+        ...appended(13, {}),
+        occurred_at: "2026-01-01T00:05:00Z",
+        event_type: "turn.requested",
+        payload: {
+          turn_id: "turn-4",
+          message_id: "human-4",
+          text: "a later ask",
+          attachments: [],
+        },
+      }),
+      {
+        ...appended(14, {}),
+        occurred_at: "2026-01-01T00:05:01Z",
+        event_type: "turn.started",
+        payload: { turn_id: "turn-4" },
+      }
+    )
+    expect(later.status).toBe("running")
+    expect(queuedTurns(later)).toEqual([])
   })
 })
 

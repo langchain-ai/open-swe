@@ -306,7 +306,7 @@ class SlackChannel(Base):
             return known
         try:
             async with SlackClient.bot() as client:
-                data = await client.conversations_info(channel=channel_id, include_num_members=True)
+                data = await client.conversations_info(channel=channel_id)
             payload = data.get("channel")
             if isinstance(payload, dict):
                 await cls.save_all(payload)

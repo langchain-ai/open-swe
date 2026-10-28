@@ -61,6 +61,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
+from openswe.workspaces.cloud_identity import validate_access_delegation, validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -121,6 +122,14 @@ class WorkspaceConflictError(ValueError):
     """
 
 
+class RefreshInFlightError(WorkspaceConflictError):
+    """A refresh of this workspace is already running; ``run_id`` names it."""
+
+    def __init__(self, slug: str, run_id: str | None) -> None:
+        super().__init__(f"a refresh of {slug!r} is already running")
+        self.run_id = run_id
+
+
 # The unique constraints a workspace write can land on that mean "taken", as
 # opposed to a constraint failure that is a bug and must propagate.
 _CONFLICT_CONSTRAINTS = frozenset(
@@ -156,6 +165,7 @@ REFRESH_LOG_MAX_CHARS = 40_000
 STALE_REFRESH_SECONDS = 3 * 60 * 60
 SNAPSHOT_NAME_MAX_CHARS = 128
 LOG_EXCERPT_LINES = 10
+REFRESH_LOG_TAIL_CHARS = 6_000
 SNAPSHOT_TAG = "latest"
 
 # Scripts and their logs live under a fixed root that is captured with the
@@ -404,6 +414,8 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
         raise ValueError(f"create_params must be at most {CREATE_PARAMS_MAX_CHARS} JSON characters")
     if _has_sensitive_create_param(params):
         raise ValueError("create_params must not contain secrets or authentication credentials")
+    validate_cloud_identity(params)
+    validate_access_delegation(params)
     return params
 
 
@@ -668,6 +680,25 @@ class Workspace(BaseModel):
             return False
         return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
 
+    def assert_refreshable(self, kind: RefreshKind) -> None:
+        """Raise ``ValueError`` when a refresh of ``kind`` cannot start now."""
+        if self.inherit_default_sandbox:
+            raise ValueError(f"workspace {self.slug!r} boots the default workspace's image")
+        if kind == "full" and not self.setup_script:
+            raise ValueError(f"workspace {self.slug!r} has no setup script to run")
+        if kind == "update" and not self.update_script:
+            raise ValueError(f"workspace {self.slug!r} has no update script to run")
+        if kind == "update" and self.ready_snapshot_id is None:
+            raise ValueError(f"workspace {self.slug!r} has no snapshot to update")
+        if self.refresh_in_flight():
+            raise RefreshInFlightError(self.slug, self.refresh_run_id)
+
+    def refresh_log_tail(self, *, chars: int = REFRESH_LOG_TAIL_CHARS) -> str | None:
+        """The end of the last settled refresh's log, where a failing script says why."""
+        if not self.refresh_log or not self.refresh_log.strip():
+            return None
+        return self.refresh_log.strip()[-chars:]
+
     @property
     def instructions(self) -> str | None:
         return self.prompt.strip() or None
@@ -697,11 +728,7 @@ class Workspace(BaseModel):
         secrets) can tighten after a record was stored, and shipping a stale
         record's params to the platform would bypass the newer rule.
         """
-        try:
-            return _validate_create_params(self.create_params)
-        except ValueError:
-            logger.warning("Ignoring invalid sandbox create params", extra={"workspace": self.slug})
-            return {}
+        return _validate_create_params(self.create_params)
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
         """Name/slug/refresh-state for the workspace picker and the settings page.

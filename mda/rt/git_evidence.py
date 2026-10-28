@@ -47,12 +47,15 @@ class GitCheckout(GitTarget):
 
 class GitSnapshot(BaseModel):
     repos: dict[str, GitCheckout] = {}
+    # Checkouts the script could not inspect, by path, with why.
+    skipped: dict[str, str] = {}
 
     def changes_since(self, before: Self) -> list[GitTarget]:
+        # A checkout skipped before is unknown then, so finding it now is no change.
         return [
             GitTarget(repo=checkout.repo, branch=checkout.branch)
             for path, checkout in self.repos.items()
-            if checkout != before.repos.get(path)
+            if path not in before.skipped and checkout != before.repos.get(path)
         ]
 
 
@@ -150,10 +153,17 @@ class TurnGit:
         if self._box is None:
             return None
         try:
-            return GitSnapshot.model_validate(await _SCRIPT.run(self._box, {"root": self._root}))
+            snapshot = GitSnapshot.model_validate(
+                await _SCRIPT.run(self._box, {"root": self._root})
+            )
         except Exception:
             logger.warning("Could not fingerprint the turn's checkouts", exc_info=True)
             return None
+        if snapshot.skipped:
+            logger.warning(
+                "Skipped checkouts in turn git evidence", extra={"skipped": snapshot.skipped}
+            )
+        return snapshot
 
 
 _TURNS: Final = RunLocal(TurnGit)

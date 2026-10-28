@@ -132,7 +132,6 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
     (state) => state.showOpenConversations
   )
   const setStandingInView = useReviewPage((state) => state.setStandingInView)
-  const openReview = useReviewPage((state) => state.openReview)
   // Watching the card itself, so the header knows when to carry its sentence.
   const ref = useRef<HTMLElement>(null)
   const ready = current !== null
@@ -185,12 +184,6 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             )}
           </div>
         </div>
-        {/* Every other next step is a button in its row below. */}
-        {standing.next?.kind === "review" && (
-          <Button size="md" onClick={() => openReview()}>
-            Review changes
-          </Button>
-        )}
       </div>
       {open && status && (
         <div className="divide-y border-t border-default">
@@ -225,7 +218,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-/** The one thing to do next, carried in the header; its Review button covers a review, and the author's way out of draft. */
+/** The one thing to do next, carried in the header; its Review button covers the author's way out of draft. */
 export function NextStepAction({
   pr,
   standing,
@@ -242,8 +235,6 @@ export function NextStepAction({
   const next = standing.next
   if (!next) return null
   switch (next.kind) {
-    case "review":
-      return null
     case "agent":
       return (
         <PullRequestThreadAction

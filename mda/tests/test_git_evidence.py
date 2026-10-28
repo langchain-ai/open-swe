@@ -1,11 +1,12 @@
 import asyncio
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 from deepagents.backends.local_shell import LocalShellBackend
 from rt.box_script import BoxScript, BoxScriptError
-from rt.git_evidence import GitSnapshot, TurnGit
+from rt.git_evidence import GitCheckout, GitSnapshot, TurnGit
 from runtime_api.operations import PullRequestHead
 
 
@@ -115,5 +116,14 @@ async def test_the_script_sees_more_edits_to_an_already_dirty_checkout(
     assert first[str(repo)].repo == "org/actual"
     assert first[str(repo)].branch == "work"
     assert first[str(repo)].dirty != second[str(repo)].dirty
+
+    broken = tmp_path / "broken"
+    shutil.copytree(repo, broken)
+    (broken / ".git" / "index").write_bytes(b"corrupt")
+    before = await fingerprint()
+    assert list(before.repos) == [str(repo)]
+    assert list(before.skipped) == [str(broken)]
+    recovered = GitSnapshot(repos={str(broken): GitCheckout(repo="org/actual", branch="work")})
+    assert recovered.changes_since(before) == []
     with pytest.raises(BoxScriptError, match="Could not inspect workspace git state"):
         await script.run(box, {"root": str(tmp_path / "missing")})

@@ -150,7 +150,6 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
             head_sha=cfg.head_sha,
         )
         try:

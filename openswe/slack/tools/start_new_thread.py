@@ -230,9 +230,7 @@ async def slack_breakout_thread(
     destination = await resolve_breakout_destination(
         source_channel, channel_id, workspace=cfg.workspace_slug
     )
-    if error := await destination.channel_error(
-        source_channel, check_audience=not channel_id and not web_only
-    ):
+    if error := await destination.channel_error(source_channel):
         return {"success": False, "error": error}
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
