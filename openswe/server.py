@@ -1003,7 +1003,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     metadata, never from the client, and keeping the tools registered across a
     surface switch is what keeps the prompt prefix cacheable.
     """
-    if cfg.source not in {"slack", "schedule", "incidents_agent", DASHBOARD_SOURCE}:
+    if cfg.source not in {"slack", "schedule", "incidents_agent", "github", DASHBOARD_SOURCE}:
         return False
     if cfg.slack_thread is None:
         return False
@@ -1014,7 +1014,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
     """Where this run owes its answer, before anything moves mid-run."""
-    if cfg.source == DASHBOARD_SOURCE or not _slack_tools_enabled(cfg):
+    if cfg.source in {DASHBOARD_SOURCE, "github"} or not _slack_tools_enabled(cfg):
         return WEB_REPLY_SURFACE
     return SLACK_REPLY_SURFACE
 
@@ -1813,6 +1813,13 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     managed_gateway, mcp_tools = (
         await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
     )
+    if incident_session is not None:
+        # incident.io refuses publishing from this MCP client (surface_cannot_publish).
+        mcp_tools = [
+            tool
+            for tool in mcp_tools
+            if (tool.metadata or {}).get("mcp_tool_name") != "status_page_update"
+        ]
 
     slack_tools = [
         manage_code_channel,

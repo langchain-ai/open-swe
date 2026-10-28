@@ -55,6 +55,10 @@ class BreakoutCommand:
             workspace=message.workspace,
         )
         parts = message.argument.split(maxsplit=1)
+        if parts and parts[0].lower() == "in" and len(parts) > 1:
+            destination = parts[1].split(maxsplit=1)
+            if destination[0].startswith(("#", "<#")):
+                parts = destination
         if (
             message.action is not SlackAction.BREAKOUT
             or not parts

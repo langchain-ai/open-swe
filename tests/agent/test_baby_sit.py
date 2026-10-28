@@ -3,17 +3,20 @@ from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid7
 
+import httpx
+import httpx2
 import pytest
 
 from openswe import baby_sit
 from openswe.github import app as github_app
 from openswe.github.ci import RequiredCheck
-from openswe.github.http import RepoClient
+from openswe.github.http import GitHubError, RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task
+from tests.support.github_sdk import mock_github_sdk
 
 
 async def _start_watch() -> baby_sit.BabySitWatch:
@@ -33,6 +36,109 @@ async def _start_watch() -> baby_sit.BabySitWatch:
             {"slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}}
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("read_method", "status_code", "body", "retryable"),
+    [
+        ("token", 404, "Not Found", False),
+        ("token", 403, "Installation suspended", False),
+        ("token", 503, "Service unavailable", True),
+        ("token", 403, "API rate limit exceeded", True),
+        ("token", None, "Connection failed", True),
+        ("pull", 403, "API rate limit exceeded for installation", True),
+        ("pull", 503, "Service unavailable", True),
+        ("pull", None, "Connection failed", True),
+        ("check_runs", 503, "Service unavailable", True),
+        ("commit_statuses", 403, "secondary rate limit", True),
+        ("pull", 404, "Not Found", False),
+        ("pull", 401, "Bad credentials", False),
+        ("pull", 403, "Resource not accessible", False),
+    ],
+)
+async def test_github_read_failures_only_end_watches_when_persistent(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    read_method: str,
+    status_code: int | None,
+    body: str,
+    retryable: bool,
+) -> None:
+    watch = await _start_watch()
+    token = AsyncMock(return_value="t")
+    if read_method != "token":
+        monkeypatch.setattr(github_app, "get_github_app_installation_token", token)
+    reads = {
+        "pull": AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        "check_runs": AsyncMock(return_value=[{"name": "tests", "status": "in_progress"}]),
+        "commit_statuses": AsyncMock(return_value=[]),
+    }
+    monkeypatch.setattr(PullRequestClient, "pull", reads["pull"])
+    monkeypatch.setattr(RepoClient, "check_runs", reads["check_runs"])
+    monkeypatch.setattr(RepoClient, "commit_statuses", reads["commit_statuses"])
+    failure = (
+        GitHubError(
+            httpx2.Response(
+                status_code,
+                text=body,
+                request=httpx2.Request("GET", "https://api.github.com/test"),
+            )
+        )
+        if status_code is not None
+        else httpx2.ConnectError(body)
+    )
+    read = reads.get(read_method, token)
+    token_failed = True
+    if read_method == "token":
+        monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
+        monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "test-key")
+        monkeypatch.setattr(github_app, "_TOKEN_CACHE", {})
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            if token_failed:
+                if status_code is None:
+                    raise httpx.ConnectError(body, request=request)
+                return httpx.Response(status_code, json={"message": body})
+            return httpx.Response(201, json={"token": "t", "expires_at": "2099-01-01T00:00:00Z"})
+
+        mock_github_sdk(monkeypatch, handle)
+    else:
+        read.side_effect = failure
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "_notify_watch", notify)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+
+    for attempt in range(1, 4):
+        result = await baby_sit.evaluate_watch(watch.key)
+        stored = await baby_sit.WATCHES.get(watch.key)
+        if retryable or attempt < 3:
+            assert result == "error"
+            assert stored is not None and stored.active
+            assert stored.evaluation_errors == (0 if retryable else attempt)
+        else:
+            assert result == "stopped"
+            assert stored is None
+
+    if retryable:
+        notify.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        read.side_effect = None
+        token_failed = False
+        assert await baby_sit.evaluate_watch(watch.key) == "pending"
+        stored = await baby_sit.WATCHES.get(watch.key)
+        assert stored is not None and stored.active
+    else:
+        # A Slack-started watch hands its terminal notice to the owning agent thread.
+        assert dispatch.await_args is not None
+        message = dispatch.await_args.args[1]
+        assert (
+            "GitHub App token unavailable"
+            if read_method == "token"
+            else "not found"
+            if status_code == 404
+            else "denied access"
+        ) in message
 
 
 async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(

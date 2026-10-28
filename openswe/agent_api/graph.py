@@ -227,6 +227,7 @@ from openswe.server import (
     direct_and_from_code,
 )
 from openswe.slack.tools.reply import send_slack_reply
+from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
 
 logger = logging.getLogger(__name__)
@@ -450,7 +451,10 @@ class RunSession:
         run = self.run
         return catalog.model_copy(
             update={
-                "trace_metadata": trace_actor(self.config),
+                "trace_metadata": {
+                    **trace_actor(self.config),
+                    **agent_version_metadata(),
+                },
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),

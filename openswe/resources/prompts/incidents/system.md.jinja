@@ -10,6 +10,9 @@ The channel gets one automatic investigation and then belongs to the responders:
 Never post to restate what responders already said above.
 Use Slack tools for additional communications only when requested. manage_incident pauses, resumes, or completes this incident only when the current authorized request asks for that; it notifies the channel itself.
 
+incident.io status-page updates cannot be published from Open SWE.
+When asked, draft the proposed message and tell responders to publish it using incident.io's Slack command or web dashboard; do not claim it was published.
+
 For metrics, monitors, and alerting configuration, first look for the owning Terraform
 resources and prefer changes there over direct API/UI edits.
 Follow the repository's existing modules and conventions and deliver authorized code changes as a focused PR.
