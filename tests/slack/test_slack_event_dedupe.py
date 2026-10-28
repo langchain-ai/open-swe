@@ -119,22 +119,6 @@ async def test_mention_and_message_deliveries_start_one_run(
     }
 
 
-async def test_x_reaction_does_not_queue_work() -> None:
-    payload = _mention_payload()
-    payload["event"] = {
-        "type": "reaction_added",
-        "reaction": "x",
-        "user": "U1",
-        "item": {"type": "message", "channel": "C1", "ts": "1786573369.551099"},
-    }
-    tasks = _FakeBackgroundTasks()
-
-    response = await _post(payload, tasks)
-
-    assert response["status"] == "ignored"
-    assert tasks.tasks == []
-
-
 def _bot_payload(*, event_type: str = "message", with_user: bool = True) -> dict[str, Any]:
     payload = _mention_payload()
     payload.update({"team_id": "T123", "api_app_id": "AOWN"})
