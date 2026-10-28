@@ -556,7 +556,7 @@ async def test_review_and_walkthrough_find_workspace_checkout(
     }
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     with patch("openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=proxy):
-        result = await fetch_review_diff({"work_dir": "/root"})
+        result = await fetch_review_diff(work_dir="/root")
     assert result["success"] is True
     assert result["files"] == ["core.py"]
     assert str(result["path"]).startswith(checkout.repo_dir + "/")

@@ -15,7 +15,7 @@ _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 async def fetch_review_diff(
-    state: Annotated[dict[str, object] | None, InjectedState] = None,
+    work_dir: Annotated[str | None, InjectedState("work_dir")] = None,
 ) -> dict[str, object]:
     """Implement the `fetch_review_diff` tool."""
     cfg = RunConfig.from_runtime()
@@ -36,12 +36,7 @@ async def fetch_review_diff(
         )
         sandbox_backend = get_cached_sandbox_backend(thread_id)
         await sandbox_backend.ready()
-        prepared_dir = state.get("work_dir") if state else None
-        work_dir = (
-            prepared_dir
-            if isinstance(prepared_dir, str) and prepared_dir
-            else await resolve_sandbox_work_dir(sandbox_backend)
-        )
+        work_dir = work_dir or await resolve_sandbox_work_dir(sandbox_backend)
         repo_dir = await resolve_checkout_dir(sandbox_backend, work_dir, repo_name)
         materialized = await materialize_review_diff(
             sandbox_backend,
