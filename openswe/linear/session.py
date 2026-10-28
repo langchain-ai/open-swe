@@ -11,6 +11,7 @@ webhook, which completes it as it does the backend's own runs; the channel repor
 its failures in the session.
 """
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
@@ -417,14 +418,15 @@ class LinearSessionTurn:
         model_id = await common.resolve_agent_model_id(login, workspace=workspace)
         if not common.model_supports_images(model_id):
             override = common.default_vision_model_pair()
-        blocks: dict[str, dict[str, JsonValue]] = {}
         async with httpx2.AsyncClient(
             transport=pooled_transport(), timeout=common.DEFAULT_HTTP_TIMEOUT
         ) as client:
-            for url in urls:
-                block = await common.fetch_image_block(url, client)
-                if block:
-                    blocks[url] = cast(dict[str, JsonValue], block)
+            fetched = await asyncio.gather(*(common.fetch_image_block(url, client) for url in urls))
+        blocks = {
+            url: cast(dict[str, JsonValue], block)
+            for url, block in zip(urls, fetched, strict=True)
+            if block
+        }
         return blocks, override
 
     def _input(

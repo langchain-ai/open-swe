@@ -14,6 +14,7 @@ and stops runs there through MDA's trusted-backend ingress, naming that conversa
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -69,6 +70,8 @@ _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
 CHANNEL_SERVICE_USER: Final = "mda:channel"
 # Beside ``x-mda-user-id``, the Agent Auth principal MDA's channels stamp a run's sender with.
 _PRINCIPAL_HEADER: Final = "x-mda-agent-auth-principal-id"
+# How many channel threads' conversations an ``MdaRuntime`` keeps.
+_CHANNEL_CONVERSATIONS_LIMIT: Final = 4096
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -172,8 +175,9 @@ class MdaRuntime:
     def __init__(self, url: str) -> None:
         self.url = url
         self._mda_threads: set[str] = set()
-        # Each channel thread's conversation on MDA, (provider, key), which never changes.
-        self._channel_conversations: dict[str, tuple[str, str]] = {}
+        # Each channel thread's conversation on MDA, (provider, key), which never changes;
+        # the most recently used ones.
+        self._channel_conversations: OrderedDict[str, tuple[str, str]] = OrderedDict()
         self._http: httpx.AsyncClient | None = None
         self._read_http: httpx.AsyncClient | None = None
 
@@ -228,7 +232,9 @@ class MdaRuntime:
         if not secret:
             raise ChannelThreadError("No MDA_SERVICE_SECRET to act on MDA's channel threads")
         conversation = self._channel_conversations.get(thread_id)
-        if conversation is None:
+        if conversation is not None:
+            self._channel_conversations.move_to_end(thread_id)
+        else:
             response = await self.read_http.get(f"/threads/{thread_id}")
             response.raise_for_status()
             metadata = _object.validate_python(response.json()).get("metadata")
@@ -239,6 +245,8 @@ class MdaRuntime:
             if not provider or not key:
                 raise ChannelThreadError(f"MDA names no conversation owning thread {thread_id}")
             conversation = self._channel_conversations[thread_id] = (provider, key)
+            if len(self._channel_conversations) > _CHANNEL_CONVERSATIONS_LIMIT:
+                self._channel_conversations.popitem(last=False)
         provider, key = conversation
         principal = await self.user_principal(user_id) if user_id else None
         headers = {
