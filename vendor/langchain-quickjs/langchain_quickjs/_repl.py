@@ -745,8 +745,18 @@ class _ThreadREPL:
     ) -> EvalOutcome:
         caller_loop = asyncio.get_running_loop()
         unwound = asyncio.Event()
+        # Whichever side takes `claim` first decides: the worker starts the eval,
+        # or the cancelled caller abandons it before it touches the context.
+        claim = threading.Lock()
+        started = False
+        abandoned = False
 
         async def evaluate() -> EvalOutcome:
+            nonlocal started
+            with claim:
+                if abandoned:
+                    raise asyncio.CancelledError
+                started = True
             try:
                 return await self._aeval_async(
                     code,
@@ -761,7 +771,13 @@ class _ThreadREPL:
         except asyncio.CancelledError:
             # The cross-thread future cancels before the worker finishes unwinding.
             # Keep the context alive until its pending jobs have stopped touching it.
-            await unwound.wait()
+            # A coroutine cancelled before its first step never runs its `finally`,
+            # so wait only for an eval that started.
+            with claim:
+                abandoned = True
+                running = started
+            if running:
+                await unwound.wait()
             raise
 
     def create_snapshot(self) -> bytes:

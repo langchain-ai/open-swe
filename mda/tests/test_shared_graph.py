@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import threading
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
@@ -21,7 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolC
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
-from langchain_quickjs._repl import EvalOutcome, _ThreadREPL
+from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
 from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
@@ -1023,3 +1024,31 @@ async def test_recovered_model_failure_preserves_interpreter_state(
         ),
     )
     assert "42" in results[-1].text
+
+
+async def test_cancelling_an_eval_its_worker_has_not_started_returns_promptly() -> None:
+    registry = _Registry(
+        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
+    )
+    repl = registry.get("busy")
+    worker_loop = registry._slots["busy"].worker._loop
+    assert worker_loop is not None
+    started = threading.Event()
+    release = threading.Event()
+
+    def block() -> None:
+        started.set()
+        release.wait(5)
+
+    worker_loop.call_soon_threadsafe(block)
+    assert await asyncio.to_thread(started.wait, 5)
+    try:
+        evaluation = asyncio.create_task(repl.eval_async("globalThis.ran = true"))
+        await asyncio.sleep(0)
+        evaluation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(evaluation, 1)
+    finally:
+        release.set()
+    assert (await repl.eval_async("typeof globalThis.ran")).result == "undefined"
+    await registry.aevict("busy")
