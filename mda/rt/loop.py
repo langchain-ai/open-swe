@@ -55,6 +55,7 @@ from runtime_api.loop import (
     ModelCall,
     PhaseResult,
     ReplyOnBehalf,
+    Route,
     Routed,
     RunEnded,
     ScoutPlanEnd,
@@ -299,7 +300,10 @@ class RunLoop:
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
         route = await self._route(held, [*_visible(state), *added])
         if route is not None:
-            update["model_route"] = route
+            if route.persist:
+                update["model_route"] = route.route
+            else:
+                update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
         model = await self._model_for(current)
         return BeforeModel(
@@ -358,12 +362,14 @@ class RunLoop:
 
     async def _route(
         self, held: Mapping[str, object], messages: Sequence[BaseMessage]
-    ) -> str | None:
+    ) -> Route | None:
+        """The route and whether it should be kept beyond this run."""
         rules = self.rules.routing
         if rules is None:
             return None
         requested = held.get("requested_model")
         stored = held.get("model_route")
+        persist = True
         if isinstance(requested, str) and requested:
             route = "default"
         elif rules.mode is None:
@@ -372,14 +378,17 @@ class RunLoop:
             route = _normalized(stored)
         elif rules.mode == "fast":
             route = "fast"
+        elif held.get("model_route_attempted_for") == run_id():
+            return None
         else:
             asked = Routed(run_id=run_id(), humans=human_messages(messages))
-            route = (await call(self._backend, ROUTE_MODEL, asked)).route
+            routed = await call(self._backend, ROUTE_MODEL, asked)
+            route, persist = routed.route, routed.persist
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
-        return route
+        return Route(route=route, persist=persist)
 
     async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
         key = (model_id, effort if isinstance(effort, str) else None)

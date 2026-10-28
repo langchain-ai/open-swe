@@ -72,8 +72,9 @@ async def test_system_notes_reach_the_agent_without_waiting_in_the_dashboard(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("system_note", [False, True])
 async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
-    registry_db: None,
+    registry_db: None, system_note: bool
 ) -> None:
     await QueuedMessage.put(
         "thread-1",
@@ -85,6 +86,9 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
         },
     )
 
+    if system_note:
+        await queue_system_note_for_thread("thread-1", "Review accepted")
+
     taken = await _read("slack")
 
     assert taken.reply_surface is None
@@ -92,6 +96,24 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+    assert taken.state_update("run-1") == {
+        "relayed_from_thread_id": "worker-thread",
+        "relay_run_id": "run-1",
+    }
+
+    await ThreadInbox("thread-1").receive(taken.queued)
+    await queue_system_note_for_thread("thread-1", "Another review accepted")
+    notes = await _read("slack")
+    assert notes.queued
+    assert notes.state_update("run-1") == {}
+
+    await QueuedMessage.put("thread-1", {"text": "My follow-up", "source": "dashboard"})
+    direct = await _read("slack")
+    assert direct.state_update("run-1") == {
+        "reply_surface": "web",
+        "relayed_from_thread_id": None,
+        "relay_run_id": "run-1",
+    }
 
 
 @pytest.mark.asyncio

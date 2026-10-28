@@ -478,6 +478,7 @@ The **Postmortem** tab renders it and **Copy incident** copies the text and sour
 There is no document editor or revision-history UI.
 
 Public status-page publishing is not implemented.
+For status-page requests, the agent drafts a message for responders to publish using incident.io's Slack command or web dashboard; its unavailable status-page update MCP tool is excluded from incident runs.
 Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action.
 Automatic turns investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes.
 Personal integrations remain unavailable in these system-owned threads.
