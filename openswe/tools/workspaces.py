@@ -4,8 +4,12 @@ Wired into admin threads; each tool rechecks user or system authorization.
 """
 
 import logging
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
+from pydantic import JsonValue
+
+from openswe.audit_logs.store import list_logs
 from openswe.audit_logs.tools import audit_tool
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable as _configurable
@@ -17,6 +21,32 @@ logger = logging.getLogger(__name__)
 
 _READ = Policy(trusted="admin_thread", actor="admin")
 _WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("workspace.slug", "task_id"))
+# Refresh logs are ``bash -x`` traces and history names people, so neither is
+# read where anyone else can see the thread.
+_PRIVATE_READ = Policy(trusted="admin_surface", actor="admin")
+
+_SNAPSHOT_WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("workspace", "task_id"))
+_SNAPSHOT_READS = frozenset({"status", "history"})
+_SNAPSHOT_STATE_FIELDS = {
+    "snapshot_id",
+    "snapshot_name",
+    "snapshot_status",
+    "status_message",
+    "last_captured_at",
+    "base_snapshot_id",
+    "refresh_status",
+    "refresh_kind",
+    "refresh_run_id",
+    "refresh_started_at",
+    "refresh_finished_at",
+    "refresh_steps",
+    "refresh_error",
+    "setup_script",
+    "update_script",
+    "create_params",
+}
+_HISTORY_WINDOW = timedelta(days=30)
+_HISTORY_LIMIT = 25
 
 
 # Deliberately narrower than the record: the agent has no use for authorship
@@ -53,29 +83,6 @@ def _summary(record: store.Workspace) -> dict[str, Any]:
     return summary
 
 
-async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
-    """Enqueue a refresh and describe the handle, or say why it cannot start."""
-    record = await store.WORKSPACES.get(slug)
-    if record is None:
-        return {
-            "status": "error",
-            "error": f"no workspace named {name!r}; publish_workspace creates one",
-        }
-    if not record.setup_script:
-        return {"status": "error", "error": f"workspace {name!r} has no setup_script to run"}
-    if record.refresh_in_flight():
-        return {
-            "status": "error",
-            "error": f"a refresh of {name!r} is already running",
-            "task_id": refresh.refresh_task_id(record.refresh_run_id or ""),
-        }
-
-    run_id = await refresh.start_refresh_run(slug)
-    if run_id is None:
-        return {"status": "error", "error": "could not start the refresh job"}
-    return {"status": "started", "task_id": refresh.refresh_task_id(run_id)}
-
-
 @expose_mcp(access="admin")
 @access(_READ)
 async def list_workspaces() -> dict[str, Any]:
@@ -96,7 +103,7 @@ async def list_workspaces() -> dict[str, Any]:
     }
 
 
-@audit_tool()
+@audit_tool(target_workspace="name")
 @access(_WRITE)
 async def publish_workspace(
     name: str,
@@ -231,20 +238,126 @@ async def publish_workspace(
     return {"ok": True, "workspace": _summary(record), "created": existing is None}
 
 
+async def _snapshot_state(record: store.Workspace) -> dict[str, object]:
+    """The image runs boot from, the refresh that last touched it, and its log."""
+    state: dict[str, object] = record.model_dump(mode="json", include=_SNAPSHOT_STATE_FIELDS)
+    state["workspace"] = record.slug
+    state["refresh_in_flight"] = record.refresh_in_flight()
+    state["refresh_task_id"] = (
+        refresh.refresh_task_id(record.refresh_run_id) if record.refresh_run_id else None
+    )
+    state["refresh_log_tail"] = record.refresh_log_tail()
+    state["live_log"] = await refresh.builder_trace(record)
+    return state
+
+
+async def _stop_refresh(record: store.Workspace) -> dict[str, object]:
+    if record.refresh_status != "refreshing" or not record.refresh_run_id:
+        raise ValueError(f"no refresh of {record.slug!r} is running")
+    stopped = await refresh.task_stop(refresh.refresh_task_id(record.refresh_run_id))
+    return {"ok": "error" not in stopped, **stopped}
+
+
+async def _edit(record: store.Workspace, changes: dict[str, object]) -> dict[str, object]:
+    if not changes:
+        raise ValueError("edit needs setup_script, update_script or create_params")
+    saved = await refresh.save_definition(record, store.WorkspaceUpdate.model_validate(changes))
+    return {
+        "ok": True,
+        "workspace": record.slug,
+        "previous": record.model_dump(mode="json", include=set(changes)),
+        "current": saved.model_dump(mode="json", include=set(changes)),
+    }
+
+
+async def _history(record: store.Workspace) -> dict[str, object]:
+    workspace_id = await store.WORKSPACES.id_for_slug(record.slug)
+    if workspace_id is None:
+        raise ValueError(f"no workspace named {record.slug!r}")
+    now = datetime.now(UTC)
+    page = await list_logs(
+        start_time=now - _HISTORY_WINDOW,
+        end_time=now,
+        limit=_HISTORY_LIMIT,
+        workspace_id=workspace_id,
+    )
+    return {
+        "ok": True,
+        "workspace": record.slug,
+        "entries": [
+            {
+                "at": entry.request_time.isoformat(),
+                "operation": entry.operation_name,
+                "succeeded": entry.operation_succeeded,
+                "actor": entry.enrichments.actor_login,
+                "actor_kind": entry.enrichments.actor_kind,
+                "source": entry.enrichments.source,
+                "thread_id": entry.enrichments.thread_id,
+            }
+            for entry in page.items
+        ],
+    }
+
+
 @expose_mcp(access="admin")
-@audit_tool()
-@access(_WRITE)
-async def refresh_workspace_start(name: str) -> dict[str, Any]:
-    """Implement the `refresh_workspace_start` tool."""
+@audit_tool(reads=_SNAPSHOT_READS, target_workspace="workspace")
+@access(
+    _SNAPSHOT_WRITE,
+    per_call=lambda args: (
+        _PRIVATE_READ if args.get("action") in _SNAPSHOT_READS else _SNAPSHOT_WRITE
+    ),
+)
+async def snapshotctl(
+    action: Literal["status", "rebuild", "stop", "edit", "history"],
+    workspace: str,
+    kind: store.RefreshKind | None = None,
+    setup_script: str | None = None,
+    update_script: str | None = None,
+    create_params: dict[str, JsonValue] | None = None,
+) -> dict[str, object]:
+    """Implement the `snapshotctl` tool."""
+    changes: dict[str, object] = {
+        field: value
+        for field, value in (
+            ("setup_script", setup_script),
+            ("update_script", update_script),
+            ("create_params", create_params),
+        )
+        if value is not None
+    }
     try:
-        slug = store.slugify(name)
-    except ValueError as exc:
-        return {"status": "error", "error": str(exc)}
-    return await _start_refresh(slug, name)
+        if changes and action != "edit":
+            raise ValueError(f"{', '.join(changes)} only apply to edit")
+        if kind is not None and action != "rebuild":
+            raise ValueError("kind only applies to rebuild")
+        record = await store.WORKSPACES.get(store.slugify(workspace))
+        if record is None:
+            raise ValueError(f"no workspace named {workspace!r}")
+        if action == "status":
+            return {"ok": True, **await _snapshot_state(record)}
+        if action == "rebuild":
+            run_id = await refresh.start_refresh(record, kind or "full")
+            return {
+                "ok": True,
+                "status": "started",
+                "workspace": record.slug,
+                "refresh_kind": kind or "full",
+                "task_id": refresh.refresh_task_id(run_id),
+            }
+        if action == "stop":
+            return await _stop_refresh(record)
+        if action == "edit":
+            return await _edit(record, changes)
+        return await _history(record)
+    except store.RefreshInFlightError as exc:
+        running = refresh.refresh_task_id(exc.run_id) if exc.run_id else None
+        return {"ok": False, "error": str(exc), "task_id": running}
+    except (ValueError, refresh.RefreshStartError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @expose_mcp(access="admin")
-@audit_tool()
+@audit_tool(target_workspace="name")
 @access(_WRITE)
 async def delete_workspace(name: str) -> dict[str, Any]:
     """Implement the `delete_workspace` tool."""
@@ -265,7 +378,7 @@ async def delete_workspace(name: str) -> dict[str, Any]:
 
 
 @expose_mcp(access="admin")
-@audit_tool()
+@audit_tool(target_workspace="workspace")
 @access(_WRITE)
 async def configure_repository(
     workspace: str,

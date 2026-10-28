@@ -12,7 +12,7 @@ from openswe.sandboxes import lifecycle
 from openswe.tools import workspaces as env_tools
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
-from openswe.workspaces.store import Workspace
+from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
@@ -86,6 +86,7 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
         assert (await env_tools.list_workspaces())["ok"] is False
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
+        assert (await env_tools.snapshotctl("rebuild", "base"))["ok"] is False
 
 
 # --- publish: capture this sandbox, then record ---
@@ -240,7 +241,7 @@ async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_refresh_start_refuses_while_one_is_running(
+async def test_rebuild_refuses_while_one_is_running(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
@@ -262,11 +263,79 @@ async def test_refresh_start_refuses_while_one_is_running(
         ),
         patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
-        result = await env_tools.refresh_workspace_start("base")
+        result = await env_tools.snapshotctl("rebuild", "base")
 
-    assert result["status"] == "error"
+    assert result["ok"] is False
     assert result["task_id"] == "ws-run-1"
     start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_reads_need_a_private_admin_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Logs and audit history stay out of shared threads; writes still reach the store."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    shared = {"metadata": {"visibility": "public", "owner_type": "user", "admin_thread": True}}
+    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=shared)))
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
+    get = AsyncMock(return_value=_READY)
+    with (
+        patch(
+            "openswe.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
+        patch.object(env_tools.store.WORKSPACES, "get", get),
+    ):
+        assert (await env_tools.snapshotctl("status", "base"))["ok"] is False
+        assert (await env_tools.snapshotctl("history", "base"))["ok"] is False
+        get.assert_not_awaited()
+        refused = await env_tools.snapshotctl("rebuild", "base")
+
+    get.assert_awaited_once_with("base")
+    assert "no setup script" in str(refused["error"])
+
+
+async def test_snapshot_edit_validates_like_the_dashboard_and_returns_what_it_replaced(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    rules = {"proxy_config": {"rules": [{"name": "gcp"}]}}
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="Core",
+            repos=["acme/api"],
+            setup_script="echo old",
+            create_params=rules,
+            inherit_default_sandbox=False,
+        ),
+        "admin",
+    )
+    with (
+        patch(
+            "openswe.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
+        patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()) as cron,
+    ):
+        refused = await env_tools.snapshotctl(
+            "edit", "core", setup_script="echo new", create_params={"secret_token": "x"}
+        )
+        assert refused["ok"] is False
+        stored = await WORKSPACES.get("core")
+        assert stored is not None
+        assert stored.setup_script == "echo old"
+
+        edited = await env_tools.snapshotctl(
+            "edit", "core", setup_script="echo new", create_params={}
+        )
+
+    assert edited["previous"] == {"setup_script": "echo old", "create_params": rules}
+    assert edited["current"] == {"setup_script": "echo new", "create_params": {}}
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert (stored.setup_script, stored.create_params) == ("echo new", {})
+    cron.assert_awaited_once_with("core")
 
 
 # --- prompt wiring ---
