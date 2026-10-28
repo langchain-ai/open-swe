@@ -49,7 +49,12 @@ from langgraph_sdk.errors import (
 )
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree, WriteReplica
-from managed_deepagents import define_deep_agent
+from managed_deepagents import (
+    DeepAgentDefinition,
+    ManagedServerRuntime,
+    define_deep_agent,
+    shared_factory,
+)
 from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
@@ -289,6 +294,55 @@ async def test_a_tool_call_the_backend_never_answered(
     assert result_message.status == ("success" if failures == 10 else "error")
     assert "secret-token" not in result_message.content
     assert client.post.await_count == attempts
+
+
+@pytest.mark.parametrize(
+    ("arguments", "takes", "succeeds"),
+    [({}, 121.0, False), ({"timeout": 1200}, 1500.0, True)],
+)
+async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, JsonValue],
+    takes: float,
+    succeeds: bool,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    request = httpx2.Request("POST", "https://backend.invalid")
+
+    async def post(*args: object, timeout: float, **kwargs: object) -> httpx2.Response:
+        if takes > timeout:
+            raise httpx2.ReadTimeout("stalled backend")
+        return httpx2.Response(200, request=request, json={"content": "done"})
+
+    client = MagicMock(is_closed=False)
+    client.post = post
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    served = operation_tool(
+        OperationSpec(
+            name="get_thread",
+            description="Operation",
+            parameters={"type": "object"},
+            seconds=120.0,
+        ),
+        _run_backend(),
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    assert served.coroutine is not None
+    result = await served.coroutine(runtime=runtime, **arguments)
+    assert isinstance(result, ToolMessage)
+    if succeeds:
+        assert result.content == "done"
+    else:
+        assert result.status == "error"
+        assert "did not answer" in result.content
 
 
 @pytest.mark.parametrize(
@@ -1321,8 +1375,16 @@ async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files
         """Print a lot."""
         return "x" * 100_000
 
-    agent = await compile_managed_agent_async(
-        define_deep_agent(
+    class NoInputs(BaseModel):
+        pass
+
+    async def no_inputs(_runtime: ManagedServerRuntime) -> NoInputs:
+        return NoInputs()
+
+    # A shared graph, as Open SWE's is: compiled for no one run.
+    @shared_factory(no_inputs)
+    def shared(_inputs: NoInputs) -> DeepAgentDefinition:
+        return define_deep_agent(
             name="test-agent",
             model=_ToolCallingModel(
                 messages=iter(
@@ -1334,11 +1396,9 @@ async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files
             ),
             tools=[dump],
             sandbox=box(files),
-            _openswe_graph_inputs={},
-        ),
-        None,
-        report_telemetry=False,
-    )
+        )
+
+    agent = await compile_managed_agent_async(shared, None, report_telemetry=False)
 
     result = await agent.ainvoke({"messages": [("user", "dump")]})
 
