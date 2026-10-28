@@ -212,6 +212,42 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     ]
 
 
+async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(slack_api) -> None:
+    thread: list[dict[str, object]] = [{"ts": "1.0", "text": "Fix it"}]
+
+    def handle(method: str, params: dict[str, object], _headers: object):
+        if method == "chat.postMessage":
+            blocks = params.get("blocks")
+            message = {
+                "ts": f"{len(thread) + 1}.0",
+                "text": params["text"],
+                "blocks": json.loads(blocks) if isinstance(blocks, str) else blocks or [],
+            }
+            thread.append(message)
+            return 200, {"ok": True, "ts": message["ts"], "message": message}, {}
+        parent = thread[0] | {"latest_reply": thread[-1]["ts"]}
+        found = [m for m in [parent, *thread[1:]] if m["ts"] == params.get("oldest", "1.0")]
+        return 200, {"ok": True, "messages": found}, {}
+
+    slack_api.handler = handle
+    sandbox = slack_utils.SlackNotice("sandbox_unreachable", "Sandbox stopped responding")
+    run_failed = slack_utils.SlackNotice(
+        "run_failed", "Run failed", quiet_after=frozenset({"sandbox_unreachable"})
+    )
+
+    for notice in (sandbox, run_failed, sandbox, run_failed):
+        assert await slack_utils.post_slack_thread_reply("C1", "1.0", notice.key, notice=notice)
+    thread.append({"ts": "9.0", "text": "@Open SWE stop please"})
+    assert await slack_utils.post_slack_thread_reply("C1", "1.0", sandbox.key, notice=sandbox)
+
+    assert [message["text"] for message in thread] == [
+        "Fix it",
+        "Sandbox stopped responding",
+        "@Open SWE stop please",
+        "Sandbox stopped responding",
+    ]
+
+
 @pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
 async def test_review_link_flag_changes_displayed_links_not_code_or_button_values(
     slack_api: SlackAPI,

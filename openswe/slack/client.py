@@ -59,6 +59,37 @@ _SLACK_THREAD_MUTATION_LOCK_SCOPE = "slack-thread-lock"
 _SLACK_THREAD_MUTATION_LOCK_TTL = timedelta(minutes=1)
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.1
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
+_SLACK_NOTICE_BLOCK_PREFIX = "open_swe_notice."
+
+
+@dataclass(frozen=True)
+class SlackNotice:
+    """An automatic notice that is not posted again while the thread still ends with it.
+
+    ``key`` is what makes two notices the same, so per-run details such as a trace
+    link stay out of it. The notice is also held back while the thread ends with
+    a notice of a kind in ``quiet_after``.
+    """
+
+    kind: str
+    key: str
+    quiet_after: frozenset[str] = frozenset()
+
+    @property
+    def block_id(self) -> str:
+        digest = hashlib.sha256(self.key.encode()).hexdigest()[:16]
+        return f"{_SLACK_NOTICE_BLOCK_PREFIX}{self.kind}.{digest}"
+
+    def repeats(self, message: Mapping[str, object]) -> bool:
+        blocks = message.get("blocks")
+        for block in blocks if isinstance(blocks, list) else []:
+            block_id = block.get("block_id") if isinstance(block, dict) else None
+            if not isinstance(block_id, str) or not block_id.startswith(_SLACK_NOTICE_BLOCK_PREFIX):
+                continue
+            kind = block_id.removeprefix(_SLACK_NOTICE_BLOCK_PREFIX).partition(".")[0]
+            if block_id == self.block_id or kind in self.quiet_after:
+                return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -1259,8 +1290,25 @@ async def post_slack_thread_reply(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     agent_thread_id: str | None = None,
+    notice: SlackNotice | None = None,
 ) -> bool:
-    """Post a reply in a Slack thread."""
+    """Post a reply in a Slack thread.
+
+    A ``notice`` is skipped, as if posted, when the thread's latest message repeats it.
+    """
+    if notice is not None:
+        latest = await fetch_latest_slack_thread_message(channel_id, thread_ts)
+        if latest is not None and notice.repeats(latest):
+            logger.info("Skipped a repeated Slack notice", extra={"slack_notice": notice.kind})
+            return True
+        if blocks is None and len(text) <= SLACK_SECTION_TEXT_MAX_CHARS:
+            blocks = [
+                {
+                    "type": "section",
+                    "block_id": notice.block_id,
+                    "text": {"type": "mrkdwn", "text": text},
+                }
+            ]
     kwargs: dict[str, Any] = {
         "blocks": blocks,
         "unfurl_links": unfurl_links,
@@ -1678,6 +1726,33 @@ async def fetch_slack_thread_message_by_ts(
         ),
         None,
     )
+
+
+async def fetch_latest_slack_thread_message(
+    channel_id: str, thread_ts: str
+) -> dict[str, Any] | None:
+    """Fetch a Slack thread's newest message, or its parent while it has no replies."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    from openswe.slack.code_channels import is_code_channel_session
+
+    if is_code_channel_session(thread_ts):
+        try:
+            async with SlackClient.bot() as client:
+                payload = await client.conversations_history(channel=channel_id, limit=1)
+        except SLACK_REQUEST_ERRORS as exc:
+            logger.warning("Slack message fetch failed", extra={"slack_error": slack_error(exc)})
+            return None
+        messages = payload.get("messages", [])
+        return next((message for message in messages if isinstance(message, dict)), None)
+
+    # Replies come back oldest first, so the parent's ``latest_reply`` names the newest one.
+    parent = await fetch_slack_thread_message_by_ts(channel_id, thread_ts, thread_ts)
+    latest_ts = parent.get("latest_reply") if parent is not None else None
+    if not isinstance(latest_ts, str) or latest_ts == thread_ts:
+        return parent
+    return await fetch_slack_thread_message_by_ts(channel_id, thread_ts, latest_ts)
 
 
 SLACK_MESSAGE_URL_RE = re.compile(

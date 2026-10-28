@@ -25,10 +25,11 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
+from openswe.middleware.sandbox_circuit_breaker import SANDBOX_UNREACHABLE_NOTICE
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
 from openswe.session_cost import schedule_session_cost_refresh
-from openswe.slack.client import post_slack_thread_reply
+from openswe.slack.client import SlackNotice, post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
@@ -57,6 +58,7 @@ _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
 _CONSECUTIVE_FAILURES = "consecutive_failed_runs"
+_RUN_FAILED_NOTICE = "run_failed"
 # A thread that keeps failing would otherwise post one notice per run, forever.
 _MAX_CONSECUTIVE_FAILURE_REPLIES = 3
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
@@ -208,11 +210,18 @@ async def _post_failure_reply(
         if location is not None:
             trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
+            # A sandbox notice already says why the run failed.
+            notice = SlackNotice(
+                _RUN_FAILED_NOTICE,
+                _failure_text(status, reason_code=reason_code),
+                quiet_after=frozenset({SANDBOX_UNREACHABLE_NOTICE}),
+            )
             return await post_slack_thread_reply(
                 location[0],
                 location[1],
                 slack_text,
                 agent_thread_id=thread_id,
+                notice=notice,
             )
         return False
 
