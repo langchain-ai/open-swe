@@ -57,10 +57,15 @@ class ParsedGitPush:
     remote_ref: str
     set_upstream: bool = False
     force_with_lease: str | None = None
+    force_flags: tuple[str, ...] = ()
 
     @property
     def remote_branch(self) -> str:
         return self.remote_ref.removeprefix("refs/heads/")
+
+    @property
+    def forced(self) -> bool:
+        return self.force_with_lease is not None or bool(self.force_flags)
 
     def inspection_failed(self) -> None:
         raise WorkflowPushInspectionError(
@@ -68,12 +73,20 @@ class ParsedGitPush:
             "and ensure the repository can be inspected. Nothing ran."
         )
 
-    def command_for_head(self, repo_dir: str, head_sha: str) -> str:
+    def command_for_head(self, repo_dir: str, head_sha: str, lease_sha: str) -> str:
+        """The push of ``head_sha`` the owner approves.
+
+        A forced push is leased to ``lease_sha``, the remote tip the approval diff was
+        taken against (empty when the branch did not exist), so it cannot overwrite
+        remote commits the owner never saw.
+        """
         args = ["push"]
         if self.set_upstream:
             args.append("--set-upstream")
-        if self.force_with_lease is not None:
-            args.append(self.force_with_lease)
+        if self.forced:
+            args.append(f"--force-with-lease=refs/heads/{self.remote_branch}:{lease_sha}")
+            if "--force-if-includes" in self.force_flags:
+                args.append("--force-if-includes")
         args.extend([self.remote, f"{head_sha}:refs/heads/{self.remote_branch}"])
         return _git_command(repo_dir, " ".join(shlex.quote(arg) for arg in args))
 
@@ -185,12 +198,8 @@ def _command_words(command: str) -> list[str]:
 
 
 def _chained_push_dirs(command: str) -> list[str | None]:
-    """The repositories ``command`` pushes from where the push is not the whole command.
-
-    A push is located by ``git -C dir push`` or the ``cd dir`` before it; ``None``
-    is the shell's own working directory.
-    """
-    if _parse_git_push(command) is not None:
+    """Repositories pushed from by a command containing other shell operations."""
+    if _standalone_push_args(command) is not None:
         return []
     tokens = _command_words(command)
     dirs: list[str | None] = []
@@ -255,7 +264,31 @@ def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
     )
 
 
+def _unsupported_push_message(request: ToolCallRequest) -> ToolMessage:
+    content = {
+        "status": "error",
+        "error_type": "WorkflowPushUnsupportedFlags",
+        "error": (
+            "Open SWE cannot inspect this standalone git push. Nothing ran. Use "
+            "`git [-C <repo>] push [options] origin <branch-or-refspec>` with optional "
+            "-u/--set-upstream, --force-with-lease[=<ref>[:<sha>]], --force-if-includes, "
+            "-f, or --force, targeting the current branch."
+        ),
+    }
+    return ToolMessage(
+        content=json.dumps(content), tool_call_id=_tool_call_id(request) or "", status="error"
+    )
+
+
 def _parse_git_push(command: str) -> ParsedGitPush | None:
+    args = _standalone_push_args(command)
+    if args is None:
+        return None
+    tokens, repo_dir = args
+    return _parse_push_args(tokens, repo_dir=repo_dir)
+
+
+def _standalone_push_args(command: str) -> tuple[list[str], str | None] | None:
     stripped = command.strip()
     if _UNSAFE_RAW_COMMAND.search(stripped) or "&" in stripped.replace("&&", ""):
         return None
@@ -269,14 +302,16 @@ def _parse_git_push(command: str) -> ParsedGitPush | None:
     if len(tokens) >= 4 and tokens[0] == "cd" and tokens[2] == "&&":
         if any(token in _SHELL_OPERATORS or token == "&&" for token in tokens[3:]):
             return None
-        return _parse_git_tokens(tokens[3:], repo_dir=tokens[1])
+        return _git_push_args(tokens[3:], repo_dir=tokens[1])
 
     if any(token in _SHELL_OPERATORS or token == "&&" for token in tokens):
         return None
-    return _parse_git_tokens(tokens, repo_dir=None)
+    return _git_push_args(tokens, repo_dir=None)
 
 
-def _parse_git_tokens(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPush | None:
+def _git_push_args(
+    tokens: list[str], *, repo_dir: str | None
+) -> tuple[list[str], str | None] | None:
     if not tokens or tokens[0] != "git":
         return None
     i = 1
@@ -288,12 +323,13 @@ def _parse_git_tokens(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPu
         return None
     if i >= len(tokens) or tokens[i] != "push":
         return None
-    return _parse_push_args(tokens[i + 1 :], repo_dir=repo_dir)
+    return tokens[i + 1 :], repo_dir
 
 
 def _parse_push_args(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPush | None:
     set_upstream = False
     force_with_lease: str | None = None
+    force_flags: list[str] = []
     positional: list[str] = []
     for token in tokens:
         if token in {"-u", "--set-upstream"}:
@@ -302,6 +338,9 @@ def _parse_push_args(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPus
             if force_with_lease is not None or not _safe_force_with_lease(token):
                 return None
             force_with_lease = token
+        elif token in {"-f", "--force", "--force-if-includes"}:
+            if token not in force_flags:
+                force_flags.append(token)
         elif token.startswith("-"):
             return None
         else:
@@ -319,6 +358,7 @@ def _parse_push_args(tokens: list[str], *, repo_dir: str | None) -> ParsedGitPus
         remote_ref=remote_ref,
         set_upstream=set_upstream,
         force_with_lease=force_with_lease,
+        force_flags=tuple(force_flags),
     )
 
 
@@ -487,6 +527,9 @@ async def _workflow_change_for_push(
         range_expr = f"{shlex.quote(base_ref)}..{shlex.quote(head)}"
         base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}")
         base_sha = _first_line(base_result.output)
+        lease_sha = base_sha
+        if parsed.forced and not _GIT_OBJECT_ID.fullmatch(base_sha):
+            return parsed.inspection_failed()
     else:
         origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
         base_ref = _first_line(origin_head.output) if origin_head.ok else "origin/main"
@@ -495,6 +538,7 @@ async def _workflow_change_for_push(
             backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
         )
         base_sha = _first_line(merge_base.output)
+        lease_sha = ""
 
     names = await _run_git(
         backend,
@@ -531,8 +575,8 @@ async def _workflow_change_for_push(
     remote = await _run_git(backend, root, "config --get remote.origin.url")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
     fixed_refspec = f"{head}:refs/heads/{parsed.remote_branch}"
-    fixed_command = parsed.command_for_head(root, head)
-    payload = {
+    fixed_command = parsed.command_for_head(root, head, lease_sha)
+    payload: dict[str, object] = {
         "repo": repo,
         "branch": branch_name,
         "base_sha": base_sha,
@@ -545,6 +589,8 @@ async def _workflow_change_for_push(
         "fixed_refspec": fixed_refspec,
         "force_with_lease": parsed.force_with_lease,
     }
+    if parsed.force_flags:
+        payload["force_flags"] = parsed.force_flags
     return WorkflowPushChange(
         fingerprint=_fingerprint(payload),
         repo=repo,
@@ -753,9 +799,27 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             )
         if change is not None:
             return await self._handle_change_async(request, handler, change)
+        if await self._unsupported_workflow_push(request):
+            return _unsupported_push_message(request)
         if await self._chained_workflow_push(request):
             return _chained_push_message(request)
         return await handler(request)
+
+    async def _unsupported_workflow_push(self, request: ToolCallRequest) -> bool:
+        """Whether ``request`` is a standalone push with options the guard cannot inspect."""
+        dirs = [
+            args[1]
+            for command in shell_commands(request)
+            if (args := _standalone_push_args(command)) is not None
+            and _parse_push_args(args[0], repo_dir=args[1]) is None
+        ]
+        backend = await _backend(_thread_id(request)) if dirs else None
+        if backend is None:
+            return bool(dirs)
+        for repo_dir in dirs:
+            if await _may_push_workflow_changes(backend, repo_dir):
+                return True
+        return False
 
     async def _chained_workflow_push(self, request: ToolCallRequest) -> bool:
         """Whether ``request`` pushes workflow changes as one step of a longer command."""
