@@ -108,7 +108,7 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> 
         workspace_slug="oss",
         github_proxy_repositories=["acme/repo"],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 

@@ -950,7 +950,6 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
 async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -> QueueController:
     monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
     monkeypatch.setenv("GITHUB_APP_ID", "99")
-    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     monkeypatch.setattr(runtime, "RUNTIME", None)
     monkeypatch.setattr(controller, "CONTROLLER", None)
     config = QueueConfiguration(
@@ -1578,7 +1577,6 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
 
     policy, lease, _ = await enable_native_validation(queue)
     await queue.release(lease)
-    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     config = QueueConfiguration(
         workspace_id=queue.workspace_id,
         repository="acme/widgets",
