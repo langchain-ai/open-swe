@@ -130,7 +130,8 @@ class UserTimeout(Exception):
         (asyncio.CancelledError(TimeoutError("run deadline exceeded")), "failed"),
         (asyncio.CancelledError(UserTimeout("run deadline exceeded")), "failed"),
         (asyncio.CancelledError(UserTimeout(TimeoutError("run deadline exceeded"))), "failed"),
-        (asyncio.CancelledError(), "cancelled"),
+        (asyncio.CancelledError(UserInterrupt("User interrupted the run")), "cancelled"),
+        (asyncio.CancelledError(), "failed"),
         (GeneratorExit(), "cancelled"),
         (RuntimeError("provider failed"), "failed"),
     ],
@@ -156,6 +157,35 @@ async def test_managed_root_records_its_end_reason(
     if reason == "failed":
         assert failure is not None
         assert str(failure) in str(patches[-1]["error"])
+
+
+async def test_managed_run_deadline_preserves_the_root_error() -> None:
+    client = MagicMock(spec=Client)
+    agent = await compile_managed_agent_async(
+        define_deep_agent(
+            name="timed-agent",
+            model=_StalledAnthropic(model_name="claude-opus-5-5", api_key="test"),
+        ),
+        {},
+        report_telemetry=False,
+    )
+    with tracing_context(enabled=True, client=client):
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                agent.ainvoke({"messages": [("user", "hello")]}, {"run_name": "timed-agent"}),
+                timeout=0.1,
+            )
+    root_id = next(
+        call.kwargs["id"]
+        for call in client.create_run.call_args_list
+        if call.kwargs["name"] == "timed-agent"
+    )
+    patches = [
+        call.kwargs for call in client.update_run.call_args_list if call.kwargs["run_id"] == root_id
+    ]
+    assert patches
+    assert _run_metadata(patches[-1])["end_reason"] == "failed"
+    assert "CancelledError" in str(patches[-1]["error"])
 
 
 async def test_root_termination_closes_children_and_suppresses_late_spans() -> None:

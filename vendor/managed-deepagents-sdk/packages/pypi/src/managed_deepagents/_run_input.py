@@ -101,7 +101,7 @@ class ManagedTurnTracer(LangChainTracer):
         if run is self.root:
             reason = "failed"
             if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
-                reason = "cancelled"
+                reason = "cancelled" if isinstance(error, GeneratorExit) else "failed"
                 pending: list[BaseException] = [error]
                 seen: set[int] = set()
                 while pending:
@@ -112,12 +112,13 @@ class ManagedTurnTracer(LangChainTracer):
                     if isinstance(cause, TimeoutError) or type(cause).__name__ == "UserTimeout":
                         reason = "failed"
                         break
-                    if (
-                        type(cause).__name__ == "UserInterrupt"
-                        and str(cause).startswith("superseded by run ")
-                        and "(multitask_strategy=interrupt)" in str(cause)
-                    ):
-                        reason = "superseded"
+                    if type(cause).__name__ == "UserInterrupt":
+                        reason = (
+                            "superseded"
+                            if str(cause).startswith("superseded by run ")
+                            and "(multitask_strategy=interrupt)" in str(cause)
+                            else "cancelled"
+                        )
                     pending.extend(arg for arg in cause.args if isinstance(arg, BaseException))
                     if cause.__cause__ is not None:
                         pending.append(cause.__cause__)
