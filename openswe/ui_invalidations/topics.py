@@ -12,23 +12,22 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from openswe.dashboard.admin import is_admin
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
 if TYPE_CHECKING:
+    from openswe.dashboard.oauth import DashboardSession
     from openswe.github.repo_names import RepoFullName
     from openswe.incidents.models import IncidentId
 
 logger = logging.getLogger(__name__)
 
-type Session = dict[str, Any]
 type Connection = AsyncConnection | AsyncSession
-type KeysAuthorizer = Callable[[Session, set[str]], Awaitable[set[str]]]
+type KeysAuthorizer = Callable[[DashboardSession, set[str]], Awaitable[set[str]]]
 
 _WELL_FORMED = re.compile(r"^[a-z][a-z-]*(?:/[A-Za-z0-9._:@-]+)*$")
 _MAX_LENGTH = 200
@@ -52,7 +51,7 @@ class BaseTopic(ABC):
         return len(topic) <= _MAX_LENGTH and _WELL_FORMED.fullmatch(topic) is not None
 
     @classmethod
-    async def audible(cls, session: Session, topics: Iterable[str]) -> set[str]:
+    async def audible(cls, session: DashboardSession, topics: Iterable[str]) -> set[str]:
         """The ``topics`` ``session`` may hear, each kind authorizing all its keys at once."""
         keys_by_kind: dict[BaseTopic, set[str]] = {}
         for topic in topics:
@@ -69,7 +68,7 @@ class BaseTopic(ABC):
         }
 
     @abstractmethod
-    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+    async def authorize(self, session: DashboardSession, keys: set[str]) -> set[str]:
         """Which of ``keys`` ``session`` may hear; the empty key is this topic itself."""
 
     @staticmethod
@@ -123,16 +122,15 @@ class Topic(BaseTopic):
         """
         await self._publish(conn, self.name)
 
-    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+    async def authorize(self, session: DashboardSession, keys: set[str]) -> set[str]:
         return keys & {""}
 
 
 class AdminTopic(Topic):
     """Data only admins may read, invalidated as a whole."""
 
-    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
-        admin = is_admin(session.get("email"), login=session.get("sub"))
-        return keys & {""} if admin else set()
+    async def authorize(self, session: DashboardSession, keys: set[str]) -> set[str]:
+        return keys & {""} if session.admin else set()
 
 
 class KeyedTopic[K: str](BaseTopic):
@@ -155,19 +153,19 @@ class KeyedTopic[K: str](BaseTopic):
     def keyed(self, key: K) -> str:
         return f"{self.name}/{key}"
 
-    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+    async def authorize(self, session: DashboardSession, keys: set[str]) -> set[str]:
         records = keys - {""}
         if self._authorize_keys is None or not records:
             return keys
         return (keys & {""}) | await self._authorize_keys(session, records)
 
 
-async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[str]:
+async def _readable_incidents(session: DashboardSession, incident_ids: set[str]) -> set[str]:
     # The incident service invalidates through this module.
     from openswe.incidents import service
     from openswe.incidents.models import IncidentId
 
-    admin = is_admin(session.get("email"), login=session.get("sub"))
+    admin = session.admin
     ordered = sorted(incident_ids)
     visible = await asyncio.gather(
         *(service.visible(IncidentId(key), include_setup=admin) for key in ordered)
@@ -175,12 +173,12 @@ async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[s
     return {key for key, ok in zip(ordered, visible, strict=True) if ok}
 
 
-async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
+async def _readable_pull_requests(session: DashboardSession, keys: set[str]) -> set[str]:
     # Imported on use: most of the app imports this module, which stays light.
     from openswe.github.repos import accessible_repo_full_names
 
     try:
-        accessible = await accessible_repo_full_names(session["sub"])
+        accessible = await accessible_repo_full_names(session.login)
     except Exception:
         logger.warning("Could not list repositories for pull request invalidations", exc_info=True)
         return set()
@@ -193,7 +191,7 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     }
 
 
-async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
+async def _readable_threads(session: DashboardSession, thread_ids: set[str]) -> set[str]:
     # Thread summaries import this module.
     from openswe.threads.summary import thread_is_readable
     from openswe.utils.json_types import thread_metadata
@@ -213,7 +211,7 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
                 extra={"agent_thread_id": thread_id},
             )
             continue
-        if thread_is_readable(thread_metadata(thread), session.get("sub"), session.get("email")):
+        if thread_is_readable(thread_metadata(thread), session.login, session.email):
             readable.add(thread_id)
     return readable
 

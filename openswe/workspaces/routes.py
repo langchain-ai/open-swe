@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.agent_overrides import get_profile_default_repo
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.refresh import (
@@ -70,7 +71,7 @@ async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
 
 @router.get("/workspaces")
 async def api_list_workspaces(
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
     return {
         "workspaces": await WORKSPACES.list_all(),
@@ -83,11 +84,11 @@ async def api_list_workspaces(
 async def api_create_workspace(
     body: WorkspaceCreate,
     request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> Workspace:
     await _require_kitchen_eligible(body.kitchen_channel_ids)
     try:
-        record = await WORKSPACES.create(body, _admin["sub"])
+        record = await WORKSPACES.create(body, _admin.login)
     except ValueError as e:
         raise _save_conflict(e) from e
     await bind_workspace(request, record)
@@ -115,16 +116,16 @@ async def _default_repo_for(slug: str, login: str | None = None) -> str | None:
 
 @router.get("/workspaces/options")
 async def api_workspace_options(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     """Pickable workspaces for any signed-in user; refresh logs only for admins.
 
     Each option carries ``default_repo`` so the composer can preselect it when
     the workspace is chosen first.
     """
-    options = await list_workspace_options(include_logs=session_is_admin(session))
+    options = await list_workspace_options(include_logs=session.admin)
     defaults = await asyncio.gather(
-        *(_default_repo_for(option["slug"], session.get("sub")) for option in options)
+        *(_default_repo_for(option["slug"], session.login) for option in options)
     )
     for option, default_repo in zip(options, defaults, strict=True):
         option["default_repo"] = default_repo
@@ -134,7 +135,7 @@ async def api_workspace_options(
 @router.get("/workspaces/{slug}")
 async def api_get_workspace(
     slug: str,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> Workspace:
     record = await WORKSPACES.get(_normalized_slug(slug))
     if not record:
@@ -148,7 +149,7 @@ async def api_update_workspace(
     slug: str,
     body: WorkspaceUpdate,
     request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> Workspace:
     normalized = _normalized_slug(slug)
     previous = await WORKSPACES.get(normalized)
@@ -194,7 +195,7 @@ class RepositoryConfiguration(BaseModel):
 @router.get("/workspaces/{slug}/repositories")
 async def api_list_workspace_repositories(
     slug: str,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> list[RepositorySettings]:
     normalized = _normalized_slug(slug)
     if not await WORKSPACES.slug_exists(normalized):
@@ -210,7 +211,7 @@ async def api_configure_workspace_repository(
     name: str,
     body: RepositoryConfiguration,
     request: Request,
-    admin: dict[str, Any] = ADMIN_DEP,
+    admin: DashboardSession = ADMIN_DEP,
 ) -> RepositorySettings:
     """Change how one of a workspace's repositories is configured there."""
     normalized = _normalized_slug(slug)
@@ -227,7 +228,7 @@ async def api_configure_workspace_repository(
             "workspace": normalized,
             "repository": settings.repo,
             "may_start_threads": settings.may_start_threads,
-            "changed_by": str(admin.get("sub") or ""),
+            "changed_by": admin.login,
         },
     )
     return settings
@@ -238,7 +239,7 @@ async def api_configure_workspace_repository(
 async def api_refresh_workspace(
     slug: str,
     request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
     """Start a snapshot rebuild from the workspace's scripts.
 
@@ -265,7 +266,7 @@ async def api_refresh_workspace(
 async def api_delete_workspace(
     slug: str,
     request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> Response:
     normalized = _normalized_slug(slug)
     await bind_workspace(request, normalized)

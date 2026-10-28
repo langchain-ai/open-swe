@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from openswe.config import ENV
 from openswe.dashboard.admin import configured_admins, is_admin
-from openswe.dashboard.deps import SESSION_DEP, session_is_admin
+from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
 from openswe.dashboard.oauth import (
     COOKIE_NAME,
@@ -19,6 +19,7 @@ from openswe.dashboard.oauth import (
     MCP_SIGN_IN_CALLBACK_PATH,
     SESSION_TTL_SECONDS,
     STATE_COOKIE_NAME,
+    DashboardSession,
     GithubUser,
     clear_state_cookie,
     cookie_security,
@@ -35,10 +36,8 @@ from openswe.dashboard.oauth import (
     issue_session,
     issue_state,
     new_state_nonce,
-    rebind_session,
     redeem_desktop_handoff,
     sanitize_redirect_to,
-    session_user_id,
     set_session_cookie,
     set_state_cookie,
     valid_handoff_challenge,
@@ -243,37 +242,19 @@ async def auth_logout() -> Response:
 
 
 @router.get("/me")
-async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    # Best-effort: this endpoint is what the dashboard boots on, and it must
-    # answer from the session alone when the database is unreachable.
-    user = None
-    try:
-        user = await User.for_session(session_user_id(session), session["sub"])
-    except Exception:
-        logger.warning(
-            "Could not read the signed-in user's row",
-            extra={"github_login": session["sub"]},
-            exc_info=True,
-        )
-    else:
-        if user is None and postgres.configured():
-            raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
-    if user is not None and session_user_id(session) != user.id:
-        # The dashboard boots here, so every stale cookie is repaired on its next load.
-        set_session_cookie(response, rebind_session(session, str(user.id)))
-        logger.info(
-            "Rebound a stale session to its user",
-            extra={"github_login": session["sub"], "user_id": str(user.id)},
-        )
-    preferences = await get_user_preferences(session["sub"])
+async def me(session: DashboardSession = SESSION_DEP) -> dict[str, Any]:
+    user = await User.get(session.user_id)
+    if user is None:
+        raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
+    preferences = await get_user_preferences(session.login)
     return {
-        "login": session["sub"],
-        "display_name": user.display_name if user else "",
-        "email": session.get("email") or (user.email or None if user else None),
-        "avatar_url": session.get("avatar_url"),
-        "user_id": str(user.id) if user else session.get("user_id"),
-        "slack_user_id": (user.slack_user_id or None) if user else None,
-        "is_admin": session_is_admin(session),
+        "login": session.login,
+        "display_name": user.display_name,
+        "email": session.email or user.email or None,
+        "avatar_url": session.avatar_url,
+        "user_id": str(user.id),
+        "slack_user_id": user.slack_user_id or None,
+        "is_admin": session.admin,
         "follow_up_behavior": preferences["follow_up_behavior"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.

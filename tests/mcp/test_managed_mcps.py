@@ -17,6 +17,7 @@ from openswe.dashboard.workspace_settings import (
 )
 from openswe.mcp import cards, managed, routes, runtime
 from openswe.users.models import User
+from tests.support.sessions import signed_in
 
 GATEWAY_ID = "01a0f8da-0f4b-7817-b2da-27b7bfa5f0f8"
 
@@ -452,11 +453,11 @@ async def test_only_the_card_owner_can_mint_its_consent_links(monkeypatch, card_
 
     with pytest.raises(HTTPException) as denied:
         await routes.connect_managed_tool_from_card(
-            GATEWAY_ID, "linear", "t", "call-1", session={"sub": "bob"}
+            GATEWAY_ID, "linear", "t", "call-1", session=signed_in("bob")
         )
     assert denied.value.status_code == 404
     redirect = await routes.connect_managed_tool_from_card(
-        GATEWAY_ID, "linear", "t", "call-1", session={"sub": "Alice"}
+        GATEWAY_ID, "linear", "t", "call-1", session=signed_in("Alice")
     )
     assert redirect.headers["location"] == link.url
     cards.connect_link.assert_awaited_once_with("alice", GATEWAY_ID, "linear")

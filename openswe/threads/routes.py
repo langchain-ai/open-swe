@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
-from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession, bind_audit_session, decode_upload_ticket
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
@@ -102,13 +102,13 @@ async def api_list_threads(
 @router.post("/threads", status_code=201)
 async def api_create_session(
     body: SessionCreateBody,
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, str]:
-    thread_id = await create_dashboard_session(body, session["sub"], email=session.get("email"))
+    thread_id = await create_dashboard_session(body, session.login, email=session.email)
     if body.start:
         status, content, _ = await proxy_dashboard_thread_commands(
             thread_id,
-            session["sub"],
+            session.login,
             json.dumps(
                 {
                     "id": 1,
@@ -116,7 +116,7 @@ async def api_create_session(
                     "params": {"input": {"messages": [{"type": "human", "content": body.prompt}]}},
                 }
             ).encode(),
-            email=session.get("email"),
+            email=session.email,
         )
         try:
             result: object = json.loads(content)
@@ -145,7 +145,7 @@ async def api_upload_session(request: Request) -> dict[str, Any] | Response:
     if code is None:
         raise HTTPException(401, "send the upload token as a bearer token")
     ticket = decode_upload_ticket(code)
-    bind_audit_session(request, {"sub": ticket.sub, "user_id": ticket.user_id})
+    bind_audit_session(request, await DashboardSession.load(ticket.user_id, email=ticket.email))
     summary = await upload_session(UploadStream(request), ticket)
     if summary is None:
         return Response(status_code=204)
@@ -155,11 +155,9 @@ async def api_upload_session(request: Request) -> dict[str, Any] | Response:
 @router.post("/threads/resolve-all")
 @audit_endpoint
 async def api_resolve_all_threads(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, int]:
-    return {
-        "resolved": await resolve_all_dashboard_threads(session["sub"], email=session.get("email"))
-    }
+    return {"resolved": await resolve_all_dashboard_threads(session.login, email=session.email)}
 
 
 @router.get("/threads/repos")
@@ -169,13 +167,13 @@ async def api_list_thread_repos(
     owned: bool = False,
     all: bool = False,
     exclude_source: Annotated[list[str] | None, Query()] = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    if all and not session_is_admin(session):
+    if all and not session.admin:
         raise HTTPException(403, "admin only")
     return await list_dashboard_thread_repos(
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
         include_resolved=include_resolved,
         include_automations=include_automations,
         owned=owned,
@@ -186,18 +184,18 @@ async def api_list_thread_repos(
 
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+    return await list_dashboard_pinned_threads(session.login, email=session.email)
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
 @audit_endpoint
 async def api_pin_thread(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await pin_dashboard_thread(thread_id, session["sub"])
+    await pin_dashboard_thread(thread_id, session.login)
     return Response(status_code=204)
 
 
@@ -205,9 +203,9 @@ async def api_pin_thread(
 @audit_endpoint
 async def api_unpin_thread(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await unpin_dashboard_thread(thread_id, session["sub"])
+    await unpin_dashboard_thread(thread_id, session.login)
     return Response(status_code=204)
 
 
@@ -230,9 +228,9 @@ async def api_list_threads_page(
     exclude_source: Annotated[list[str] | None, Query()] = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    if all and not session_is_admin(session):
+    if all and not session.admin:
         raise HTTPException(403, "admin only")
     if repo and ownerless:
         raise HTTPException(400, "repo and ownerless are mutually exclusive")
@@ -242,8 +240,8 @@ async def api_list_threads_page(
             raise HTTPException(400, "repo must be owner/name")
         repo = f"{owner}/{name}"
     return await list_dashboard_threads_page(
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
         limit=limit,
         offset=offset,
         include_all=all,
@@ -276,32 +274,30 @@ class PullRequestChecksRequest(BaseModel):
 @router.post("/threads/pull-request-checks")
 async def api_get_pull_request_checks(
     payload: PullRequestChecksRequest,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, PullRequestState]:
     return await get_dashboard_pull_request_checks(
-        [ref.model_dump() for ref in payload.pullRequests], session["sub"]
+        [ref.model_dump() for ref in payload.pullRequests], session.login
     )
 
 
 @router.get("/threads/{thread_id}/pull-request-status")
 async def api_get_thread_pull_request_status(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_pull_request_status(
         thread_id,
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
     )
 
 
 @router.get("/threads/{thread_id}/queued-messages", response_model=list[QueuedPreview])
 async def api_get_thread_queued_messages(
-    thread_id: str, session: dict[str, Any] = SESSION_DEP
+    thread_id: str, session: DashboardSession = SESSION_DEP
 ) -> list[QueuedPreview]:
-    return await get_dashboard_thread_queued_messages(
-        thread_id, session["sub"], email=session.get("email")
-    )
+    return await get_dashboard_thread_queued_messages(thread_id, session.login, email=session.email)
 
 
 @router.get("/threads/{thread_id}/pull-request-context")
@@ -310,15 +306,15 @@ async def api_get_thread_pull_request_context(
     repo_full_name: str,
     number: int,
     scope: PullRequestFixScope,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_pull_request_context(
         thread_id,
-        session["sub"],
+        session.login,
         repo_full_name=repo_full_name,
         number=number,
         scope=scope,
-        email=session.get("email"),
+        email=session.email,
     )
 
 
@@ -350,12 +346,12 @@ router.include_router(browser.router)
 @router.get("/threads/{thread_id}/recovery.patch")
 async def api_get_thread_recovery_patch(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     content, filename = await get_dashboard_thread_recovery_patch(
         thread_id,
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
     )
     return Response(
         content=content,
@@ -367,22 +363,22 @@ async def api_get_thread_recovery_patch(
 @router.get("/threads/{thread_id}/working-tree-diff")
 async def api_get_thread_working_tree_diff(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_working_tree_diff(
-        thread_id, session["sub"], email=session.get("email")
+        thread_id, session.login, email=session.email
     )
 
 
 @router.get("/threads/{thread_id}/branch-diff")
 async def api_get_thread_branch_diff(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_branch_diff(
         thread_id,
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
     )
 
 
@@ -390,51 +386,45 @@ async def api_get_thread_branch_diff(
 async def api_get_thread_path(
     thread_id: str,
     path: str = "",
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> WorkspacePath:
-    return await get_dashboard_thread_path(
-        thread_id, session["sub"], path, email=session.get("email")
-    )
+    return await get_dashboard_thread_path(thread_id, session.login, path, email=session.email)
 
 
 @router.get("/threads/{thread_id}/background-work")
 async def api_get_thread_background_work(
-    thread_id: str, session: dict[str, Any] = SESSION_DEP
+    thread_id: str, session: DashboardSession = SESSION_DEP
 ) -> BackgroundWork:
-    return await get_dashboard_thread_background_work(
-        thread_id, session["sub"], email=session.get("email")
-    )
+    return await get_dashboard_thread_background_work(thread_id, session.login, email=session.email)
 
 
 @router.get("/threads/{thread_id}/background-work/{task_id}/output")
 async def api_get_thread_background_output(
-    thread_id: str, task_id: str, session: dict[str, Any] = SESSION_DEP
+    thread_id: str, task_id: str, session: DashboardSession = SESSION_DEP
 ) -> BackgroundOutput:
     return await get_dashboard_thread_background_output(
-        thread_id, task_id, session["sub"], email=session.get("email")
+        thread_id, task_id, session.login, email=session.email
     )
 
 
 @router.get("/threads/{thread_id}/file-index")
 async def api_get_thread_file_index(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> WorkspaceFileIndex:
-    return await get_dashboard_thread_file_index(
-        thread_id, session["sub"], email=session.get("email")
-    )
+    return await get_dashboard_thread_file_index(thread_id, session.login, email=session.email)
 
 
 # The pre-branch-diff name, kept for desktop bundles already in the wild.
 @router.get("/threads/{thread_id}/pr-diff")
 async def api_get_thread_pr_diff(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_branch_diff(
         thread_id,
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
     )
 
 
@@ -443,13 +433,13 @@ async def api_get_thread_pr_diff(
 async def api_rename_thread(
     thread_id: str,
     body: ThreadRenameBody,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await rename_dashboard_thread(
         thread_id,
-        session["sub"],
+        session.login,
         title=body.title,
-        email=session.get("email"),
+        email=session.email,
     )
 
 
@@ -457,9 +447,9 @@ async def api_rename_thread(
 @audit_endpoint
 async def api_share_thread_with_workspace(
     thread_id: str,
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, object]:
-    return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
+    return await share_thread_with_workspace(thread_id, session.login, email=session.email)
 
 
 class ThreadMoveRequest(BaseModel):
@@ -474,12 +464,12 @@ class ThreadMoveRequest(BaseModel):
 async def api_move_thread(
     thread_id: str,
     body: ThreadMoveRequest,
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, object]:
     return await move_thread(
         thread_id,
-        session["sub"],
-        email=session.get("email"),
+        session.login,
+        email=session.email,
         bridge_id=body.sandbox_bridge_id,
         target=body.target,
     )
@@ -489,9 +479,9 @@ async def api_move_thread(
 @audit_endpoint
 async def api_continue_thread_privately(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    return await continue_thread_privately(thread_id, session["sub"], email=session.get("email"))
+    return await continue_thread_privately(thread_id, session.login, email=session.email)
 
 
 @router.post("/threads/{thread_id}/resolve")
@@ -499,13 +489,13 @@ async def api_continue_thread_privately(
 async def api_resolve_thread(
     thread_id: str,
     body: ThreadResolveBody,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     return await resolve_dashboard_thread(
         thread_id,
-        session["sub"],
+        session.login,
         resolved=body.resolved,
-        email=session.get("email"),
+        email=session.email,
     )
 
 
@@ -516,16 +506,16 @@ async def api_list_thread_runs(
     offset: int = 0,
     status: str | None = None,
     select: Annotated[list[str] | None, Query()] = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     status_code, content, media_type = await proxy_dashboard_thread_runs_list(
         thread_id,
-        session["sub"],
+        session.login,
         limit=limit,
         offset=offset,
         status=status,
         select=select,
-        email=session.get("email"),
+        email=session.email,
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
 
@@ -535,14 +525,14 @@ async def api_list_thread_runs(
 async def api_create_thread_run(
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     body = await request.body()
     return await proxy_dashboard_thread_run_enqueue(
         thread_id,
-        session["sub"],
+        session.login,
         body,
-        email=session.get("email"),
+        email=session.email,
         content_type=request.headers.get("content-type", "application/json"),
     )
 
@@ -552,17 +542,17 @@ async def api_create_thread_run(
 async def api_cancel_thread_run(
     thread_id: str,
     run_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
     wait: str = "0",
     action: str = "interrupt",
 ) -> Response:
     status_code, content, media_type = await proxy_dashboard_thread_run_cancel(
         thread_id,
         run_id,
-        session["sub"],
+        session.login,
         wait=wait,
         action=action,
-        email=session.get("email"),
+        email=session.email,
     )
     if status_code < 400:
         await interrupt_transcript_turns(thread_id, [run_id])
@@ -584,30 +574,30 @@ async def api_cancel_thread(
 @audit_endpoint
 async def admin_cancel_thread(
     thread_id: str,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
+    return await admin_cancel_dashboard_thread(thread_id, _admin.login, email=_admin.email)
 
 
 @router.delete("/threads/{thread_id}")
 @audit_endpoint
 async def api_delete_thread(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await delete_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+    await delete_dashboard_thread(thread_id, session.login, email=session.email)
     return Response(status_code=204)
 
 
 @router.get("/threads/{thread_id}/state")
 async def api_get_thread_state(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     timings: dict[str, float] = {}
     started = perf_counter()
     payload = await get_dashboard_thread_state(
-        thread_id, session["sub"], email=session.get("email"), timings=timings
+        thread_id, session.login, email=session.email, timings=timings
     )
     timings["total"] = (perf_counter() - started) * 1000
     header = server_timing_header(timings)
@@ -665,14 +655,14 @@ async def api_thread_commands(
 async def api_thread_history(
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     body = await request.body()
     status_code, content, media_type = await proxy_dashboard_thread_history(
         thread_id,
-        session["sub"],
+        session.login,
         body,
-        email=session.get("email"),
+        email=session.email,
         content_type=request.headers.get("content-type", "application/json"),
     )
     return Response(content=content, status_code=status_code, media_type=media_type)

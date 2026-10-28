@@ -12,6 +12,7 @@ from openswe.threads.session_upload import (
 from openswe.tools.access import Policy, access, unchanged
 from openswe.tools.admin_gate import configurable
 from openswe.tools.mcp_exposure import expose_mcp
+from openswe.users import User
 
 
 @expose_mcp()
@@ -31,7 +32,12 @@ async def upload_session(
     header = SessionUploadHeader(
         type=type, repo=repo, branch=branch, pr_url=pr_url, visibility=visibility
     )
-    reservation = await reserve_session_upload(header, cfg.github_login, email=cfg.user_email)
+    user = await User.for_login("github", cfg.github_login)
+    if user is None:
+        return {"ok": False, "error": "The caller has no Open SWE account"}
+    reservation = await reserve_session_upload(
+        header, cfg.github_login, user_id=user.id, email=cfg.user_email
+    )
     return {
         "ok": True,
         **reservation.model_dump(),

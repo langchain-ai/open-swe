@@ -11,6 +11,7 @@ from slack_sdk.errors import SlackApiError
 from openswe.jobs import queue
 from openswe.slack import channel_options, channels, dashboard_routes
 from openswe.slack.channels import SlackChannel
+from tests.support.sessions import signed_in
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:
@@ -195,9 +196,9 @@ async def test_private_channels_are_listed_for_admins_only(
         channels=[option("C0PUBLIC", private=False), option("G0PRIVATE", private=True)]
     )
     monkeypatch.setattr(dashboard_routes, "list_slack_channels", AsyncMock(return_value=directory))
-    monkeypatch.setattr(dashboard_routes, "session_is_admin", lambda _session: admin)
+    monkeypatch.setenv("CONFIGURED_ADMINS", "someone" if admin else "")
 
-    listed = await dashboard_routes.api_list_slack_channels({"sub": "someone"})
+    listed = await dashboard_routes.api_list_slack_channels(signed_in("someone"))
 
     assert [channel.id for channel in listed.channels] == (
         ["C0PUBLIC", "G0PRIVATE"] if admin else ["C0PUBLIC"]

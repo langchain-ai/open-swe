@@ -29,6 +29,8 @@ from openswe.utils.thread_ops import langgraph_url
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
 
+pytest_plugins = ["tests.support.sessions"]
+
 # What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
 os.environ.setdefault("REDIS_URI", "fake")
 os.environ.setdefault("DATABASE_URI", ":memory:")

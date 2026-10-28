@@ -1,20 +1,15 @@
 """FastAPI dependencies shared by every dashboard-mounted API router."""
 
-from typing import Any, Protocol
+from typing import Protocol
 
 from fastapi import Depends, HTTPException
 
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import require_session
+from openswe.dashboard.oauth import DashboardSession, require_session
 from openswe.dashboard.repo_access import require_repo_access_for_user
 
 
-def session_is_admin(session: dict[str, Any]) -> bool:
-    return is_admin(session.get("email"), login=session.get("sub"))
-
-
-def require_admin(session: dict[str, Any]) -> dict[str, Any]:
-    if not session_is_admin(session):
+def require_admin(session: DashboardSession) -> DashboardSession:
+    if not session.admin:
         raise HTTPException(403, "admin only")
     return session
 
@@ -22,7 +17,7 @@ def require_admin(session: dict[str, Any]) -> dict[str, Any]:
 SESSION_DEP = Depends(require_session)
 
 
-def admin_session(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
+def admin_session(session: DashboardSession = SESSION_DEP) -> DashboardSession:
     return require_admin(session)
 
 

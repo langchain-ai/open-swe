@@ -12,6 +12,7 @@ from openswe.github import dashboard_routes, repo_cache, repos
 from openswe.github.http import GitHubClient
 from openswe.users import User
 from tests.support.github_sdk import mock_github_sdk
+from tests.support.sessions import signed_in
 
 _read_cached_repos = repo_cache.read_cached_repos
 _write_cached_repos = repo_cache.write_cached_repos
@@ -119,7 +120,7 @@ async def test_list_repos_follows_installation_and_repository_next_links(
         )
 
     mock_github_sdk(monkeypatch, handle)
-    payload = await dashboard_routes.list_repos(session={"sub": "octocat"})
+    payload = await dashboard_routes.list_repos(session=signed_in("octocat"))
     assert payload["repositories"] == [
         {"full_name": "acme/first", "private": False, "archived": False},
         {"full_name": "acme/later", "private": True, "archived": True},
@@ -166,7 +167,7 @@ async def test_list_repos_serves_stale_cache_and_schedules_refresh(monkeypatch) 
     schedule = MagicMock()
     monkeypatch.setattr(dashboard_routes, "schedule_repo_cache_refresh", schedule)
 
-    result = await dashboard_routes.list_repos(session={"sub": "octocat"})
+    result = await dashboard_routes.list_repos(session=signed_in("octocat"))
 
     assert result == cached
     fetch.assert_not_awaited()

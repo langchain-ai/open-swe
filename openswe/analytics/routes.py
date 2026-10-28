@@ -13,7 +13,8 @@ from openswe.analytics.queries import (
     usage_leaderboard,
 )
 from openswe.config import ENV
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +50,13 @@ class PageView(BaseModel):
 @router.post("/analytics/page", status_code=204)
 async def api_page_view(
     body: PageView,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> None:
     from openswe.analytics.posthog import record_usage
 
     await record_usage(
-        login=session["sub"],
-        email=session.get("email"),
+        login=session.login,
+        email=session.email,
         event_type="page",
         name=body.page_name,
         properties={"page_name": body.page_name, "surface": "dashboard"},
@@ -69,7 +70,7 @@ async def api_agent_usage_leaderboard(
     cursor: str | None = None,
     sort: UsageSort = "rank",
     direction: SortDirection = "asc",
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
@@ -85,9 +86,9 @@ async def api_agent_usage_leaderboard(
             cursor=cursor,
             sort=sort,
             direction=direction,
-            current_login=session["sub"],
-            current_email=session.get("email"),
-            admin=session_is_admin(session),
+            current_login=session.login,
+            current_email=session.email,
+            admin=session.admin,
         )
     except InvalidUsageCursor as exc:
         logger.info(
@@ -107,7 +108,7 @@ async def api_agent_usage_leaderboard(
 async def api_pr_merge_rate_by_model(
     period: str | None = "30d",
     maturity_days: int | None = Query(default=None, ge=1, le=365),
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
@@ -121,7 +122,7 @@ async def api_pr_merge_rate_by_model(
         return await pr_merge_rate_by_model(
             period=period,
             maturity_days=maturity_days,
-            admin=session_is_admin(session),
+            admin=session.admin,
         )
     except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
         logger.warning(
@@ -133,7 +134,7 @@ async def api_pr_merge_rate_by_model(
 
 @router.get("/analytics/readiness")
 async def api_analytics_readiness(
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
     from openswe.database.analytics import readiness
 
@@ -142,7 +143,7 @@ async def api_analytics_readiness(
 
 @router.get("/analytics/outbox-status")
 async def api_analytics_outbox_status(
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
     from openswe.analytics.outbox import outbox_status
 

@@ -13,6 +13,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_workspace_overrides,
 )
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.sessions import signed_in
 
 
 async def test_an_override_applies_to_its_workspace_only(registry_db) -> None:
@@ -124,12 +125,12 @@ async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(re
     """A name the store could never hold is a bad request; a name it does not hold is 404."""
     with pytest.raises(HTTPException) as refused:
         await workspace_settings.api_get_workspace_settings(
-            workspace="!!!", _session={"sub": "alice"}
+            workspace="!!!", _session=signed_in("alice")
         )
     assert refused.value.status_code == 400
     with pytest.raises(HTTPException) as missing:
         await workspace_settings.api_get_workspace_settings(
-            workspace="oss", _session={"sub": "alice"}
+            workspace="oss", _session=signed_in("alice")
         )
     assert missing.value.status_code == 404
 
@@ -144,7 +145,7 @@ async def test_workspace_settings_api_round_trips_overrides(registry_db) -> None
         workspace=" OSS ",
         body=WorkspaceSettingsUpdate(review_draft_prs=False),
         request=request,
-        _admin={"sub": "alice"},
+        _admin=signed_in("alice"),
     )
     assert entry.workspace_id == await WORKSPACES.id_for_slug("oss")
     assert entry.enrichments.workspace == "oss"
@@ -152,9 +153,9 @@ async def test_workspace_settings_api_round_trips_overrides(registry_db) -> None
     assert saved["effective"]["review_draft_prs"] is False
 
     fetched = await workspace_settings.api_get_workspace_settings(
-        workspace="oss", _session={"sub": "alice"}
+        workspace="oss", _session=signed_in("alice")
     )
     assert fetched == saved
-    assert (await workspace_settings.api_get_instance_settings(_session={"sub": "alice"}))[
+    assert (await workspace_settings.api_get_instance_settings(_session=signed_in("alice")))[
         "review_draft_prs"
     ] is True

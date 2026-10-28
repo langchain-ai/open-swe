@@ -6,13 +6,14 @@ import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal, Self
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import PullRequestClient
@@ -382,10 +383,10 @@ async def api_get_review_conversation(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Conversation:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    async with GitHubClient.as_user(session["sub"]) as github:
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    async with GitHubClient.as_user(session.login) as github:
         return await Conversation.load(github.repo(owner, repo).pull_request(pr_number))
 
 
@@ -396,11 +397,11 @@ async def api_post_review_conversation_comment(
     repo: str,
     pr_number: int,
     comment: ConversationCommentCreate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ConversationComment:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     body = comment.text
-    async with GitHubClient.as_user(session["sub"]) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return await ConversationComment.post(
             github.repo(owner, repo).pull_request(pr_number), body
         )
@@ -414,11 +415,11 @@ async def api_reply_to_review_thread(
     pr_number: int,
     comment_id: int,
     comment: ConversationCommentCreate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ThreadComment:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     body = comment.text
-    async with GitHubClient.as_user(session["sub"]) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return await ThreadComment.reply(
             github.repo(owner, repo).pull_request(pr_number), comment_id, body
         )
@@ -434,10 +435,10 @@ async def api_set_review_thread_resolution(
     pr_number: int,
     thread_node_id: str,
     resolution: ThreadResolution,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> None:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    async with GitHubClient.as_user(session["sub"]) as github:
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    async with GitHubClient.as_user(session.login) as github:
         await (
             github.repo(owner, repo)
             .pull_request(pr_number)

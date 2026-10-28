@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
-from openswe.dashboard.oauth import frontend_base_url
+from openswe.dashboard.oauth import DashboardSession, frontend_base_url
 from openswe.mcp.cards import ConnectCard, connect_service
 from openswe.mcp.instance import (
     delete_instance_mcp,
@@ -78,14 +78,14 @@ instance_mcp_router = APIRouter(route_class=MCPRoute)
 
 
 @instance_mcp_router.get("/mcps", response_model=list[MCPConnectionPublic])
-async def api_list_instance_mcps(_admin: dict[str, Any] = ADMIN_DEP) -> list[dict[str, Any]]:
+async def api_list_instance_mcps(_admin: DashboardSession = ADMIN_DEP) -> list[dict[str, Any]]:
     return await list_instance_mcps()
 
 
 @instance_mcp_router.put("/mcps/{name}", response_model=MCPConnectionPublic)
 @audit_endpoint
 async def api_save_instance_mcp(
-    name: str, update: MCPConnectionUpdate, _admin: dict[str, Any] = ADMIN_DEP
+    name: str, update: MCPConnectionUpdate, _admin: DashboardSession = ADMIN_DEP
 ) -> dict[str, Any]:
     try:
         return await save_instance_mcp(name, update)
@@ -95,14 +95,14 @@ async def api_save_instance_mcp(
 
 @instance_mcp_router.delete("/mcps/{name}", status_code=204)
 @audit_endpoint
-async def api_delete_instance_mcp(name: str, _admin: dict[str, Any] = ADMIN_DEP) -> None:
+async def api_delete_instance_mcp(name: str, _admin: DashboardSession = ADMIN_DEP) -> None:
     await delete_instance_mcp(name)
 
 
 @instance_mcp_router.post("/mcps/{name}/headers/reveal")
 @audit_endpoint
 async def api_reveal_instance_mcp_headers(
-    name: str, _admin: dict[str, Any] = ADMIN_DEP
+    name: str, _admin: DashboardSession = ADMIN_DEP
 ) -> JSONResponse:
     return _reveal_mcp_headers(await get_instance_mcp(name))
 
@@ -111,7 +111,7 @@ async def api_reveal_instance_mcp_headers(
 async def api_discover_instance_mcp(
     name: str,
     update: MCPConnectionUpdate | None = None,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> list[dict[str, str]]:
     try:
         return await discover_instance_mcp(name, update)
@@ -124,7 +124,7 @@ workspace_mcp_router = APIRouter(route_class=MCPRoute)
 
 @workspace_mcp_router.get("/workspaces/{workspace}/mcps", response_model=list[MCPConnectionPublic])
 async def api_list_workspace_mcps(
-    workspace: str, _admin: dict[str, Any] = ADMIN_DEP
+    workspace: str, _admin: DashboardSession = ADMIN_DEP
 ) -> list[dict[str, Any]]:
     return await list_workspace_mcps(_normalized_workspace(workspace))
 
@@ -135,7 +135,7 @@ async def api_save_workspace_mcp(
     workspace: str,
     name: str,
     update: MCPConnectionUpdate,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
     try:
         return await save_workspace_mcp(_normalized_workspace(workspace), name, update)
@@ -146,7 +146,7 @@ async def api_save_workspace_mcp(
 @workspace_mcp_router.delete("/workspaces/{workspace}/mcps/{name}", status_code=204)
 @audit_endpoint
 async def api_delete_workspace_mcp(
-    workspace: str, name: str, _admin: dict[str, Any] = ADMIN_DEP
+    workspace: str, name: str, _admin: DashboardSession = ADMIN_DEP
 ) -> None:
     await delete_workspace_mcp(_normalized_workspace(workspace), name)
 
@@ -156,7 +156,7 @@ async def api_delete_workspace_mcp(
 async def api_reveal_workspace_mcp_headers(
     workspace: str,
     name: str,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> JSONResponse:
     return _reveal_mcp_headers(await get_workspace_mcp(_normalized_workspace(workspace), name))
 
@@ -168,7 +168,7 @@ async def api_discover_workspace_mcp(
     workspace: str,
     name: str,
     update: MCPConnectionUpdate | None = None,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> list[dict[str, str]]:
     try:
         return await discover_workspace_mcp(_normalized_workspace(workspace), name, update)
@@ -180,8 +180,8 @@ user_mcp_router = APIRouter(route_class=MCPRoute)
 
 
 @user_mcp_router.get("/my-mcps", response_model=list[MCPConnectionPublic])
-async def api_list_my_mcps(session: dict[str, Any] = SESSION_DEP) -> list[dict[str, Any]]:
-    return await list_user_mcps(session["sub"])
+async def api_list_my_mcps(session: DashboardSession = SESSION_DEP) -> list[dict[str, Any]]:
+    return await list_user_mcps(session.login)
 
 
 @user_mcp_router.put("/my-mcps/{name}", response_model=MCPConnectionPublic)
@@ -189,37 +189,37 @@ async def api_list_my_mcps(session: dict[str, Any] = SESSION_DEP) -> list[dict[s
 async def api_save_my_mcp(
     name: str,
     update: MCPConnectionUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     try:
-        return await save_user_mcp(session["sub"], name, update)
+        return await save_user_mcp(session.login, name, update)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
 
 @user_mcp_router.delete("/my-mcps/{name}", status_code=204)
 @audit_endpoint
-async def api_delete_my_mcp(name: str, session: dict[str, Any] = SESSION_DEP) -> None:
-    await delete_user_mcp(session["sub"], name)
+async def api_delete_my_mcp(name: str, session: DashboardSession = SESSION_DEP) -> None:
+    await delete_user_mcp(session.login, name)
 
 
 @user_mcp_router.post("/my-mcps/{name}/headers/reveal")
 @audit_endpoint
 async def api_reveal_my_mcp_headers(
     name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> JSONResponse:
-    return _reveal_mcp_headers(await get_user_mcp(session["sub"], name))
+    return _reveal_mcp_headers(await get_user_mcp(session.login, name))
 
 
 @user_mcp_router.post("/my-mcps/{name}/discover", response_model=list[MCPToolDescription])
 async def api_discover_my_mcp(
     name: str,
     update: MCPConnectionUpdate | None = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> list[dict[str, str]]:
     try:
-        return await discover_user_mcp(session["sub"], name, update)
+        return await discover_user_mcp(session.login, name, update)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
@@ -241,10 +241,10 @@ managed_mcp_router = APIRouter(route_class=MCPRoute)
 
 
 @managed_mcp_router.get("/managed-tools/gateways", response_model=list[Gateway])
-async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> list[Gateway]:
+async def api_list_managed_tools_gateways(admin: DashboardSession = ADMIN_DEP) -> list[Gateway]:
     """Gateways an admin can pick for the instance, read with the admin's own LangSmith login."""
     try:
-        return await list_gateways(admin["sub"])
+        return await list_gateways(admin.login)
     except LangSmithNotConnected as exc:
         raise HTTPException(409, str(exc)) from None
     except ManagedToolsError as exc:
@@ -252,13 +252,13 @@ async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> 
 
 
 @managed_mcp_router.get("/my-managed-tools", response_model=ManagedToolsView)
-async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> ManagedToolsView:
+async def api_my_managed_tools(session: DashboardSession = SESSION_DEP) -> ManagedToolsView:
     if not managed_tools_configured():
         return ManagedToolsView(configured=False, gateways=[])
     statuses: list[GatewayStatus] = []
     if gateway := await instance_gateway():
         try:
-            statuses.append(await gateway_status(session["sub"], gateway, with_connected=True))
+            statuses.append(await gateway_status(session.login, gateway, with_connected=True))
         except LangSmithNotConnected:
             return ManagedToolsView(configured=True, gateways=[])
         except ManagedToolsError:
@@ -295,14 +295,14 @@ async def api_connect_managed_tool(
     slug: str,
     thread_id: str | None = None,
     card: str | None = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ManagedConnectResponse:
     """A consent link for one service; from a thread's card, the thread resumes once connected."""
     try:
         if thread_id and card:
-            link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
+            link = await (await _card(thread_id, card, session.login, gateway)).connect(slug)
         else:
-            link = await connect_service(session["sub"], await _instance_gateway(gateway), slug)
+            link = await connect_service(session.login, await _instance_gateway(gateway), slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
     return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
@@ -311,11 +311,11 @@ async def api_connect_managed_tool(
 @managed_mcp_router.delete("/my-managed-tools/{gateway}/services/{service}", status_code=204)
 @audit_endpoint
 async def api_disconnect_managed_tool(
-    gateway: str, service: str, session: dict[str, Any] = SESSION_DEP
+    gateway: str, service: str, session: DashboardSession = SESSION_DEP
 ) -> None:
     """Remove the caller's own LangSmith connection to one service in the tool kit."""
     try:
-        await disconnect_service(session["sub"], await _instance_gateway(gateway), service)
+        await disconnect_service(session.login, await _instance_gateway(gateway), service)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
 
@@ -326,11 +326,11 @@ async def connect_managed_tool_from_card(
     slug: str,
     thread_id: str,
     card: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> RedirectResponse:
     """A Slack card button: mint the consent link here, for the signed-in owner only."""
     try:
-        offered = await _card(thread_id, card, session["sub"], gateway)
+        offered = await _card(thread_id, card, session.login, gateway)
         link = await offered.connect(slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None

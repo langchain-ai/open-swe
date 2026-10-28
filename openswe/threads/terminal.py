@@ -5,14 +5,13 @@ import json
 import logging
 import posixpath
 import shlex
-from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.oauth import decode_terminal_ticket, issue_terminal_ticket
+from openswe.dashboard.oauth import DashboardSession, issue_terminal_ticket, redeem_terminal_ticket
 from openswe.threads.handlers import get_dashboard_terminal_sandbox
 from openswe.utils.thread_ops import langgraph_url
 
@@ -40,7 +39,7 @@ def _cloud_terminal_websocket_url(thread_id: str) -> str:
     return urlunsplit((scheme, parsed.netloc, path, "", ""))
 
 
-def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> dict[str, Any]:
+async def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> DashboardSession:
     offered = [
         value.strip()
         for value in websocket.headers.get("sec-websocket-protocol", "").split(",")
@@ -48,7 +47,7 @@ def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> dict[str, A
     ]
     if len(offered) != 2 or offered[0] != _CLOUD_TERMINAL_SUBPROTOCOL:
         raise HTTPException(401, "invalid terminal ticket")
-    return decode_terminal_ticket(offered[1], thread_id=thread_id)
+    return await redeem_terminal_ticket(offered[1], thread_id=thread_id)
 
 
 @router.post("/threads/{thread_id}/terminal/connect")
@@ -56,23 +55,21 @@ def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> dict[str, A
 async def api_thread_terminal_connection(
     thread_id: str,
     response: Response,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, str]:
-    await get_dashboard_terminal_sandbox(thread_id, session["sub"], email=session.get("email"))
+    await get_dashboard_terminal_sandbox(thread_id, session.login, email=session.email)
     response.headers["Cache-Control"] = "no-store"
     return {
         "url": _cloud_terminal_websocket_url(thread_id),
         "protocol": _CLOUD_TERMINAL_SUBPROTOCOL,
-        "ticket": issue_terminal_ticket(
-            login=session["sub"], email=session.get("email"), thread_id=thread_id
-        ),
+        "ticket": issue_terminal_ticket(session, thread_id=thread_id),
     }
 
 
-async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[str, Any]) -> None:
+async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: DashboardSession) -> None:
     try:
         sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
-            thread_id, session["sub"], email=session.get("email")
+            thread_id, session.login, email=session.email
         )
     except HTTPException as exc:
         await websocket.close(code=1008, reason=str(exc.detail)[:123])
@@ -163,7 +160,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
 @router.websocket("/threads/{thread_id}/terminal")
 async def api_thread_terminal(websocket: WebSocket, thread_id: str) -> None:
     try:
-        session = _cloud_terminal_session(websocket, thread_id)
+        session = await _cloud_terminal_session(websocket, thread_id)
     except HTTPException as exc:
         await websocket.close(code=1008, reason=str(exc.detail)[:123])
         return

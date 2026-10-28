@@ -3,10 +3,13 @@
 import asyncio
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import func, select, update
 
+from openswe.dashboard.oauth import DashboardSession, issue_session
 from openswe.database import postgres
 from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
+from openswe.users.records import user_id_for_login
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -90,25 +93,26 @@ async def test_linking_a_claimed_identity_moves_it_to_the_new_owner() -> None:
     assert [i.provider for i in reloaded_first.identities] == ["github"]
 
 
-async def test_a_session_follows_its_github_login_after_the_identity_moves() -> None:
-    minted_for = await User.sign_in("github", "1001", login="OctoCat")
-    new_owner = await User.sign_in("github", "2002", login="ada")
-    await new_owner.link("github", "1001", login="OctoCat")
+async def test_a_session_answers_to_its_users_current_login_not_to_whoever_took_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    ada = await User.sign_in("github", "1001", login="ada")
+    cookie = issue_session(login="ada", email=None, avatar_url=None, user_id=str(ada.id))
+    taker = await User.sign_in("github", "2002", login="Ada")
 
-    resolved = await User.for_session(minted_for.id, "octocat")
+    holder = await User.for_login("github", "ada")
+    assert holder is not None and holder.id == taker.id
+    assert await User.for_login("github", "") is None
+    async with postgres.session() as session:
+        assert await session.scalar(select(user_id_for_login(""))) is None
+    with pytest.raises(HTTPException) as stale:
+        await DashboardSession.from_token(cookie)
+    assert stale.value.status_code == 401
 
-    assert resolved is not None and resolved.id == new_owner.id
-    assert await User.get(minted_for.id) is not None
-
-
-async def test_a_session_keeps_its_user_after_a_rename_frees_the_login() -> None:
-    renamed = await User.sign_in("github", "1001", login="ada")
     await User.sign_in("github", "1001", login="renamed")
-    await User.sign_in("github", "2002", login="ada")
-
-    resolved = await User.for_session(renamed.id, "ada")
-
-    assert resolved is not None and resolved.id == renamed.id
+    session = await DashboardSession.from_token(cookie)
+    assert (session.user_id, session.login) == (ada.id, "renamed")
 
 
 async def test_an_unauthorized_github_login_gets_no_user_row() -> None:

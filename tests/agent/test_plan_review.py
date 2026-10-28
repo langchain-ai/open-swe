@@ -8,6 +8,7 @@ from openswe.database import postgres
 from openswe.threads.plan_store import (
     ThreadPlan,
 )
+from tests.support.sessions import signed_in
 
 
 async def _seed_plan(thread_id: str, value: dict[str, Any]) -> None:
@@ -78,7 +79,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 
     with pytest.raises(HTTPException) as exc:
         await workflow_approval_api.list_workflow_push_approvals(
-            "thread-1", {"sub": "octocat", "email": "octo@example.com"}
+            "thread-1", signed_in("octocat", email="octo@example.com")
         )
 
     assert exc.value.status_code == 404
@@ -105,9 +106,7 @@ async def test_republished_artifact_drops_legacy_approval(
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", merge_metadata)
     monkeypatch.setattr(plan_api, "fetch_thread_metadata", AsyncMock(return_value=metadata))
     await plan_store.save_plan_content("t1", html="<p>Updated artifact</p>")
-    result = await plan_api.get_plan(
-        "t1", session={"sub": "reviewer", "email": None, "name": "Reviewer"}
-    )
+    result = await plan_api.get_plan("t1", session=signed_in("reviewer"))
     assert result["status"] == "shared"
     assert result["approvedBy"] is None
     assert result["approvedAt"] is None
@@ -118,7 +117,7 @@ async def test_dismissal_clears_when_artifact_is_republished(
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
-    session = {"sub": "owner", "email": None}
+    session = signed_in("owner")
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
     monkeypatch.setattr(
         plan_api,
@@ -143,11 +142,11 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
-    author = {"sub": "alice", "name": "Alice"}
+    author = signed_in("alice")
     comment = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), author)
     assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
     with pytest.raises(HTTPException) as exc:
-        await plan_api.remove_plan_comment("t", comment["id"], {"sub": "bob"})
+        await plan_api.remove_plan_comment("t", comment["id"], signed_in("bob"))
     assert exc.value.status_code == 403
     await plan_api.remove_plan_comment("t", comment["id"], author)
     assert (await plan_api.get_plan_comments("t", author))["comments"] == []
@@ -162,7 +161,7 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
-    author = {"sub": "alice", "name": "Alice"}
+    author = signed_in("alice")
     await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), author)
     dispatch = AsyncMock()
     monkeypatch.setattr(plan_api, "dispatch_agent_run", dispatch)
@@ -171,7 +170,7 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
     monkeypatch.setattr(plan_api, "langgraph_client", lambda: None)
 
     with pytest.raises(HTTPException) as exc:
-        await plan_api.submit_plan_comments("t", {"sub": "bob"})
+        await plan_api.submit_plan_comments("t", signed_in("bob"))
     assert exc.value.status_code == 422
     dispatch.assert_not_awaited()
 
@@ -200,7 +199,7 @@ async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
     write = AsyncMock(return_value=path)
     monkeypatch.setattr(plan_api, "write_plan_to_sandbox", write)
-    author = {"sub": "alice"}
+    author = signed_in("alice")
     comment = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Keep this"), author)
     result = await plan_api.update_plan("t", plan_api.PlanUpdate(markdown="# Updated"), author)
     assert result == {"status": "shared", "markdown": "# Updated"}
@@ -217,8 +216,8 @@ async def test_artifact_replies_survive_parent_deletion(
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
-    alice = {"sub": "alice"}
-    bob = {"sub": "bob"}
+    alice = signed_in("alice")
+    bob = signed_in("bob")
     parent = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), alice)
     reply = await plan_api.post_plan_comment(
         "t", plan_api.CommentBody(body="Follow-on", parent_id=parent["id"]), bob

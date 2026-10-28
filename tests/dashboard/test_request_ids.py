@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from openswe.api import request_ids
 from openswe.dashboard.client_errors import router as client_errors_router
 from openswe.dashboard.oauth import require_session
+from tests.support.sessions import signed_in
 
 REQUEST_ID = "req_0f8fad5b-d9cb-469f-a165-70867728950e"
 
@@ -36,7 +37,7 @@ def _app() -> FastAPI:
         raise RuntimeError("boom")
 
     app.include_router(client_errors_router, prefix="/dashboard/api")
-    app.dependency_overrides[require_session] = lambda: {"sub": "alice"}
+    app.dependency_overrides[require_session] = lambda: signed_in("alice")
     request_ids.add_request_ids(app)
     return app
 

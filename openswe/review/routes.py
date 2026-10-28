@@ -11,7 +11,7 @@ from pydantic.alias_generators import to_camel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
@@ -69,7 +69,6 @@ from openswe.review.styles import (
     ReviewStylePromptUpdate,
 )
 from openswe.threads.handlers import mark_review_session_viewed
-from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
@@ -84,7 +83,7 @@ class EnabledReviewRepoUpdate(BaseModel):
 
 @router.get("/enabled-review-repos")
 async def api_list_enabled_review_repos(
-    _session: dict[str, Any] = SESSION_DEP,
+    _session: DashboardSession = SESSION_DEP,
 ) -> dict[str, list[str]]:
     return {"repos": await list_enabled_review_repos()}
 
@@ -93,7 +92,7 @@ async def api_list_enabled_review_repos(
 @audit_endpoint
 async def api_set_enabled_review_repo(
     update: EnabledReviewRepoUpdate,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
     return {"repos": repos}
@@ -101,7 +100,7 @@ async def api_set_enabled_review_repo(
 
 @router.get("/admin/evals/reviewer")
 async def admin_get_reviewer_eval(
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> ReviewerEvalStatus:
     """Status of the latest reviewer eval."""
     return await get_reviewer_eval_status()
@@ -128,24 +127,22 @@ class ReviewerEvalStart(BaseModel):
 @audit_endpoint
 async def admin_start_reviewer_eval(
     body: ReviewerEvalStart,
-    session: dict[str, Any] = ADMIN_DEP,
+    session: DashboardSession = ADMIN_DEP,
 ) -> ReviewerEvalStatus:
     """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
     config = resolve_eval_config()
     config.update(body.model_dump(exclude={"limit"}))
     try:
-        return await start_reviewer_eval(
-            config, body.limit, session_user_id(session) or user_id_for_login(session["sub"])
-        )
+        return await start_reviewer_eval(config, body.limit, session.user_id)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/review-styles")
 async def api_list_review_styles(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> list[ReviewStyle]:
-    return await filter_repo_models_for_user(session["sub"], await REVIEW_STYLES.list_all())
+    return await filter_repo_models_for_user(session.login, await REVIEW_STYLES.list_all())
 
 
 class ReviewSummaryRef(BaseModel):
@@ -164,7 +161,7 @@ class ReviewSummariesRequest(BaseModel):
 @router.post("/reviews/summaries")
 async def api_get_review_summaries(
     payload: ReviewSummariesRequest,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, ReviewSummary | None]:
     identities: list[tuple[str, str, int]] = []
     for ref in payload.pull_requests:
@@ -172,7 +169,7 @@ async def api_get_review_summaries(
         if identity is None:
             raise HTTPException(422, "invalid pull request reference")
         identities.append(identity)
-    accessible = await accessible_repo_full_names(session["sub"])
+    accessible = await accessible_repo_full_names(session.login)
     authorized = [
         (owner, repo, number)
         for owner, repo, number in identities
@@ -185,9 +182,9 @@ async def api_get_review_summaries(
 async def api_list_reviews(
     page: int = 0,
     mine: bool = True,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    login = session["sub"]
+    login = session.login
     accessible = await accessible_repo_full_names(login)
 
     async def is_accessible(summary: dict[str, Any]) -> bool:
@@ -208,9 +205,9 @@ async def api_get_review(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     return await get_review(owner, repo, pr_number)
 
 
@@ -220,9 +217,9 @@ async def get_assessment_feedback(
     repo: str,
     pr_number: int,
     review_id: int,
-    session: dict[str, object] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> AssessmentFeedback | None:
-    login = str(session["sub"])
+    login = session.login
     assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
     return await assessment.feedback_from(login)
 
@@ -235,9 +232,9 @@ async def submit_assessment_feedback(
     pr_number: int,
     review_id: int,
     submission: FeedbackSubmission,
-    session: dict[str, object] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> AssessmentFeedback:
-    login = str(session["sub"])
+    login = session.login
     assessment = await PublishedAssessment.for_viewer(owner, repo, pr_number, review_id, login)
     return await assessment.record_feedback(login, submission)
 
@@ -247,7 +244,7 @@ async def api_get_pull_request_preview(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PullRequestPreview:
     async with _as_viewer(session, owner, repo) as repository:
         return await get_pull_request_preview(repository.pull_request(pr_number))
@@ -258,7 +255,7 @@ async def api_get_pull_request_labels(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PullRequestLabels:
     async with _as_viewer(session, owner, repo) as repository:
         return await PullRequestLabels.read(repository.pull_request(pr_number))
@@ -271,7 +268,7 @@ async def api_change_pull_request_label(
     repo: str,
     pr_number: int,
     change: LabelChange,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> None:
     async with _as_viewer(session, owner, repo) as repository:
         await change.apply(repository.pull_request(pr_number))
@@ -282,9 +279,9 @@ async def api_get_review_diff(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     return await get_review_diff(owner, repo, pr_number)
 
 
@@ -297,9 +294,9 @@ async def api_get_review_file_contents(
     base_sha: str,
     head_sha: str,
     original_path: str = "",
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, str | None]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     return await get_review_file_contents(
         owner, repo, pr_number, path, original_path, base_sha, head_sha
     )
@@ -311,9 +308,9 @@ async def api_get_review_image(
     repo: str,
     pr_number: int,
     url: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     return await proxy_pr_image(owner, repo, pr_number, url)
 
 
@@ -323,10 +320,10 @@ async def api_re_review(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_re_review(owner, repo, pr_number, session["sub"])
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    return await trigger_re_review(owner, repo, pr_number, session.login)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/scout")
@@ -335,10 +332,10 @@ async def api_run_review_scout(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ReviewScoutTrigger:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    return await trigger_review_scout(owner, repo, pr_number, session.login)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)
@@ -346,10 +343,10 @@ async def api_mark_review_viewed(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     await mark_review_session_viewed(
-        ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session["sub"])
+        ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session.login)
     )
     return Response(status_code=204)
 
@@ -364,10 +361,10 @@ async def api_dismiss_walkthrough(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> WalkthroughDismissed:
     """Drop the stored walkthrough so the next scout run rebuilds it."""
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     return WalkthroughDismissed(dismissed=await Walkthrough.dismiss(owner, repo, pr_number))
 
 
@@ -378,7 +375,7 @@ async def api_post_review_comment(
     repo: str,
     pr_number: int,
     comment: PendingReviewCommentInput,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PostedReviewComment:
     async with _as_viewer(session, owner, repo) as repository:
         return await PostedReviewComment.post(repository.pull_request(pr_number), comment)
@@ -396,30 +393,30 @@ async def api_submit_pull_request_review(
     repo: str,
     pr_number: int,
     review: PullRequestReviewSubmit,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> SubmittedReview:
     async with _as_viewer(session, owner, repo) as repository:
         return await SubmittedReview.submit(
             repository.pull_request(pr_number),
-            login=session["sub"],
+            login=session.login,
             event=review.event,
             body=review.body.strip(),
         )
 
 
 @asynccontextmanager
-async def _as_viewer(session: dict[str, Any], owner: str, repo: str) -> AsyncIterator[RepoClient]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    async with GitHubClient.as_user(session["sub"]) as github:
+async def _as_viewer(session: DashboardSession, owner: str, repo: str) -> AsyncIterator[RepoClient]:
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    async with GitHubClient.as_user(session.login) as github:
         yield github.repo(owner, repo)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/pending-review")
 async def api_get_pending_review(
-    owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
+    owner: str, repo: str, pr_number: int, session: DashboardSession = SESSION_DEP
 ) -> PendingReview | None:
     async with _as_viewer(session, owner, repo) as repository:
-        return await PendingReview.load(repository.pull_request(pr_number), login=session["sub"])
+        return await PendingReview.load(repository.pull_request(pr_number), login=session.login)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments")
@@ -429,11 +426,11 @@ async def api_add_pending_review_comment(
     repo: str,
     pr_number: int,
     comment: PendingReviewCommentInput,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PendingReview:
     async with _as_viewer(session, owner, repo) as repository:
         return await PendingReview.add_comment(
-            repository.pull_request(pr_number), comment, login=session["sub"]
+            repository.pull_request(pr_number), comment, login=session.login
         )
 
 
@@ -449,14 +446,14 @@ async def api_update_pending_review_comment(
     pr_number: int,
     comment_id: int,
     update: PendingReviewCommentUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PendingReview:
     async with _as_viewer(session, owner, repo) as repository:
         return await PendingReview.update_comment(
             repository.pull_request(pr_number),
             comment_id,
             update.body.strip(),
-            login=session["sub"],
+            login=session.login,
         )
 
 
@@ -467,11 +464,11 @@ async def api_delete_pending_review_comment(
     repo: str,
     pr_number: int,
     comment_id: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PendingReview | None:
     async with _as_viewer(session, owner, repo) as repository:
         await repository.delete_review_comment(comment_id)
-        return await PendingReview.load(repository.pull_request(pr_number), login=session["sub"])
+        return await PendingReview.load(repository.pull_request(pr_number), login=session.login)
 
 
 class PendingReviewDiscarded(BaseModel):
@@ -481,11 +478,11 @@ class PendingReviewDiscarded(BaseModel):
 @router.delete("/reviews/{owner}/{repo}/{pr_number}/pending-review")
 @audit_endpoint
 async def api_discard_pending_review(
-    owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
+    owner: str, repo: str, pr_number: int, session: DashboardSession = SESSION_DEP
 ) -> PendingReviewDiscarded:
     async with _as_viewer(session, owner, repo) as repository:
         discarded = await PendingReview.discard(
-            repository.pull_request(pr_number), login=session["sub"]
+            repository.pull_request(pr_number), login=session.login
         )
     return PendingReviewDiscarded(discarded=discarded)
 
@@ -501,10 +498,10 @@ async def api_get_review_chat(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ReviewChat:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_review_chat(owner, repo, pr_number, session["sub"], session.get("email"))
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    return await get_review_chat(owner, repo, pr_number, session.login, session.email)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")
@@ -515,15 +512,15 @@ async def api_review_chat_commands(
     pr_number: int,
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     body = await request.body()
     status_code, content, media_type = await proxy_review_chat_commands(
         owner,
         repo,
         pr_number,
-        session["sub"],
+        session.login,
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
@@ -538,15 +535,15 @@ async def api_review_chat_stream_events(
     pr_number: int,
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> StreamingResponse:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     body = await request.body()
     stream = await proxy_review_chat_stream_events(
         owner,
         repo,
         pr_number,
-        session["sub"],
+        session.login,
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
@@ -564,11 +561,11 @@ async def api_review_chat_state(
     repo: str,
     pr_number: int,
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     status_code, content, media_type = await proxy_review_chat_state(
-        owner, repo, pr_number, session["sub"], thread_id
+        owner, repo, pr_number, session.login, thread_id
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
 
@@ -580,15 +577,15 @@ async def api_review_chat_history(
     pr_number: int,
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     body = await request.body()
     status_code, content, media_type = await proxy_review_chat_history(
         owner,
         repo,
         pr_number,
-        session["sub"],
+        session.login,
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
@@ -600,10 +597,10 @@ async def api_review_chat_history(
 @audit_endpoint
 async def api_create_review_style(
     body: ReviewStyleCreate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ReviewStyle:
-    await require_repo_access_for_user(session["sub"], body.full_name)
-    return await REVIEW_STYLES.create(body.full_name, session["sub"])
+    await require_repo_access_for_user(session.login, body.full_name)
+    return await REVIEW_STYLES.create(body.full_name, session.login)
 
 
 class ApprovalsFileStatus(BaseModel):
@@ -614,10 +611,10 @@ class ApprovalsFileStatus(BaseModel):
 @router.get("/review-styles/{full_name:path}/approvals-file")
 async def api_get_review_style_approvals_file(
     full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ApprovalsFileStatus:
     full_name = normalize_repo_full_name(full_name)
-    token = await require_repo_access_for_user(session["sub"], full_name)
+    token = await require_repo_access_for_user(session.login, full_name)
     owner, _, name = full_name.partition("/")
     return ApprovalsFileStatus(
         found=await fetch_approvals_md(owner, name, None, token=token) is not None
@@ -627,10 +624,10 @@ async def api_get_review_style_approvals_file(
 @router.get("/review-styles/{full_name:path}")
 async def api_get_review_style(
     full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ReviewStyle:
     full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session.login, full_name)
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
@@ -642,10 +639,10 @@ async def api_get_review_style(
 async def api_update_review_style_prompt(
     full_name: str,
     body: ReviewStylePromptUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ReviewStyle:
     full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session.login, full_name)
     if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
     if "approval_mode" in body.model_fields_set:
@@ -659,10 +656,10 @@ async def api_update_review_style_prompt(
 @audit_endpoint
 async def api_delete_review_style(
     full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session.login, full_name)
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")

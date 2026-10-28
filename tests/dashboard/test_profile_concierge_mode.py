@@ -6,10 +6,11 @@ from fastapi import HTTPException
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
 from openswe.users import User, UserPreferences
 from openswe.users.records import UnknownUser
+from tests.support.sessions import signed_in
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
-_SESSION = {"sub": "ada", "email": "ada@example.com"}
+_SESSION = signed_in("ada", email="ada@example.com")
 
 
 @pytest.fixture(autouse=True)

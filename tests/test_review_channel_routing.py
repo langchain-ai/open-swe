@@ -7,6 +7,7 @@ from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review import routes
+from tests.support.sessions import signed_in
 
 
 def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
@@ -58,6 +59,8 @@ async def test_review_availability_uses_cached_settings(
         patch.object(routes.HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
         patch.object(routes, "review_blockers", AsyncMock(return_value=[])),
     ):
-        result = await routes.api_human_review_availability("lc", "repo", 7, session={"sub": "ada"})
+        result = await routes.api_human_review_availability(
+            "lc", "repo", 7, session=signed_in("ada")
+        )
     assert result.available is (not routed or filename.startswith("ui/"))
     assert result.active is False

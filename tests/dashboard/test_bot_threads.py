@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.threads import handlers, listing, plan_api, summary, workflow_approval_api
+from tests.support.sessions import signed_in
 
 _ADMINS = {"admin"}
 
@@ -58,7 +59,7 @@ def test_bot_thread_is_readable_and_still_promptable_from_slack(bot_thread):
 @pytest.mark.parametrize("login", ["bob", "admin"])
 async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypatch):
     _, client = bot_thread
-    session = {"sub": login}
+    session = signed_in(login)
     operations = [
         lambda: handlers.get_dashboard_terminal_sandbox("bot-thread", login),
         lambda: handlers.delete_dashboard_thread("bot-thread", login),

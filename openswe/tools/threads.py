@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import enforce_github_login_gate
+from openswe.dashboard.oauth import DashboardSession, enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from openswe.invocation import resolve_invocation_id
@@ -102,9 +102,12 @@ class _Actor:
     # An automation reading threads on its own run; it has no participant threads.
     automation: bool = False
 
-    @property
-    def session(self) -> dict[str, Any]:
-        return {"sub": self.login, "email": self.email, "name": self.name}
+    async def session(self) -> DashboardSession:
+        """The actor acting as a dashboard user would; 401 without an Open SWE account."""
+        user = await User.for_login("github", self.login)
+        if user is None:
+            raise HTTPException(401, f"{self.login} has no Open SWE account")
+        return DashboardSession.of(user, email=self.email)
 
     @property
     def admin(self) -> bool:
@@ -1070,7 +1073,7 @@ async def manage_thread(
             result = await plan_api.post_plan_comment(
                 thread_id,
                 plan_api.CommentBody(body=comment or ""),
-                session=actor.session,
+                session=await actor.session(),
             )
             return {"success": True, "comment": result}
         if action == "delete_plan_comment":
@@ -1079,7 +1082,7 @@ async def manage_thread(
             result = await plan_api.remove_plan_comment(
                 thread_id,
                 comment_id or "",
-                session=actor.session,
+                session=await actor.session(),
             )
             return {"success": True, **result}
         if action == "update_plan":
@@ -1096,7 +1099,7 @@ async def manage_thread(
             if content_format != existing_format:
                 return _failure(f"existing plan format is {existing_format}")
             update = plan_api.PlanUpdate(**{content_format: content})
-            result = await plan_api.update_plan(thread_id, update, session=actor.session)
+            result = await plan_api.update_plan(thread_id, update, session=await actor.session())
             return {
                 "success": True,
                 "status": result.get("status"),
@@ -1112,7 +1115,7 @@ async def manage_thread(
                 if action == "approve_workflow_push"
                 else workflow_approval_api.reject_workflow_push
             )
-            result = await handler(thread_id, fingerprint or "", session=actor.session)
+            result = await handler(thread_id, fingerprint or "", session=await actor.session())
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:

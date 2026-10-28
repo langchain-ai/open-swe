@@ -10,6 +10,7 @@ from openswe.github import pull_request_dashboard_routes as pr_routes
 from openswe.github import pull_request_status as prs
 from openswe.github.ci import RequiredCheck
 from openswe.review import routes as review_routes
+from tests.support.sessions import signed_in
 
 
 def _client(number: int) -> prs.PullRequestClient:
@@ -221,7 +222,9 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     )
     monkeypatch.setattr(profiles, "get_valid_access_token", token)
     monkeypatch.setattr(pr_routes, "list_open_pull_requests", listing)
-    await pr_routes.api_list_pull_requests(repo="acme/app", scope=scope, session={"sub": "octocat"})
+    await pr_routes.api_list_pull_requests(
+        repo="acme/app", scope=scope, session=signed_in("octocat")
+    )
     token.assert_awaited_once_with("octocat")
     github, *args = listing.await_args.args
     assert github.http.headers["Authorization"] == "Bearer user-token"
@@ -229,7 +232,7 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     assert listing.await_args.kwargs["scope"] == scope
     token.return_value = None
     with pytest.raises(github_http.GitHubSignInRequired):
-        await pr_routes.api_list_pull_requests(session={"sub": "another-user"})
+        await pr_routes.api_list_pull_requests(session=signed_in("another-user"))
     assert listing.await_count == 1
 
 
@@ -301,7 +304,7 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
     payload = review_routes.ReviewSummariesRequest(
         pull_requests=[{"repo": "acme/private", "number": 1}]
     )
-    assert await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"}) == {}
+    assert await review_routes.api_get_review_summaries(payload, session=signed_in("octocat")) == {}
     lookup.assert_not_awaited()
     payload = review_routes.ReviewSummariesRequest(
         pull_requests=[
@@ -309,7 +312,7 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
             {"repo": "acme/private", "number": 2},
         ]
     )
-    await review_routes.api_get_review_summaries(payload, session={"sub": "octocat"})
+    await review_routes.api_get_review_summaries(payload, session=signed_in("octocat"))
     lookup.assert_awaited_once_with([("acme", "allowed", 1)])
 
 

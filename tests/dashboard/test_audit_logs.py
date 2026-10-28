@@ -1,6 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -17,11 +17,12 @@ from openswe.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCu
 from openswe.audit_logs.routes import router
 from openswe.bridge import routes as bridge_routes
 from openswe.bridge.store import BridgeStore
-from openswe.dashboard import deps, oauth, workspace_settings
+from openswe.dashboard import oauth, workspace_settings
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.database import postgres
 from openswe.threads.principals import PrincipalDep
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.sessions import SessionUsers
 
 
 class Settings(BaseModel):
@@ -58,16 +59,13 @@ def app() -> FastAPI:
     return application
 
 
-def cookie(login: str, user_id: str) -> dict[str, str]:
-    return {
-        oauth.COOKIE_NAME: oauth.issue_session(
-            login=login, email=None, avatar_url=None, user_id=user_id
-        )
-    }
+def cookie(users: SessionUsers, login: str, user_id: UUID) -> dict[str, str]:
+    return {oauth.COOKIE_NAME: users.cookie(login, user_id=user_id)}
 
 
 async def test_authenticated_activity_is_isolated_and_secret_free_when_mounted(
     monkeypatch: pytest.MonkeyPatch,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     entries: list[AuditLog] = []
@@ -86,7 +84,7 @@ async def test_authenticated_activity_is_isolated_and_secret_free_when_mounted(
         async with httpx.AsyncClient(
             transport=transport,
             base_url="http://test",
-            cookies=cookie(f"user-{index}", str(ids[index])),
+            cookies=cookie(session_users, f"user-{index}", ids[index]),
         ) as client:
             response = await client.put(
                 f"/prefix/dashboard/api/settings/{resource_id}?token=query-secret",
@@ -118,7 +116,9 @@ async def test_authenticated_activity_is_isolated_and_secret_free_when_mounted(
 
 @pytest.mark.parametrize("prefix", ["", "/prefix"])
 async def test_telemetry_keeps_its_effects_without_audit_entries(
-    monkeypatch: pytest.MonkeyPatch, prefix: str
+    monkeypatch: pytest.MonkeyPatch,
+    prefix: str,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     entries: list[AuditLog] = []
@@ -148,7 +148,7 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=root),
         base_url="http://test",
-        cookies=cookie("alice", str(uuid4())),
+        cookies=cookie(session_users, "alice", uuid4()),
     ) as client:
         assert (
             await client.post(
@@ -179,10 +179,12 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
 @pytest.mark.parametrize("workspace", [None, "preview"])
 @pytest.mark.usefixtures("registry_db")
 async def test_settings_audit_changes_are_redacted_and_track_resets(
-    monkeypatch: pytest.MonkeyPatch, workspace: str | None
+    monkeypatch: pytest.MonkeyPatch,
+    workspace: str | None,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
-    monkeypatch.setattr(deps, "is_admin", lambda email, *, login: login == "admin")
+    monkeypatch.setattr(oauth, "is_admin", lambda email, *, login: login == "admin")
     entries: list[AuditLog] = []
 
     async def append(entry: AuditLog) -> None:
@@ -209,7 +211,7 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application),
         base_url="http://test",
-        cookies=cookie("admin", str(user_id)),
+        cookies=cookie(session_users, "admin", user_id),
     ) as client:
         for payload in (
             {"model_routing_enabled": True, "org_guidelines": "new-secret"},
@@ -241,10 +243,12 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
 @pytest.mark.parametrize("failure", ["read", "write"])
 @pytest.mark.usefixtures("registry_db")
 async def test_settings_audit_does_not_invent_changes_on_store_failure(
-    monkeypatch: pytest.MonkeyPatch, failure: str
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
-    monkeypatch.setattr(deps, "is_admin", lambda email, *, login: True)
+    monkeypatch.setattr(oauth, "is_admin", lambda email, *, login: True)
     entries: list[AuditLog] = []
 
     async def append(entry: AuditLog) -> None:
@@ -263,7 +267,7 @@ async def test_settings_audit_does_not_invent_changes_on_store_failure(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
         base_url="http://test",
-        cookies=cookie("admin", str(uuid4())),
+        cookies=cookie(session_users, "admin", uuid4()),
     ) as client:
         response = await client.put("/dashboard/api/settings", json={"model_routing_enabled": True})
     assert response.status_code == (200 if failure == "read" else 500)
@@ -279,7 +283,9 @@ async def test_settings_audit_does_not_invent_changes_on_store_failure(
 
 
 async def test_audit_failure_preserves_response(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     monkeypatch.setattr(store.postgres, "configured", lambda: True)
@@ -291,7 +297,7 @@ async def test_audit_failure_preserves_response(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app()),
         base_url="http://test",
-        cookies=cookie("alice", str(uuid4())),
+        cookies=cookie(session_users, "alice", uuid4()),
     ) as client:
         response = await client.put("/dashboard/api/settings/item", json={"token": "x"})
     assert response.status_code == 200
@@ -299,7 +305,9 @@ async def test_audit_failure_preserves_response(
 
 
 async def test_key_actor_wins_over_cookie_and_survives_workspace_deletion(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     await WORKSPACES.create(WorkspaceCreate(name="Audit scope"), "admin")
@@ -315,7 +323,7 @@ async def test_key_actor_wins_over_cookie_and_survives_workspace_deletion(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app()),
         base_url="http://test",
-        cookies=cookie("alice", str(uuid4())),
+        cookies=cookie(session_users, "alice", uuid4()),
     ) as client:
         response = await client.post(
             "/dashboard/api/machine", headers={"Authorization": f"Bearer {secret}"}
@@ -334,10 +342,12 @@ async def test_key_actor_wins_over_cookie_and_survives_workspace_deletion(
 
 
 async def test_admin_query_paginates_equal_timestamps_and_filters(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    session_users: SessionUsers,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
-    monkeypatch.setattr(deps, "is_admin", lambda email, *, login: login == "admin")
+    monkeypatch.setattr(oauth, "is_admin", lambda email, *, login: login == "admin")
     now = datetime.now(UTC)
     workspace_id, user_id = uuid4(), uuid4()
     entries = [
@@ -366,9 +376,9 @@ async def test_admin_query_paginates_equal_timestamps_and_filters(
         transport=httpx.ASGITransport(app=app()), base_url="http://test"
     ) as client:
         assert (await client.get("/dashboard/api/audit-logs", params=params)).status_code == 401
-        client.cookies.update(cookie("ordinary", str(uuid4())))
+        client.cookies.update(cookie(session_users, "ordinary", uuid4()))
         assert (await client.get("/dashboard/api/audit-logs", params=params)).status_code == 403
-        client.cookies.update(cookie("admin", str(uuid4())))
+        client.cookies.update(cookie(session_users, "admin", uuid4()))
         first = await client.get("/dashboard/api/audit-logs", params=params)
         assert first.status_code == 200
         data = first.json()

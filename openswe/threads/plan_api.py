@@ -7,7 +7,11 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, model_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
+from openswe.dashboard.oauth import (
+    DashboardSession,
+    require_same_origin_for_mutations,
+    require_session,
+)
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.threads.access import _ensure_dashboard_github_token
@@ -81,12 +85,12 @@ async def fetch_thread_metadata(thread_id: str) -> dict[str, Any]:
 
 
 @plan_router.get("/{thread_id}")
-async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> dict[str, Any]:
+async def get_plan(thread_id: str, session: DashboardSession = _SESSION_DEP) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata, session["sub"], session.get("email")):
+    if not thread_is_readable(metadata, session.login, session.email):
         raise HTTPException(404, "thread not found")
-    login = session["sub"]
-    email = session.get("email")
+    login = session.login
+    email = session.email
     content = await get_plan_content(thread_id) or {}
     approved_by = content.get("approved_by") or metadata.get("plan_approved_by")
     if isinstance(approved_by, dict):
@@ -110,7 +114,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
             "id": login,
             "login": login,
             "email": email,
-            "name": session.get("name") or login,
+            "name": login,
         },
     }
 
@@ -118,11 +122,11 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 @plan_router.put("/{thread_id}")
 @audit_endpoint
 async def update_plan(
-    thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, body: PlanUpdate, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     """Save an edited HTML artifact while preserving review comments."""
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(metadata, session.login)
     content = await get_plan_content(thread_id) or {}
     if body.dismissed:
         if not content:
@@ -161,10 +165,10 @@ async def update_plan(
 
 @plan_router.get("/{thread_id}/comments")
 async def get_plan_comments(
-    thread_id: str, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata, session["sub"], session.get("email")):
+    if not thread_is_readable(metadata, session.login, session.email):
         raise HTTPException(404, "thread not found")
     return {"comments": await list_plan_comments(thread_id)}
 
@@ -172,10 +176,10 @@ async def get_plan_comments(
 @plan_router.post("/{thread_id}/comments")
 @audit_endpoint
 async def post_plan_comment(
-    thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, body: CommentBody, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(metadata, session.login)
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
@@ -186,10 +190,10 @@ async def post_plan_comment(
             raise HTTPException(404, "parent comment not found")
         if parent.get("parent_id") is not None or body.anchor is not None:
             raise HTTPException(422, "replies must reference a top-level comment without an anchor")
-    login = session["sub"]
+    login = session.login
     return await add_plan_comment(
         thread_id,
-        author=session.get("name") or login,
+        author=login,
         author_login=login,
         body=text,
         parent_id=body.parent_id,
@@ -200,11 +204,11 @@ async def post_plan_comment(
 @plan_router.post("/{thread_id}/comments/submit")
 @audit_endpoint
 async def submit_plan_comments(
-    thread_id: str, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, str]:
     metadata = await fetch_thread_metadata(thread_id)
-    login = session["sub"]
-    _assert_thread_postable(metadata, login, session.get("email"))
+    login = session.login
+    _assert_thread_postable(metadata, login, session.email)
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     if not any(comment.get("author_login") == login for comment in comments):
         raise HTTPException(422, "no comments to submit")
@@ -225,15 +229,15 @@ async def submit_plan_comments(
 @plan_router.delete("/{thread_id}/comments/{comment_id}")
 @audit_endpoint
 async def remove_plan_comment(
-    thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, comment_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(metadata, session.login)
     comments = await list_plan_comments(thread_id)
     target = next((c for c in comments if c.get("id") == comment_id), None)
     if target is None:
         raise HTTPException(404, "comment not found")
-    login = session["sub"]
+    login = session.login
     if target.get("author_login") != login:
         raise HTTPException(403, "only the comment author can delete a comment")
     await delete_plan_comment(thread_id, comment_id)

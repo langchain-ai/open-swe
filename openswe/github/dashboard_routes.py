@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.github.http import GitHubClient
 from openswe.github.repo_cache import (
     REPO_LIST_FRESH_MS,
@@ -20,7 +21,7 @@ router = APIRouter(tags=["github"])
 @router.get("/repos")
 async def list_repos(
     refresh: bool = False,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     """List repos where Open SWE is installed and the user has access.
 
@@ -28,7 +29,7 @@ async def list_repos(
     ``refresh=true``, because the fan-out over every installation takes 10s+
     for users with hundreds of accessible repos.
     """
-    login = session["sub"]
+    login = session.login
     if not refresh:
         cached = await read_cached_repos(login)
         if cached is not None:
@@ -41,7 +42,7 @@ async def list_repos(
 
 @router.get("/repos/{owner}/{repo}/merge-methods")
 async def api_repository_merge_methods(
-    owner: str, repo: str, session: dict[str, Any] = SESSION_DEP
+    owner: str, repo: str, session: DashboardSession = SESSION_DEP
 ) -> RepositoryMergeMethods:
-    async with GitHubClient.as_user(session["sub"]) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return await repository_merge_methods(github.repo(owner, repo))

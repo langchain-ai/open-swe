@@ -18,7 +18,7 @@ request names it, and the principal is checked against it:
 
 import logging
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import Depends, HTTPException, Request
 
@@ -27,7 +27,7 @@ from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import bind_audit_session, optional_session
+from openswe.dashboard.oauth import DashboardSession, bind_audit_session, optional_session
 from openswe.federation.github_oidc import (
     GitHubActionsClaims,
     InvalidFederatedToken,
@@ -104,12 +104,8 @@ class Principal:
         )
 
     @classmethod
-    def of_person(cls, session: dict[str, Any]) -> Principal:
-        login = session.get("sub")
-        if not isinstance(login, str) or not login.strip():
-            raise HTTPException(401, "session carries no user")
-        email = session.get("email")
-        return cls.of_login(login.strip(), email if isinstance(email, str) else None)
+    def of_person(cls, session: DashboardSession) -> Principal:
+        return cls(kind="person", login=session.login, email=session.email, admin=session.admin)
 
     @property
     def machine(self) -> bool:
@@ -210,7 +206,7 @@ async def require_principal(request: Request) -> Principal:
                 ),
             )
             return principal
-    session = optional_session(request)
+    session = await optional_session(request)
     if session is None:
         raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
     principal = Principal.of_person(session)

@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from openswe.incidents import documents, service
 from openswe.incidents.models import Evidence, Hypothesis, Incident, IncidentPolicy, IncidentReport
 from openswe.slack.channels import SlackChannel
+from tests.support.sessions import signed_in
 
 CHANNEL = {
     "id": "C1",
@@ -103,7 +104,7 @@ async def test_documents_api_is_read_only_and_checks_channel_access(record):
     await documents.update_from_report(record, report())
     app = FastAPI()
     app.include_router(router, prefix="/documents")
-    app.dependency_overrides[incidents_routes.require_session] = lambda: {"sub": "test-user"}
+    app.dependency_overrides[incidents_routes.require_session] = lambda: signed_in("test-user")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:

@@ -26,6 +26,7 @@ from openswe.human_review.standard import (
 from openswe.slack.blocks import block_payload
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
+from tests.support.sessions import signed_in
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -817,7 +818,7 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         patch.object(RepoClient, "info", info),
         patch("openswe.human_review.routes.latest_review_states", states),
     ):
-        result = await api_review_assignments(page=1, session={"sub": "ada"})
+        result = await api_review_assignments(page=1, session=signed_in("ada"))
     assert [row.number for row in result.pull_requests] == [1]
 
 

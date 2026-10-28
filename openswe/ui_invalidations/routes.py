@@ -11,12 +11,13 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.ui_invalidations import outbox
 from openswe.ui_invalidations.hub import HUB, REPLAY_MARGIN_SECONDS
 from openswe.ui_invalidations.topics import Topic
@@ -39,7 +40,7 @@ _SSE_HEADERS = {
 @router.get("/ui-invalidations")
 async def api_ui_invalidations(
     t: Annotated[list[str] | None, Query()] = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> StreamingResponse:
     """``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``."""
     ages = _parse_subscriptions(t or [])

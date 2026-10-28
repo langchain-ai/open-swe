@@ -42,6 +42,7 @@ from openswe.transcript.routes import (
 )
 from openswe.transcript.snapshot import load_access, load_snapshot
 from openswe.transcript.turns import settle_run_turn
+from tests.support.sessions import signed_in
 
 OWNER = "test-user"
 
@@ -208,7 +209,7 @@ async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: N
     """The mirror is what the transcript API authorizes against, so it must follow."""
     thread_id = str(uuid7())
     await _create(thread_id, visibility="public")
-    stranger = {"sub": "someone-else", "email": "someone-else@example.com"}
+    stranger = signed_in("someone-else", email="someone-else@example.com")
 
     await _readable_transcript(thread_id, stranger)
 
@@ -217,7 +218,7 @@ async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: N
     with pytest.raises(HTTPException) as refused:
         await _readable_transcript(thread_id, stranger)
     assert refused.value.status_code == 404
-    await _readable_transcript(thread_id, {"sub": OWNER, "email": None})
+    await _readable_transcript(thread_id, signed_in(OWNER))
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None
     assert snapshot.thread.title == "Renamed"
@@ -227,7 +228,7 @@ async def test_a_live_stream_ends_when_its_reader_loses_access(registry_db: None
     """Authorization is granted once per request; the stream outlives it."""
     thread_id = str(uuid7())
     await _create(thread_id, visibility="public")
-    stranger = {"sub": "someone-else", "email": "someone-else@example.com"}
+    stranger = signed_in("someone-else", email="someone-else@example.com")
 
     async with aclosing(_stream(thread_id, 0, stranger)) as stream:
 
@@ -250,7 +251,7 @@ async def test_a_stream_that_ends_during_its_replay_unsubscribes(registry_db: No
     """A cursor past the head ends the stream before it ever awaits a notification."""
     thread_id = str(uuid7())
     await _create(thread_id)
-    owner = {"sub": OWNER, "email": None}
+    owner = signed_in(OWNER)
 
     async with aclosing(_stream(thread_id, 10_000, owner)) as stream:
         assert await anext(stream) == "event: deleted\ndata: {}\n\n"
@@ -269,7 +270,7 @@ async def test_a_replay_is_refused_to_a_reader_who_lost_access(registry_db: None
     """The request was authorized while public; the replay itself sees the flip."""
     thread_id = str(uuid7())
     await _create(thread_id, visibility="public")
-    stranger = {"sub": "someone-else", "email": "someone-else@example.com"}
+    stranger = signed_in("someone-else", email="someone-else@example.com")
     await _readable_transcript(thread_id, stranger)
 
     await mirror_thread_metadata(thread_id, {"visibility": "private"})
@@ -400,7 +401,7 @@ async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(
         ],
     )
 
-    owner = {"sub": OWNER, "email": None}
+    owner = signed_in(OWNER)
     response = await api_get_thread_attachment(thread_id, attachment_id, owner)
     assert response.body == b"pretend-png"
     assert response.headers["content-type"] == "image/png"
@@ -414,7 +415,7 @@ async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(
     assert missing.value.status_code == 404
 
     with pytest.raises(HTTPException) as refused:
-        await api_get_thread_attachment(thread_id, attachment_id, {"sub": "stranger"})
+        await api_get_thread_attachment(thread_id, attachment_id, signed_in("stranger"))
     assert refused.value.status_code == 404
 
 

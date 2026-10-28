@@ -122,22 +122,6 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
-    async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
-        """The person a dashboard session belongs to.
-
-        The session's ``user_id`` wins while that row still holds any GitHub
-        identity, so a renamed login never falls through to whoever took the old
-        handle; only a row whose GitHub identity moved away falls back to the login.
-        """
-        if not postgres.configured():
-            return None
-        if user_id is not None:
-            user = await cls.get(user_id)
-            if user is not None and any(i.provider == "github" for i in user.identities):
-                return user
-        return await cls.for_login("github", github_login)
-
-    @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
         if not postgres.configured():
@@ -381,8 +365,8 @@ class User(Base):
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
-        """The person behind a mutable handle; the most recently seen one wins."""
-        if not postgres.configured():
+        """The person holding a mutable handle now; for Slack, the most recently seen one."""
+        if not login.strip() or not postgres.configured():
             return None
         async with postgres.session() as session:
             return await session.scalar(
@@ -447,6 +431,7 @@ class User(Base):
         """Attach another provider account to this person, taking it over if needed."""
         cls = type(self)
         async with postgres.session() as session:
+            await _release_login(session, provider, external_id, login)
             upsert = insert(UserIdentity).values(
                 user_id=self.id,
                 provider=provider,
@@ -540,6 +525,7 @@ class User(Base):
             email=email,
             team_id=team_id,
         )
+        await _release_login(session, provider, external_id, login)
         claimed = await session.scalar(
             upsert.on_conflict_do_update(
                 index_elements=[UserIdentity.provider, UserIdentity.external_id],
@@ -570,6 +556,28 @@ class User(Base):
     @classmethod
     def _with_identities(cls, statement: Select[Self]) -> Select[Self]:
         return statement.options(selectinload(cls.identities))
+
+
+async def _release_login(
+    session: AsyncSession, provider: Provider, external_id: str, login: str
+) -> None:
+    """Clear ``login`` from every other GitHub account still recorded with it.
+
+    GitHub logins are reassigned after a rename, so the account signing in with
+    one now is its only holder; a stale copy would let lookups by login reach
+    the person who gave it up.
+    """
+    if provider != "github" or not login:
+        return
+    await session.execute(
+        update(UserIdentity)
+        .where(
+            UserIdentity.provider == "github",
+            UserIdentity.external_id != external_id,
+            func.lower(UserIdentity.login) == login.lower(),
+        )
+        .values(login="")
+    )
 
 
 def _known(**values: str) -> dict[str, str]:

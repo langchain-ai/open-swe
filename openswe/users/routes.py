@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from openswe.dashboard.deps import ADMIN_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.users.models import User
 
 router = APIRouter(tags=["users"])
@@ -15,7 +16,7 @@ async def admin_list_users(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     search: str = Query(default=""),
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, Any]:
     """One page of users with the identities each one signed in or linked with."""
     users, total = await User.page(offset=(page - 1) * page_size, limit=page_size, search=search)

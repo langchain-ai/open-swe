@@ -5,6 +5,7 @@ from starlette.types import Scope
 
 from openswe.api import agent_server_auth
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session
+from tests.support.sessions import SessionUsers, user_id_of
 
 BACKEND_KEY = "lsv2_backend_key"
 
@@ -29,11 +30,16 @@ def _ctx(permissions: list[str], resource: str, action: str) -> Auth.types.AuthC
     )
 
 
-async def test_only_the_backend_key_or_a_dashboard_session_authenticates() -> None:
+async def test_only_the_backend_key_or_a_dashboard_session_authenticates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    SessionUsers(monkeypatch).add("ada")
     backend = await agent_server_auth.authenticate(_scope((b"x-api-key", BACKEND_KEY.encode())))
     assert backend["permissions"] == [agent_server_auth.BACKEND_PERMISSION]
 
-    session = issue_session(login="ada", email=None, avatar_url=None, user_id="u1")
+    session = issue_session(
+        login="ada", email=None, avatar_url=None, user_id=str(user_id_of("ada"))
+    )
     person = await agent_server_auth.authenticate(
         _scope((b"cookie", f"{COOKIE_NAME}={session}".encode()))
     )

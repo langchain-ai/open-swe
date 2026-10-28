@@ -7,7 +7,6 @@ instructions apply whatever casing a run names it with.
 """
 
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response
@@ -18,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP, filter_repo_models_for_user
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
@@ -174,28 +174,28 @@ router = APIRouter(tags=["agent-instructions"])
 
 @router.get("/agent-instructions")
 async def api_list_agent_instructions(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> list[AgentInstructions]:
-    return await filter_repo_models_for_user(session["sub"], await AGENT_INSTRUCTIONS.list_all())
+    return await filter_repo_models_for_user(session.login, await AGENT_INSTRUCTIONS.list_all())
 
 
 @router.post("/agent-instructions")
 @audit_endpoint
 async def api_create_agent_instructions(
     body: AgentInstructionsCreate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> AgentInstructions:
-    await require_repo_access_for_user(session["sub"], body.full_name)
-    return await AGENT_INSTRUCTIONS.create(body.full_name, session["sub"])
+    await require_repo_access_for_user(session.login, body.full_name)
+    return await AGENT_INSTRUCTIONS.create(body.full_name, session.login)
 
 
 @router.get("/agent-instructions/{full_name:path}")
 async def api_get_agent_instructions(
     full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> AgentInstructions:
     full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session.login, full_name)
     record = await AGENT_INSTRUCTIONS.get(full_name)
     if not record:
         raise HTTPException(404, "agent instructions not found")
@@ -207,10 +207,10 @@ async def api_get_agent_instructions(
 async def api_update_agent_instructions(
     full_name: str,
     body: AgentInstructionsUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> AgentInstructions:
     full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session.login, full_name)
     return await AGENT_INSTRUCTIONS.set_instructions(full_name, body.instructions)
 
 
@@ -218,10 +218,10 @@ async def api_update_agent_instructions(
 @audit_endpoint
 async def api_delete_agent_instructions(
     full_name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     full_name = normalize_repo_full_name(full_name)
-    await require_repo_access_for_user(session["sub"], full_name)
+    await require_repo_access_for_user(session.login, full_name)
     record = await AGENT_INSTRUCTIONS.get(full_name)
     if not record:
         raise HTTPException(404, "agent instructions not found")

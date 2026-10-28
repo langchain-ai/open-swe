@@ -17,6 +17,7 @@ from openswe.threads import (
 )
 from openswe.tools import threads as tools
 from openswe.ui_invalidations.topics import Topic
+from tests.support.sessions import signed_in
 
 _ADMINS = {"admin", "admin@example.com"}
 
@@ -124,7 +125,7 @@ async def test_admin_can_read_artifact_but_not_mutate(private_thread, monkeypatc
     monkeypatch.setattr(
         workflow_approval_api, "get_workflow_push_approvals", AsyncMock(return_value={})
     )
-    admin = {"sub": "admin"}
+    admin = signed_in("admin")
     assert await plan_api.get_plan_comments("private-thread", admin) == {"comments": []}
     await workflow_approval_api.list_workflow_push_approvals("private-thread", admin)
     with pytest.raises(HTTPException) as exc:

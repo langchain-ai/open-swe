@@ -10,6 +10,7 @@ from openswe.review.reviews import (
     _is_allowed_image_url,
     _require_image_in_pr,
 )
+from tests.support.sessions import signed_in
 
 
 def test_is_allowed_image_url_rejects_unsafe_urls():
@@ -60,7 +61,7 @@ async def test_label_write_requires_repository_access(monkeypatch):
     monkeypatch.setattr("openswe.review.routes.require_repo_access_for_user", deny_access)
     with pytest.raises(HTTPException) as exc:
         await api_change_pull_request_label(
-            "acme", "private", 7, LabelChange(name="bug", selected=True), {"sub": "user"}
+            "acme", "private", 7, LabelChange(name="bug", selected=True), signed_in("user")
         )
     assert exc.value.status_code == 403
 

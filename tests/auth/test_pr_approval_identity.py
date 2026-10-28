@@ -7,6 +7,7 @@ import langgraph_sdk
 from openswe.dashboard import profiles
 from openswe.run_config import RunConfig
 from openswe.threads import plan_api, workflow_approval_api
+from tests.support.sessions import signed_in
 
 
 async def test_approval_run_uses_authenticated_actor(monkeypatch):
@@ -31,7 +32,7 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch):
     )
     dispatch = AsyncMock(return_value={"run_id": "approval-run"})
     monkeypatch.setattr(workflow_approval_api, "dispatch_agent_run", dispatch)
-    session = {"sub": "Bob", "email": "bob@example.com"}
+    session = signed_in("Bob", email="bob@example.com")
     await workflow_approval_api.approve_workflow_push("thread-1", "fp", session=session)
 
     assert dispatch.await_args is not None

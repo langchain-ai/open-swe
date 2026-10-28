@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse, Response
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import (
     STATE_TTL_SECONDS,
+    DashboardSession,
     DesktopConnectExchange,
     cookie_security,
     decode_state,
@@ -23,7 +24,6 @@ from openswe.dashboard.oauth import (
     redeem_connect_handoff,
     require_session,
     sanitize_redirect_to,
-    session_user_id,
     valid_handoff_challenge,
 )
 from openswe.slack.oauth import (
@@ -68,7 +68,7 @@ async def slack_login(
     redirect_to: str | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
-    _session: dict[str, Any] = SESSION_DEP,
+    _session: DashboardSession = SESSION_DEP,
 ) -> RedirectResponse:
     """Start the Sign in with Slack flow to link the current GitHub account."""
     if not slack_oauth_configured():
@@ -122,7 +122,7 @@ async def slack_callback(
         _clear_slack_state_cookie(response)
         return response
 
-    session = require_session(request)
+    session = await require_session(request)
     nonce_hash = state_payload.get("nonce_hash")
     cookie_nonce = request.cookies.get(SLACK_STATE_COOKIE_NAME)
     if (
@@ -157,24 +157,19 @@ async def _verified_slack_identity(code: str) -> SlackIdentity:
 
 
 async def _link_slack_identity(
-    session: dict[str, Any], *, slack_user_id: str, email: str, team_id: str
+    session: DashboardSession, *, slack_user_id: str, email: str, team_id: str
 ) -> None:
     """Attach the Slack account to the person the session belongs to."""
-    github_login = session["sub"]
-    user = await User.for_session(session_user_id(session), github_login)
+    user = await User.get(session.user_id)
     if user is None:
-        logger.warning(
-            "Slack identity not linked: no user for this GitHub login",
-            extra={"github_login": github_login},
-        )
-        raise HTTPException(409, "no Open SWE account for your GitHub login — sign in again")
+        raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
     await user.link("slack", slack_user_id, email=email, team_id=team_id)
 
 
 @router.post("/slack/desktop/exchange")
 async def slack_desktop_exchange(
     body: DesktopConnectExchange,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
     """Finish a desktop Slack link with the app's own session."""
     claims = redeem_connect_handoff(provider="slack", code=body.code, verifier=body.verifier)

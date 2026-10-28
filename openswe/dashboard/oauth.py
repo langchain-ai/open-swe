@@ -7,6 +7,7 @@ import logging
 import re
 import secrets
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote, urlparse
@@ -20,12 +21,14 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.requests import HTTPConnection
 
 from openswe.config import ENV
+from openswe.dashboard.admin import is_admin
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.authorization import (
     allowed_logins,
     allowed_orgs,
     is_authorized_github_login,
 )
+from openswe.users.models import User
 from openswe.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
@@ -52,12 +55,70 @@ UPLOAD_TICKET_AUDIENCE = "open-swe-session-upload"
 JWT_ALG = "HS256"
 
 
-def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> str:
+_EXPIRED_SESSION = "your session has expired — sign in with GitHub again"
+
+
+@dataclass(frozen=True, kw_only=True)
+class DashboardSession:
+    """The person a dashboard request comes from, as their ``users`` row knows them now.
+
+    A session token names its person by ``user_id``. The GitHub login it was
+    minted with is never trusted: GitHub hands a login to someone else after a
+    rename, so the login comes from the person's row on every request.
+    """
+
+    user_id: UUID
+    login: str
+    email: str | None = None
+    avatar_url: str | None = None
+
+    @classmethod
+    def of(
+        cls, user: User, *, email: str | None = None, avatar_url: str | None = None
+    ) -> DashboardSession:
+        return cls(
+            user_id=user.id,
+            login=user.github_login,
+            email=email,
+            avatar_url=avatar_url or user.avatar_url or None,
+        )
+
+    @classmethod
+    async def load(
+        cls, user_id: UUID, *, email: str | None = None, avatar_url: str | None = None
+    ) -> DashboardSession:
+        """``user_id``'s session; 401 once they no longer have an account with a GitHub login."""
+        user = await User.get(user_id)
+        if user is None or not user.github_login:
+            raise HTTPException(401, _EXPIRED_SESSION)
+        return cls.of(user, email=email, avatar_url=avatar_url)
+
+    @classmethod
+    async def from_token(cls, token: str) -> DashboardSession:
+        """The session a dashboard cookie carries."""
+        claims = decode_session(token)
+        try:
+            user_id = UUID(str(claims.get("user_id")))
+        except ValueError as exc:
+            raise HTTPException(401, _EXPIRED_SESSION) from exc
+        email, avatar_url = claims.get("email"), claims.get("avatar_url")
+        return await cls.load(
+            user_id,
+            email=email if isinstance(email, str) else None,
+            avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+        )
+
+    @property
+    def admin(self) -> bool:
+        return is_admin(self.email, login=self.login)
+
+
+def issue_terminal_ticket(session: DashboardSession, *, thread_id: str) -> str:
     now = int(time.time())
     payload = {
         "aud": TERMINAL_TICKET_AUDIENCE,
-        "sub": login,
-        "email": email,
+        "sub": str(session.user_id),
+        "email": session.email,
         "thread_id": thread_id,
         "iat": now,
         "exp": now + TERMINAL_TICKET_TTL_SECONDS,
@@ -65,7 +126,8 @@ def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> s
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
-def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
+async def redeem_terminal_ticket(token: str, *, thread_id: str) -> DashboardSession:
+    """The session a terminal ticket was issued to, for the one thread it names."""
     try:
         payload = jwt.decode(
             token,
@@ -74,36 +136,32 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
             audience=TERMINAL_TICKET_AUDIENCE,
             options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
         )
-    except jwt.PyJWTError as exc:
+        user_id = UUID(str(payload.get("sub")))
+    except (jwt.PyJWTError, ValueError) as exc:
         raise HTTPException(401, "invalid terminal ticket") from exc
-    login = payload.get("sub")
     ticket_thread_id = payload.get("thread_id")
-    if not isinstance(login, str) or not login or not isinstance(ticket_thread_id, str):
-        raise HTTPException(401, "invalid terminal ticket")
-    if not hmac.compare_digest(ticket_thread_id, thread_id):
+    if not isinstance(ticket_thread_id, str) or not hmac.compare_digest(
+        ticket_thread_id, thread_id
+    ):
         raise HTTPException(401, "invalid terminal ticket")
     email = payload.get("email")
-    return {"sub": login, "email": email if isinstance(email, str) else None}
+    return await DashboardSession.load(user_id, email=email if isinstance(email, str) else None)
 
 
 class UploadTicket(BaseModel):
     """Who may fill which reserved session-upload thread, as its upload URL carries it."""
 
-    sub: str = Field(min_length=1)
+    user_id: UUID = Field(validation_alias="sub")
     email: str | None = None
-    user_id: str | None = None
     thread_id: str = Field(min_length=1)
 
 
-def issue_upload_ticket(
-    *, login: str, email: str | None, user_id: str | None, thread_id: str
-) -> str:
+def issue_upload_ticket(*, user_id: UUID, email: str | None, thread_id: str) -> str:
     now = int(time.time())
     payload = {
         "aud": UPLOAD_TICKET_AUDIENCE,
-        "sub": login,
+        "sub": str(user_id),
         "email": email,
-        "user_id": user_id,
         "thread_id": thread_id,
         "iat": now,
         "exp": now + UPLOAD_TICKET_TTL_SECONDS,
@@ -240,22 +298,6 @@ def issue_session(*, login: str, email: str | None, avatar_url: str | None, user
         "exp": now + SESSION_TTL_SECONDS,
     }
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
-
-
-def rebind_session(session: dict[str, Any], user_id: str) -> str:
-    """``session`` re-signed for ``user_id``, keeping its expiry."""
-    return jwt.encode({**session, "user_id": user_id}, _secret(), algorithm=JWT_ALG)
-
-
-def session_user_id(session: dict[str, Any]) -> UUID | None:
-    """The person a session was minted for, or ``None`` for one issued without."""
-    raw = session.get("user_id")
-    if not isinstance(raw, str) or not raw:
-        return None
-    try:
-        return UUID(raw)
-    except ValueError:
-        return None
 
 
 def decode_session(token: str) -> dict[str, Any]:
@@ -454,44 +496,41 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(
+async def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
-) -> dict[str, Any]:
+) -> DashboardSession:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
-    session = decode_session(token)
+    session = await DashboardSession.from_token(token)
     bind_audit_session(request, session)
     return session
 
 
-def bind_audit_session(request: HTTPConnection, session: dict[str, object]) -> None:
+def bind_audit_session(request: HTTPConnection, session: DashboardSession) -> None:
     from openswe.audit_logs.middleware import bind_actor
     from openswe.audit_logs.models import AuditLogEnrichments
 
-    login = session.get("sub")
     bind_actor(
         request,
-        user_id=session_user_id(session),
-        enrichments=AuditLogEnrichments(
-            actor_kind="person", actor_login=login if isinstance(login, str) else None
-        ),
+        user_id=session.user_id,
+        enrichments=AuditLogEnrichments(actor_kind="person", actor_login=session.login),
     )
 
 
-def optional_session(request: HTTPConnection) -> dict[str, Any] | None:
+async def optional_session(request: HTTPConnection) -> DashboardSession | None:
     """The caller's session, where another credential may serve instead.
 
-    An unreadable cookie reads as no session: a route that accepts more than one
-    kind of credential has to go on and try the others.
+    An unreadable or expired cookie reads as no session: a route that accepts
+    more than one kind of credential has to go on and try the others.
     """
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
     try:
-        return decode_session(token)
+        return await DashboardSession.from_token(token)
     except HTTPException:
-        logger.debug("Ignoring an unreadable session cookie on a multi-credential route")
+        logger.debug("Ignoring an unusable session cookie on a multi-credential route")
         return None
 
 

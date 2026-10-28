@@ -14,6 +14,7 @@ from openswe.jobs import queue
 from openswe.slack.http import SlackRequestError
 from openswe.tools.send_announcement import send_announcement
 from openswe.users.models import User, UserIdentity
+from tests.support.sessions import signed_in
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -73,7 +74,7 @@ def _client(session: dict[str, str]) -> httpx.AsyncClient:
 
 @pytest.fixture
 async def admin_client(admin: User) -> AsyncIterator[httpx.AsyncClient]:
-    async with _client({"sub": "admin", "user_id": str(admin.id)}) as client:
+    async with _client(signed_in("admin", user_id=admin.id)) as client:
         yield client
 
 
@@ -131,7 +132,7 @@ async def test_only_admins_announce_and_a_test_reaches_only_the_admin(
     admin_client: httpx.AsyncClient, slack: FakeSlack
 ) -> None:
     intern = await _person(("github", "intern"), ("slack", "UINTERN"))
-    async with _client({"sub": "intern", "user_id": str(intern.id)}) as client:
+    async with _client(signed_in("intern", user_id=intern.id)) as client:
         refused = await client.post("/dashboard/api/admin/announcements", json={"text": "hi"})
     assert refused.status_code == 403
 

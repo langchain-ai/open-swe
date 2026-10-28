@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.users.records import UserRecords
 from openswe.utils.time import now_iso
 
@@ -78,15 +79,15 @@ router = APIRouter(tags=["user-preferences"])
 
 @router.get("/me/preferences")
 async def api_get_my_preferences(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    return await get_user_preferences(session["sub"])
+    return await get_user_preferences(session.login)
 
 
 @router.put("/me/preferences")
 @audit_endpoint
 async def api_put_my_preferences(
     body: UserPreferencesUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    return await set_user_preferences(session["sub"], body)
+    return await set_user_preferences(session.login, body)
