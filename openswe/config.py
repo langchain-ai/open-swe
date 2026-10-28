@@ -284,6 +284,17 @@ ENV.var(
 ENV.var("DEFAULT_REPO_NAME", "Default GitHub repository when a run names none.")
 ENV.var("SLACK_REPO_OWNER", "Slack-specific default repository owner.")
 ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
+ENV.var(
+    "CONFIDENTIALITY_GUARD",
+    "Pre-publication confidentiality check on pushes, GitHub CLI writes and pull requests "
+    "to public repositories: off, shadow (log finding kinds only) or enforce (refuse).",
+    default="off",
+)
+ENV.var(
+    "CONFIDENTIALITY_REVIEW_MODEL",
+    "Model that reviews outgoing public content against the run's sensitive context after "
+    "the deterministic scan; unset skips the reviewer pass.",
+)
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)

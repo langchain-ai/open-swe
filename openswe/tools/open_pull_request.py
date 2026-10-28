@@ -1,6 +1,7 @@
 """Open a GitHub pull request using the thread's credential scope."""
 
 import asyncio
+import json
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -16,6 +17,8 @@ from openswe.act_as.gate import require_consent
 from openswe.agent_api.git_metadata import record_pr_target
 from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
+from openswe.confidentiality.check import Publication
+from openswe.confidentiality.scan import Segment
 from openswe.credential_scope import (
     PrAuthorNotAParticipant,
     pr_author_login,
@@ -1103,6 +1106,14 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
+        publication = Publication(
+            f"{owner}/{repo}",
+            "pull_request",
+            (Segment("pull request title", title), Segment("pull request body", body)),
+        )
+        verdict = await publication.check(_configurable())
+        if not verdict.allowed:
+            return json.loads(verdict.refusal(publication))
         body = await _stamp_attribution_footer(
             await _maybe_append_references(client, token, owner, repo, body),
             state,

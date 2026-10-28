@@ -6,6 +6,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
+from openswe.middleware import git_push
 from openswe.middleware import workflow_push_guard as guard
 from openswe.sandboxes.state import SandboxBackendProxy
 
@@ -109,10 +110,10 @@ def _clear_backend_cache() -> Any:
 
 
 def test_parse_git_push_supports_git_c_and_cd() -> None:
-    assert guard._parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
+    assert git_push.parse_git_push("git -C /repo push origin feature") == guard.ParsedGitPush(
         repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
     )
-    assert guard._parse_git_push(
+    assert git_push.parse_git_push(
         "cd /repo && git push -u origin HEAD:feature"
     ) == guard.ParsedGitPush(
         repo_dir="/repo",
@@ -121,8 +122,8 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
         remote_ref="feature",
         set_upstream=True,
     )
-    assert guard._parse_git_push("git status && git push") is None
-    assert guard._parse_git_push("git push origin feature; git push origin evil:feature") is None
+    assert git_push.parse_git_push("git status && git push") is None
+    assert git_push.parse_git_push("git push origin feature; git push origin evil:feature") is None
 
 
 @pytest.mark.parametrize(
@@ -137,7 +138,7 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
     ],
 )
 def test_parse_git_push_rejects_unsafe_options(options: str) -> None:
-    assert guard._parse_git_push(f"git -C /repo push {options} origin feature") is None
+    assert git_push.parse_git_push(f"git -C /repo push {options} origin feature") is None
 
 
 async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:

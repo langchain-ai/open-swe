@@ -3,6 +3,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
+    "ConfidentialityGuardMiddleware": ".confidentiality_guard",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -22,6 +23,7 @@ _MIDDLEWARE_MODULES = {
 }
 
 __all__ = [
+    "ConfidentialityGuardMiddleware",
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
@@ -41,6 +43,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from openswe.middleware.confidentiality_guard import ConfidentialityGuardMiddleware
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
     from openswe.middleware.model_errors import ModelErrorMiddleware

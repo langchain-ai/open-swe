@@ -97,6 +97,7 @@ from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
     BasePrepareRunMiddleware,
+    ConfidentialityGuardMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
@@ -2056,7 +2057,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.files = files.backend
     surface.artifacts_root = files.artifacts_root
-    surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
+    surface.shell_guards = [
+        PullRequestCreationGuardMiddleware(),
+        ConfidentialityGuardMiddleware(),
+        WorkflowPushGuardMiddleware(),
+    ]
     surface.file_checks = ("image_reads", "agents_md")
     surface.models = SurfaceModels(
         main=ModelChoice(model_id, dict(model_kwargs)),
