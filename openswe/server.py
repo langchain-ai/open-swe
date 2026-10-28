@@ -34,6 +34,7 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
 )
+from runtime_api.endpoint import QUICK_CALL_SECONDS
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -948,6 +949,16 @@ def direct_and_from_code(name: str) -> bool:
 def code_name(name: str) -> str | None:
     """The name code mode calls a tool by, as ``tools.<name>``, if it can."""
     return to_camel_case(name) if callable_from_code(name) else None
+
+
+_QUICK_CALLS = frozenset(
+    {"get_thread", "list_threads", "slack_read_channel_messages", "slack_read_thread_messages"}
+)
+
+
+def call_seconds(name: str) -> float | None:
+    """How long a call of a tool may take, when shorter than a tool call's allowance."""
+    return QUICK_CALL_SECONDS if name in _QUICK_CALLS else None
 
 
 def code_only(name: str) -> bool:

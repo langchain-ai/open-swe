@@ -17,6 +17,8 @@ API_PREFIX: Final = "/agent-api/"
 API_PATH: Final = API_PREFIX + "{endpoint}"
 # A tool call can run a long command.
 LONG_CALL_SECONDS: Final = 1800.0
+# A tool call that only reads the backend's own records or Slack.
+QUICK_CALL_SECONDS: Final = 120.0
 # A call of the model loop, which only reads and writes the run's own records.
 LOOP_CALL_SECONDS: Final = 300.0
 
