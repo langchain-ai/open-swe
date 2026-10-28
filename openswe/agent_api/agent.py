@@ -11,6 +11,7 @@ from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
 from openswe.github.thread_token import get_github_token
 from openswe.github.token import resolve_github_token
+from openswe.middleware.confidentiality_guard import ConfidentialityGuardMiddleware
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
@@ -29,7 +30,12 @@ class AgentParts(RunParts):
     """The agent's pieces, as its plan builds them, for a call answered without it."""
 
     reporters = (_TRANSCRIPT, record_run_usage)
-    shell_guards = (PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware())
+    # The confidentiality guard reads the push as written, before the workflow guard pins it.
+    shell_guards = (
+        PullRequestCreationGuardMiddleware(),
+        ConfidentialityGuardMiddleware(),
+        WorkflowPushGuardMiddleware(),
+    )
 
     def legacy(self, cfg: RunConfig) -> bool:
         # A requested offload needs the conversation's model, and an incident the
