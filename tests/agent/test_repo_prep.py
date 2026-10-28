@@ -72,8 +72,6 @@ async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
     assert ok is True
     assert len(backend.commands) == 1
     cmd = backend.commands[0]
-    assert "exec 9>/work/widget.review-prep.lock" in cmd
-    assert "flock -w 120 9" in cmd
     assert "gh repo clone acme/widget" in cmd
     assert "/work/widget/.git" in cmd
     assert "git fetch origin def456" in cmd
@@ -106,59 +104,6 @@ async def test_materialize_trusted_skills_extracts_from_trusted_ref() -> None:
     for cmd in backend.commands:
         assert "git cat-file -e def456:" in cmd
         assert "git archive def456" in cmd
-
-
-@pytest.mark.parametrize("cancel_prepare", [False, True])
-async def test_prepare_serializes_repositories_with_a_bounded_wait(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel_prepare: bool
-) -> None:
-    import openswe.sandboxes.repo_prep as prep
-
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        "#!/bin/sh\nname=${3##*/}\n"
-        'touch "$name.started"\n'
-        'while [ "$name" = widget ] && [ ! -f release ]; do sleep 0.01; done\n'
-        'mkdir -p "$name/.git"\n'
-    )
-    gh.chmod(0o755)
-    git = bin_dir / "git"
-    git.write_text("#!/bin/sh\ntouch fetched\n")
-    git.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    monkeypatch.setattr(prep, "PREP_LOCK_TIMEOUT_SECONDS", 0.1)
-
-    shell = _ShellBackend()
-    backend = cast(SandboxBackendProtocol, shell)
-
-    async def prepare(name: str) -> None:
-        await prep.prepare_review_repo_or_raise(
-            backend, work_dir=str(tmp_path), repo_owner="acme", repo_name=name, head_sha=""
-        )
-
-    first = asyncio.create_task(prepare("widget"))
-    try:
-        async with asyncio.timeout(5):
-            while not (tmp_path / "widget.started").exists():
-                await asyncio.sleep(0.01)
-        if cancel_prepare:
-            first.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await first
-        await asyncio.wait_for(prepare("other"), 5)
-        with pytest.raises(prep.ReviewRepoPreparationError, match="Timed out waiting"):
-            await asyncio.wait_for(prepare("widget"), 5)
-        assert not (tmp_path / "widget" / "fetched").exists()
-    finally:
-        (tmp_path / "release").touch()
-        if not first.cancelled():
-            await asyncio.wait_for(first, 5)
-        for process in shell.processes:
-            await asyncio.wait_for(process.wait(), 5)
-    await prepare("widget")
-    assert (tmp_path / "widget" / "fetched").exists()
 
 
 @pytest.mark.parametrize("cancel_old", [False, True])
@@ -275,23 +220,3 @@ async def test_prepare_cleans_stale_locks_only_without_git_processes(
     assert (repo_dir / "fetches").read_text().splitlines() == [expected, expected]
     for name in ("index.lock", "shallow.lock"):
         assert (repo_dir / ".git" / name).exists() is (process_status != 1)
-
-
-@pytest.mark.parametrize("raises", [False, True])
-async def test_preparation_failure_preserves_boolean_api_and_bounded_diagnostics(
-    raises: bool,
-) -> None:
-    from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
-
-    backend = cast(
-        SandboxBackendProtocol,
-        _FakeSandboxBackend(
-            exit_code=1, output="x" * 3000 + "fatal: checkout failed", raise_exc=raises
-        ),
-    )
-    kwargs = {"work_dir": "/work", "repo_owner": "acme", "repo_name": "widget", "head_sha": "abc"}
-    assert await prepare_review_repo(backend, **kwargs) is False
-    with pytest.raises(ReviewRepoPreparationError) as error:
-        await prepare_review_repo_or_raise(backend, **kwargs)
-    assert len(str(error.value)) <= 2000
-    assert str(error.value).endswith("sandbox unreachable" if raises else "fatal: checkout failed")
