@@ -1146,10 +1146,10 @@ async def slack_interactivity(
             if button.action not in {"approve", "reject"}:
                 return ignored("Unknown workflow approval action")
             approved = button.action == "approve"
-            record = await common.decide_workflow_push_approval(
+            decision = await common.decide_workflow_push_approval(
                 thread_id, button.fingerprint, approved=approved, actor=user_id
             )
-            if record is None:
+            if decision is None:
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
                     thread_ts=reply_ts,
@@ -1157,6 +1157,15 @@ async def slack_interactivity(
                     agent_thread_id=thread_id,
                 )
                 return ignored("workflow approval not found")
+            record, changed = decision
+            if not changed:
+                background_tasks.add_task(
+                    _update_selected_option_message,
+                    interaction,
+                    action.model_copy(update={"text": None}),
+                    f"Workflow push {record['status']}",
+                )
+                return accepted(f"Workflow push already {record['status']}")
             background_tasks.add_task(
                 _update_selected_option_message,
                 interaction,

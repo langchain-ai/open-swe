@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -49,7 +50,7 @@ import {
   type MetricAvailability,
 } from "@/lib/usage-diagnostics"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const HELP_TRIGGER_CLASS =
   "cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
@@ -283,7 +284,7 @@ function UsageAnalyticsPeriod({
                   color="secondary"
                   variant={usageScope === scope ? "outlined" : "plain"}
                   aria-pressed={usageScope === scope}
-                  className="capitalize"
+                  className="capitalize focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                   onClick={() => {
                     setUsageScope(scope)
                     if (sort === "invocations" || sort === "threads") {
@@ -503,7 +504,7 @@ function AnalyticsCoverage({
             size="xs"
             color="secondary"
             variant="outlined"
-            className="shrink-0"
+            className="shrink-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             leftDecorator={ArrowClockwiseIcon}
             disabled={refreshing}
             onClick={(event) => {
@@ -876,17 +877,25 @@ function OutcomeCell({
         </div>
       }
     >
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={`${count} (${outcomePercent(group, outcome)}%)`}
         type="button"
         // A click pins the breakdown open instead of toggling it shut.
         onClick={(event) => {
           event.preventDefault()
           setOpen(true)
         }}
-        className={HELP_TRIGGER_CLASS}
+        className={cn(
+          "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          "h-auto border-0 px-0",
+          HELP_TRIGGER_CLASS
+        )}
       >
         {value}
-      </button>
+      </Button>
     </Tooltip>
   )
 }
@@ -1033,9 +1042,22 @@ function PROutcomeCells({
                   : "Mean distance unavailable for this group"
               }
             >
-              <button type="button" className={HELP_TRIGGER_CLASS}>
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={
+                  value == null ? "—" : `${(value / 100).toFixed(1)}%`
+                }
+                type="button"
+                className={cn(
+                  "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                  "h-auto border-0 px-0",
+                  HELP_TRIGGER_CLASS
+                )}
+              >
                 {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
-              </button>
+              </Button>
             </Tooltip>
             {supported && group.distance_sample_size !== undefined && (
               <div className="text-xs text-secondary">
@@ -1298,11 +1320,17 @@ function SortableHeader<Key extends string>({
     : undefined
 
   const button = (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-label={column.label}
       type="button"
       onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
       className={cn(
-        "flex w-full items-center gap-space-1 rounded-sm px-space-2 py-space-3 hover:bg-surface-level-2-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+        "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+        "h-auto whitespace-normal",
+        "w-full gap-space-1 px-space-2 py-space-3 hover:bg-surface-level-2-hover",
         column.align === "right" ? "justify-end" : "justify-start",
         isActive && "text-primary",
         column.tooltip &&
@@ -1316,7 +1344,7 @@ function SortableHeader<Key extends string>({
         className={cn("shrink-0", !isActive && "text-icon-tertiary")}
         aria-hidden
       />
-    </button>
+    </Button>
   )
 
   return (
@@ -1590,14 +1618,18 @@ function UserCell({
   const detail = row.user.github_login
   const profileUrl = githubProfileUrl(row.user.github_login)
   const name = profileUrl ? (
-    <a
+    <MacawLink
+      variant="xs"
       href={profileUrl}
       target="_blank"
       rel="noreferrer"
-      className="truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+      className={cn(
+        INHERITED_LINK,
+        "min-w-0 truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&>span]:truncate"
+      )}
     >
       {row.user.name}
-    </a>
+    </MacawLink>
   ) : (
     <span className="truncate font-medium text-primary">{row.user.name}</span>
   )
@@ -1682,13 +1714,21 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
     <div className="flex flex-col items-end gap-0.5">
       <span>{unavailable ? "—" : formatCurrency(row.total_cost_usd)}</span>
       <Tooltip title={explanation} tooltipClassName="max-w-xs">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
           type="button"
           aria-label={`Cost ${label.toLowerCase()}`}
-          className={cn(HELP_TRIGGER_CLASS, "text-xxs text-secondary")}
+          className={cn(
+            "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+            "h-auto border-0 px-0",
+            HELP_TRIGGER_CLASS,
+            "text-secondary"
+          )}
         >
           {label}
-        </button>
+        </Button>
       </Tooltip>
     </div>
   )

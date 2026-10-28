@@ -145,6 +145,7 @@ class RequestResult(BaseModel):
     error: str = ""
     request_id: str = ""
     channel: str = ""
+    channel_name: str = ""
     permalink: str = ""
     reused: bool = False
     summary_updated: bool = False
@@ -490,6 +491,7 @@ async def _request_review(
         auto_merge=request.auto_merge,
         request_id=str(request.id),
         channel=target.id,
+        channel_name=target.name,
         permalink=await _permalink(request),
     )
 

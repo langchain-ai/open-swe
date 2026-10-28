@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, urlparse
 
 import httpx2
@@ -243,6 +243,10 @@ class GitHubSignInRequired(Exception):
 class GitHubAppUnavailable(Exception):
     """No GitHub App installation token can be minted for the request."""
 
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
 
 class RepoFileUnreadableError(RuntimeError):
     """A repository file could not be read reliably."""
@@ -335,6 +339,7 @@ class GitHubClient:
             installation_id=installation_id,
             repositories=[repo] if permissions is not None and repo is not None else None,
             permissions=permissions,
+            raise_errors=True,
         )
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
@@ -919,6 +924,45 @@ def _artifact_destination(location: str) -> None:
         or url.port not in (None, 443)
     ):
         raise ValueError("Untrusted artifact download destination")
+
+
+type ReadStatus = Literal["ok", "transient", "missing", "forbidden", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadResult[T]:
+    """A GitHub read and the reason it could not be completed."""
+
+    value: T | None
+    status: ReadStatus
+
+
+async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
+    """Preserve retryable failures separately from missing or inaccessible resources."""
+    try:
+        return ReadResult(await read, "ok")
+    except httpx2.HTTPStatusError as exc:
+        response = exc.response
+        status: ReadStatus = "unavailable"
+        if (
+            response.status_code == 429
+            or 500 <= response.status_code < 600
+            or _is_secondary_rate_limit(response)
+            or (response.status_code == 403 and "Retry-After" in response.headers)
+        ):
+            status = "transient"
+        elif response.status_code == 404:
+            status = "missing"
+        elif response.status_code in {401, 403}:
+            status = "forbidden"
+        logger.warning("GitHub read failed", extra={"read_status": status}, exc_info=True)
+        return ReadResult(None, status)
+    except httpx2.TransportError:
+        logger.warning("GitHub read transport failed", exc_info=True)
+        return ReadResult(None, "transient")
+    except httpx2.HTTPError, ValueError:
+        logger.warning("GitHub read unavailable", exc_info=True)
+        return ReadResult(None, "unavailable")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:
