@@ -350,7 +350,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
           : "Local ignore region"
       }
     >
-      <span className="bg-surface-level-1 px-space-1 text-xxs text-primary">
+      <span className="bg-elevated px-space-1 text-xxs text-primary">
         {index < scenario.mask_rects.length
           ? "Recorded ignore"
           : `Local ignore ${index - scenario.mask_rects.length + 1}`}
@@ -393,7 +393,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             className="pointer-events-none absolute rounded-sm border-2 border-purple"
             style={rectStyle(annotation)}
           >
-            <span className="absolute top-0 left-0 max-w-full truncate rounded-br-sm bg-surface-level-1 px-space-1 text-xxs text-primary">
+            <span className="absolute top-0 left-0 max-w-full truncate rounded-br-sm bg-elevated px-space-1 text-xxs text-primary">
               {annotation.title}
             </span>
           </div>
@@ -434,7 +434,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
       {mode === "toggle" ? exclusions : overlays}
       {mode === "wipe" && (
         <div
-          className="pointer-events-none absolute inset-y-0 w-px bg-surface-level-1 shadow-md"
+          className="pointer-events-none absolute inset-y-0 w-px bg-elevated shadow-md"
           style={{ left: `${wipe}%` }}
         />
       )}
@@ -841,7 +841,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
 
 function ImageLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-b border-default bg-surface-level-2 px-space-3 py-space-2 text-xs font-medium text-secondary">
+    <div className="border-b border-default bg-surface-level-3 px-space-3 py-space-2 text-xs font-medium text-secondary">
       {children}
     </div>
   )

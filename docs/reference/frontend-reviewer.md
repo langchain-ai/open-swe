@@ -8,6 +8,8 @@ Open **Design QA** in the Open SWE sidebar to browse your PRs or review assignme
 
 The feature uses the dashboard's existing deployment, GitHub session, and repository authorization. It does not need a separate site or DNS record. The interface uses the app's installed Macaw components, stylesheet, and semantic tokens.
 
+Surface roles follow LangChainPlus's `smith-frontend/STYLES.md`: level 1 for the page, level 2 through Macaw's default neutral `Card`, level 3 for nested screenshot headers and canvas wells, and `bg-elevated` for labels floating over evidence. Inputs and the run picker inherit the installed Macaw controls' theme, hover, focus, and disabled styles. Screenshot pixels and the diagnostic pink diff mask remain independent of the viewer's theme.
+
 ## Capture and inspect
 
 Supply a base preview, the PR preview, and up to five matching routes. For LangChainPlus, the head URL defaults to `https://pr-<number>-fe.review.smith.langchain.com`. Build the base preview from the PR's exact base commit; a shared development deployment is not a reliable baseline.

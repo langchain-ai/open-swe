@@ -4,6 +4,7 @@ import { Card } from "@langchain/macaw-components/Card"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
+import { Select } from "@langchain/macaw-components/Select"
 import {
   useIsMutating,
   useMutation,
@@ -155,19 +156,19 @@ export function FrontendReviewer({
             {list.data && list.data.runs.length > 0 && (
               <label className="flex items-center gap-space-3 text-xs text-secondary">
                 Review run
-                <select
+                <Select
                   aria-label="Review run"
-                  className="max-w-full rounded-sm border border-default bg-surface-level-1 px-space-3 py-space-2 text-sm text-primary"
-                  value={selectedId ?? ""}
-                  onChange={(event) => onRunChange(event.target.value)}
-                >
-                  {list.data.runs.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {new Date(item.created_at).toLocaleString()} ·{" "}
-                      {item.status} · {item.head_sha.slice(0, 7)}
-                    </option>
-                  ))}
-                </select>
+                  size="md"
+                  triggerClassName="w-auto min-w-0 max-w-full"
+                  value={selectedId}
+                  onChange={(id) => {
+                    if (id) onRunChange(id)
+                  }}
+                  options={list.data.runs.map((item) => ({
+                    value: item.id,
+                    label: `${new Date(item.created_at).toLocaleString()} · ${item.status} · ${item.head_sha.slice(0, 7)}`,
+                  }))}
+                />
               </label>
             )}
             {selectedId && detail.isPending && (

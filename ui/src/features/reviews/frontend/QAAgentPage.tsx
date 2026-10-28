@@ -263,7 +263,7 @@ function QAPullRequestCard({ pr }: { pr: OpenPullRequest }) {
       className="block min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
       <Card className="flex h-full min-w-0 flex-col overflow-hidden p-0 transition-colors hover:border-strong">
-        <div className="flex aspect-[16/7] items-center justify-center overflow-hidden border-b border-default bg-surface-level-2">
+        <div className="flex aspect-[16/7] items-center justify-center overflow-hidden border-b border-default bg-surface-level-3">
           {evidence.isPending ? (
             <Skeleton className="h-full w-full" />
           ) : thumbnail ? (

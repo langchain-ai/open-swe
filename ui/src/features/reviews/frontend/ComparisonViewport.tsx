@@ -256,7 +256,7 @@ export function ComparisonViewport({
               }
               tabIndex={0}
               className={cn(
-                "overflow-auto overscroll-contain outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]",
+                "overflow-auto overscroll-contain bg-surface-level-3 outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]",
                 interaction === "select"
                   ? "cursor-crosshair"
                   : dragging
