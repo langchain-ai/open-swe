@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
@@ -186,19 +187,27 @@ export const Messages = memo(function MessagesComponent({
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
             {loadEarlier && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={
+                  loadEarlier.loading
+                    ? "Loading earlier turns…"
+                    : "Load earlier turns"
+                }
                 type="button"
                 disabled={loadEarlier.loading}
                 onClick={() => {
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-space-3 w-full rounded-sm py-space-1 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
+                className="mb-space-3 w-full py-space-1 text-center text-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
                   : "Load earlier turns"}
-              </button>
+              </Button>
             )}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
