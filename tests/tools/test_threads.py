@@ -1,6 +1,7 @@
 import importlib
 import json
 from types import SimpleNamespace
+from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,20 +27,32 @@ def _actor(*, login: str = "octocat", admin: bool = False) -> object:
 
 
 @pytest.mark.parametrize(
-    ("sender", "context_id", "context_login", "stored_login", "lookup_fails", "expected"),
+    (
+        "sender",
+        "surface",
+        "context_id",
+        "context_login",
+        "stored_login",
+        "lookup_fails",
+        "expected",
+    ),
     [
-        ("github:123", "github:123", "reviewer", None, False, "reviewer"),
-        ("github:123", "github:456", "other", None, False, None),
-        ("github:123", "github:123", None, "reviewer", False, "reviewer"),
-        ("github:123", "github:123", None, None, False, None),
-        ("github:123", "github:123", None, None, True, None),
-        ("github:reviewer", "github:456", "other", None, False, "reviewer"),
-        ("slack:U123", "github:123", "reviewer", None, False, "thread-owner"),
+        ("github:123", "github", "github:123", "reviewer", None, False, "reviewer"),
+        ("github:123", "github", "github:456", "other", None, False, None),
+        ("github:123", "github", "github:123", None, "reviewer", False, "reviewer"),
+        ("github:123", "github", "github:123", None, None, False, None),
+        ("github:123", "github", "github:123", None, None, True, None),
+        ("github:123", "web", "github:456", "other", None, False, "123"),
+        ("github:123", "web", "github:456", "other", "different-user", False, "123"),
+        ("github:123", "automation", "github:456", "other", None, False, "123"),
+        ("github:reviewer", "github", "github:456", "other", None, False, "reviewer"),
+        ("slack:U123", "github", "github:123", "reviewer", None, False, "thread-owner"),
     ],
 )
 async def test_actor_uses_latest_resolvable_github_sender(
     monkeypatch: pytest.MonkeyPatch,
     sender: str,
+    surface: Literal["github", "web", "automation"],
     context_id: str,
     context_login: str | None,
     stored_login: str | None,
@@ -80,7 +93,7 @@ async def test_actor_uses_latest_resolvable_github_sender(
             person,
             human_input(
                 "Delete the thread",
-                {"sender_id": sender, "surface": "github", "kind": "human"},
+                {"sender_id": sender, "surface": surface, "kind": "human"},
             ),
             person,
         ]
@@ -98,35 +111,23 @@ async def test_actor_uses_latest_resolvable_github_sender(
     )
 
 
-@pytest.mark.parametrize("identity", ["context", "store", "login", "unknown", "lookup-fails"])
 @pytest.mark.parametrize("authorized", [True, False])
 async def test_github_sender_can_use_thread_tools_only_when_authorized(
-    monkeypatch: pytest.MonkeyPatch, identity: str, authorized: bool
+    monkeypatch: pytest.MonkeyPatch, authorized: bool
 ) -> None:
-    allowed = authorized and identity in {"context", "store", "login"}
     monkeypatch.setenv(
         "ALLOWED_GITHUB_USERS", "thread-owner,reviewer" if authorized else "thread-owner"
-    )
-    monkeypatch.setattr(
-        threads_tool.User,
-        "for_identity",
-        AsyncMock(
-            return_value=SimpleNamespace(github_login="reviewer") if identity == "store" else None,
-            side_effect=RuntimeError("store unavailable") if identity == "lookup-fails" else None,
-        ),
     )
     monkeypatch.setattr(
         threads_tool, "get_config", lambda: {"configurable": {"github_login": "thread-owner"}}
     )
     state = {
         "messages": [
-            person_introduction(
-                {"id": "github:123", "github_login": "reviewer" if identity == "context" else ""}
-            ),
+            person_introduction({"id": "github:123", "github_login": "reviewer"}),
             human_input(
                 "Send the author a confirmation",
                 {
-                    "sender_id": "github:reviewer" if identity == "login" else "github:123",
+                    "sender_id": "github:123",
                     "surface": "github",
                     "kind": "human",
                 },
@@ -162,19 +163,16 @@ async def test_github_sender_can_use_thread_tools_only_when_authorized(
         ),
     )
 
-    actor = await threads_tool.resolve_thread_actor(state)
     listed = await threads_tool.list_threads(state=state)
     detail = await threads_tool.get_thread("thread-1", state=state)
     sent = await threads_tool.manage_thread(
         "thread-1", "send_message", message="Please confirm", state=state
     )
 
-    assert (actor is not None) is allowed
-    assert listed["success"] is allowed
-    assert detail["success"] is allowed
-    assert sent["success"] is allowed
-    if allowed:
-        assert actor is not None and actor.login == "reviewer"
+    assert listed["success"] is authorized
+    assert detail["success"] is authorized
+    assert sent["success"] is authorized
+    if authorized:
         assert listed["items"][0]["id"] == "thread-1"
         assert detail["thread"]["id"] == "thread-1"
         assert sent["run_id"] == "run-2"

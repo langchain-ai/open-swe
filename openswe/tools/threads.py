@@ -507,6 +507,21 @@ async def _latest_state_github_login(state: Mapping[str, object] | None) -> str 
             login = sender_id.removeprefix("github:").strip()
             if not login.isdigit():
                 return login or None
+            blocks = content if isinstance(content, list) else [content]
+            for block in blocks:
+                text = _value(block, "text") if isinstance(block, Mapping) else block
+                if not isinstance(text, str):
+                    continue
+                try:
+                    envelope = ElementTree.fromstring(text)
+                except ElementTree.ParseError:
+                    continue
+                if (
+                    envelope.tag == "input-message"
+                    and envelope.get("sender") == sender_id
+                    and envelope.get("surface") in {"web", "automation"}
+                ):
+                    return login
             for context_message in reversed(messages):
                 context_content = _message_content(context_message)
                 if dynamic_context_hash(context_content) is None:
