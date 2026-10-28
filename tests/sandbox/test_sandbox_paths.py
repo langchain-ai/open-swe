@@ -30,15 +30,17 @@ class _FakeSandboxBackend:
         provider: _FakeProvider | None = None,
         shell_paths: dict[str, str] | None = None,
         writable_dirs: set[str] | None = None,
+        sandbox_id: str = "fake-sandbox",
     ) -> None:
         self.sandbox = provider
+        self._id = sandbox_id
         self.shell_paths = shell_paths or {}
         self.writable_dirs = writable_dirs or set()
         self.commands: list[str] = []
 
     @property
     def id(self) -> str:
-        return "fake-sandbox"
+        return self._id
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         del timeout
@@ -137,3 +139,17 @@ async def test_home_fallback_is_reprobed_when_workspace_becomes_available() -> N
     assert await resolve_sandbox_work_dir(sandbox) == "/root"
     backend.writable_dirs.add("/workspace")
     assert await resolve_sandbox_work_dir(sandbox) == "/workspace"
+
+
+async def test_desktop_checkout_keeps_its_cwd_over_workspace() -> None:
+    backend = _FakeSandboxBackend(
+        shell_paths={"pwd": "/home/me/repo"},
+        writable_dirs={"/workspace", "/home/me/repo"},
+        sandbox_id="bridge:mac",
+    )
+    sandbox = cast(SandboxBackendProtocol, backend)
+
+    assert await resolve_sandbox_work_dir(sandbox) == "/home/me/repo"
+    probes = len(backend.commands)
+    assert await resolve_sandbox_work_dir(sandbox) == "/home/me/repo"
+    assert len(backend.commands) == probes

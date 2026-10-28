@@ -8,6 +8,7 @@ from collections.abc import AsyncIterable, Iterable
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
+from openswe.sandboxes.state import SandboxBackendProxy
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +63,13 @@ async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> s
     ):
         return cached_work_dir
 
+    local = _is_local_checkout(await _connected(sandbox_backend))
     checked_candidates: list[str] = []
-    async for candidate in _iter_work_dir_candidates(sandbox_backend):
+    async for candidate in _iter_work_dir_candidates(sandbox_backend, workspace=not local):
         checked_candidates.append(candidate)
         if await _is_writable_directory(sandbox_backend, candidate):
-            if candidate == WORKSPACE_DIR or candidate == declared_work_dir(sandbox_backend):
+            # A remote fallback is re-probed so a later /workspace replaces it.
+            if local or candidate in (WORKSPACE_DIR, declared_work_dir(sandbox_backend)):
                 _cache_work_dir(sandbox_backend, candidate)
             return candidate
 
@@ -76,8 +79,17 @@ async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> s
     raise RuntimeError(msg)
 
 
+async def _connected(sandbox_backend: SandboxBackendProtocol) -> SandboxBackendProtocol:
+    """The backend behind a proxy, connected so its id is known."""
+    return (
+        await sandbox_backend.ready()
+        if isinstance(sandbox_backend, SandboxBackendProxy)
+        else sandbox_backend
+    )
+
+
 async def _iter_work_dir_candidates(
-    sandbox_backend: SandboxBackendProtocol,
+    sandbox_backend: SandboxBackendProtocol, *, workspace: bool
 ) -> AsyncIterable[str]:
     seen: set[str] = set()
 
@@ -86,7 +98,7 @@ async def _iter_work_dir_candidates(
             seen.add(candidate)
             yield candidate
 
-    if WORKSPACE_DIR not in seen:
+    if workspace and WORKSPACE_DIR not in seen:
         seen.add(WORKSPACE_DIR)
         yield WORKSPACE_DIR
 
