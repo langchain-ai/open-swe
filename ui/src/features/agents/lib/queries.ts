@@ -774,7 +774,9 @@ export function useSidebarActiveThread({
     row &&
     mergeTaskFamily(
       row,
-      [rootDetail, fetched, active].flatMap((thread) => (thread ? [thread] : []))
+      [rootDetail, fetched, active].flatMap((thread) =>
+        thread ? [thread] : []
+      )
     )
   )
 }
