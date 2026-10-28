@@ -206,6 +206,38 @@ async def test_every_other_conversation_stays_on_the_backend(
     assert request.thread_id == "backend-thread"
 
 
+@pytest.mark.parametrize("single_session", ["code_channel", "concierge_dm"])
+async def test_a_reply_in_a_thread_mda_held_stays_with_a_single_session(
+    monkeypatch: pytest.MonkeyPatch, single_session: str
+) -> None:
+    # A code channel or concierge DM turned on after MDA took one of its threads.
+    owned = AsyncMock(return_value=_MDA_THREAD)
+    monkeypatch.setattr(mda_forwarding, "owned_thread", owned)
+    monkeypatch.setattr(
+        webhook_common, "is_code_channel", AsyncMock(return_value=single_session == "code_channel")
+    )
+    monkeypatch.setattr(
+        slack_routes.User,
+        "concierge_mode_for_slack",
+        AsyncMock(return_value=single_session == "concierge_dm"),
+    )
+    reply = _mention()
+    reply["event"] |= {"type": "message", "text": "and also", "thread_ts": "1786573300.000001"}
+    if single_session == "concierge_dm":
+        reply["event"] |= {"channel": "D1", "channel_type": "im"}
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(reply, dict(_SLACK_HEADERS))), cast(BackgroundTasks, tasks)
+    )
+
+    assert response["status"] == "accepted"
+    [(task, (request, _repo))] = tasks.tasks
+    assert task is slack_service.process_slack_mention
+    assert request.thread_id == "backend-thread"
+    owned.assert_not_awaited()
+
+
 async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_nowhere(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

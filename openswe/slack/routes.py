@@ -841,8 +841,14 @@ async def slack_webhook(
             return accepted("Slack by-the-way question queued")
 
         # A conversation MDA owns, or a new one MDA's Slack channel can start, goes there.
+        # A code channel or concierge DM is one backend conversation whichever Slack thread
+        # a message is in, so even a reply in a thread MDA held before stays with it.
         root_ts = reply_thread_ts or original_message_ts
-        mda_thread_id = await mda_forwarding.owned_thread(channel_id, root_ts)
+        mda_thread_id = (
+            None
+            if in_code_channel or in_concierge_mode
+            else await mda_forwarding.owned_thread(channel_id, root_ts)
+        )
         new_conversation = False
         if mda_thread_id is None and await mda_forwarding.startable_thread(
             app_id=envelope.api_app_id,
