@@ -49,7 +49,12 @@ from langgraph_sdk.errors import (
 )
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree, WriteReplica
-from managed_deepagents import define_deep_agent
+from managed_deepagents import (
+    DeepAgentDefinition,
+    ManagedServerRuntime,
+    define_deep_agent,
+    shared_factory,
+)
 from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
@@ -1321,8 +1326,16 @@ async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files
         """Print a lot."""
         return "x" * 100_000
 
-    agent = await compile_managed_agent_async(
-        define_deep_agent(
+    class NoInputs(BaseModel):
+        pass
+
+    async def no_inputs(_runtime: ManagedServerRuntime) -> NoInputs:
+        return NoInputs()
+
+    # A shared graph, as Open SWE's is: compiled for no one run.
+    @shared_factory(no_inputs)
+    def shared(_inputs: NoInputs) -> DeepAgentDefinition:
+        return define_deep_agent(
             name="test-agent",
             model=_ToolCallingModel(
                 messages=iter(
@@ -1334,11 +1347,9 @@ async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files
             ),
             tools=[dump],
             sandbox=box(files),
-            _openswe_graph_inputs={},
-        ),
-        None,
-        report_telemetry=False,
-    )
+        )
+
+    agent = await compile_managed_agent_async(shared, None, report_telemetry=False)
 
     result = await agent.ainvoke({"messages": [("user", "dump")]})
 
