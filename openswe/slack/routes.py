@@ -1159,6 +1159,12 @@ async def slack_interactivity(
                 return ignored("workflow approval not found")
             record, changed = decision
             if not changed:
+                background_tasks.add_task(
+                    _update_selected_option_message,
+                    interaction,
+                    action.model_copy(update={"text": None}),
+                    f"Workflow push {record['status']}",
+                )
                 return accepted(f"Workflow push already {record['status']}")
             background_tasks.add_task(
                 _update_selected_option_message,
