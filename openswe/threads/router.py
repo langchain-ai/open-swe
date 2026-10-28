@@ -198,13 +198,15 @@ async def _refuse_channel_write(send: Send, thread: IndexedThread) -> bool:
     return True
 
 
-async def _channel_write_headers(send: Send, thread: IndexedThread) -> dict[str, str] | None:
-    """Headers for a write on ``thread``: none of its own, its channel conversation's, or
-    ``None`` once the write was refused because they can't be had."""
+async def _channel_write_headers(
+    send: Send, thread: IndexedThread, *, user_id: str | None = None
+) -> dict[str, str] | None:
+    """Headers for a write on ``thread``: none of its own, its channel conversation's for
+    ``user_id``, or ``None`` once the write was refused because they can't be had."""
     if channel_of(thread.metadata) is None:
         return {}
     try:
-        return await RUNTIMES.mda_runtime.channel_write_headers(thread.thread_id)
+        return await RUNTIMES.mda_runtime.channel_write_headers(thread.thread_id, user_id=user_id)
     except ChannelThreadError, httpx.HTTPError:
         logger.warning(
             "Can't act on an MDA channel's thread", extra={"thread_id": thread.thread_id}
@@ -402,7 +404,13 @@ class ThreadRouter:
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
             return
-        headers = await _channel_write_headers(send, thread)
+        # The person the run is attributed to, which only the backend writes
+        # (``dispatch.prepare_durable_run``); a run for none acts as the backend.
+        run_metadata = payload.get("metadata")
+        user_id = run_metadata.get("user_id") if isinstance(run_metadata, dict) else None
+        headers = await _channel_write_headers(
+            send, thread, user_id=user_id if isinstance(user_id, str) else None
+        )
         if headers is None:
             return
         # Busy before the answer reaches the caller, so a run that ends at once

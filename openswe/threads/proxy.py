@@ -14,6 +14,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from openswe.dispatch import channel_of
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -38,6 +39,7 @@ from openswe.threads.summary import (
     _now_ms,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.users.models import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -279,7 +281,9 @@ async def proxy_dashboard_thread_commands(
             outgoing = json.dumps(enriched).encode()
 
     try:
-        reply = await THREADS.command(thread_id, outgoing)
+        reply = await THREADS.command(
+            thread_id, outgoing, user_id=await _sender_user_id(principal, login, metadata)
+        )
     except Exception:
         # Answered like the runtime's own failure, so a refused start still closes its turn.
         logger.exception("Delivering a thread command failed", extra={"thread_id": thread_id})
@@ -347,6 +351,19 @@ async def proxy_dashboard_thread_commands(
                 exc_info=True,
             )
     return reply.status, reply.content, reply.media_type
+
+
+async def _sender_user_id(principal: Principal, login: str, metadata: dict[str, Any]) -> str | None:
+    """The Open SWE user a person's command on a channel's thread acts as there.
+
+    The one ``_run_user_metadata`` attributes the person's dashboard runs to, so a
+    follow-up has the principal their channel runs have. ``None`` for a machine,
+    which is no person, and on any other thread.
+    """
+    if principal.machine or channel_of(metadata) is None:
+        return None
+    user = await User.for_login("github", login)
+    return None if user is None else str(user.id)
 
 
 async def _queue_if_thread_turned_busy(

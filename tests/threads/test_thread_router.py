@@ -10,8 +10,10 @@ from starlette.types import Message, Receive, Scope, Send
 
 from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
-from openswe.threads import index, router, runtimes, store
+from openswe.threads import index, proxy, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
+from openswe.threads.principals import Principal
+from openswe.users.models import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -26,6 +28,9 @@ AS_THE_CONVERSATION = {
     "x-mda-source-provider": "linear",
     "x-mda-source-thread-id": "org/ISS-1",
 }
+# A person's Open SWE user, which their channel runs act as (``mda/identity.py``).
+USER_ID = "0190a3c4-0000-7000-8000-00000000ada0"
+AS_THE_PERSON = {**AS_THE_CONVERSATION, "x-mda-user-id": USER_ID}
 
 
 class _Http:
@@ -507,6 +512,61 @@ async def test_a_channel_thread_takes_a_run_started_by_command(
     assert harness.acted_as == [AS_THE_CONVERSATION]
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "busy"
+
+
+async def test_a_persons_run_on_a_channel_thread_acts_as_them(
+    monkeypatch: pytest.MonkeyPatch, secret: None
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    # A queued follow-up: its run is attributed to the person who sent it.
+    status, _ = await harness.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        {"assistant_id": "agent", "input": {}, "metadata": {"user_id": USER_ID}},
+    )
+
+    assert status == 200
+    assert harness.acted_as == [AS_THE_PERSON]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"id": 7, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}},
+        {"id": 7, "method": "input.respond", "params": {}},
+    ],
+)
+async def test_a_persons_command_on_a_channel_thread_acts_as_them(
+    monkeypatch: pytest.MonkeyPatch, secret: None, command: dict[str, JsonValue]
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    reply = await store.THREADS.command(THREAD, json.dumps(command).encode(), user_id=USER_ID)
+
+    assert reply.status == 200
+    assert harness.acted_as == [AS_THE_PERSON]
+
+
+async def test_a_dashboard_command_on_a_channel_thread_is_its_senders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    ada = await User.sign_in("github", "1", login="ada")
+    channel = {"channel": "linear"}
+    machine = Principal(kind="api_key", workspace="acme")
+
+    assert await proxy._sender_user_id(Principal.of_login("ada"), "ada", channel) == str(ada.id)
+    # Only on a channel's thread, for a person Open SWE knows.
+    assert await proxy._sender_user_id(Principal.of_login("ada"), "ada", {}) is None
+    assert await proxy._sender_user_id(Principal.of_login("bob"), "bob", channel) is None
+    # A machine is no person: the backend acts.
+    assert await proxy._sender_user_id(machine, "ada", channel) is None
 
 
 @pytest.mark.parametrize(

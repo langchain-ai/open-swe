@@ -182,8 +182,14 @@ class ThreadStore:
         state = await RUNTIMES.runs_on(thread.runtime).reads.threads.get_state(thread_id)
         return _object.validate_python(dict(state))
 
-    async def command(self, thread_id: str, body: bytes) -> CommandReply:
-        """Answer one protocol v2 command as the thread's runtime does."""
+    async def command(
+        self, thread_id: str, body: bytes, *, user_id: str | None = None
+    ) -> CommandReply:
+        """Answer one protocol v2 command as the thread's runtime does.
+
+        ``user_id`` is the Open SWE user who sent it, which a run or an answer on a
+        channel's thread acts as; without one it acts as the backend.
+        """
         try:
             command = _object.validate_json(body)
         except ValueError:
@@ -205,9 +211,11 @@ class ThreadStore:
         if refusal is not None and method not in READ_COMMANDS | ACTING_COMMANDS:
             return _json_reply(409, {"detail": refusal})
         if refusal is not None and method in ACTING_COMMANDS:
-            # A run or an answer on a channel's thread: as the backend acting in its conversation.
+            # A run or an answer on a channel's thread: as its sender, in its conversation.
             try:
-                acting = await RUNTIMES.mda_runtime.channel_write_headers(thread_id)
+                acting = await RUNTIMES.mda_runtime.channel_write_headers(
+                    thread_id, user_id=user_id
+                )
             except ChannelThreadError, httpx.HTTPError:
                 logger.warning(
                     "Can't act on an MDA channel's thread", extra={"thread_id": thread_id}
@@ -231,6 +239,7 @@ class ThreadStore:
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
                 channel=bool(acting),
+                user_id=user_id,
             )
             if reply.get("type") == "success":
                 try:
