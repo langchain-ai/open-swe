@@ -19,6 +19,7 @@ import asyncio
 import logging
 import posixpath
 import re
+import uuid
 import warnings
 from functools import partial
 from typing import Any, NamedTuple, NotRequired, cast
@@ -935,7 +936,7 @@ async def prepare_reviewer_run(
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
         "rendered_system_prompt": system_prompt,
-        "messages": [HumanMessage(content=run_context)],
+        "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,

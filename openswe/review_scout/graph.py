@@ -9,6 +9,7 @@ none it finishes without a model call.
 
 import logging
 import re
+import uuid
 from collections.abc import Mapping
 from functools import partial
 from typing import Any, NotRequired, cast
@@ -188,7 +189,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
-            "messages": [HumanMessage(content=run_context)],
+            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
             "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,
