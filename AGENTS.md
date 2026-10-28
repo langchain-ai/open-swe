@@ -28,7 +28,7 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 
 ## Conventions
 
-- Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/MACAW.md`.
+- Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
 
 - Async-only.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
