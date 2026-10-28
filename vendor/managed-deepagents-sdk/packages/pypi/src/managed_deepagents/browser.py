@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
 import posixpath
 import shlex
@@ -37,8 +38,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDic
 
 import httpx
 import websockets
-from deepagents.backends import CompositeBackend
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends import CompositeBackend, StateBackend
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.async_subagents import (
     AsyncSubAgent,
     _forwarded_context,
@@ -90,19 +91,16 @@ Scope = Literal["thread", "user"]
 
 #: The client and the browser's extension must match; ``mda`` pins this in deployments.
 STAGEHAND_VERSION = "4.3.0"
-_WORKSPACE = "/workspace"  # where run code's screenshots land in the sandbox
+_WORKSPACE = "/workspace"  # where run code's screenshots land in the agent's files
 _INSTRUCTIONS = (
     # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
     "These tools are named browser_run, browser_snapshot and browser_screenshot: "
     "call those wherever this text or an error names run, snapshot or screenshot.\n"
-    f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox: "
+    f"Screenshots that run code saves go to {_WORKSPACE} in your files: "
     f"`await page.screenshot({{ path: 'shots/a.png' }})` saves {_WORKSPACE}/shots/a.png."
 )
-_SCREENSHOT_PATH = (
-    "Only if you have a sandbox: also save the image to this absolute path in it, "
-    "creating its folder, e.g. to publish it."
-)
-_LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost
+_SCREENSHOT_PATH = "Also save the image to this absolute path in your files, creating its folder."
+_LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost, once it has one
     "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
 )
@@ -123,7 +121,7 @@ recording, the viewport is {_RECORD_VIEWPORT[0]}x{_RECORD_VIEWPORT[1]}, and each
 pause between your calls plays for at most {_RECORD_MAX_HOLD_S:g}s.
 A recording also ends, and is saved, when the run ends or you hand the browser to
 the user: it never shows what they do. It stops at
-{_RECORD_MAX_S // 60} minutes."""
+{_RECORD_MAX_S // 60} minutes. It needs a sandbox to save in."""
 _HANDOFF_LINK_TTL_S = 900  # how long the link a user gets for a handoff works
 #: The graph `mda` builds beside the agent, whose run waits out a handoff.
 HANDOFF_WATCHER_GRAPH = "mda-browser-handoff"
@@ -145,6 +143,20 @@ _WAKE_TEXT: dict[BrowserHandoffStatus, str] = {
     "ended": "The browser handoff ended. Take a snapshot to see whether the user finished.",
 }
 _RELEASE_AFTER_S = 60.0  # a run that raises or interrupts never reaches aafter_agent
+#: Without a sandbox a saved file lives in thread state, which every later checkpoint carries.
+_MAX_SAVED_BYTES = 5_000_000
+_TOO_BIG = (
+    "{mb:.1f} MB is over the 5 MB limit for files saved without a sandbox. "
+    "Take a viewport screenshot instead of a full page."
+)
+_NO_RECORDER = (
+    "error: browser_record needs a sandbox to save recordings in, and this run has none. "
+    "Screenshots still save."
+)
+_CLOSE_TIMEOUT_S = 30.0  # for freeing the extension from a client that never closed
+_STILL_CLOSING = (
+    "The browser is still finishing a call from a client that went away. Try again shortly."
+)
 _LOG = logging.getLogger("mda.browser")
 
 
@@ -211,7 +223,7 @@ class _Take:
 
     browser: str  # the browser's name, whose sandbox records
     folder: str  # where the recorder keeps the take, in that sandbox
-    runtime: ManagedToolRuntime  # whose sandbox the recording is saved to
+    sandbox: BackendProtocol  # the agent's sandbox, where the recording is saved
     path: str | None  # where `start` said to save it
 
 
@@ -267,20 +279,29 @@ async def _release_when_idle(key: str) -> None:
 
 class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
     """Give the agent Stagehand's tools, named ``browser_run``, ``browser_snapshot`` and so on,
-    plus ``browser_handoff`` to hand the browser over and ``browser_record`` for a video."""
+    plus ``browser_handoff`` to hand the browser over and ``browser_record`` for a video.
+
+    Screenshots save to the run's sandbox, or without one to ``backend``: the agent's
+    own files, as deepagents' ``backend``, so its file tools find them.
+    """
 
     name = "mda-browser"
     state_schema = BrowserState
 
-    def __init__(self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600) -> None:
+    def __init__(
+        self,
+        *,
+        scope: Scope = "thread",
+        idle_ttl_seconds: int = 600,
+        backend: BackendProtocol | None = None,
+    ) -> None:
         super().__init__()
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
+        self.backend = backend if backend is not None else StateBackend()
         self.tools = self._tools()
         self._arguments = {tool.name: set(tool.args) for tool in self.tools}
         self._instructions = f"{facade_instructions()}\n\n{_INSTRUCTIONS}"
-        if scope == "thread":
-            self._instructions += f" {_LOCALHOST_NOTE}"
 
     def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
         """The LangSmith browser this run's browser tools use, whether or not it exists yet.
@@ -328,6 +349,10 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                 if pending := _RELEASES.pop(key, None):
                     pending.cancel()
                 _RELEASES[key] = asyncio.create_task(_release_when_idle(key))
+
+    def _files(self, runtime: ManagedToolRuntime) -> BackendProtocol:
+        """Where the run's files save: its sandbox, or the agent's own backend."""
+        return runtime.backend if runtime.backend is not None else self.backend
 
     def _where(self, runtime: ManagedToolRuntime | Runtime) -> tuple[str, str]:
         """The run's browser key and window; ``RuntimeError`` without a thread or user."""
@@ -379,10 +404,11 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
     ) -> ModelResponse[object]:
         """Append the facade's instructions to the system message, as their own block."""
         system = request.system_message
-        blocks = [
-            *(system.content_blocks if system else []),
-            create_text_block(self._instructions),
-        ]
+        text = self._instructions
+        # A user's browser serves several threads, whose sandboxes cannot all be localhost.
+        if self.scope == "thread" and getattr(request.runtime, "backend", None) is not None:
+            text += f" {_LOCALHOST_NOTE}"
+        blocks = [*(system.content_blocks if system else []), create_text_block(text)]
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
 
     async def _hand_to_user(
@@ -443,12 +469,9 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             return f"error: {path} not saved: give an absolute path. Still recording."
         async with _LOCKS.setdefault(where, asyncio.Lock()):
             if action == "start":
-                if runtime.backend is None:
-                    return (
-                        "error: this agent has no sandbox to save a recording in. "
-                        "Recording not started."
-                    )
-                return await self._call(runtime, lambda s: _start_take(s, where, runtime, path))
+                if (sandbox := runtime.backend) is None:
+                    return _NO_RECORDER
+                return await self._call(runtime, lambda s: _start_take(s, where, sandbox, path))
             if (take := _TAKES.pop(where, None)) is None:
                 return (
                     "error: not recording. A recording ends when the run ends or you "
@@ -498,7 +521,7 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                 try:
                     value = await session.tools.run(code=code, actions=actions)
                 finally:  # code that threw may have saved some first
-                    saved = await _save_artifacts(runtime, Path(session.artifacts))
+                    saved = await _save_artifacts(self._files(runtime), Path(session.artifacts))
                 return "\n".join([json.dumps(value, default=str), *saved])
 
             return await self._call(runtime, go)
@@ -528,7 +551,8 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                 return shot
             text = "Screenshot of the current page."
             if path:
-                text += " " + await _save(runtime, path, base64.b64decode(shot["data"]))
+                data = base64.b64decode(shot["data"])
+                text += " " + await _save(self._files(runtime), path, data)
             image = {"type": "image", "url": f"data:{shot['mimeType']};base64,{shot['data']}"}
             return [{"type": "text", "text": text}, image]
 
@@ -695,17 +719,17 @@ async def _finish_take(take: _Take, path: str | None) -> list[dict[str, str]] | 
         return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
     default = f"{_RECORDINGS}/{time.strftime('%Y%m%d-%H%M%S')}.mp4"
     path = path or default
-    saved = await _save(take.runtime, path, video)
+    saved = await _save(take.sandbox, path, video)
     if saved.startswith("error:"):
         # The browser's sandbox no longer has the take, so try once more, under recordings/.
         missed = sanitize_error_message(saved.removeprefix("error: "))
-        moved = await _save(take.runtime, default, video)
+        moved = await _save(take.sandbox, default, video)
         if moved.startswith("error:"):
             return f"error: {missed}. The recording is lost."
         saved = moved if path == default else f"{missed}. {moved[:-1]} instead."
         path = default
-    beside = f"{posixpath.splitext(posixpath.normpath(path))[0]}.json"
-    noted = await _save(take.runtime, beside, timeline)
+    beside = f"{posixpath.splitext(_normpath(path))[0]}.json"
+    noted = await _save(take.sandbox, beside, timeline)
     text = f"{saved[:-1]}: {reply['seconds']:.0f}s, {len(video) / 1e6:.1f} MB. {noted}"
     if reply["early"]:
         text += f" {reply['early']}"
@@ -725,10 +749,10 @@ def _unexpected(arguments: list[str]) -> str:
     return f"error: unexpected argument{'s' if len(arguments) > 1 else ''} {names}."
 
 
-async def _save_artifacts(runtime: ManagedToolRuntime, root: Path) -> list[str]:
+async def _save_artifacts(backend: BackendProtocol, root: Path) -> list[str]:
     """Move what the facade saved under ``root`` to the same relative path in /workspace."""
     files = await asyncio.to_thread(_take_files, root)
-    return [await _save(runtime, f"{_WORKSPACE}/{rel}", data) for rel, data in files]
+    return [await _save(backend, f"{_WORKSPACE}/{rel}", data) for rel, data in files]
 
 
 def _take_files(root: Path) -> list[tuple[str, bytes]]:
@@ -740,21 +764,42 @@ def _take_files(root: Path) -> list[tuple[str, bytes]]:
     return sorted(files)
 
 
-async def _save(runtime: ManagedToolRuntime, path: str, data: bytes) -> str:
-    """Write ``data`` to absolute ``path`` in the agent's sandbox, creating its folder."""
-    backend = runtime.backend
-    if backend is None:
-        return f"error: {path} not saved: this agent has no sandbox."
+async def _save(backend: BackendProtocol, path: str, data: bytes) -> str:
+    """Write ``data`` to absolute ``path`` in ``backend``, creating its folder."""
     if not posixpath.isabs(path):
         return f"error: {path} not saved: give an absolute path."
-    path = posixpath.normpath(path)
+    path = _normpath(path)
+    if mount := _mount(backend, path):
+        return (
+            f"error: {path} not saved: {mount} is not for saved files. Save it under {_WORKSPACE}."
+        )
+    sandbox = isinstance(backend, SandboxBackendProtocol)
+    if not sandbox and len(data) > _MAX_SAVED_BYTES:
+        return f"error: {path} not saved: {_TOO_BIG.format(mb=math.ceil(len(data) / 1e5) / 10)}"
     try:
-        if isinstance(backend, SandboxBackendProtocol):
+        if sandbox:
             await backend.aexecute(f"mkdir -p -- {shlex.quote(posixpath.dirname(path))}")
         [result] = await backend.aupload_files([(path, data)])
     except Exception as err:  # noqa: BLE001 - reported to the model
         return f"error: {path} not saved: {type(err).__name__}: {err}"
     return f"error: {path} not saved: {result.error}" if result.error else f"Saved {path}."
+
+
+def _normpath(path: str) -> str:
+    """Absolute ``path`` with one leading slash, as Node normalizes it; POSIX keeps two."""
+    return "/" + posixpath.normpath(path).lstrip("/")
+
+
+def _mount(backend: BackendProtocol, path: str) -> str | None:
+    """The mount of the agent's own files that ``path`` is in, such as ``/skills``.
+
+    Its mounts hold Context Hub's skills, instructions and memory, where a screenshot
+    would be read-only or read by every later run.
+    """
+    if not isinstance(backend, CompositeBackend):
+        return None
+    mounts = (prefix.rstrip("/") for prefix, _ in backend.sorted_routes)
+    return next((mount for mount in mounts if f"{path}/".startswith(f"{mount}/")), None)
 
 
 def _browser_key(info: object, thread: str, scope: Scope) -> str:
@@ -925,9 +970,10 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
     except Exception as err:
         if "already initialized" not in str(err):
             raise
-    # A client that never closed (a crash, another replica) left its claim in the
-    # extension; reinstalling it clears the claim without restarting Chrome.
-    await _reinstall_extension(cdp_url, headers)
+    # A client that never closed (a crash, a dropped connection) left its claim in the
+    # extension; closing it frees it.
+    # Known limit: closing a live client on another replica leaves both clients attached.
+    await _close_stale_client(cdp_url, headers)
     return await _connect(key, window_name, name, cdp_url, local_url, headers)
 
 
@@ -1048,7 +1094,7 @@ async def _install_extension(box: AsyncSandbox) -> None:
 
 
 async def _start_take(
-    session: _Session, where: tuple[str, str], runtime: ManagedToolRuntime, path: str | None
+    session: _Session, where: tuple[str, str], sandbox: BackendProtocol, path: str | None
 ) -> str:
     """Record the newest tab of the session's window, beside Chrome in its sandbox.
 
@@ -1069,7 +1115,7 @@ async def _start_take(
         except RuntimeError as err:  # the recorder's own; the client is fine
             await _remove_take(box, folder)
             return f"error: {sanitize_error_message(str(err))}"
-    _TAKES[where] = _Take(session.browser, folder, runtime, path)
+    _TAKES[where] = _Take(session.browser, folder, sandbox, path)
     width, height = _RECORD_VIEWPORT
     return (
         f"Recording. The viewport is {width}x{height} until you stop, "
@@ -1154,12 +1200,36 @@ def _recorder_command(folder: str, action: str, *args: str) -> str:
     return f"PYTHONPATH={shlex.quote(_RECORDER_PACKAGES_DIR)} {_RECORDER_PYTHON} {words}"
 
 
-async def _reinstall_extension(cdp_url: str, headers: dict[str, str]) -> None:
-    """Uninstall Stagehand's extension and load it again over CDP."""
-    async with asyncio.timeout(30), websockets.connect(cdp_url, additional_headers=headers) as ws:
+async def _close_stale_client(cdp_url: str, headers: dict[str, str]) -> None:
+    """Send Stagehand's extension ``stagehand.close``, as the client that never did would have.
 
-        async def cdp(id_: int, method: str, **params: object) -> dict[str, Any]:
-            await ws.send(json.dumps({"id": id_, "method": method, "params": params}))
+    The extension's worker keeps a client's claim after the client is gone. Reinstalling
+    the extension is no way out: Chrome won't uninstall one browserd loaded at launch.
+    """
+    deadline = asyncio.timeout(_CLOSE_TIMEOUT_S)
+    try:
+        async with deadline:
+            await _send_close(cdp_url, headers)
+    except TimeoutError:
+        if not deadline.expired():
+            raise
+        # The worker closes a client once its calls end, and a dead client's may run on.
+        raise TimeoutError(_STILL_CLOSING) from None
+
+
+async def _send_close(cdp_url: str, headers: dict[str, str]) -> None:
+    """Over CDP, hand the worker of Stagehand's extension ``stagehand.close``."""
+    # Once it adds the worker's binding, it hears the worker's replies to every client.
+    connect = websockets.connect(cdp_url, additional_headers=headers, max_size=None)
+    async with connect as ws:
+
+        async def cdp(
+            id_: int, method: str, session: str | None = None, **params: object
+        ) -> dict[str, Any]:
+            message: dict[str, object] = {"id": id_, "method": method, "params": params}
+            if session:
+                message["sessionId"] = session
+            await ws.send(json.dumps(message))
             while (reply := json.loads(await ws.recv())).get("id") != id_:
                 pass  # events share the socket
             if "error" in reply:
@@ -1167,10 +1237,31 @@ async def _reinstall_extension(cdp_url: str, headers: dict[str, str]) -> None:
                 raise RuntimeError(msg)
             return reply.get("result", {})
 
-        for extension in (await cdp(0, "Extensions.getExtensions"))["extensions"]:
-            if extension["name"] == "Stagehand Runtime":
-                await cdp(1, "Extensions.uninstall", id=extension["id"])
-        await cdp(2, "Extensions.loadUnpacked", path=_EXTENSION_DIR)
+        extensions = (await cdp(0, "Extensions.getExtensions"))["extensions"]
+        ours = next(
+            (e["id"] for e in extensions if e["name"] == "Stagehand Runtime" and e.get("enabled")),
+            None,
+        )
+        url = f"chrome-extension://{ours}/service-worker.js"
+        targets = (await cdp(1, "Target.getTargets"))["targetInfos"]
+        worker = next((t["targetId"] for t in targets if t["url"] == url), None)
+        if worker is None:
+            return  # a stopped worker keeps no claim, and connecting wakes it
+        attached = await cdp(2, "Target.attachToTarget", targetId=worker, flatten=True)
+        session = attached["sessionId"]
+        binding = "__stagehandSendToHost"  # where the worker replies
+        await cdp(3, "Runtime.addBinding", session, name=binding)
+        # Clients number their calls from 1, so one still attached drops this reply.
+        close = json.dumps({"jsonrpc": "2.0", "id": 0, "method": "stagehand.close", "params": {}})
+        expression = f"globalThis.__stagehandReceiveFromHost({json.dumps(close)})"
+        # Awaited, the evaluate returns once the worker has closed the client.
+        evaluated = await cdp(
+            4, "Runtime.evaluate", session, expression=expression, awaitPromise=True
+        )
+        if details := evaluated.get("exceptionDetails"):
+            why = details.get("exception", {}).get("description") or details.get("text")
+            msg = f"Stagehand's extension did not close the client holding it: {why}"
+            raise RuntimeError(msg)
 
 
 async def _window_port(box: AsyncSandbox, window_id: str) -> int:

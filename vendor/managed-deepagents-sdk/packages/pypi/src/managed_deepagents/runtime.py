@@ -1794,7 +1794,11 @@ def _prepend_slack_files_middleware(
 def _append_browser_middleware(
     merged: dict[str, object], browser: BrowserDefinition | None
 ) -> None:
-    """Give the agent a browser when the project declares one in ``browser.py``."""
+    """Give the agent a browser when the project declares one in ``browser.py``.
+
+    Without a sandbox its screenshots save to the agent's own ``backend``, so call it
+    once that is final.
+    """
     if browser is None:
         return
     from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
@@ -1802,7 +1806,11 @@ def _append_browser_middleware(
     authored_middleware = merged.get("middleware")
     merged["middleware"] = [
         *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
-        BrowserMiddleware(scope=browser.scope, idle_ttl_seconds=browser.idle_ttl_seconds),
+        BrowserMiddleware(
+            scope=browser.scope,
+            idle_ttl_seconds=browser.idle_ttl_seconds,
+            backend=cast("BackendProtocol | None", merged.get("backend")),
+        ),
     ]
 
 
