@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from openswe.slack import mda_forwarding
 from openswe.slack.request import SlackRequest
 from openswe.threads import index, router
-from openswe.webhooks.common import ThreadRecord
+from openswe.webhooks.common import ThreadRecord, visibility_is_settled
 
 pytestmark = [pytest.mark.usefixtures("registry_db"), pytest.mark.mda_lookups]
 
@@ -98,21 +98,25 @@ async def test_a_refused_new_conversation_goes_back_to_the_backend(
     monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
     processed = AsyncMock()
     monkeypatch.setattr(mda_forwarding, "process_slack_mention", processed)
-    await index.create(THREAD, runtime="mda", metadata={"channel": "slack", "source": "slack"})
-    await mda_forwarding.bind_slack_thread_id("C1", "1.0", THREAD)
-    await mda_forwarding.remember(_request("A"), None, "1.1")
+    thread_id = await mda_forwarding.claim_conversation("A1", "T1", "C1", "1.0", owner_login="ada")
+    assert thread_id is not None
+    await mda_forwarding.remember(
+        SlackRequest(channel_id="C1", thread_ts="1.0", text="A", thread_id=thread_id), None, "1.1"
+    )
 
-    taken = await asyncio.gather(*(mda_forwarding.take_back(THREAD, "1.1") for _ in range(3)))
+    taken = await asyncio.gather(*(mda_forwarding.take_back(thread_id, "1.1") for _ in range(3)))
 
     assert taken.count(True) == 1
     [(request, repo)] = [call.args for call in processed.await_args_list]
     assert (request.text, repo) == ("A", None)
     replies.assert_not_awaited()
     # The thread is the backend's now, so the conversation's later messages stay here.
-    thread = await index.get(THREAD)
+    thread = await index.get(thread_id)
     assert thread is not None and mda_forwarding.channel_of(thread.metadata) is None
-    local.update.assert_awaited_with(THREAD, {"channel": None})
+    local.update.assert_awaited_with(thread_id, {"channel": None})
     assert await mda_forwarding.owned_thread("C1", "1.0") is None
+    # Its private stub is a placeholder still: the backend's first write sets who sees it.
+    assert not visibility_is_settled(thread.metadata)
 
 
 async def test_a_message_the_channel_took_is_not_taken_back(replies: AsyncMock) -> None:
