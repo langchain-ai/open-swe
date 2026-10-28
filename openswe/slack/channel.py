@@ -10,10 +10,10 @@ the signed run token, and answers the channel with it.
 """
 
 import logging
-from typing import Any, Final, cast
+from typing import Annotated, Any, Final, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from managed_deepagents import EndpointAnswer, EndpointThread
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
@@ -55,13 +55,16 @@ def _no_run(reason: str, **fields: str) -> None:
 
 
 @router.post("/events")
-async def slack_channel_event(call: SlackChannelCall) -> EndpointAnswer | None:
+async def slack_channel_event(
+    call: SlackChannelCall, webhook_id: Annotated[str, Header(alias="webhook-id")]
+) -> EndpointAnswer | None:
     """The run a forwarded Slack message starts on the channel's thread, or ``None``.
 
     ``None`` when the message wasn't one the backend handed over (the backend
     gates every message before it forwards one), when gating posted the reply
     itself, such as the prompt to connect an account, or when building the run
-    failed, which the Slack thread hears about.
+    failed, which the Slack thread hears about. MDA retrying a call it got no
+    answer to, under the same ``webhook_id``, gets the run built again.
     """
     event, thread = call["event"], call["thread"]
     key = event.get("key")
@@ -77,7 +80,7 @@ async def slack_channel_event(call: SlackChannelCall) -> EndpointAnswer | None:
         raise HTTPException(status_code=422, detail="The event names no message")
     fields = {"agent_thread_id": thread_id, "slack_message_ts": message_ts}
 
-    remembered = await mda_forwarding.recall(thread_id, message_ts)
+    remembered = await mda_forwarding.recall(thread_id, message_ts, webhook_id)
     if remembered is None:
         logger.warning(
             "MDA's Slack channel asked about a message the backend didn't hand over",

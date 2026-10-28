@@ -25,13 +25,13 @@ async def test_a_message_remembered_while_another_is_recalled_keeps_both() -> No
     await mda_forwarding.remember(_request("A"), None, "1.1")
 
     recalled, *_ = await asyncio.gather(
-        mda_forwarding.recall(THREAD, "1.1"),
+        mda_forwarding.recall(THREAD, "1.1", "msg_1"),
         *(mda_forwarding.remember(_request(f"B{n}"), None, f"2.{n}") for n in range(10)),
     )
 
     assert recalled is not None and recalled[0].text == "A"
     for n in range(10):
-        later = await mda_forwarding.recall(THREAD, f"2.{n}")
+        later = await mda_forwarding.recall(THREAD, f"2.{n}", f"msg_{n}")
         assert later is not None and later[0].text == f"B{n}"
     thread = await index.get(THREAD)
     assert thread is not None and thread.metadata["title"] == "kept"
@@ -41,9 +41,33 @@ async def test_a_message_is_recalled_once() -> None:
     await index.create(THREAD, runtime="mda", metadata={})
     await mda_forwarding.remember(_request("A"), None, "1.1")
 
-    recalled = await asyncio.gather(*(mda_forwarding.recall(THREAD, "1.1") for _ in range(5)))
+    recalled = await asyncio.gather(
+        *(mda_forwarding.recall(THREAD, "1.1", f"msg_{n}") for n in range(5))
+    )
 
     assert [r[0].text for r in recalled if r is not None] == ["A"]
+
+
+async def test_mda_retrying_a_call_gets_the_same_request_until_the_sweep_drops_it(
+    monkeypatch: pytest.MonkeyPatch, replies: AsyncMock
+) -> None:
+    await index.create(THREAD, runtime="mda", metadata={})
+    await mda_forwarding.remember(_request("A"), None, "1.1")
+    assert await mda_forwarding.recall(THREAD, "1.1", "msg_d1") is not None
+
+    # The first answer never reached MDA (a 502, a dropped connection): it asks again.
+    retried = await mda_forwarding.recall(THREAD, "1.1", "msg_d1")
+
+    assert retried is not None and retried[0].text == "A"
+    # Any other call still gets nothing, and the message the channel took isn't lost.
+    assert await mda_forwarding.recall(THREAD, "1.1", "msg_d2") is None
+    assert await mda_forwarding.report_lost(THREAD, "1.1", "lost") is False
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now + 400)
+    await mda_forwarding.sweep_lost_requests()
+    replies.assert_not_awaited()
+    thread = await index.get(THREAD)
+    assert thread is not None and thread.metadata[mda_forwarding.RECALLED_KEY] == {}
 
 
 async def test_expired_requests_are_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,7 +80,7 @@ async def test_expired_requests_are_dropped(monkeypatch: pytest.MonkeyPatch) -> 
     thread = await index.get(THREAD)
     assert thread is not None
     assert list(thread.metadata[mda_forwarding.PENDING_KEY]) == ["2.1"]
-    assert await mda_forwarding.recall(THREAD, "1.1") is None
+    assert await mda_forwarding.recall(THREAD, "1.1", "msg_1") is None
 
 
 @pytest.fixture
@@ -80,13 +104,13 @@ async def test_a_lost_message_is_reported_once_and_never_runs(replies: AsyncMock
     assert (request.text, repo) == ("A", None)
     assert isinstance(error, mda_forwarding.MdaHandoffLost)
     # The channel asking afterwards starts nothing: the person already heard.
-    assert await mda_forwarding.recall(THREAD, "1.1") is None
+    assert await mda_forwarding.recall(THREAD, "1.1", "msg_1") is None
 
 
 async def test_a_message_the_channel_took_is_not_reported(replies: AsyncMock) -> None:
     await index.create(THREAD, runtime="mda", metadata={})
     await mda_forwarding.remember(_request("A"), None, "1.1")
-    assert await mda_forwarding.recall(THREAD, "1.1") is not None
+    assert await mda_forwarding.recall(THREAD, "1.1", "msg_1") is not None
 
     assert await mda_forwarding.report_lost(THREAD, "1.1", "lost") is False
     replies.assert_not_awaited()
@@ -124,7 +148,7 @@ async def test_a_refused_new_conversation_goes_back_to_the_backend(
 async def test_a_message_the_channel_took_is_not_taken_back(replies: AsyncMock) -> None:
     await index.create(THREAD, runtime="mda", metadata={"channel": "slack"})
     await mda_forwarding.remember(_request("A"), None, "1.1")
-    assert await mda_forwarding.recall(THREAD, "1.1") is not None
+    assert await mda_forwarding.recall(THREAD, "1.1", "msg_1") is not None
 
     assert await mda_forwarding.take_back(THREAD, "1.1") is False
 

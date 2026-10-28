@@ -60,6 +60,11 @@ _FIRST_BACKOFF_SECONDS: Final = 1.0
 #: Thread metadata key holding the requests the backend gated, until the channel asks for them.
 PENDING_KEY: Final = "mda_slack_requests"
 _PENDING_TTL_SECONDS: Final = 600
+#: Thread metadata key holding each request the channel took, with the call that took it,
+#: so MDA retrying that call gets the same request again.
+RECALLED_KEY: Final = "mda_slack_recalled"
+#: MDA retries a call within three attempts of at most a minute each.
+_REPLAY_SECONDS: Final = 300
 #: A forwarded message the channel hasn't asked about by then is lost: the person hears so.
 LOST_AFTER_SECONDS: Final = 90
 SWEEP_JOB: Final = "mda_slack_lost_requests"
@@ -205,16 +210,44 @@ async def remember(
 
 
 async def recall(
-    thread_id: str, message_ts: str
+    thread_id: str, message_ts: str, call_id: str
 ) -> tuple[SlackRequest, SlackRepoResolution | None] | None:
-    """The request remembered for ``message_ts`` in ``thread_id``, taken out of the thread."""
+    """The request remembered for ``message_ts`` in ``thread_id``, taken out of the thread.
+
+    One call takes it. MDA retries a call it got no answer to with the same webhook id,
+    ``call_id``, and that call gets the request again, so the run is still built once
+    for MDA; any other call gets ``None``.
+    """
+    now = time.time()
     entry = await index.take_entry(thread_id, PENDING_KEY, message_ts)
-    if not isinstance(entry, dict):
-        return None
-    at = entry.get("at")
-    if not isinstance(at, int | float) or at < time.time() - _PENDING_TTL_SECONDS:
+    if isinstance(entry, dict):
+        taken: dict[str, JsonValue] = {"entry": entry, "by": call_id, "at": now}
+        await index.put_entry(
+            thread_id, RECALLED_KEY, message_ts, taken, expired_before=now - _REPLAY_SECONDS
+        )
+    else:
+        entry = await _taken_by(thread_id, message_ts, call_id, since=now - _REPLAY_SECONDS)
+    if entry is None or not _stamped_since(entry, now - _PENDING_TTL_SECONDS):
         return None
     return _remembered(entry)
+
+
+async def _taken_by(
+    thread_id: str, message_ts: str, call_id: str, *, since: float
+) -> dict[str, JsonValue] | None:
+    """The request ``call_id`` took for ``message_ts`` since ``since``, if it took one."""
+    thread = await index.get(thread_id)
+    recalled = thread.metadata.get(RECALLED_KEY) if thread is not None else None
+    taken = recalled.get(message_ts) if isinstance(recalled, dict) else None
+    if not (isinstance(taken, dict) and taken.get("by") == call_id):
+        return None
+    entry = taken.get("entry")
+    return entry if isinstance(entry, dict) and _stamped_since(taken, since) else None
+
+
+def _stamped_since(entry: Mapping[str, JsonValue], since: float) -> bool:
+    at = entry.get("at")
+    return isinstance(at, int | float) and at >= since
 
 
 def _remembered(
@@ -344,9 +377,14 @@ async def sweep_lost_requests() -> int:
 
     Normally the channel asks within seconds; one that hasn't after
     :data:`LOST_AFTER_SECONDS` was dropped on the way (Trigger Server, MDA's
-    deployment, a restart). Entries past the TTL are dropped unreported.
+    deployment, a restart). Entries past the TTL are dropped unreported, and so are
+    the requests the channel took once MDA can no longer retry the call.
     """
     now = time.time()
+    for thread_id, message_ts in await index.entries_between(
+        RECALLED_KEY, after=now - _PENDING_TTL_SECONDS, before=now - _REPLAY_SECONDS
+    ):
+        await index.take_entry(thread_id, RECALLED_KEY, message_ts)
     reported = 0
     for thread_id, message_ts in await index.entries_between(
         PENDING_KEY, after=now - _PENDING_TTL_SECONDS, before=now - LOST_AFTER_SECONDS
