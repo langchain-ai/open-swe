@@ -383,8 +383,8 @@ class RunSession:
                     reads_all=injections.reads_all,
                     code_name=code_name(described.name),
                     seconds=120.0
-                    if described.name in {"get_thread", "list_threads", "search_tools"}
-                    or described.name.startswith(("slack_read_", "walkthrough_"))
+                    if described.name in {"get_thread", "list_threads"}
+                    or described.name.startswith("slack_read_")
                     else None,
                 )
                 for described in self.surface.catalog()
