@@ -9,11 +9,13 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
+from langgraph.types import Command
 from runtime_api.operations import RunOperation, ToolEvidence
 
 from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.mcp.instance import instance_mcp_source
+from openswe.mcp.runtime import _tool_name
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware.model_call_shape import CallShape
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -90,7 +92,18 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     remote = StructuredTool.from_function(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
-    with patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
+    status_page_tools = [
+        StructuredTool.from_function(
+            coroutine=update_incident,
+            name=_tool_name(connection, "status_page_update"),
+            description="Update the public status page",
+            metadata={"mcp_tool_name": "status_page_update"},
+        )
+        for connection in ("incident", "incident_io", "oncall", "incident-" * 10)
+    ]
+    with patch(
+        "openswe.server.load_mcp_tools", AsyncMock(return_value=[remote, *status_page_tools])
+    ) as mcps:
         result = cast(dict[str, Any], await _plan_agent(_incident_config()))
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.
@@ -132,6 +145,20 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     }
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     assert remote.name in dynamic.tools[0].description
+    assert {tool.name for tool in await dynamic.catalog_tools()} == {remote.name}
+    for tool in status_page_tools:
+        assert tool.name not in dynamic.tools[0].description
+        load_result = await dynamic.tools[0].ainvoke(
+            {
+                "name": "load_integration_tools",
+                "args": {"tool_names": [tool.name]},
+                "id": "status-page-load",
+                "type": "tool_call",
+            }
+        )
+        assert isinstance(load_result, Command)
+        assert isinstance(load_result.update, dict)
+        assert load_result.update["messages"][0].status == "error"
     subagent = result["subagents"][0]
     assert subagent.tools is not None
     assert ("open_pull_request" in subagent.tools) is explicit

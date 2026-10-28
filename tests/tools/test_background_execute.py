@@ -14,17 +14,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from deepagents.backends import LocalShellBackend
 from fastapi import FastAPI
 from langgraph_sdk.errors import NotFoundError
 
 from openswe import background_tasks
 from openswe.background_tasks import monitor_background_tasks, reconcile_background_tasks
-from openswe.sandboxes import tool_access, tool_routes
+from openswe.sandboxes import state, tool_access, tool_routes
 from openswe.sandboxes.scripts import source
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import service as task_service
 from openswe.tools import threads
-from openswe.tools.background_execute import TASK_ROOT, background_execute
+from openswe.tools.background_execute import TASK_ROOT, background_execute, current_backend
 from openswe.utils.background_task_state import update_background_task_state
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
@@ -806,3 +807,52 @@ async def test_reattach_reconciles_tracked_tasks() -> None:
 
     reconcile.assert_awaited_once_with("thread-1")
     SANDBOX_BACKENDS.clear()
+
+
+async def test_background_tools_reconnect_on_a_replica_without_a_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = importlib.import_module("openswe.tools.background_execute")
+    backend = LocalShellBackend(root_dir=str(tmp_path), inherit_env=True)
+    monkeypatch.setattr(
+        module.RunConfig, "from_runtime", lambda: SimpleNamespace(thread_id="thread-mda")
+    )
+    monkeypatch.setattr(
+        state,
+        "get_sandbox_metadata",
+        AsyncMock(return_value={"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}),
+    )
+
+    async def connect(sandbox_id: str, *, thread_id: str | None = None) -> LocalShellBackend:
+        assert (sandbox_id, thread_id) == ("mda-sandbox", "thread-mda")
+        return backend
+
+    monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
+    monkeypatch.setattr(state, "SANDBOX_BACKENDS", {})
+
+    thread_id, proxy = current_backend()
+    result = await proxy.aexecute("printf reconnected")
+
+    assert thread_id == "thread-mda"
+    assert result.exit_code == 0
+    assert result.output == "reconnected"
+
+
+async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("openswe.tools.background_execute")
+    monkeypatch.setattr(
+        module.RunConfig, "from_runtime", lambda: SimpleNamespace(thread_id="unprepared")
+    )
+    monkeypatch.setattr(module, "uses_completion_callback", AsyncMock(return_value=False))
+    monkeypatch.setattr(state, "get_sandbox_metadata", AsyncMock(return_value={}))
+    connect = AsyncMock(side_effect=AssertionError("connected without a sandbox id"))
+    monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
+    state.SANDBOX_BACKENDS.clear()
+
+    result = await background_execute("echo hello")
+
+    assert result["success"] is False
+    assert "Missing sandbox_id in thread metadata for unprepared" in result["error"]
+    connect.assert_not_awaited()
