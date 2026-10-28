@@ -55,6 +55,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         "get_or_create_sandbox_backend_proxy",
         lambda _: MagicMock(ready=AsyncMock(return_value=MagicMock(id="sandbox-1"))),
     )
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))
     for name in (
         "resolve_triggering_user_identity",
@@ -105,10 +106,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     )
     middleware._requested_models = available_requested_models(fable_enabled=False)
     middleware._model_selection = ModelSelectionMiddleware(
-        {"fast": MagicMock()},
-        MagicMock(),
-        routing_mode="fast",
-        requested_model_factory=lambda _model, _effort: MagicMock(),
+        {"fast": "openai:gpt-6-luna"}, routing_mode="fast"
     )
     middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
     return Handoff(middleware, settings, store, record)

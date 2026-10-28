@@ -30,7 +30,7 @@ from openswe.prompts import prompt
 logger = logging.getLogger(__name__)
 
 # Tools that post a card as the turn's final Slack reply.
-_CARD_TOOLS = frozenset({"connect_managed_tools"})
+CARD_TOOLS = frozenset({"connect_managed_tools"})
 
 ReplySurface = Literal["slack", "web"]
 
@@ -92,6 +92,23 @@ def _last_answer(messages: Sequence[BaseMessage]) -> str:
     return ""
 
 
+def reply_nudge(
+    tool_name: str, no_reply_tool_name: str, introduced: set[str] | None = None
+) -> list[str]:
+    """What asks the model again for the reply it owes, introducing the guard unless ``introduced``."""
+    instruction = prompt(
+        "runs/missing-user-reply",
+        {"reply_tool": tool_name, "no_reply_tool": no_reply_tool_name},
+    )
+    built = build_input_messages(
+        instruction,
+        {"sender_id": REPLY_GUARD["id"], "surface": "automation", "kind": "system"},
+        systems=[REPLY_GUARD],
+        injected_dynamic_context_hashes=set(introduced or ()),
+    )
+    return [content_to_text(message["content"]) for message in built]
+
+
 class RequireUserReplyMiddleware(OpenSWEMiddleware):
     """Re-invoke the model when a turn that owes the user an answer ends without one.
 
@@ -130,7 +147,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         if (
             name == self._no_reply_tool_name
             or name in self._replies
-            or (self._tool_name == "slack_reply" and name in _CARD_TOOLS)
+            or (self._tool_name == "slack_reply" and name in CARD_TOOLS)
         ):
             return True
         # An acknowledgement is not an answer, and the Slack prompt orders one
@@ -189,19 +206,10 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         )
 
     def _nudge(self, state: Mapping[str, Any]) -> list[HumanMessage]:
-        instruction = prompt(
-            "runs/missing-user-reply",
-            {"reply_tool": self._tool_name, "no_reply_tool": self._no_reply_tool_name},
+        built = reply_nudge(
+            self._tool_name, self._no_reply_tool_name, visible_dynamic_context_hashes(state)
         )
-        built = build_input_messages(
-            instruction,
-            {"sender_id": REPLY_GUARD["id"], "surface": "automation", "kind": "system"},
-            systems=[REPLY_GUARD],
-            injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
-        )
-        return [
-            HumanMessage(content=content_to_text(m["content"]), id=str(uuid.uuid7())) for m in built
-        ]
+        return [HumanMessage(content=text, id=str(uuid.uuid7())) for text in built]
 
     @hook_config(can_jump_to=["model"])
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002

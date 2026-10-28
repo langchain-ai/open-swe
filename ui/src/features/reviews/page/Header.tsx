@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { copyPageLink, copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
@@ -353,9 +353,7 @@ export function Header({
               <GithubLogoIcon aria-hidden size={16} weight="regular" />
               Open on GitHub
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => copyText(window.location.href, "Copied the link")}
-            >
+            <DropdownMenuItem onSelect={copyPageLink}>
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
             </DropdownMenuItem>

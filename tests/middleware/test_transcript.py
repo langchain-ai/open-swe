@@ -644,11 +644,14 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
-    # A provider MDA declares no box for, so preparing reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # A thread with no box of MDA's, so preparing reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain_core.messages import messages_to_dict
 
     from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_parts import RunParts
     from openswe.agent_api.tokens import RemoteRun
     from openswe.sandboxes.tool_runtime import ToolSurface
 
@@ -657,10 +660,16 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     async def build(config: Any, surface: ToolSurface) -> None:
         surface.middleware = [mw.TranscriptMiddleware()]
 
-    async def start_models(cfg: Any) -> Any:
-        raise AssertionError("not asked for")
+    async def never_planned(config: Any, surface: ToolSurface) -> None:
+        raise AssertionError("Reporting a run never plans it")
 
-    graph = RemoteGraph("agent", build, start_models)
+    graph = RemoteGraph("agent", build)
+
+    # Another replica: it reports the run's calls without planning the run.
+    class Reporting(RunParts):
+        reporters = (mw.TranscriptMiddleware(),)
+
+    elsewhere = RemoteGraph("agent", never_planned, Reporting())
     run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
     asked = HumanMessage(content="do the thing", id="human-1")
     delegated = AIMessage(
@@ -674,28 +683,30 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         id="sub-ai-1",
         tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "sub-call-1"}],
     )
-    nested = messages_to_dict([HumanMessage(content="look", id="sub-human"), looked])
     answer = AIMessage(content="found it", id="sub-ai-2")
 
     await graph.api(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
     task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
-    await graph.api(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
-    inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
+    # Each report names the reply that made the call, never the conversation.
+    await elsewhere.api(run, "tool_started", {"run_id": RUN_ID, "message_id": "ai-1", **task})
+    inside = {"run_id": RUN_ID, "namespace": ["task-1"]}
     # MDA reports every call it makes, the subagent's included, under its ``task`` call.
     read = {"name": "read_file", "arguments": {"path": "a.py"}, "tool_call_id": "sub-call-1"}
-    await graph.api(run, "tool_started", {**inside, **read})
+    await elsewhere.api(run, "tool_started", {**inside, **read, "message_id": looked.id})
     contents = ToolMessage(content="contents of a.py", tool_call_id="sub-call-1")
-    await graph.api(
+    await elsewhere.api(
         run, "tool_result", {**inside, **read, "result": messages_to_dict([contents])[0]}
     )
-    await graph.api(run, "model_result", {**inside, "response": messages_to_dict([answer])})
+    await elsewhere.api(run, "model_result", {**inside, "response": messages_to_dict([answer])})
     result = ToolMessage(content="found it", tool_call_id="task-1")
-    await graph.api(
+    await elsewhere.api(
         run,
         "tool_result",
-        {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
+        {"run_id": RUN_ID, **task, "result": messages_to_dict([result])[0]},
     )
+    await elsewhere.api(run, "run_ended", {"run_id": RUN_ID})
 
+    assert engine.types[-1] == "turn.completed"
     recorded = [
         (
             c.event.type,

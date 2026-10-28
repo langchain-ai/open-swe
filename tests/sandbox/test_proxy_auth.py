@@ -11,6 +11,7 @@ from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
     configure_sandbox_proxy,
 )
+from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -190,10 +191,6 @@ class TestRefreshProxyOnSandboxReuse:
                     response=response,
                 ),
             ),
-            patch(
-                "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-            ) as mock_create,
-            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from openswe.sandboxes.lifecycle import (
                 SandboxUnreachableError,
@@ -204,4 +201,41 @@ class TestRefreshProxyOnSandboxReuse:
                 await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
-            mock_create.assert_not_awaited()
+
+
+class TestRefreshThreadGithubProxy:
+    async def test_a_replica_that_never_connected_still_gives_the_box_a_fresh_token(self) -> None:
+        """Nothing is read from this process: the box and its rules come from the thread."""
+        proxy_config = {"rules": [{"name": "public-api"}]}
+        metadata = {"sandbox_id": "sandbox-abc", SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config}
+        with (
+            patch(
+                "openswe.sandboxes.lifecycle.get_sandbox_metadata",
+                new_callable=AsyncMock,
+                return_value=metadata,
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.workspace_token",
+                new_callable=AsyncMock,
+                return_value=SandboxGitHubAccess("ghs_fresh", "2026-10-27T20:00:00Z"),
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.thread_token_repositories",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock
+            ) as configure,
+        ):
+            from openswe.sandboxes.lifecycle import refresh_thread_github_proxy
+            from openswe.sandboxes.state import SANDBOX_BACKENDS
+
+            SANDBOX_BACKENDS.pop("thread-123", None)
+            expires_at = await refresh_thread_github_proxy("thread-123")
+
+        configure.assert_awaited_once_with(
+            "sandbox-abc", "ghs_fresh", base_proxy_config=proxy_config, thread_id="thread-123"
+        )
+        assert expires_at is not None
+        assert expires_at.isoformat() == "2026-10-27T20:00:00+00:00"

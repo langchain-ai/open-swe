@@ -5,7 +5,12 @@ from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentState,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -18,6 +23,7 @@ from langchain_core.messages import (
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
+from rt.backend import Run, RunContext
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
     ModelCallTimeoutError,
@@ -25,6 +31,7 @@ from rt.model_calls import (
     ReplayableHistoryMiddleware,
 )
 from rt.models import ModelSpec
+from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
 _OPENAI = ChatOpenAI(
@@ -43,7 +50,7 @@ class _WrapsModelCalls(Protocol):
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse: ...
+    ) -> ModelResponse | ExtendedModelResponse: ...
 
 
 async def _forwarded(
@@ -205,8 +212,11 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
         HumanMessage(content="explain it"),
     ]
 
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    # A run whose catalog names no models of its own, so the call's own decide.
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     forwarded = await _forwarded(
-        BackendRunMiddleware(MagicMock(), None),
+        BackendRunMiddleware(run.backend),
         messages,
         _ANTHROPIC,
         state={"messages": messages, "open_swe_call": call.model_dump()},

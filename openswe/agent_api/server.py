@@ -13,20 +13,17 @@ coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 """
 
 import logging
-from collections.abc import Awaitable, Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
-from langsmith import tracing_context
-from langsmith.run_trees import RunTree
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import CATALOG
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
@@ -55,28 +52,6 @@ def _graphs() -> Mapping[str, Api]:
     return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
 
 
-@contextmanager
-def _traced_under_caller(scope: Scope) -> Iterator[None]:
-    """Nest what the call traces under the runtime span that made it, when it says which.
-
-    Without it every hook would start a trace of its own, apart from the run's turn.
-    """
-    headers = Request(scope).headers
-    parent: RunTree | None = None
-    if dotted_order := headers.get("langsmith-trace"):
-        try:
-            parent = RunTree.from_headers(
-                {"langsmith-trace": dotted_order, "baggage": headers.get("baggage", "")}
-            )
-        except Exception:
-            logger.warning("Ignoring unusable trace headers", exc_info=True)
-    if parent is None:
-        yield
-        return
-    with tracing_context(parent=parent):
-        yield
-
-
 def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
     principal = scope.get("state", {}).get(_RUN_STATE_KEY)
     if not isinstance(principal, RemoteRun | WorkerGrant):
@@ -91,18 +66,17 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
     if isinstance(principal, WorkerGrant):
         if async_workers.GRANT_API.serves(endpoint):
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
-        if endpoint != CATALOG.name:
-            raise RefusedCallError("A worker grant only adopts a run token")
-        # Its tools, models and schemas only: the worker reads them before it has an identity.
-        run = principal.coordinator
-    else:
-        run = principal
-        if async_workers.RUN_API.serves(endpoint):
-            return await async_workers.RUN_API.dispatch(endpoint, run, body)
+        raise RefusedCallError("A worker grant only adopts a run token")
+    if async_workers.RUN_API.serves(endpoint):
+        return await async_workers.RUN_API.dispatch(endpoint, principal, body)
+    return await _graph(principal)(principal, endpoint, body)
+
+
+def _graph(run: RemoteRun) -> Api:
     graph = _graphs().get(run.assistant_id)
     if graph is None:
         raise RefusedCallError(f"This backend serves no {run.assistant_id} graph")
-    return await graph(run, endpoint, body)
+    return graph
 
 
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
@@ -124,7 +98,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         context["run_id"] = run_id
     set_logging_context(context)
     try:
-        with _traced_under_caller(scope):
+        with traced_under(Request(scope).headers):
             result = await _answer(principal, endpoint, body)
     except RefusedCallError as exc:
         await JSONResponse({"detail": str(exc)}, 403)(scope, receive, send)

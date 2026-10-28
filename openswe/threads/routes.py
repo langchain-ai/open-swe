@@ -18,7 +18,9 @@ from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import browser, terminal
 from openswe.threads.background_work import (
+    BackgroundOutput,
     BackgroundWork,
+    get_dashboard_thread_background_output,
     get_dashboard_thread_background_work,
 )
 from openswe.threads.diffs import (
@@ -401,6 +403,15 @@ async def api_get_thread_background_work(
 ) -> BackgroundWork:
     return await get_dashboard_thread_background_work(
         thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/background-work/{task_id}/output")
+async def api_get_thread_background_output(
+    thread_id: str, task_id: str, session: dict[str, Any] = SESSION_DEP
+) -> BackgroundOutput:
+    return await get_dashboard_thread_background_output(
+        thread_id, task_id, session["sub"], email=session.get("email")
     )
 
 

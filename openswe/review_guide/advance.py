@@ -9,7 +9,6 @@ one begins.
 """
 
 import logging
-from collections import Counter
 
 from openswe.prompts import prompt
 from openswe.review_guide.buttons import NEXT
@@ -19,7 +18,6 @@ from openswe.review_guide.messages import post_with_buttons, refresh_progress, r
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.review_guide.walk import Approval, OnScreen, Reader, Walk
 from openswe.utils.thread_ops import langgraph_client
-from openswe.walkthrough.diff import line_key
 from openswe.walkthrough.record import Walkthrough
 
 logger = logging.getLogger(__name__)
@@ -41,9 +39,7 @@ async def approve_click(
     approval = walk.approve(message_ts)
     if approval is None or shown is None:
         return None
-    await session.mark_seen(
-        Counter(line_key(ref.path, ref.sign, ref.text) for ref in approval.lines)
-    )
+    await session.mark_seen(walk.head_sha, walk.merge_base_sha, approval.lines)
     await session.save_walk(walk)
     await retire(session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Seen")
     return approval
@@ -91,7 +87,7 @@ async def advance(channel_id: str, message_ts: str) -> None:
     ):
         await _guide_turn(session)
         return
-    reader = Reader.of(walk, stored.plan, await session.seen_lines())
+    reader = Reader.of(walk, stored.plan, await session.seen_at(walk.head_sha))
     upcoming = reader.next_chunk()
     if upcoming is not None:
         shown = reader.show(upcoming)

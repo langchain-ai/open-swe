@@ -23,11 +23,11 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
     SandboxServerReloadError,
 )
-from runtime_api.endpoint import call
 from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
-from rt.backend import BackendCallError, OpenSweBackend, run_call
+from rt.backend import OpenSweBackend
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ _SLOW_CALL_SECONDS: Final = 5
 
 
 class ToolErrorMiddleware(AgentMiddleware):
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
 
@@ -71,7 +73,7 @@ class ToolErrorMiddleware(AgentMiddleware):
             # Every later call would meet the same dead box, so the run ends here once
             # the person knows.
             logger.exception("The thread's sandbox stopped answering")
-            await self._report_unreachable(request, exc)
+            self._report_unreachable(request, exc)
             raise
         finally:
             seconds = monotonic() - started
@@ -85,18 +87,10 @@ class ToolErrorMiddleware(AgentMiddleware):
                     },
                 )
 
-    async def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
+    def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
         sandbox_id = _SANDBOX_ID.search(str(exc))
-        gone = run_call(
-            SandboxGone,
-            run_id(),
-            request.state,
-            sandbox_id=sandbox_id.group(0) if sandbox_id else None,
-        )
-        try:
-            await call(self._backend, SANDBOX_UNREACHABLE, gone)
-        except BackendCallError:
-            logger.warning("Could not tell the person the sandbox stopped answering", exc_info=True)
+        gone = SandboxGone(run_id=run_id(), sandbox_id=sandbox_id.group(0) if sandbox_id else None)
+        self._backend.outbox.notify(SANDBOX_UNREACHABLE, gone)
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:

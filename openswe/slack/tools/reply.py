@@ -43,6 +43,7 @@ from openswe.slack.orphan import (
     slack_thread_detached,
 )
 from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
+from openswe.slack.review_links import preserve_github_links as github_link_delivery
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
@@ -85,11 +86,13 @@ async def slack_reply(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     *,
     option_user_id: str | None = None,
+    preserve_github_links: bool = False,
 ) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
-    result = await send_slack_reply(
-        message, response_type, options, blocks, state, option_user_id=option_user_id
-    )
+    with github_link_delivery(preserve_github_links):
+        result = await send_slack_reply(
+            message, response_type, options, blocks, state, option_user_id=option_user_id
+        )
     image_urls = result.pop("image_urls", None)
     if not image_urls:
         return result

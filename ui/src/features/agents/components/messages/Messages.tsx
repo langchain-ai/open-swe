@@ -13,6 +13,7 @@ import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
+import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
@@ -103,6 +104,7 @@ export const Messages = memo(function MessagesComponent({
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   onRemoveQueuedMessage,
+  onReply,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -265,6 +267,10 @@ export const Messages = memo(function MessagesComponent({
           </div>
           <div ref={reserveRef} aria-hidden />
         </div>
+
+        {onReply && (
+          <SelectionReply containerRef={scrollRef} onReply={onReply} />
+        )}
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (
           <IconButton

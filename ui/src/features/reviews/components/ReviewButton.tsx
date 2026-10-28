@@ -207,7 +207,11 @@ export function ReviewButton({
             aria-label={approved ? "Approved" : `Approve${pendingLabel}`}
             aria-live="polite"
             onClick={approve}
-            className={cn(!approved && approveColors)}
+            className={cn(
+              approved
+                ? "border-success! bg-success! text-success-secondary!"
+                : approveColors
+            )}
           >
             {approved ? "Approved" : "Approve"}
           </Button>
@@ -217,10 +221,12 @@ export function ReviewButton({
               label="Comment or request changes"
               tooltipProps={{ disabled: true }}
               className={cn(
-                !approved && [
-                  approveColors,
-                  "border-l! border-l-white/30! dark:border-l-black/20!",
-                ]
+                approved
+                  ? "border-success! bg-success! text-success-secondary! hover:brightness-110"
+                  : [
+                      approveColors,
+                      "border-l! border-l-white/30! dark:border-l-black/20!",
+                    ]
               )}
             />
           </PopoverTrigger>

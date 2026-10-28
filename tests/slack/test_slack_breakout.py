@@ -19,6 +19,7 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
             "id": channel_id,
             "name": channel_id.lower(),
             "is_channel": True,
+            "num_members": 10,
             "is_private": private,
             "is_ext_shared": False,
             "is_pending_ext_shared": False,
@@ -53,12 +54,12 @@ def _request() -> SlackRequest:
 
 def _patch_slack(monkeypatch) -> SimpleNamespace:
     posted = SimpleNamespace(
-        reactions=AsyncMock(),
+        notifications=AsyncMock(),
         ephemeral=AsyncMock(),
         source_line=AsyncMock(return_value="<https://slack/p105|(source)>"),
     )
     monkeypatch.setattr(breakout, "source_thread_line", posted.source_line)
-    monkeypatch.setattr(breakout, "mark_broken_out", posted.reactions)
+    monkeypatch.setattr(breakout, "mark_broken_out", posted.notifications)
     monkeypatch.setattr(breakout, "post_slack_ephemeral_message", posted.ephemeral)
     return posted
 
@@ -189,7 +190,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         },
     ]
     posted.source_line.assert_awaited_once_with("C1", "105.0")
-    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", expected, "200.0")
+    posted.notifications.assert_awaited_once_with("C1", "100.0", expected, "200.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
@@ -199,6 +200,30 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     )
     assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [50, None])
+async def test_default_breakout_waits_for_destination_in_large_or_unknown_channel(
+    monkeypatch, public_channels, count
+):
+    channel = _channel("C1", private=False)
+    assert channel is not None
+    channel.payload["num_members"] = count
+    public_channels.side_effect = None
+    public_channels.return_value = channel
+    posted = _patch_slack(monkeypatch)
+    start = AsyncMock()
+    monkeypatch.setattr(breakout, "_start", start)
+
+    await breakout.process_slack_breakout(_request(), Command("fix it"), None)
+
+    start.assert_not_awaited()
+    assert "destination" in posted.ephemeral.await_args.args[2]
+
+    await breakout.process_slack_breakout(_request(), Command("fix it", channel_id="C1"), None)
+
+    start.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -225,7 +250,7 @@ async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(
     assert sent.text == "fix it"
     assert sent.prior_message_text == "Context for this task.\nMore details"
     assert sent.context_thread_ts == "100.0"
-    posted.reactions.assert_awaited_once()
+    posted.notifications.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -237,9 +262,7 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
     )
     monkeypatch.setattr(breakout, "dashboard_thread_url", lambda _: "https://dashboard/agents/new")
     reply = AsyncMock()
-    react = AsyncMock()
     monkeypatch.setattr(breakout_links, "post_slack_thread_reply", reply)
-    monkeypatch.setattr(breakout_links, "add_slack_reaction", react)
 
     await breakout.process_slack_web(_request(), Command("fix it"), None)
 
@@ -253,10 +276,8 @@ async def test_web_breakout_notifies_source_thread_only_after_starting(monkeypat
             unfurl_links=False,
             unfurl_media=False,
         )
-        react.assert_awaited_once_with("C1", "105.0", breakout_links.BREAKOUT_REACTION)
     else:
         reply.assert_not_awaited()
-        react.assert_not_awaited()
     posted.ephemeral.assert_not_awaited()
 
 
@@ -278,7 +299,7 @@ async def test_bare_breakout_refuses_private_threads(monkeypatch):
     await breakout.process_slack_breakout(_request(), Command(""), None)
 
     move.assert_not_awaited()
-    posted.reactions.assert_not_awaited()
+    posted.notifications.assert_not_awaited()
     posted.ephemeral.assert_awaited_once()
 
 
@@ -299,7 +320,7 @@ async def test_breakout_never_goes_to_a_private_channel(monkeypatch, public_chan
 
     root.assert_not_awaited()
     move.assert_not_awaited()
-    posted.reactions.assert_not_awaited()
+    posted.notifications.assert_not_awaited()
     assert posted.ephemeral.await_args.args[3] == "100.0"
 
 
@@ -330,5 +351,5 @@ async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_chann
     await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2>", "C2"), None)
 
     root.assert_not_awaited()
-    posted.reactions.assert_not_awaited()
+    posted.notifications.assert_not_awaited()
     assert "public source channel and destination" in posted.ephemeral.await_args.args[2]

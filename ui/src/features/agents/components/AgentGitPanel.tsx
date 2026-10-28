@@ -13,6 +13,10 @@ import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
 import {
+  BackgroundWorkPanel,
+  useHasBackgroundWork,
+} from "@/features/agents/components/BackgroundWorkPanel"
+import {
   selectThreadDiffScope,
   useDiffPanelStore,
 } from "@/features/agents/lib/diffPanelStore"
@@ -27,9 +31,13 @@ import {
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
+import { normalizeSelection } from "@/features/agents/utils/passageReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 interface AgentGitPanelProps {
   onComment?: (content: string) => Promise<void>
+  /** Takes replies to text selected in the panel's files and terminals. */
+  onReply?: (reply: PassageReply) => void
   thread: AgentThread
   revealFilePath?: string | null
   revealChangesKey?: number
@@ -40,6 +48,7 @@ interface AgentGitPanelProps {
 export function AgentGitPanel({
   thread,
   onComment,
+  onReply,
   revealFilePath,
   revealChangesKey = 0,
   collapsed,
@@ -86,6 +95,8 @@ export function AgentGitPanel({
     openSurface(threadRef, "preview")
     onCollapsedChange(false)
   }, [browserOpened, onCollapsedChange, openSurface, threadRef])
+
+  const backgroundWorkAvailable = useHasBackgroundWork(thread.id)
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
@@ -213,8 +224,22 @@ export function AgentGitPanel({
       renderBrowser={() => (
         <BrowserPanel threadId={thread.id} opened={browserOpened} />
       )}
+      backgroundWorkAvailable={backgroundWorkAvailable}
+      renderBackgroundWork={() => <BackgroundWorkPanel threadId={thread.id} />}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
+      onReply={onReply}
+      {...(onReply && {
+        // The terminal hands over only the selected text, so there is no context to add.
+        onTerminalAddToChat: (text: string) =>
+          onReply({
+            source: "terminal",
+            before: "",
+            selection: normalizeSelection(text),
+            after: "",
+            comment: "",
+          }),
+      })}
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}

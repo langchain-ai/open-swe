@@ -33,7 +33,7 @@ from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import patch_thread_module
+from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -44,6 +44,11 @@ _PAIR = ("openai:gpt-6.1-sol", "medium")
 @asynccontextmanager
 async def _unlocked(*args, **kwargs):
     yield
+
+
+@pytest.fixture(autouse=True)
+def _threads_kept_by_the_fake_client(monkeypatch) -> None:
+    patch_thread_module(monkeypatch, "THREADS", ThreadStoreOverClient())
 
 
 @pytest.fixture(autouse=True)
@@ -645,6 +650,7 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     if not history_available:
         get_state.side_effect = RuntimeError("History unavailable")
     client = SimpleNamespace(threads=SimpleNamespace(get_state=get_state))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
 
     _, injected, _ = await thread_runs._attributed_run_messages(
@@ -654,7 +660,6 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
         content="Continue",
         creating=False,
         email=None,
-        client=client,
     )
 
     assert injected == ({unlinked_hash} if history_available else {linked_hash, unlinked_hash})
@@ -739,6 +744,59 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
     assert exc_info.value is error
 
 
+_REFUSED_START = json.dumps(
+    {"type": "error", "id": 0, "error": "unknown_error", "message": "failed to create run"}
+).encode()
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status_code"),
+    [
+        pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
+        pytest.param(
+            thread_proxy.CommandReply(200, _REFUSED_START, "application/json"),
+            200,
+            id="runtime-refused",
+        ),
+    ],
+)
+async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
+    monkeypatch, refusal: Exception | thread_proxy.CommandReply, status_code: int
+) -> None:
+    turn_id = uuid7()
+
+    class UndeliverableThreads(ThreadStoreOverClient):
+        async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
+            if isinstance(refusal, Exception):
+                raise refusal
+            return refusal
+
+    class IdleThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "status": "idle", "metadata": {"owner_login": "ada"}}
+
+    async def enrich(thread_id: str, login: str, command: dict[str, object], **kwargs) -> dict:
+        return {
+            "method": "run.start",
+            "params": {"config": {"configurable": {"transcript_turn_id": str(turn_id)}}},
+        }
+
+    failed = AsyncMock()
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
+    )
+    patch_thread_module(monkeypatch, "THREADS", UndeliverableThreads())
+    monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
+    monkeypatch.setattr(thread_proxy, "fail_unstarted_turn", failed)
+
+    status, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid", "ada", b'{"method": "run.start", "params": {}}'
+    )
+
+    assert status == status_code
+    failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
+
+
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
     class AdminThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -778,9 +836,6 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
                 },
             }
 
-    class AdminClient:
-        threads = AdminThreads()
-
     class FakeResponse:
         status_code = 200
         content = b"{}"
@@ -788,23 +843,17 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
 
     posted: list[bytes] = []
 
-    class FakeAsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> FakeAsyncClient:
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
+    class FakeHttpClient:
         async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> FakeResponse:
             posted.append(content)
             return FakeResponse()
 
+    class AdminClient:
+        threads = AdminThreads()
+        http = SimpleNamespace(client=FakeHttpClient())
+
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
-    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
 
     status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "another-admin", b'{"method": "input.respond"}'

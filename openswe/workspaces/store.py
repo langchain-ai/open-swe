@@ -248,9 +248,8 @@ def script_root() -> str:
     """Where a workspace's scripts and their logs live inside a sandbox.
 
     ``/open-swe/environment`` in a real sandbox, where the agent runs as root.
-    Configurable
-    because ``SANDBOX_TYPE=local`` executes on a developer's own machine, whose
-    filesystem root is not writable.
+    Configurable because the E2E's stand-in sandboxes run on a developer's own
+    machine, whose filesystem root is not writable.
     """
     return ENV.OPENSWE_SCRIPT_ROOT.get().strip().rstrip("/") or DEFAULT_SCRIPT_ROOT
 
@@ -1661,15 +1660,6 @@ async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str
     return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
 
 
-def require_capture_support() -> None:
-    """Only the langsmith provider has a snapshot API to capture into."""
-    sandbox_type = ENV.SANDBOX_TYPE.get()
-    if sandbox_type != "langsmith":
-        raise RuntimeError(
-            f"capturing a workspace snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
-        )
-
-
 async def _delete_snapshot(snapshot_id: object) -> None:
     """Best-effort delete of a superseded snapshot."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
@@ -1702,12 +1692,7 @@ async def capture_workspace_snapshot(
     The previous snapshot survives a failed capture, in both senses: it is deleted
     only once the new one is ready, and the record stays ``ready`` so runs keep
     booting from it instead of dropping to the base image.
-
-    Only the langsmith provider can capture; other providers have no snapshot API
-    to capture into, so this raises rather than failing deep in the SDK.
     """
-    require_capture_support()
-
     record = await WORKSPACES.get(slug)
     if record is None:
         raise ValueError(f"no workspace named {slug!r}")
@@ -1750,7 +1735,6 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
         get_async_sandbox_client,
     )
 
-    require_capture_support()
     async with get_async_sandbox_client() as client:
         snapshot = await capture_snapshot_with_tag(
             client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout

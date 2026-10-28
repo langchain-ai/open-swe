@@ -6,9 +6,12 @@ reads the thread and run configuration and metadata from the verified claims, ne
 from tool arguments the model controls.
 """
 
+import hashlib
+import hmac
+import secrets
 import time
 from collections.abc import Mapping
-from typing import Final
+from typing import Final, Self
 
 import jwt
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
@@ -34,6 +37,30 @@ class RuntimeTokenError(Exception):
     """A token was refused; the message names the failed check, never the token."""
 
 
+class RunSettings(BaseModel):
+    """What the backend decided for a run as it started it, which every later call reads."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Where the run was asked from, once a default is applied.
+    source: str | None = None
+    # Whether pull requests the run opens start as drafts, by the sender's preference.
+    draft_prs: bool | None = None
+    # The model and effort the run calls, once settings and overrides are applied.
+    model_id: str | None = None
+    effort: str | None = None
+
+    def configurable(self) -> dict[str, JsonValue]:
+        """The run config keys these settings fill."""
+        values: dict[str, JsonValue] = {
+            "source": self.source,
+            "draft_prs": self.draft_prs,
+            "resolved_agent_model_id": self.model_id,
+            "resolved_agent_effort": self.effort,
+        }
+        return {key: value for key, value in values.items() if value is not None}
+
+
 class RemoteRun(BaseModel):
     """The run a token was signed for, exactly as dispatch stamped it."""
 
@@ -43,11 +70,42 @@ class RemoteRun(BaseModel):
     assistant_id: str
     configurable: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = {}
+    settings: RunSettings = RunSettings()
+    # What the run's operation grants are signed under; None on a run started before
+    # operations were granted, whose tools its plan bounds instead.
+    grant_id: str | None = None
+    # When the run's token expires, in epoch seconds; a token signed again for the run
+    # keeps it, so holding one never extends it.
+    expires_at: int | None = None
+
+    def granting(self) -> Self:
+        """This run, with a grant id of its own for the operations its catalog grants."""
+        return self.model_copy(update={"grant_id": secrets.token_urlsafe(16)})
+
+    def grant(self, operation: str) -> str | None:
+        """The grant of ``operation`` to this run, which its calls of it must carry."""
+        keys = _signing_keys()
+        return None if self.grant_id is None or not keys else _grant(keys[0], self, operation)
+
+    def granted(self, operation: str, grant: str | None) -> bool:
+        """Whether this run may call ``operation``: its catalog granted it, under any live key."""
+        return (
+            self.grant_id is not None
+            and grant is not None
+            and any(
+                hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+            )
+        )
 
 
 def _signing_keys() -> list[str]:
     secret = ENV.REMOTE_RUNTIME_TOKEN_SECRET.optional() or ""
     return [key.strip() for key in secret.split(",") if key.strip()]
+
+
+def _grant(key: str, run: RemoteRun, operation: str) -> str:
+    message = f"{run.thread_id}\n{run.grant_id}\n{operation}".encode()
+    return hmac.new(key.encode(), message, hashlib.sha256).hexdigest()[:32]
 
 
 def runtime_tokens_configured() -> bool:
@@ -63,11 +121,13 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "iss": _ISSUER,
         "aud": audience,
         "iat": issued_at,
-        "exp": issued_at + _TTL_SECONDS,
+        "exp": run.expires_at or issued_at + _TTL_SECONDS,
         "sub": run.thread_id,
         "assistant_id": run.assistant_id,
         "cfg": run.configurable,
         "md": run.metadata,
+        **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
+        **({"gid": run.grant_id} if run.grant_id else {}),
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
@@ -102,6 +162,9 @@ def _run(claims: Mapping[str, object]) -> RemoteRun:
             "assistant_id": claims.get("assistant_id"),
             "configurable": claims.get("cfg"),
             "metadata": claims.get("md", {}),
+            "settings": claims.get("set", {}),
+            "grant_id": claims.get("gid"),
+            "expires_at": claims.get("exp"),
         }
     )
 
