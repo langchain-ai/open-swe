@@ -18,11 +18,12 @@ from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from runtime_api.catalog import McpServerSpec
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
-from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
+from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.utils.startup_trace import asubphase
@@ -151,6 +152,11 @@ def _discovery_slots() -> asyncio.Semaphore:
 
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+    if record.connection is not None:
+        raise MCPDiscoveryError(
+            "Only an MDA run reads this server's connection, so Open SWE cannot list its "
+            "tools; enter the names of the tools to allow"
+        )
     try:
         async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
             return await _discover_tools(record, namespace)
@@ -198,7 +204,7 @@ def _wrap_tool(
                 raise ToolException("MCP connection scope changed; start a new run")
             if not record.enabled:
                 raise ToolException("MCP is disabled or disconnected")
-            if record.url != url or record.transport != transport:
+            if record.url != url or record.transport != transport or record.connection is not None:
                 raise ToolException("MCP connection changed; start a new run")
             if not record.allows_tool(definition.name):
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
@@ -301,7 +307,44 @@ async def _load_tools(
         return [], "failed"
 
 
-async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
+@dataclass(frozen=True)
+class LoadedMCPs:
+    """The tools of the MCP servers the backend serves, and the servers only an MDA run reaches."""
+
+    tools: list[BaseTool] = field(default_factory=list)
+    # Servers whose credential is an MDA connection, which the run reads and connects with.
+    runtime_servers: list[McpServerSpec] = field(default_factory=list)
+
+
+def _runtime_server(
+    source: MCPSource, record: MCPConnection, overridden_scopes: list[MCPScope]
+) -> McpServerSpec | None:
+    """``record`` as the MDA run connects to it, if its tier may read its connection."""
+    connection = record.connection
+    if (
+        connection is None
+        or not connection.for_mcp_server
+        or connection.owner != CONNECTION_OWNERS.get(source.scope)
+    ):
+        logger.warning(
+            "Skipping an MCP server whose connection its tier may not read",
+            extra={"mcp_name": record.name, "mcp_scope": source.scope},
+        )
+        return None
+    return McpServerSpec(
+        name=record.name,
+        url=record.url,
+        transport=record.transport,
+        tools={tool: _tool_name(record.name, tool) for tool in record.allowed_tools},
+        connection=connection,
+        header=record.connection_header,
+        provenance=MCPToolProvenance(
+            connection_name=record.name, scope=source.scope, overridden_scopes=overridden_scopes
+        ).note(),
+    )
+
+
+async def load_mcps(*sources: MCPSource, connection_name: str | None = None) -> LoadedMCPs:
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
@@ -314,7 +357,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
     except Exception:
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
-        return []
+        return LoadedMCPs()
     connections = [
         (source, record)
         for _, (source, record) in sorted(resolved.items())
@@ -324,13 +367,9 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
     ]
     groups = await asyncio.gather(
         *(
-            _load_tools(
-                source,
-                record,
-                sources,
-                scopes[record.name][:-1],
-            )
+            _load_tools(source, record, sources, scopes[record.name][:-1])
             for source, record in connections
+            if record.connection is None
         )
     )
     outcomes = Counter(outcome for _, outcome in groups)
@@ -341,4 +380,22 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
             for outcome in get_args(CatalogOutcome.__value__)
         },
     )
-    return [tool for tools, _ in groups for tool in tools]
+    runtime_servers = [
+        _runtime_server(source, record, scopes[record.name][:-1])
+        for source, record in connections
+        if record.connection is not None
+    ]
+    return LoadedMCPs(
+        tools=[tool for tools, _ in groups for tool in tools],
+        runtime_servers=[server for server in runtime_servers if server is not None],
+    )
+
+
+async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
+    """The tools of the MCP servers the backend serves itself, by precedence as ``load_mcps``."""
+    loaded = await load_mcps(*sources, connection_name=connection_name)
+    for server in loaded.runtime_servers:
+        logger.info(
+            "Leaving out an MCP server only an MDA run can reach", extra={"mcp_name": server.name}
+        )
+    return loaded.tools

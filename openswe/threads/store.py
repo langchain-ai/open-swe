@@ -188,7 +188,7 @@ class ThreadStore:
         """Answer one protocol v2 command as the thread's runtime does.
 
         ``user_id`` is the Open SWE user who sent it, which a run or an answer on a
-        channel's thread acts as; without one it acts as the backend.
+        channel's thread acts as; without one it is the channel's own, for no person.
         """
         try:
             command = _object.validate_json(body)
@@ -238,8 +238,7 @@ class ThreadStore:
                 params,
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
-                channel=bool(acting),
-                user_id=user_id,
+                channel_headers=acting,
             )
             if reply.get("type") == "success":
                 try:

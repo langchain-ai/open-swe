@@ -26,7 +26,7 @@ SERVICE_SECRET = "whsec_a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="
 # What the backend sends to act in that conversation: MDA's trusted-backend ingress.
 AS_THE_CONVERSATION = {
     "x-mda-ingress-secret": SERVICE_SECRET,
-    "x-mda-user-id": "openswe:backend",
+    "x-mda-user-id": "mda:channel",
     "x-mda-source-provider": "linear",
     "x-mda-source-thread-id": "org/ISS-1",
 }
@@ -381,6 +381,7 @@ async def test_a_new_thread_runs_on_mda(
             "kind": "task_message",
             "event_match_ids": ["match-1"],
             "ls_attribution_identifier": "trigger",
+            "user_id": "user-1",
         },
     }
 
@@ -402,10 +403,11 @@ async def test_a_new_thread_runs_on_mda(
     signed = verify_runtime_token(token)
     assert signed.configurable == {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}
     # The hooks see the run metadata an in-process run would, e.g. which delivered
-    # task messages the transcript records.
+    # task messages the transcript records, and the catalog whom the run acts for.
     assert run_config(signed)["metadata"] == {
         "event_match_ids": ["match-1"],
         "ls_attribution_identifier": "trigger",
+        "user_id": "user-1",
     }
 
 
@@ -592,7 +594,7 @@ async def test_a_persons_command_on_a_channel_thread_acts_as_them(
     assert harness.acted_as == [AS_THE_PERSON]
 
 
-async def test_without_their_principal_a_persons_run_acts_as_the_backend(
+async def test_without_their_principal_a_persons_run_is_the_channels_own(
     monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
@@ -625,7 +627,7 @@ async def test_a_dashboard_command_on_a_channel_thread_is_its_senders(
     # Only on a channel's thread, for a person Open SWE knows.
     assert await proxy._sender_user_id(Principal.of_login("ada"), "ada", {}) is None
     assert await proxy._sender_user_id(Principal.of_login("bob"), "bob", channel) is None
-    # A machine is no person: the backend acts.
+    # A machine is no person: the write is the channel's own.
     assert await proxy._sender_user_id(machine, "ada", channel) is None
 
 

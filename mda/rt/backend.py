@@ -120,6 +120,10 @@ class BackendUnavailableError(BackendCallError):
     """A transport or gateway failure left the call without a usable response."""
 
 
+class BackendRefusedError(BackendCallError):
+    """The backend answered that the run may not make this call."""
+
+
 def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     """The graph state the backend's hooks keep, which goes back with every call."""
     held = state.get("open_swe_state")
@@ -449,11 +453,11 @@ class OpenSweBackend:
                     )
                     await asyncio.sleep(wait)
                     continue
-                error = (
-                    BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES
-                    else BackendCallError
-                )
+                error: type[BackendCallError] = BackendCallError
+                if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES:
+                    error = BackendUnavailableError
+                elif status == 403:
+                    error = BackendRefusedError
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
 

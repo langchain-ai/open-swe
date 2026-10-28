@@ -45,7 +45,7 @@ from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
-    ReplaceSandboxMiddleware,
+    ManagedSandboxMiddleware,
     box,
     opened_sandbox,
 )
@@ -179,7 +179,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
     )
     toolsets = RunToolsets(backend, files)
     skills = RunSkillsMiddleware(backend, skill_files)
-    replace_sandbox = ReplaceSandboxMiddleware(backend)
+    managed_sandbox = ManagedSandboxMiddleware(backend)
     # The backend's transcript and usage see every reply and every tool call.
     reports: list[AgentMiddleware] = [
         ReportRepliesMiddleware(backend),
@@ -200,7 +200,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
                     *reports,
                     skills,
                     files,
-                    replace_sandbox,
+                    managed_sandbox,
                     RunToolsMiddleware(toolsets, subagent=subagent),
                     RunSubagentMiddleware(toolsets, subagent),
                     *model_call_guards(subagent=True),
@@ -214,7 +214,7 @@ def _parts(inputs: GraphInputs) -> _Parts:
         list[AgentMiddleware],
         [
             BackendRunMiddleware(backend, opened_sandbox),
-            replace_sandbox,
+            managed_sandbox,
             *reports,
             skills,
             files,

@@ -52,14 +52,18 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 # The protocol v2 stream modes `run.start` uses, minus protocol-only channels the
 # REST run-create schema rejects.
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
-# The run metadata the graph's hooks read. Only these ride in the run token, which
-# travels in a header on every hook call.
-_HOOK_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier")
+# The run metadata the backend reads back from the run token, which travels in a
+# header on every hook call: what the graph's hooks read, and the person the run acts
+# for, which decides whether its catalog names that person's connections.
+_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", "user_id")
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
-# Who the backend's runs on a channel's thread are from, as MDA records them.
-BACKEND_USER: Final = "openswe:backend"
+# Who the backend's writes on a channel's thread that name no person's principal are
+# from: MDA's channel service principal, which owns no user connections. Keep it a
+# service id: MDA takes any other id for a person, so on Slack threads every such
+# write would share that one id's user connections.
+CHANNEL_SERVICE_USER: Final = "mda:channel"
 # Beside ``x-mda-user-id``, the Agent Auth principal MDA's channels stamp a run's sender with.
 _PRINCIPAL_HEADER: Final = "x-mda-agent-auth-principal-id"
 
@@ -191,7 +195,7 @@ class MdaRuntime:
 
         ``user_id`` is the Open SWE user the write is for, so a person's run here has
         the principal their channel runs have (:meth:`user_principal`); without one, or
-        when Agent Auth can't name it, the backend acts as itself.
+        when Agent Auth can't name it, the write is the channel's own, for no person.
         """
         secret = ENV.MDA_SERVICE_SECRET.optional()
         if not secret:
@@ -212,7 +216,7 @@ class MdaRuntime:
         principal = await self.user_principal(user_id) if user_id else None
         return {
             "x-mda-ingress-secret": secret,
-            "x-mda-user-id": principal or BACKEND_USER,
+            "x-mda-user-id": principal or CHANNEL_SERVICE_USER,
             **({_PRINCIPAL_HEADER: principal} if principal else {}),
             "x-mda-source-provider": provider,
             "x-mda-source-thread-id": key,
@@ -320,7 +324,7 @@ class MdaRuntime:
         context = dict(
             await remote_run_context(
                 configurable,
-                metadata={k: run_metadata[k] for k in _HOOK_METADATA_KEYS if k in run_metadata},
+                metadata={k: run_metadata[k] for k in _TOKEN_METADATA_KEYS if k in run_metadata},
                 thread_id=thread_id,
                 assistant_id=assistant_id,
             )
@@ -351,14 +355,13 @@ class MdaRuntime:
         *,
         thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
-        channel: bool = False,
-        user_id: str | None = None,
+        channel_headers: Mapping[str, str] | None = None,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        On a ``channel`` thread the run starts in its conversation as ``user_id``, or as the
-        backend without one (:meth:`channel_write_headers`), which raises ``ChannelThreadError``.
+        On a channel's thread, ``channel_headers`` (:meth:`channel_write_headers`) start the
+        run in its conversation, for the person they name.
         """
         starting_ms = now_ms()
         config = params.get("config")
@@ -388,17 +391,14 @@ class MdaRuntime:
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
-        if channel:
-            # The channel created the thread there, as its conversation's own.
-            headers = await self.channel_write_headers(thread_id, user_id=user_id)
-        else:
-            headers = {}
+        if not channel_headers:
+            # The channel created its threads there; the backend's own may need it.
             await self.ensure_remote_thread(thread_id)
         rewritten = await self.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
         response = await self.http.post(
-            f"/threads/{thread_id}/runs", json=rewritten, headers=headers
+            f"/threads/{thread_id}/runs", json=rewritten, headers=channel_headers
         )
         if response.is_error:
             logger.warning(

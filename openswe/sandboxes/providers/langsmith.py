@@ -1,11 +1,11 @@
 """LangSmith sandbox backend integration."""
 
 import asyncio
-import base64
 import json
 import logging
 import shlex
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
@@ -29,6 +29,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.sandbox_proxy import GITHUB_PROXY_RULES
 
 from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
@@ -60,7 +61,6 @@ PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 # takes up to about three minutes; outlast that rather than fail the run.
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
 # The most entries the sandbox file API returns for one listing.
@@ -234,35 +234,23 @@ class GitHubProxyRule(TypedDict):
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
     if not github_token:
         return []
-    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
-    return [
-        {
-            "name": "github-api",
-            "match_hosts": ["api.github.com"],
-            "headers": [
-                {
-                    "name": "Authorization",
-                    "type": "opaque",
-                    "value": f"Bearer {github_token}",
-                }
-            ],
-            # `gh` refuses to run without a token in its environment even though the
-            # proxy injects the real one on the wire.
-            "env_vars": {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER},
-        },
-        {
-            "name": "github",
-            "match_hosts": ["github.com", "*.github.com"],
-            "headers": [
-                {
-                    "name": "Authorization",
-                    "type": "opaque",
-                    "value": f"Basic {basic_auth}",
-                }
-            ],
-        },
-    ]
+    rules: list[GitHubProxyRule] = []
+    for rule in GITHUB_PROXY_RULES:
+        header: GitHubProxyHeader = {
+            "name": "Authorization",
+            "type": "opaque",
+            "value": rule.authorization(github_token),
+        }
+        written: GitHubProxyRule = {
+            "name": rule.name,
+            "match_hosts": list(rule.hosts),
+            "headers": [header],
+        }
+        if rule.env_vars:
+            written["env_vars"] = dict(rule.env_vars)
+        rules.append(written)
+    return rules
 
 
 def _proxy_config_retry_after(exc: BaseException) -> float | None:
@@ -367,6 +355,41 @@ async def _patch_proxy_config(
     )
 
 
+async def sandbox_proxy_config(
+    sandbox_name: str,
+    github_token: str | None,
+    *,
+    base_proxy_config: Mapping[str, object] | None = None,
+    thread_id: str | None = None,
+) -> dict[str, JsonValue]:
+    """The box's proxy config: GitHub's rules with ``github_token``, none without one, the
+    thread's tool channel, and the custom settings of ``base_proxy_config``."""
+    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    proxy_config = dict(base_proxy_config or {})
+    custom_rules = proxy_config.get("rules")
+    # Written afresh below, or credentials saved by built-in integrations since removed.
+    replaced = {
+        *(rule.name for rule in GITHUB_PROXY_RULES),
+        TOOLS_RULE,
+        "github-public",
+        "open-swe-langsmith",
+        "stagehand-model",
+    }
+    preserved_rules = [
+        rule
+        for rule in (custom_rules if isinstance(custom_rules, list) else [])
+        if not isinstance(rule, dict) or rule.get("name") not in replaced
+    ]
+    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
+    proxy_config["rules"] = [
+        *_github_proxy_rules(github_token),
+        *([tools_rule] if tools_rule else []),
+        *preserved_rules,
+    ]
+    return _json_object.validate_python(proxy_config)
+
+
 async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
@@ -380,29 +403,9 @@ async def configure_sandbox_proxy(
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     url = f"{api.endpoint}/boxes/{sandbox_name}"
-    proxy_config = dict(base_proxy_config or {})
-    custom_rules = proxy_config.get("rules")
-    # Retire credentials saved by removed built-in integrations.
-    preserved_rules = [
-        rule
-        for rule in (custom_rules if isinstance(custom_rules, list) else [])
-        if not isinstance(rule, dict)
-        or rule.get("name")
-        not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
-    ]
-    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
-
-    preserved_rules = [
-        rule
-        for rule in preserved_rules
-        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
-    ]
-    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
-    proxy_config["rules"] = [
-        *_github_proxy_rules(github_token),
-        *([tools_rule] if tools_rule else []),
-        *preserved_rules,
-    ]
+    proxy_config = await sandbox_proxy_config(
+        sandbox_name, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
+    )
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS

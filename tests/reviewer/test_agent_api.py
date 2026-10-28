@@ -150,7 +150,13 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     # A thread in no task gets no task context.
     assert context == {"instructions": "", "message": None}
     assert refreshed == {"expires_at": None}
-    refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
+    # The coding agent narrows its token no further than its thread does.
+    refresh.assert_awaited_once_with(
+        run.thread_id,
+        workspace_slug=None,
+        github_proxy_repositories=None,
+        github_proxy_permissions=None,
+    )
 
 
 @pytest.mark.usefixtures("registry_db")

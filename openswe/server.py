@@ -31,6 +31,7 @@ from runtime_api.catalog import (
     CliResultRules,
     InboxSpec,
     LoopRules,
+    McpServerSpec,
     ReplyRules,
     RoutingRules,
 )
@@ -88,7 +89,7 @@ from openswe.input_messages import (
     person_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.mcp import load_mcp_tools
+from openswe.mcp import LoadedMCPs, load_mcps
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.user import user_mcp_source
@@ -807,8 +808,8 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
     loaded = _integrations.get((login, workspace))
     if loaded is not None and loaded[0] > time.monotonic():
         return loaded[1]
-    _gateway, tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
-    by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
+    _gateway, mcps = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
+    by_name = {tool.name: tool for tool in mcps.tools}
     _keep_integrations((login, workspace), by_name)
     return by_name
 
@@ -881,7 +882,7 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
 
 async def _mcp_tools_for(
     credential_login: str | None, workspace: str, managed_gateway: str | None
-) -> list[Any]:
+) -> LoadedMCPs:
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
     A later tier's connection replaces a same-named one from the tier before. The
@@ -892,13 +893,43 @@ async def _mcp_tools_for(
         sources.append(user_mcp_source(credential_login))
         if managed_gateway:
             sources.append(managed_mcp_source(credential_login, managed_gateway))
-    return await load_mcp_tools(*sources)
+    return await load_mcps(*sources)
+
+
+def _owned_mcp_servers(
+    config: RunnableConfig, credential_login: str | None, servers: Sequence[McpServerSpec]
+) -> list[McpServerSpec]:
+    """``servers`` without the personal ones, unless the MDA run acts for their owner.
+
+    MDA reads a personal server's connection as the person the run acts for there: the
+    user the run is attributed to (``dispatch._run_user_metadata``). A run attributed to
+    no one, such as a background task's completion, has no person's principal: on a
+    channel's thread it is MDA's channel service principal (``mda:channel``), which reads
+    no user connections, and on any other thread the principal of the backend's own key,
+    which every such run shares, so one person's grant would reach everyone's servers.
+    """
+    attributed = (config.get("metadata") or {}).get("ls_attribution_identifier")
+    for_owner = (
+        isinstance(attributed, str)
+        and credential_login is not None
+        and attributed.lower() == credential_login.lower()
+    )
+    owned: list[McpServerSpec] = []
+    for server in servers:
+        if server.connection.owner == "user" and not for_owner:
+            logger.warning(
+                "Leaving out a personal MCP server of a run that does not act for its owner",
+                extra={"mcp_name": server.name},
+            )
+            continue
+        owned.append(server)
+    return owned
 
 
 async def _run_mcp_tools(
     thread_id: str, credential_login: str | None, workspace: str
-) -> tuple[str | None, list[Any]]:
-    """The instance's Managed Tools gateway and the MCP tools the run may use."""
+) -> tuple[str | None, LoadedMCPs]:
+    """The instance's Managed Tools gateway and the MCPs the run may use."""
     managed_gateway = await instance_gateway() if credential_login else None
     async with aphase(thread_id, "factory.mcp_tools"):
         return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
@@ -1769,8 +1800,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
 
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
-    managed_gateway, mcp_tools = (
-        await mcp_tools_task if mcp_tools_task is not None else (None, list[Any]())
+    managed_gateway, mcps = (
+        await mcp_tools_task if mcp_tools_task is not None else (None, LoadedMCPs())
     )
 
     slack_tools = [
@@ -1871,7 +1902,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
     dynamic_tool_middleware = _integration_middleware(
-        mcp_tools,
+        mcps.tools,
         {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
     )
 
@@ -2083,6 +2114,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     ]
     surface.dynamic = dynamic_tool_middleware
+    surface.mcp_servers = _owned_mcp_servers(config, credential_login, mcps.runtime_servers)
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
     surface.backend_paths = tuple(

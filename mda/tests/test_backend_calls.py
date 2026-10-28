@@ -1,12 +1,13 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import closing
+from contextlib import ExitStack, closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
+from urllib.error import URLError
 from uuid import UUID
 
 import anthropic
@@ -40,6 +41,7 @@ from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph_sdk.errors import (
     APIStatusError,
@@ -49,7 +51,12 @@ from langgraph_sdk.errors import (
 )
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree, WriteReplica
-from managed_deepagents import define_deep_agent
+from managed_deepagents import (
+    ConnectionNotFoundError,
+    CredentialAuthorizationRequiredError,
+    CredentialStoreError,
+    define_deep_agent,
+)
 from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
@@ -74,6 +81,7 @@ from runtime_api.catalog import (
     SandboxCreate,
     SandboxSpec,
 )
+from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -289,6 +297,92 @@ async def test_a_tool_call_the_backend_never_answered(
     assert result_message.status == ("success" if failures == 10 else "error")
     assert "secret-token" not in result_message.content
     assert client.post.await_count == attempts
+
+
+@pytest.mark.parametrize("code_mode", [False, True])
+@pytest.mark.parametrize(
+    ("owner", "failure", "outcome"),
+    [
+        ("agent", None, {"open-swe-exa": "exa-key"}),
+        ("user", CredentialStoreError("service callers cannot own OAuth grants"), {}),
+        ("user", CredentialAuthorizationRequiredError(["open-swe-exa"]), {}),
+        ("user", URLError(ConnectionRefusedError()), {}),
+        ("user", GraphInterrupt(), "pauses"),
+        ("agent", ConnectionNotFoundError("open-swe-exa", "agent"), "fails"),
+        ("agent", URLError(ConnectionRefusedError()), "fails"),
+    ],
+)
+async def test_an_operation_carries_what_the_run_reads_of_its_connections(
+    monkeypatch: pytest.MonkeyPatch,
+    owner: Literal["agent", "user"],
+    failure: Exception | None,
+    outcome: dict[str, str] | Literal["pauses", "fails"],
+    code_mode: bool,
+) -> None:
+    from rt.backend import reporting, subagent_of
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+
+    async def read() -> str:
+        if failure is not None:
+            raise failure
+        return "exa-key"
+
+    monkeypatch.setattr("rt.tools.connections", MagicMock(get=lambda slug, owner: read()))
+    backend = _run_backend()
+    calls: list[dict[str, JsonValue]] = []
+
+    async def answer(_name: str, body: dict[str, JsonValue]) -> BaseModel:
+        calls.append(body)
+        return OperationResult(content="done")
+
+    _answering(monkeypatch, backend, answer)
+    started = MagicMock()
+    finished = MagicMock()
+    monkeypatch.setattr(backend.outbox, "started", started)
+    monkeypatch.setattr(backend.outbox, "finished", finished)
+    spec = OperationSpec(
+        name="web_search",
+        description="Search",
+        parameters={"type": "object"},
+        connections=[ConnectionRef(slug="open-swe-exa", owner=owner)],
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id=None if code_mode else "call-1",
+        store=None,
+    )
+    served = operation_tool(spec, backend)
+    assert served.coroutine is not None
+    # Code mode reports the calls it makes itself, under the eval call that ran them.
+    with ExitStack() as stack:
+        if code_mode:
+            stack.enter_context(subagent_of("eval-1"))
+            stack.enter_context(reporting("eval-1"))
+        if outcome == "pauses":
+            with pytest.raises(GraphInterrupt):
+                await served.coroutine(runtime=runtime)
+        else:
+            result = await served.coroutine(runtime=runtime)
+    # A call that paused runs again once the person answers: it leaves no report open.
+    assert started.call_count == finished.call_count == (code_mode and outcome != "pauses")
+    if outcome == "pauses":
+        assert calls == []
+        return
+    assert isinstance(result, ToolMessage)
+    if outcome == "fails":
+        assert result.status == "error"
+        assert ("mda connections create open-swe-exa" in result.text) == (
+            isinstance(failure, ConnectionNotFoundError)
+        )
+        assert calls == []
+    else:
+        assert result.status == "success"
+        assert [body["credentials"] for body in calls] == [outcome]
 
 
 @pytest.mark.parametrize(
@@ -1697,6 +1791,33 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+async def test_a_model_call_paused_for_a_connection_is_not_retried_on_the_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    paused = GraphInterrupt()
+    handler = AsyncMock(side_effect=[paused, ModelResponse(result=[AIMessage(content="fallback")])])
+    state: RunState = {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=None,
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+    middleware = BackendRunMiddleware(_run_backend("token", invocation_id="run"))
+    with pytest.raises(GraphInterrupt) as caught:
+        await middleware.awrap_model_call(
+            ModelRequest(model=model, messages=[], state=state), handler
+        )
+    assert caught.value is paused
 
 
 @pytest.mark.parametrize("managed", [False, True])

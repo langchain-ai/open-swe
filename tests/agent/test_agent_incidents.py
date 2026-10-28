@@ -13,6 +13,7 @@ from runtime_api.operations import RunOperation, ToolEvidence
 
 from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.mcp import LoadedMCPs
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware.model_call_shape import CallShape
@@ -90,7 +91,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     remote = StructuredTool.from_function(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
-    with patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
+    loaded = LoadedMCPs(tools=[remote], runtime_servers=[])
+    with patch("openswe.server.load_mcps", AsyncMock(return_value=loaded)) as mcps:
         result = cast(dict[str, Any], await _plan_agent(_incident_config()))
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.
