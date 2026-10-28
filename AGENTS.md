@@ -71,6 +71,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - Structured logging: static message, values in `extra`.
   Avoid standard `LogRecord` field names in `extra`.
 - Prefer exposing UI write operations as authorized agent tools.
+  Whenever adding or changing a setting, add or update its authorized agent tool alongside the UI, reusing the same validation and permission checks.
+  Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.
   Destructive or sensitive actions may stay human-only.
   Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
