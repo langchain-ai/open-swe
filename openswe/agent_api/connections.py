@@ -23,6 +23,13 @@ from openswe.config import ENV, EnvVar
 
 logger = logging.getLogger(__name__)
 
+#: Run metadata naming the Open SWE user a run acts as, whose own connections it reads.
+#: Only the backend writes it, and only for a run that person started: a channel's run,
+#: which MDA starts as its verified sender, or one they started from the dashboard on a
+#: channel's thread, which the thread router starts as their principal. The run's
+#: ``user_id`` is whom it is attributed to, which is not whom it acts as.
+ACTING_USER_KEY: Final = "acting_user_id"
+
 _carried: ContextVar[Mapping[str, str]] = ContextVar(
     "operation_credentials", default=MappingProxyType({})
 )
@@ -58,13 +65,13 @@ def operation_connections(operation: str, config: RunnableConfig) -> list[Connec
     """The connections ``operation``'s tool reads in the run ``config`` configures, as this
     backend's settings name them.
 
-    A person's own only when the run acts for one. A run the backend starts for no one has
-    no person's principal: on a channel's thread it is MDA's channel service principal
-    (``mda:channel``), which reads no user connections, and on any other thread the
-    principal of the backend's own key, which all such runs share, so a grant made there
-    would serve every one of them.
+    A person's own only when the run acts as one (``ACTING_USER_KEY``), whatever person it
+    is attributed to. Any other run has no person's principal: on a channel's thread it is
+    MDA's channel service principal (``mda:channel``), which reads no user connections,
+    and on any other thread the principal of the backend's own key, which all such runs
+    share, so a grant made there would serve every one of them.
     """
-    for_person = _acts_for_person(config)
+    for_person = acting_user(config.get("metadata") or {}) is not None
     return [
         ref
         for read in _READ_BY.get(operation, ())
@@ -72,11 +79,10 @@ def operation_connections(operation: str, config: RunnableConfig) -> list[Connec
     ]
 
 
-def _acts_for_person(config: RunnableConfig) -> bool:
-    # Dispatch records the person a run is for (``user_id``) only when there is one, and
-    # the thread router starts the run in a channel's conversation as them.
-    user_id = (config.get("metadata") or {}).get("user_id")
-    return isinstance(user_id, str) and bool(user_id.strip())
+def acting_user(metadata: Mapping[str, object]) -> str | None:
+    """The Open SWE user the run ``metadata`` describes acts as (``ACTING_USER_KEY``)."""
+    user_id = metadata.get(ACTING_USER_KEY)
+    return user_id if isinstance(user_id, str) and user_id.strip() else None
 
 
 @cache

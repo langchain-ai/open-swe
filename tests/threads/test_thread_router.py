@@ -10,6 +10,7 @@ from managed_deepagents._agent_auth import AgentAuthContext, ResolvePrincipalIde
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, proxy, router, runtimes, store
@@ -403,11 +404,10 @@ async def test_a_new_thread_runs_on_mda(
     signed = verify_runtime_token(token)
     assert signed.configurable == {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}
     # The hooks see the run metadata an in-process run would, e.g. which delivered
-    # task messages the transcript records, and the catalog whom the run acts for.
+    # task messages the transcript records; a task message acts as no one.
     assert run_config(signed)["metadata"] == {
         "event_match_ids": ["match-1"],
         "ls_attribution_identifier": "trigger",
-        "user_id": "user-1",
     }
 
 
@@ -545,6 +545,16 @@ def agent_auth(monkeypatch: pytest.MonkeyPatch) -> Resolved:
     return resolved
 
 
+def _acts_as(harness: _Harness) -> str | None:
+    """The person the run token of the one run started says it acts as."""
+    [(_, sent)] = harness.forwarded
+    context = sent["context"]
+    assert isinstance(context, dict) and isinstance(token := context["__run_token"], str)
+    acting = verify_runtime_token(token).metadata.get(ACTING_USER_KEY)
+    assert acting is None or isinstance(acting, str)
+    return acting
+
+
 async def test_a_persons_run_on_a_channel_thread_acts_as_them(
     monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved
 ) -> None:
@@ -552,15 +562,20 @@ async def test_a_persons_run_on_a_channel_thread_acts_as_them(
     harness = _Harness(monkeypatch)
     await _channel_thread(harness)
 
-    # A queued follow-up: its run is attributed to the person who sent it.
+    # A queued follow-up: its run acts as the person who sent it.
     status, _ = await harness.request(
         "POST",
         f"/threads/{THREAD}/runs",
-        {"assistant_id": "agent", "input": {}, "metadata": {"user_id": USER_ID}},
+        {
+            "assistant_id": "agent",
+            "input": {},
+            "metadata": {"user_id": USER_ID, ACTING_USER_KEY: USER_ID},
+        },
     )
 
     assert status == 200
     assert harness.acted_as == [AS_THE_PERSON]
+    assert _acts_as(harness) == USER_ID
     # The principal MDA resolves the user ``resolve_user`` names to, with MDA's key.
     assert agent_auth == [
         (
@@ -594,8 +609,33 @@ async def test_a_persons_command_on_a_channel_thread_acts_as_them(
     assert harness.acted_as == [AS_THE_PERSON]
 
 
-async def test_without_their_principal_a_persons_run_is_the_channels_own(
+async def test_a_run_attributed_to_a_person_they_did_not_start_is_the_channels_own(
     monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    # A wakeup, an event match or a task message: attributed to the person, not theirs.
+    status, _ = await harness.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        {
+            "assistant_id": "agent",
+            "input": {},
+            "metadata": {"user_id": USER_ID, "ls_attribution_identifier": "ada"},
+        },
+    )
+
+    assert status == 200
+    assert harness.acted_as == [AS_THE_CONVERSATION]
+    assert _acts_as(harness) is None
+    assert agent_auth == []
+
+
+@pytest.mark.parametrize("command", [False, True], ids=["rest", "command"])
+async def test_without_their_principal_a_persons_run_is_the_channels_own(
+    monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved, command: bool
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
@@ -605,13 +645,24 @@ async def test_without_their_principal_a_persons_run_is_the_channels_own(
         raise CredentialStoreError("Agent Auth resolve principal failed", 503, {})
 
     monkeypatch.setattr(runtimes.AgentAuth, "resolve_principal", unavailable)
-    command = {"id": 7, "method": "input.respond", "params": {}}
+    params: dict[str, JsonValue] = {
+        "assistant_id": "agent",
+        "input": {},
+        "metadata": {"user_id": USER_ID, ACTING_USER_KEY: USER_ID},
+    }
 
-    reply = await store.THREADS.command(THREAD, json.dumps(command).encode(), user_id=USER_ID)
+    if command:
+        start = {"id": 7, "method": "run.start", "params": params}
+        reply = await store.THREADS.command(THREAD, json.dumps(start).encode(), user_id=USER_ID)
+        status = reply.status
+    else:
+        status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
 
-    # Never the user's id unresolved, which MDA would take for another person.
-    assert reply.status == 200
+    # Never the user's id unresolved, which MDA would take for another person, and
+    # never a token that names their connections for the channel's principal.
+    assert status == 200
     assert harness.acted_as == [AS_THE_CONVERSATION]
+    assert _acts_as(harness) is None
 
 
 async def test_a_dashboard_command_on_a_channel_thread_is_its_senders(
