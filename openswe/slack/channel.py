@@ -10,7 +10,7 @@ the signed run token, and answers the channel with it.
 """
 
 import logging
-from typing import Annotated, Any, Final, cast
+from typing import Annotated, Final, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -42,7 +42,7 @@ class SlackChannelCall(TypedDict):
     The event stays a plain object here: its fields are read one by one below.
     """
 
-    event: dict[str, Any]
+    event: dict[str, JsonValue]
     thread: EndpointThread
 
 

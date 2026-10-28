@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langgraph_sdk.errors import NotFoundError
-from pydantic import AliasChoices, AliasPath, BaseModel, Field, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
 from openswe.database import postgres
@@ -1089,13 +1089,13 @@ CHANNEL_HISTORY_MESSAGES = 50
 CONTINUES_THREAD_KEY = "continues_thread"
 
 
-def _state_messages(state: object) -> list[dict[str, Any]]:
+def _state_messages(state: object) -> list[dict[str, JsonValue]]:
     values = state.get("values") if isinstance(state, Mapping) else None
     messages = values.get("messages") if isinstance(values, Mapping) else None
     return [m for m in messages if isinstance(m, dict)] if isinstance(messages, list) else []
 
 
-def _starts_turn(messages: list[dict[str, Any]], index: int) -> bool:
+def _starts_turn(messages: list[dict[str, JsonValue]], index: int) -> bool:
     """Whether a copy may start at ``index``: not at a tool result, nor between an AI
     message's tool calls and their results."""
     if messages[index].get("type") == "tool":
@@ -1104,7 +1104,7 @@ def _starts_turn(messages: list[dict[str, Any]], index: int) -> bool:
     return not (previous.get("type") == "ai" and previous.get("tool_calls"))
 
 
-def recent_turns(messages: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+def recent_turns(messages: list[dict[str, JsonValue]], limit: int) -> list[dict[str, JsonValue]]:
     """The latest ``limit`` messages at most, starting at a turn boundary."""
     start = max(len(messages) - limit, 0)
     while start < len(messages) and not _starts_turn(messages, start):
@@ -1112,7 +1112,7 @@ def recent_turns(messages: list[dict[str, Any]], limit: int) -> list[dict[str, A
     return messages[start:]
 
 
-async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[dict[str, Any]]:
+async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[dict[str, JsonValue]]:
     """The channel conversation a PR thread continues, for the PR thread's first run."""
     try:
         if _state_messages(await THREADS.state(pr_thread_id)):
@@ -1571,7 +1571,7 @@ class GitHubIssueRun:
 
     thread_id: str
     input: RunInput
-    configurable: dict[str, Any]
+    configurable: dict[str, JsonValue]
 
 
 async def _conversation_started(thread_id: str) -> bool:
