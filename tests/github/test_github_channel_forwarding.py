@@ -62,7 +62,7 @@ def intake(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     register_github_logins(monkeypatch, "ada")
     mocks = {"pr_comment": AsyncMock(), "forward": AsyncMock()}
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", mocks["pr_comment"])
-    monkeypatch.setattr(forwarding, "forward_to_mda_channel", mocks["forward"])
+    monkeypatch.setattr(forwarding.queue, "schedule", mocks["forward"])
     return mocks
 
 
@@ -93,7 +93,12 @@ async def test_an_issue_mention_goes_to_mda_exactly_as_github_sent_it(
     response, body = await _deliver(event_type, payload)
 
     assert response.json()["message"] == message
-    forwarded_body, headers = intake["forward"].await_args.args
+    # Queued as a job, so a restart doesn't lose it, keyed by the delivery.
+    kind, job_payload = intake["forward"].await_args.args
+    assert kind == forwarding.FORWARD_JOB
+    assert intake["forward"].await_args.kwargs["key"] == f"{forwarding.FORWARD_JOB}:delivery-1"
+    job = forwarding.ForwardJob.model_validate(json.loads(json.dumps(job_payload)))
+    forwarded_body, headers = job.raw_body, job.headers
     assert forwarded_body == body
     # Only GitHub's own headers: not the User-Agent or anything else the request carried.
     assert headers == {
@@ -184,6 +189,28 @@ async def test_the_forward_retries_until_mda_takes_the_delivery(
         "attempts": 3,
     }
     cast(AsyncMock, forwarding.react_lost).assert_not_awaited()
+
+
+async def test_the_forward_waits_out_a_rate_limit(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    answers = iter(
+        [
+            httpx2.Response(429, headers={"Retry-After": "7"}),
+            httpx2.Response(429, headers={"Retry-After": "3600"}),
+            httpx2.Response(202),
+        ]
+    )
+    seen = _mda(monkeypatch, lambda _request: next(answers))
+
+    with caplog.at_level("INFO"):
+        await forwarding.forward_to_mda_channel(b"{}", _HEADERS)
+
+    assert len(seen) == 3
+    # As long as MDA asks, up to a bound.
+    waits = [call.args[0] for call in cast(AsyncMock, forwarding.asyncio.sleep).await_args_list]
+    assert waits == [7.0, 60.0]
+    assert _outcome(caplog)["forward_outcome"] == "delivered"
 
 
 @pytest.mark.parametrize("status", [401, 307])
