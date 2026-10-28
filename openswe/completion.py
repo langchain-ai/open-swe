@@ -13,11 +13,13 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 import hmac
 import logging
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
+from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
 from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata
@@ -59,6 +61,9 @@ _MAX_FAILURE_REPLY_RUN_IDS = 20
 _CONSECUTIVE_FAILURES = "consecutive_failed_runs"
 # A thread that keeps failing would otherwise post one notice per run, forever.
 _MAX_CONSECUTIVE_FAILURE_REPLIES = 3
+# One failure reply per run, however many of its webhook and the stalled-run sweep race.
+_FAILURE_REPLY_CLAIM = "run_failure_reply"
+_FAILURE_REPLY_CLAIM_TTL = timedelta(days=2)
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
@@ -98,12 +103,14 @@ _REASON_TEXT = {
     "sandbox_unreachable": "the run lost its sandbox",
     "backend_interrupted": "the connection to the Open SWE backend was interrupted",
     "step_limit": "the run hit its step limit",
+    "run_stalled": "the run stopped responding",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
     "backend_interrupted": "Re-trigger the run to try again.",
+    "run_stalled": "Send your message again to retry.",
 }
 
 
@@ -620,17 +627,29 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
         return {"status": "ignored", "reason": "repeated failures"}
 
+    claim_key = f"{thread_id}:{run_id}" if run_id is not None else None
+    if claim_key is not None and not await event_claims.claim(
+        _FAILURE_REPLY_CLAIM, claim_key, ttl=_FAILURE_REPLY_CLAIM_TTL
+    ):
+        return {"status": "ignored", "reason": "failure reply already posted for run"}
     reason_code = _failure_reason_code(error, metadata, run_id)
     error_message = error.get("message") if isinstance(error, dict) else error
-    posted = await _post_failure_reply(
-        thread_id,
-        metadata,
-        status,
-        reason_code,
-        invocation_id=_invocation_id(payload),
-        terminal_error=error_message if isinstance(error_message, str) else None,
-    )
+    try:
+        posted = await _post_failure_reply(
+            thread_id,
+            metadata,
+            status,
+            reason_code,
+            invocation_id=_invocation_id(payload),
+            terminal_error=error_message if isinstance(error_message, str) else None,
+        )
+    except BaseException:
+        if claim_key is not None:
+            await event_claims.release(_FAILURE_REPLY_CLAIM, claim_key)
+        raise
     if not posted:
+        if claim_key is not None:
+            await event_claims.release(_FAILURE_REPLY_CLAIM, claim_key)
         return {"status": "ignored", "reason": "no reply posted"}
 
     try:

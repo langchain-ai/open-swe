@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 _PAGE: Final = 100
 # Kinds whose crons nothing needs: retired features and one-time cleanups.
-_RETIRED: Final = frozenset({"expedited_review", "analyzer_continual", "thread_feedback"})
+_RETIRED: Final = frozenset(
+    {"expedited_review", "analyzer_continual", "thread_feedback", "reconcile"}
+)
 
 
 class _AgentServerCron(BaseModel):

@@ -8,7 +8,8 @@ which also runs the graphs Managed Deep Agents does not host.
 import logging
 import time
 from collections.abc import Mapping
-from typing import Final
+from datetime import datetime
+from typing import Final, Literal
 
 import httpx
 from langgraph_sdk import get_client
@@ -59,6 +60,25 @@ class _RunError(BaseModel):
 
 class _ErroredThread(BaseModel):
     error: _RunError | None = None
+
+
+type RunStatus = Literal["pending", "running", "success", "error", "timeout", "interrupted"]
+
+
+class MdaRun(BaseModel):
+    """A run as MDA reports it."""
+
+    run_id: str
+    status: RunStatus
+    created_at: datetime
+    metadata: dict[str, JsonValue] = {}
+
+    @property
+    def active(self) -> bool:
+        return self.status in ("pending", "running")
+
+
+_runs = TypeAdapter(list[MdaRun])
 
 
 class _SdkThreads:
@@ -143,21 +163,48 @@ class MdaRuntime:
         thread = await index.get(thread_id)
         if thread is None or not thread.stopped_since(starting_ms):
             return
+        logger.info(
+            "Interrupting a run its thread was stopped while it started",
+            extra={"thread_id": thread_id, "run_id": run_id},
+        )
+        # A stop that came once MDA had the run may have cancelled it already.
+        await self.cancel(thread_id, run_id)
+
+    async def cancel(self, thread_id: str, run_id: str) -> bool:
+        """Interrupt the run; ``False`` when MDA refused or could not be reached."""
         extra = {"thread_id": thread_id, "run_id": run_id}
-        logger.info("Interrupting a run its thread was stopped while it started", extra=extra)
         try:
             response = await self.http.post(
                 f"/threads/{thread_id}/runs/{run_id}/cancel", params={"action": "interrupt"}
             )
         except httpx.HTTPError:
-            logger.warning("Could not interrupt a stopped run", extra=extra, exc_info=True)
-            return
+            logger.warning("Could not interrupt an MDA run", extra=extra, exc_info=True)
+            return False
         if response.is_error:
-            # A stop that came once MDA had the run may have cancelled it already.
             logger.warning(
-                "Could not interrupt a stopped run",
+                "Could not interrupt an MDA run",
                 extra={**extra, "status_code": response.status_code},
             )
+            return False
+        return True
+
+    async def run(self, thread_id: str, run_id: str) -> MdaRun | None:
+        response = await self.http.get(f"/threads/{thread_id}/runs/{run_id}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return MdaRun.model_validate(response.json())
+
+    async def active_run(self, thread_id: str) -> MdaRun | None:
+        """The run the thread is on: the running one, else the oldest still waiting to start."""
+        for status in ("running", "pending"):
+            response = await self.http.get(
+                f"/threads/{thread_id}/runs", params={"status": status, "limit": 10}
+            )
+            response.raise_for_status()
+            if runs := _runs.validate_python(response.json()):
+                return min(runs, key=lambda run: run.created_at)
+        return None
 
     async def run_payload(
         self,

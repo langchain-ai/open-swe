@@ -9,6 +9,12 @@ from openswe.message_queue import QueuedMessage
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
+from tests.conftest import MemoryEventClaims
+
+
+@pytest.fixture(autouse=True)
+def _failure_reply_claims(memory_event_claims: MemoryEventClaims) -> MemoryEventClaims:
+    return memory_event_claims
 
 
 class _FakeThreads:
