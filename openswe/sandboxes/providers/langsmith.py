@@ -367,6 +367,20 @@ async def _patch_proxy_config(
     )
 
 
+def _is_federated_proxy_rule(rule: object) -> bool:
+    if not isinstance(rule, dict):
+        return False
+    for cloud, fields in (
+        ("aws", {"role_arn"}),
+        ("gcp", {"workload_identity_provider"}),
+        ("azure", {"tenant_id", "client_id"}),
+    ):
+        settings = rule.get(cloud)
+        if rule.get("type") == cloud and isinstance(settings, dict) and fields & settings.keys():
+            return True
+    return False
+
+
 async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
@@ -386,9 +400,18 @@ async def configure_sandbox_proxy(
     preserved_rules = [
         rule
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
-        if not isinstance(rule, dict)
-        or rule.get("name")
-        not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
+        if not _is_federated_proxy_rule(rule)
+        and (
+            not isinstance(rule, dict)
+            or rule.get("name")
+            not in {
+                "github",
+                "github-api",
+                "github-public",
+                "open-swe-langsmith",
+                "stagehand-model",
+            }
+        )
     ]
     from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
 
@@ -407,6 +430,17 @@ async def configure_sandbox_proxy(
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
+        response = await client.get(url, headers=api.headers())
+        api.raise_for_status(response)
+        sandbox = _json_object.validate_python(response.json())
+        current_config = sandbox.get("proxy_config")
+        current_rules = current_config.get("rules") if isinstance(current_config, dict) else None
+        # Federation authority is immutable, including its absence on older boxes.
+        proxy_config["rules"].extend(
+            rule
+            for rule in (current_rules if isinstance(current_rules, list) else [])
+            if _is_federated_proxy_rule(rule)
+        )
         await _patch_proxy_config(client, url, payload, api, sandbox_name)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
