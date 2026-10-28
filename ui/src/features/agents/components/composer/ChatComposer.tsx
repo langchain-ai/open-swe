@@ -120,7 +120,7 @@ export interface RestoredDraft {
   text: string
   images: Array<ImageChunk>
   replies?: Array<PassageReply>
-  /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
+  /** Replace the previous suggestion and its images if its text is still untouched. */
   replacesSuggestion?: boolean
 }
 
@@ -466,6 +466,7 @@ export const ChatComposer = memo(function ChatComposer({
 
   const restoredKeyRef = useRef<number | null>(null)
   const lastSuggestionRef = useRef<string | null>(null)
+  const suggestedImagesRef = useRef<Array<ImageChunk>>([])
   useEffect(() => {
     if (!restoreDraft || restoredKeyRef.current === restoreDraft.key) return
     restoredKeyRef.current = restoreDraft.key
@@ -479,10 +480,16 @@ export const ChatComposer = memo(function ChatComposer({
       .filter((part) => part.trim().length > 0)
       .join("\n\n")
     applyPrompt(next, next.length)
-    if (restoreDraft.images.length > 0) {
+    if (restoreDraft.images.length > 0 || untouched) {
+      const previous = new Set(untouched ? suggestedImagesRef.current : [])
       // oxlint-disable-next-line react/set-state-in-effect
-      setPendingImages((prev) => [...restoreDraft.images, ...prev])
+      setPendingImages((prev) => [
+        ...restoreDraft.images,
+        ...prev.filter((image) => !previous.has(image)),
+      ])
     }
+    if (restoreDraft.replacesSuggestion)
+      suggestedImagesRef.current = restoreDraft.images
     const restoredReplies = restoreDraft.replies ?? []
     if (restoredReplies.length > 0) {
       setPendingReplies((prev) => [

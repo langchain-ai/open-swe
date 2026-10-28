@@ -63,6 +63,9 @@ vi.mock("@/lib/appCommands", () => ({
 afterEach(() => cleanup())
 
 beforeEach(() => {
+  Range.prototype.getBoundingClientRect ??= () => new DOMRect()
+  Range.prototype.getClientRects ??= () =>
+    Object.assign([], { item: () => new DOMRect() })
   stream.isLoading = false
   stream.disconnect.mockClear()
   cancelThread.mockClear()
@@ -75,19 +78,23 @@ function renderComposer(
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
-  render(
+  const view = (next: Partial<ChatComposerProps>) => (
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
         <ThreadSourceProvider threadId="thread-1" transcript={false}>
           <ChatComposer
             activeRun={{ threadId: "thread-1", running }}
             {...props}
+            {...next}
           />
         </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
-    </QueryClientProvider>,
-    { wrapper: TooltipProvider }
+    </QueryClientProvider>
   )
+  const result = render(view({}), { wrapper: TooltipProvider })
+  return {
+    rerender: (next: Partial<ChatComposerProps>) => result.rerender(view(next)),
+  }
 }
 
 describe("ChatComposer stop button", () => {
@@ -199,6 +206,49 @@ describe("ChatComposer stop button", () => {
 })
 
 describe("ChatComposer options", () => {
+  it("lets the reviewer inspect and remove a prepared screenshot before sending the draft", async () => {
+    const onSubmit = vi.fn()
+    const base = {
+      kind: "image" as const,
+      base64: btoa("base"),
+      mimeType: "image/png",
+      fileName: "design-qa-base.png",
+    }
+    const pr = { ...base, base64: btoa("pr"), fileName: "design-qa-pr.png" }
+    const { rerender } = renderComposer(false, {
+      onSubmit,
+      restoreDraft: {
+        key: 1,
+        text: "Review this interaction",
+        images: [base, pr],
+        replacesSuggestion: true,
+      },
+    })
+    await screen.findByAltText("design-qa-base.png")
+    expect(screen.getByAltText("design-qa-pr.png")).toBeTruthy()
+    expect(onSubmit).not.toHaveBeenCalled()
+    const next = { ...pr, fileName: "next-state-pr.png" }
+    rerender({
+      restoreDraft: {
+        key: 2,
+        text: "Review the next state",
+        images: [base, next],
+        replacesSuggestion: true,
+      },
+    })
+    await screen.findByAltText("next-state-pr.png")
+    expect(screen.queryByAltText("design-qa-pr.png")).toBeNull()
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove image" })[0]!)
+    expect(screen.queryByAltText("design-qa-base.png")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        { text: "Review the next state", images: [next], replies: [] },
+        undefined
+      )
+    )
+  })
+
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
 

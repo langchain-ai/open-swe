@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { FrontendReportView, FrontendReviewer } from "./FrontendReviewer"
+import { useReviewPage } from "@/features/reviews/page/store"
 import {
   frontendReviewApi,
   type FrontendReviewRun,
@@ -336,8 +337,15 @@ it("refreshes terminal progress when the worker finishes before the enqueue resp
   client.clear()
 })
 
-it("keeps interaction coverage separate and preserves PR-only states without a false comparison", () => {
-  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("fixture image"))
+it("attaches the selected interaction's available image and replay context without claiming a paired comparison", async () => {
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockRejectedValue(new Error("fixture image"))
+  useReviewPage.setState({
+    chatDraft: undefined,
+    railOpen: false,
+    railTab: "discussion",
+  })
   const media =
     "/dashboard/api/reviews/acme/widgets/7/frontend-reviews/00000000-0000-0000-0000-000000000001/media/state.png"
   const baseline: FrontendScenario = {
@@ -345,7 +353,7 @@ it("keeps interaction coverage separate and preserves PR-only states without a f
     title: "Projects",
     path: "/projects",
     status: "complete",
-    before_url: media,
+    before_url: media.replace("state.png", "base.png"),
     after_url: media,
     diff_url: media,
     mask_url: media,
@@ -366,8 +374,9 @@ it("keeps interaction coverage separate and preserves PR-only states without a f
     min_region_pixels: 4,
     error: null,
   }
-  render(
+  const { unmount } = render(
     <FrontendReportView
+      currentHeadSha={"c".repeat(40)}
       run={{
         ...run,
         status: "complete",
@@ -408,4 +417,89 @@ it("keeps interaction coverage separate and preserves PR-only states without a f
   ).toBeTruthy()
   expect(screen.getByText("PR: Dialog extends beyond viewport")).toBeTruthy()
   expect(screen.queryByRole("region", { name: "Visual comparison" })).toBeNull()
+
+  fetch.mockResolvedValue(
+    Object.assign(new Response(), {
+      blob: async () => new Blob(["pr-pixels"], { type: "image/png" }),
+    })
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  await waitFor(() =>
+    expect(useReviewPage.getState().chatDraft?.images).toEqual([
+      {
+        kind: "image",
+        mimeType: "image/png",
+        base64: btoa("pr-pixels"),
+        fileName: `design-qa-${run.id}-dialog-pr.png`,
+      },
+    ])
+  )
+  const { chatDraft, railOpen, railTab } = useReviewPage.getState()
+  expect(chatDraft!.text).toContain(run.id)
+  expect(chatDraft!.text).toContain(`PR commit: ${run.head_sha}`)
+  expect(chatDraft!.text).toContain("Stale capture:")
+  expect(chatDraft!.text).toContain("Base screenshot: not captured.")
+  expect(chatDraft!.text).toContain("Control missing on base")
+  expect(chatDraft!.text).toContain("click #create\n2. type #name")
+  expect(chatDraft!.text).toContain("PR: Dialog extends beyond viewport")
+  expect(railOpen).toBe(true)
+  expect(railTab).toBe("chat")
+
+  fireEvent.click(screen.getByRole("button", { name: /^Projects · complete/ }))
+  fetch.mockImplementation(async (input) =>
+    Object.assign(new Response(), {
+      blob: async () =>
+        new Blob(
+          [String(input).endsWith("base.png") ? "base-pixels" : "pr-pixels"],
+          { type: "image/png" }
+        ),
+    })
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  await waitFor(() =>
+    expect(
+      useReviewPage
+        .getState()
+        .chatDraft?.images.map(({ base64 }) => atob(base64))
+    ).toEqual(["base-pixels", "pr-pixels"])
+  )
+  const pairedDraft = useReviewPage.getState().chatDraft
+
+  // An expired protected image must not replace a draft with a partial pair.
+  fetch.mockImplementation(async (input) =>
+    String(input).endsWith("state.png")
+      ? new Response(null, { status: 403 })
+      : new Response(null, { status: 404 })
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Ask about this change",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
+  )
+  expect(useReviewPage.getState().chatDraft).toBe(pairedDraft)
+
+  // Navigating away during an attachment fetch cannot inject it into another PR.
+  const finish: Array<(response: Response) => void> = []
+  fetch.mockImplementation(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish.push(resolve)
+      })
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  unmount()
+  await act(async () => {
+    for (const resolve of finish)
+      resolve(
+        Object.assign(new Response(), {
+          blob: async () => new Blob(["late-pixels"], { type: "image/png" }),
+        })
+      )
+  })
+  expect(useReviewPage.getState().chatDraft).toBe(pairedDraft)
 })

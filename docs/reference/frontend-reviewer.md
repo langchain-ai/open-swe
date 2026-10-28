@@ -28,6 +28,8 @@ Expand **Ignore noisy areas** to draw up to twenty local exclusion rectangles, o
 
 The route list shows recorded change percentages, independent of viewer adjustments. **Changes and incomplete** hides completed paired captures with recorded zero differences, while retaining blocked, failed, missing, and fully excluded comparisons.
 
+Select a capture and choose **Ask about this change** to prepare a message in the PR's **Chat**. It attaches the available original screenshots with their base/PR labels, the selected checkpoint's replay steps, capture blockers, layout warnings, and revision details. Review or edit the question and remove images before sending. Viewer overlays, local ignore regions, and crops are not attached. A missing side stays explicit, and an image-loading failure leaves the existing draft intact. Changing captures replaces an untouched suggested draft and its screenshots while preserving your own uploads.
+
 ## Interaction coverage
 
 Agent-created reviews can include short interaction journeys selected from the PR diff and affected components. The capture tool accepts at most three journeys and five saved states across the run. It replays identical steps against base and PR in fresh contexts, in addition to the static route screenshots. No additional browser dependencies are required.

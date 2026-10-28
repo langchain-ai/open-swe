@@ -206,7 +206,8 @@ export interface MaterializedImages {
  * silently, because the queued run these images belong to may be about to go.
  */
 export async function materializeImages(
-  images: ReadonlyArray<AnyImageChunk>
+  images: ReadonlyArray<AnyImageChunk>,
+  signal?: AbortSignal
 ): Promise<MaterializedImages> {
   const settled = await Promise.all(
     images.map(async (image): Promise<ImageChunk | null> => {
@@ -214,6 +215,7 @@ export async function materializeImages(
       try {
         const response = await fetch(image.url, {
           credentials: image.credentials === "session" ? "include" : "omit",
+          signal,
         })
         if (!response.ok) return null
         const blob = await response.blob()

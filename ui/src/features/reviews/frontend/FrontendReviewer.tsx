@@ -24,6 +24,7 @@ import {
   type FrontendReviewInput,
 } from "./api"
 import { EvidenceViewer } from "./EvidenceViewer"
+import { AskAboutChange } from "./AskAboutChange"
 
 export function FrontendReviewer({
   pr,
@@ -569,9 +570,16 @@ export function FrontendReportView({
       )}
       {scenario && (
         <section aria-label={scenario.title} className="min-w-0">
-          <div className="mb-space-3 flex items-baseline gap-space-2">
+          <div className="mb-space-3 flex flex-wrap items-center gap-space-2">
             <h3 className="text-sm font-medium">{scenario.title}</h3>
             <span className="text-xs text-secondary">{scenario.path}</span>
+            <span className="flex-1" />
+            <AskAboutChange
+              key={`${run.id}:${scenario.id}`}
+              run={run}
+              scenario={scenario}
+              currentHeadSha={currentHeadSha}
+            />
           </div>
           {scenario.interaction && (
             <div className="mb-space-3 flex flex-col gap-space-2 text-xs text-secondary">
