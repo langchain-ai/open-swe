@@ -86,6 +86,11 @@ class TurnTrace:
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
 
+    def record_model(self, model_id: str) -> None:
+        """Tag the turn with its most recently attempted model, without relabeling child calls."""
+        if self.root is not None:
+            self.root.metadata["model"] = model_id
+
     @staticmethod
     def current_headers() -> dict[str, str]:
         """Distributed-tracing headers for the running call's span, so a backend hook nests under it.
@@ -102,7 +107,12 @@ class TurnTrace:
                 if not isinstance(tracer, LangChainTracer):
                     continue
                 span = tracer.run_map.get(str(callbacks.parent_run_id))
-                if span is None or span.extra.get("__disabled") or not span.trace_id:
+                if (
+                    span is None
+                    or span.end_time is not None
+                    or span.extra.get("__disabled")
+                    or not span.trace_id
+                ):
                     return {}
                 headers = span.to_headers()
                 headers["baggage"] = ",".join(

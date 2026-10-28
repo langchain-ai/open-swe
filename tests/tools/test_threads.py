@@ -629,7 +629,11 @@ async def test_allowed_slack_bot_inspects_only_public_threads(
         assert result["transcript"]["messages"][0]["text"] == "Fix the race"
         assert result["available_actions"] == []
     else:
-        assert result == {"success": False, "error": "thread not found", "status_code": 404}
+        assert result == {
+            "success": False,
+            "error": "this private thread can only be reached from its owner's private conversation",
+            "status_code": 403,
+        }
         client.threads.get_state.assert_not_awaited()
 
 
