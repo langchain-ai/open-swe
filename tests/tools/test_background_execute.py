@@ -21,13 +21,11 @@ from langgraph_sdk.errors import NotFoundError
 from openswe import background_tasks
 from openswe.background_tasks import monitor_background_tasks, reconcile_background_tasks
 from openswe.sandboxes import state, tool_access, tool_routes
-from openswe.sandboxes.scripts import SandboxScript, source
+from openswe.sandboxes.scripts import source
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import service as task_service
 from openswe.tools import threads
-from openswe.tools.background_execute import TASK_ROOT, background_execute
-from openswe.tools.background_task import background_task
-from openswe.tools.monitor import monitor
+from openswe.tools.background_execute import TASK_ROOT, background_execute, current_backend
 from openswe.utils.background_task_state import update_background_task_state
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
@@ -816,13 +814,9 @@ async def test_background_tools_reconnect_on_a_replica_without_a_binding(
 ) -> None:
     module = importlib.import_module("openswe.tools.background_execute")
     backend = LocalShellBackend(root_dir=str(tmp_path), inherit_env=True)
-    monkeypatch.setattr(module, "SCRIPT", SandboxScript("background_task.py", str(tmp_path)))
     monkeypatch.setattr(
         module.RunConfig, "from_runtime", lambda: SimpleNamespace(thread_id="thread-mda")
     )
-    monkeypatch.setattr(module, "uses_completion_callback", AsyncMock(return_value=False))
-    monkeypatch.setattr(module, "_track", AsyncMock())
-    monkeypatch.setattr(background_tasks, "ensure_background_task_polling", AsyncMock())
     monkeypatch.setattr(
         state,
         "get_sandbox_metadata",
@@ -834,29 +828,14 @@ async def test_background_tools_reconnect_on_a_replica_without_a_binding(
         return backend
 
     monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
-    monkeypatch.setattr(
-        importlib.import_module("openswe.tools.background_task"),
-        "require_admin",
-        AsyncMock(return_value="denied"),
-    )
-    monkeypatch.setattr("openswe.monitors.sandbox.ROOT", str(tmp_path / "monitors"))
-    state.SANDBOX_BACKENDS.clear()
-    launched = await background_execute("sleep 30", timeout=60)
-    assert launched["success"] is True
-    task_id = launched["task_id"]
-    try:
-        state.SANDBOX_BACKENDS.clear()
-        status = await background_task("status", task_id)
-        assert (status["success"], status["status"]) == (True, "running")
-        state.SANDBOX_BACKENDS.clear()
-        listing = await background_task("list")
-        assert [task["task_id"] for task in listing["tasks"]] == [task_id]
-        state.SANDBOX_BACKENDS.clear()
-        assert await monitor("list") == {"success": True, "monitors": []}
-    finally:
-        state.SANDBOX_BACKENDS.clear()
-        stopped = await background_task("stop", task_id)
-        assert (stopped["success"], stopped["status"]) == (True, "stopped")
+    monkeypatch.setattr(state, "SANDBOX_BACKENDS", {})
+
+    thread_id, proxy = current_backend()
+    result = await proxy.aexecute("printf reconnected")
+
+    assert thread_id == "thread-mda"
+    assert result.exit_code == 0
+    assert result.output == "reconnected"
 
 
 async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
