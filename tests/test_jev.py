@@ -208,7 +208,13 @@ async def test_rejected_direct_credential_retries_gateway_exactly_once(
     assert requests[1].headers["Authorization"] == "Bearer gateway-key"
     assert json.loads(requests[1].read())["model"] == "typesafe/jev-1.13.0"
     assert decision.outcome == ("accepted" if status == 200 else "classifier_failure")
-    assert decision.reason == ("confident_choice" if status == 200 else "classifier_auth_failure")
+    assert decision.reason == (
+        "confident_choice"
+        if status == 200
+        else "classifier_auth_failure"
+        if status == 403
+        else "classifier_error"
+    )
 
 
 @pytest.mark.parametrize("failed_question", [None, "runtime_model", "runtime_effort"])

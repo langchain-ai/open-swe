@@ -58,9 +58,9 @@ async def select_jev_choices(
     if not typesafe_key and not gateway_key:
         logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
         return results
-    for decision in tracked.values():
-        decision.reason = "classifier_error"
     for attempt in range(2):
+        for decision in tracked.values():
+            decision.reason = "classifier_error"
         use_gateway = not typesafe_key or attempt == 1
         try:
             async with (
