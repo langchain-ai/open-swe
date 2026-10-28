@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid7
 
 import pytest
 
@@ -9,6 +10,7 @@ from openswe.github import app as github_app
 from openswe.github.ci import RequiredCheck
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task
@@ -123,10 +125,23 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
-async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("card_state", ["none", "ready", "draft", "other_thread"])
+async def test_green_webhook_stops_the_watch_without_waking_for_draft_card(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, card_state: str
 ) -> None:
     await _start_watch()
+    approval = (
+        HumanReviewRequest(
+            pull_request_id=uuid7(),
+            head_sha="head-1",
+            kind="expedited",
+            thread_id="other-thread" if card_state == "other_thread" else "thread-1",
+            awaiting_ready=card_state in {"draft", "other_thread"},
+        )
+        if card_state != "none"
+        else None
+    )
+    monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=approval))
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
     )
@@ -167,9 +182,13 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
         "matched": 1,
         "dispatched": 0,
     }
-    dispatch.assert_awaited_once()
-    assert dispatch.await_args is not None
-    assert "checks are green" in dispatch.await_args.args[1]
+    if card_state == "draft":
+        dispatch.assert_not_awaited()
+    else:
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args is not None
+        expected = "merge_expedited_pr" if card_state == "ready" else "checks are green"
+        assert expected in dispatch.await_args.args[1]
     notify.assert_not_awaited()
     assert await baby_sit.WATCHES.list_active() == []
     assert await baby_sit.WATCHES.get("acme/repo#7") is None

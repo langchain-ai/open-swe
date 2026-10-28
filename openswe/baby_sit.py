@@ -358,7 +358,7 @@ async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
     An expedited review's thread only ever carries its card; returning ``False``
     hands terminal outcomes to the agent instead.
     """
-    if await _has_expedited_card(watch):
+    if await _review_card(watch) is not None:
         logger.info(
             "Suppressed baby-sit notice for an expedited review", extra={"watch_key": watch.key}
         )
@@ -418,20 +418,25 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
     return "stopped"
 
 
-async def _has_expedited_card(watch: BabySitWatch) -> bool:
+async def _review_card(watch: BabySitWatch) -> HumanReviewRequest | None:
     if not postgres.configured():
-        return False
+        return None
     try:
         approval = await HumanReviewRequest.active_for(watch.owner, watch.repo, watch.pr_number)
     except Exception:
         logger.warning("Expedited review lookup failed for %s", watch.key, exc_info=True)
-        return False
-    return approval is not None and approval.thread_id in {"", watch.thread_id}
+        return None
+    return (
+        approval if approval is not None and approval.thread_id in {"", watch.thread_id} else None
+    )
 
 
 async def _finish_ready(watch: BabySitWatch) -> str:
     """Hand a green PR back to its agent thread, which decides whether to merge or report."""
-    expedited = await _has_expedited_card(watch)
+    approval = await _review_card(watch)
+    if approval is not None and approval.awaiting_ready:
+        await stop_watch(watch.key)
+        return "stopped"
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
@@ -440,7 +445,7 @@ async def _finish_ready(watch: BabySitWatch) -> str:
                 "runs/baby-sit-ready",
                 pr_url=watch.pr_url,
                 head_sha=watch.head_sha,
-                expedited=expedited,
+                expedited=approval is not None,
             ),
             configurable,
             source=str(configurable.get("source") or "github"),
@@ -617,7 +622,7 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures, expedited=await _has_expedited_card(watch)),
+            watch.failure_prompt(failures, expedited=await _review_card(watch) is not None),
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,
