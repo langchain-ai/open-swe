@@ -488,25 +488,18 @@ async def _new_branch_base(
         if merge_base.ok and merge_base.output:
             return _first_line(merge_base.output)
 
-    branches = await _run_git(
-        backend, root, "for-each-ref --format='%(refname)' refs/remotes/origin/"
+    git = _git_command(root, "")
+    candidates = await _run_git(
+        backend,
+        root,
+        "for-each-ref --format='%(refname)' refs/remotes/origin/ | "
+        "while IFS= read -r branch; do "
+        '[ "$branch" = refs/remotes/origin/HEAD ] && continue; '
+        f'base=$({git}merge-base {shlex.quote(head)} "$branch") || continue; '
+        f'{git}show -s --format="%ct %H" "$base" || continue; '
+        "done | sort -s -k1,1nr | awk 'NR == 1 {print $2}'",
     )
-    newest_timestamp = -1
-    base_sha = ""
-    for branch in branches.output.splitlines() if branches.ok else []:
-        if branch == "refs/remotes/origin/HEAD":
-            continue
-        merge_base = await _run_git(
-            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(branch)}"
-        )
-        candidate = _first_line(merge_base.output) if merge_base.ok else ""
-        if not candidate:
-            continue
-        timestamp = await _run_git(backend, root, f"show -s --format=%ct {shlex.quote(candidate)}")
-        if timestamp.ok and timestamp.output.isdigit() and int(timestamp.output) > newest_timestamp:
-            newest_timestamp = int(timestamp.output)
-            base_sha = candidate
-    return base_sha
+    return _first_line(candidates.output) if candidates.ok else ""
 
 
 async def _workflow_change_for_push(
