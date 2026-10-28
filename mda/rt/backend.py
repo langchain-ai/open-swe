@@ -43,6 +43,7 @@ from pydantic import (
 from runtime_api.catalog import Catalog, OperationSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
+from runtime_api.tool_search import LISTED, OperationNames
 from runtime_api.workers import ADOPT, Adopt
 
 from rt.outbox import Outbox
@@ -270,6 +271,18 @@ class Run:
     def awaiting_adoption(self) -> bool:
         """A launched worker that has not yet traded its grant for a run token of its own."""
         return self._token is None and self._worker_grant is not None
+
+    async def read_operations(self, run_id: str | None) -> None:
+        """Read the specs of the operations its catalog names, once: its context names them only.
+
+        A worker that has yet to adopt reads none; its own catalog comes with its run token.
+        """
+        planned = self.planned
+        if not planned.awaits_operations or self._token is None:
+            return
+        names = OperationNames(run_id=run_id, names=planned.operation_names)
+        listed = await call(self.backend, LISTED, names)
+        self._planned = planned.model_copy(update={"operations": listed.operations})
 
     @property
     def planned(self) -> Catalog:

@@ -105,10 +105,19 @@ class RunToolsets:
 
     def get(self, run: Run | None = None) -> RunTools:
         run = run if run is not None else self._backend.run
+        if run.catalog.awaits_operations:
+            raise RuntimeError("The run has yet to read its operations")
         held = self._runs.get(run)
         if not held or held[0].catalog is not run.catalog:
             held[:] = [RunTools(run.catalog, self._backend, self._files)]
         return held[0]
+
+    async def ready(self) -> RunTools:
+        """The run's tools, once it has read its operations: a run picked up from its
+        checkpoint in another process reads them here, past the hook that reads them."""
+        run = self._backend.run
+        await run.read_operations(run_id())
+        return self.get(run)
 
 
 class FoundOperations:
@@ -167,7 +176,7 @@ class RunToolsMiddleware(AgentMiddleware):
         self._task_tools = RunLocal[dict[tuple[int, str], BaseTool]](dict)
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = self._toolsets.get()
+        tools = await self._toolsets.ready()
         if self._subagent is None:
             hidden = tools.hidden
             own = tools.offered
@@ -206,7 +215,7 @@ class RunToolsMiddleware(AgentMiddleware):
         self, request: ToolCallRequest, handler: ToolHandler
     ) -> ToolMessage | Command:
         if request.tool is None:
-            tools = self._toolsets.get()
+            tools = await self._toolsets.ready()
             name = request.tool_call["name"]
             tool = tools.by_name.get(name)
             # Only a name the backend knows: any other gets the tool node's own answer
@@ -233,7 +242,7 @@ class RunSubagentMiddleware(AgentMiddleware):
         self._name = name
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = self._toolsets.get()
+        tools = await self._toolsets.ready()
         spec = tools.subagents.get(self._name)
         if spec is not None and request.system_message is not None:
             text = request.system_message.text.replace(
@@ -301,6 +310,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     @property
     def _ptc(self) -> list[str | BaseTool]:
         try:
+            # Read only once a hook made sure the run has its operations.
             tools = self._toolsets.get()
         except BackendCallError, RuntimeError:
             # Outside a run, such as at build: only the graph's own.
@@ -311,11 +321,11 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     def _ptc(self, _ptc: object) -> None:
         """The interpreter sets its tools once; these are each run's."""
 
-    def _runs_code(self) -> bool:
-        return self._active(self._toolsets.get())
+    async def _runs_code(self) -> bool:
+        return self._active(await self._toolsets.ready())
 
     async def abefore_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
-        if not self._runs_code():
+        if not await self._runs_code():
             return None
         update = self._slot_update_for_runtime()
         prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
@@ -324,13 +334,13 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         return {**update, **(restored or {})} or None
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        if not self._runs_code():
+        if not await self._runs_code():
             tools = [tool for tool in request.tools if getattr(tool, "name", None) != _EVAL_TOOL]
             return await handler(request.override(tools=tools))
         return await super().awrap_model_call(request, handler)
 
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
-        if not self._runs_code():
+        if not await self._runs_code():
             return None
         return await super().aafter_agent(state, runtime)
 

@@ -1,8 +1,8 @@
 """Keep the operations of the runs MDA plays.
 
-A run's catalog lists only the operations the model is offered as tools; the run
-finds the rest through the backend. The backend keeps every operation a run
-started with here, once per distinct set, and the run's token names its digest.
+A run's context names its operations and carries none of their specs; the run
+reads them from the backend. The backend keeps every operation a run started with
+here, once per distinct set, and the run's token names its digest.
 """
 
 from alembic import op
@@ -23,7 +23,8 @@ def upgrade() -> None:
             created_by uuid REFERENCES users(id) ON DELETE SET NULL,
             updated_by uuid REFERENCES users(id) ON DELETE SET NULL,
             digest text NOT NULL,
-            operations jsonb NOT NULL
+            operations jsonb NOT NULL,
+            excluded jsonb NOT NULL
         )
     """)
     op.execute("CREATE UNIQUE INDEX run_operations_digest ON run_operations (digest)")
@@ -32,6 +33,10 @@ def upgrade() -> None:
         "COMMENT ON TABLE run_operations IS 'Every operation an MDA run started with, "
         "without its grants, kept once per distinct set; updated_at is the last run that "
         "started with it.'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN run_operations.excluded IS 'Names of the operations the graph "
+        "keeps from the model: read by a run that lists them, never found by search.'"
     )
     op.execute(
         "COMMENT ON COLUMN run_operations.digest IS 'SHA-256 of the operations as canonical "

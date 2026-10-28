@@ -1,10 +1,10 @@
-"""The run's operations its catalog leaves out, which the backend finds for it.
+"""The run's operations, which the backend keeps and reads to it.
 
-A run's catalog lists only the operations the model is offered as tools. The rest,
-such as every connected integration's, stay on the backend: the run's
-``search_tools`` finds them by what they do (``SEARCH``), and the run calls one by
-the name a search gave it, from code mode or directly, once the backend has said
-what it is (``FIND``).
+A run's context names the operations its catalog lists, and the run reads their
+specs as it starts (``LISTED``). The rest, such as every connected integration's,
+stay on the backend: the run's ``search_tools`` finds them by what they do
+(``SEARCH``), and the run calls one by the name a search gave it, from code mode or
+directly, once the backend has said what it is (``FIND``).
 """
 
 from pydantic import BaseModel, JsonValue
@@ -38,12 +38,28 @@ class OperationLookup(RunRequest):
     name: str
 
 
+class OperationNames(RunRequest):
+    names: list[str]
+
+
+class ListedOperations(BaseModel):
+    # Each with the run's grant of it.
+    operations: list[OperationSpec] = []
+
+
 class FoundOperation(BaseModel):
     # With the run's grant of it; None when the run has no operation by that name.
     operation: OperationSpec | None = None
 
 
-# Both only read, so they are safe to send again.
+# Each only reads, so it is safe to send again.
+LISTED = Endpoint(
+    "listed_operations",
+    OperationNames,
+    ListedOperations,
+    seconds=QUICK_CALL_SECONDS,
+    delivery="idempotent",
+)
 SEARCH = Endpoint(
     "search_tools", ToolSearch, ToolMatches, seconds=QUICK_CALL_SECONDS, delivery="idempotent"
 )

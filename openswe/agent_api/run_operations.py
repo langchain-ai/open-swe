@@ -1,23 +1,24 @@
 """Every operation an MDA run started with, kept by content for the run tokens that name it.
 
-A run's catalog leaves its integrations out: hundreds of them would put a megabyte
-in each run's context, which the Agent Server copies into every checkpoint and every
-read of the run. The backend keeps every operation here as it starts the run, once
-per distinct set, and signs their digest into the run's token
-(``RunSettings.operations``); the run's ``search_tools`` and code mode reach them
-through ``runtime_api.tool_search``.
+A run's context names its operations and carries none of their specs: the Agent
+Server copies the context into every checkpoint and every read of the run, and the
+specs of hundreds of integrations come to a megabyte. The backend keeps every
+operation here as it starts the run, once per distinct set, and signs their digest
+into the run's token (``RunSettings.operations``). The run reads the specs of those
+its catalog names, and ``search_tools`` and code mode reach the rest, through
+``runtime_api.tool_search``.
 """
 
 import hashlib
 import math
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from typing import Final, Self
 from uuid import UUID, uuid7
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import SEARCH_TOOLS, OperationSpec
 from sqlalchemy import ForeignKey, delete, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -44,6 +45,8 @@ class KeptOperations(Base):
 
     digest: Mapped[str]
     operations: Mapped[list[JsonValue]] = mapped_column(JSONB)
+    # Those the graph keeps from the model: listed for a run that names them, never found.
+    excluded: Mapped[list[str]] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
@@ -53,6 +56,13 @@ class KeptOperations(Base):
     updated_by: Mapped[UUID | None] = mapped_column(
         ForeignKey(User.id, ondelete="SET NULL"), default=None
     )
+
+
+class _KeptSet(BaseModel):
+    """What a digest is taken over."""
+
+    operations: list[OperationSpec]
+    excluded: list[str]
 
 
 class OperationsNotKeptError(LookupError):
@@ -99,16 +109,25 @@ def bm25(
 
 
 class RunOperations:
-    """Every operation a run may call, without the run's grants."""
+    """Every operation a run may call, without the run's grants, and those the graph excludes."""
 
-    def __init__(self, operations: Sequence[OperationSpec]) -> None:
+    def __init__(self, operations: Sequence[OperationSpec], excluded: Iterable[str] = ()) -> None:
         self.operations = sorted(
             (operation.model_copy(update={"grant": None}) for operation in operations),
             key=lambda operation: operation.name,
         )
+        self.excluded = sorted(set(excluded))
 
     def _canonical(self) -> bytes:
-        return _operations.dump_json(self.operations)
+        return (
+            _KeptSet(operations=self.operations, excluded=self.excluded).model_dump_json().encode()
+        )
+
+    @property
+    def _findable(self) -> list[OperationSpec]:
+        # What the graph excludes is never found: the model calls it neither from code nor by search.
+        excluded = set(self.excluded)
+        return [operation for operation in self.operations if operation.name not in excluded]
 
     @property
     def digest(self) -> str:
@@ -138,6 +157,7 @@ class RunOperations:
                         id=uuid7(),
                         digest=digest,
                         operations=_operations.dump_python(self.operations, mode="json"),
+                        excluded=self.excluded,
                     )
                     .on_conflict_do_nothing(index_elements=[cls.digest])
                 )
@@ -146,16 +166,25 @@ class RunOperations:
     @classmethod
     async def kept(cls, digest: str) -> Self:
         async with postgres.session() as session:
-            operations = await session.scalar(
-                select(KeptOperations.operations).where(KeptOperations.digest == digest)
-            )
-        if operations is None:
+            row = (
+                await session.execute(
+                    select(KeptOperations.operations, KeptOperations.excluded).where(
+                        KeptOperations.digest == digest
+                    )
+                )
+            ).one_or_none()
+        if row is None:
             raise OperationsNotKeptError(digest)
-        return cls(_operations.validate_python(operations))
+        return cls(_operations.validate_python(row.operations), row.excluded)
+
+    def named(self, names: Iterable[str]) -> list[OperationSpec]:
+        """The operations by ``names``, as a run's catalog names them."""
+        wanted = set(names)
+        return [operation for operation in self.operations if operation.name in wanted]
 
     def search(self, query: str, limit: int) -> list[OperationSpec]:
         """The operations that best match ``query``, ranked by BM25 over name, description and parameters."""
-        candidates = [operation for operation in self.operations if operation.name != SEARCH_TOOLS]
+        candidates = [operation for operation in self._findable if operation.name != SEARCH_TOOLS]
         scores = bm25(_tokens(query), [_document(operation) for operation in candidates])
         best = sorted(
             (pair for pair in zip(candidates, scores, strict=True) if pair[1] > 0),
@@ -168,7 +197,7 @@ class RunOperations:
         return next(
             (
                 operation
-                for operation in self.operations
+                for operation in self._findable
                 if name in {operation.name, operation.code_name}
             ),
             None,

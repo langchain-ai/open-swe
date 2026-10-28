@@ -51,7 +51,7 @@ from runtime_api.catalog import (
     SubagentSpec,
 )
 from runtime_api.reports import Reports
-from runtime_api.tool_search import FoundOperation
+from runtime_api.tool_search import FoundOperation, ListedOperations
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
@@ -64,13 +64,18 @@ def _thread(thread_id: str) -> ManagedRunConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
+# Each run's catalog by its token, whose operations the fake backend lists to it.
+_CATALOGS: dict[str, Catalog] = {}
+
+
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
-    """A run as dispatch starts it."""
+    """A run as dispatch starts it: its catalog's operations by name alone."""
+    _CATALOGS[token] = catalog
     return {
         "graph": graph,
         "__run_token": token,
         "invocation_id": f"invocation-{token}",
-        "__catalog": catalog.model_dump(mode="json"),
+        "__catalog": catalog.carried().model_dump(mode="json"),
     }
 
 
@@ -143,6 +148,14 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
+        if hook == "listed_operations":
+            catalog = _CATALOGS[headers["Authorization"].removeprefix("Bearer ")]
+            names = json["names"]
+            assert isinstance(names, list)
+            listed = ListedOperations(
+                operations=[op for op in catalog.operations if op.name in names]
+            )
+            return httpx2.Response(200, request=request, json=listed.model_dump(mode="json"))
         if hook == "find_operation":
             calls[-1] = (hook, headers["Authorization"], str(json["name"]))
             found = FoundOperation(
@@ -405,7 +418,9 @@ async def test_code_mode_calls_operations_its_catalog_leaves_out(
     assert missing.status == "error" and "noTool" in missing.text
     assert '<error type="TypeError">notOne is not one of this run' in evaluated.text
     called = [(hook, detail) for hook, _, detail in backend_calls if detail]
-    # Found once for the run, then called with the grant the backend gave.
+    # Its context names its own operations, whose specs it reads once.
+    assert [hook for hook, _, _ in backend_calls].count("listed_operations") == 1
+    # The rest found once, each called with the grant the backend gave.
     assert called == [
         ("find_operation", "withheldLookup"),
         ("operation", "withheld_lookup:found-grant"),

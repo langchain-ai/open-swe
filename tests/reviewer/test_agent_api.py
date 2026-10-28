@@ -749,10 +749,17 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         isinstance(op, dict) and run.granted(str(op["name"]), str(op["grant"])) for op in operations
     )
 
-    # The run's search and code mode reach what its catalog leaves out, by its token.
-    from runtime_api.tool_search import FoundOperation, ToolMatches
+    # The run's context names its operations; it reads their specs and grants by its token.
+    from runtime_api.tool_search import FoundOperation, ListedOperations, ToolMatches
 
     started_run = run.model_copy(update={"settings": started.settings})
+    names = [str(op["name"]) for op in operations if isinstance(op, dict)]
+    listed = ListedOperations.model_validate(
+        await graph.api(started_run, "listed_operations", {"names": names})
+    )
+    assert sorted(op.name for op in listed.operations) == sorted(names)
+    assert all(run.granted(op.name, op.grant) for op in listed.operations)
+    # The run's search and code mode reach what its catalog leaves out, by its token.
     found = ToolMatches.model_validate(
         await graph.api(started_run, "search_tools", {"query": "mcp search", "limit": 1})
     )

@@ -9,8 +9,9 @@ import (``runtime_api``):
   the rules of its middleware around each model call. It is worked out once as the
   run starts and rides in the run's context (``RemoteGraph.start_run``); the
   settings later calls read are signed into the run's token (``RunSettings``). It
-  lists every operation but the run's integrations: every operation is kept by
-  digest (``run_operations``), which ``search_tools`` and ``find_operation`` read
+  lists every operation but the run's integrations, and the context names them
+  only: every operation is kept by digest (``run_operations``), which
+  ``listed_operations``, ``search_tools`` and ``find_operation`` read
 - ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
   prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
   plans the run again
@@ -161,9 +162,12 @@ from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.skills import SKILLS, RunSkills
 from runtime_api.tool_search import (
     FIND,
+    LISTED,
     SEARCH,
     FoundOperation,
+    ListedOperations,
     OperationLookup,
+    OperationNames,
     ToolMatch,
     ToolMatches,
     ToolSearch,
@@ -400,12 +404,8 @@ class RunSession:
         ]
 
     def operations(self) -> RunOperations:
-        """Every operation the run may call, which the backend keeps for ``search_tools``.
-
-        What the graph excludes stays out: code mode never calls it either.
-        """
-        excluded = self._excluded()
-        return RunOperations([spec for spec in self._specs() if spec.name not in excluded])
+        """Every operation the run may call, which the backend keeps for the run to read."""
+        return RunOperations(self._specs(), self._excluded())
 
     def catalog(self) -> Catalog:
         operations = self._operation_tools()
@@ -1000,6 +1000,16 @@ class TokenRun:
             raise OperationsNotKeptError("This run started before the backend kept its operations")
         return await RunOperations.kept(self.run.settings.operations)
 
+    async def listed_operations(self, request: OperationNames) -> ListedOperations:
+        """The specs of the operations the run's catalog names, with the run's grant of each."""
+        named = (await self._operations()).named(request.names)
+        return ListedOperations(
+            operations=[
+                operation.model_copy(update={"grant": self.run.grant(operation.name)})
+                for operation in named
+            ]
+        )
+
     async def search_tools(self, request: ToolSearch) -> ToolMatches:
         """The run's operations that best match what the model looks for."""
         found = (await self._operations()).search(request.query, request.limit)
@@ -1405,6 +1415,7 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
 RUN_CALLS: Final = Handlers[TokenRun]()
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
 RUN_CALLS.serve(SKILLS, TokenRun.skills)
+RUN_CALLS.serve(LISTED, TokenRun.listed_operations)
 RUN_CALLS.serve(SEARCH, TokenRun.search_tools)
 RUN_CALLS.serve(FIND, TokenRun.find_operation)
 RUN_CALLS.serve(INBOX, TokenRun.inbox)

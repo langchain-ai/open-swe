@@ -101,7 +101,10 @@ class StartedRun:
         context: RemoteRunContext = {
             "graph": self.graph,
             "__run_token": self.token,
-            "__catalog": _json_object.validate_python(self.catalog.model_dump(mode="json")),
+            # Its operations by name alone; the run reads their specs from the backend.
+            "__catalog": _json_object.validate_python(
+                self.catalog.carried().model_dump(mode="json")
+            ),
         }
         if self.invocation_id:
             context["invocation_id"] = self.invocation_id

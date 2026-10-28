@@ -180,6 +180,9 @@ class Catalog(BaseModel):
     # All but the run's integrations, which stay on the backend: found with
     # ``search_tools`` and called from code mode (``runtime_api.tool_search``).
     operations: list[OperationSpec] = []
+    # The same operations by name alone, as the run's context carries them (``carried``):
+    # the run reads their specs as it starts (``runtime_api.tool_search.LISTED``).
+    operation_names: list[str] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
@@ -212,3 +215,18 @@ class Catalog(BaseModel):
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
+
+    def carried(self) -> Catalog:
+        """This catalog as a run's context carries it: its operations by name alone.
+
+        The Agent Server copies the context into every checkpoint and every read of
+        the run, so the specs stay with the backend, which the run reads them from.
+        """
+        return self.model_copy(
+            update={"operations": [], "operation_names": [op.name for op in self.operations]}
+        )
+
+    @property
+    def awaits_operations(self) -> bool:
+        """Whether it names operations whose specs the run has yet to read."""
+        return bool(self.operation_names) and not self.operations
