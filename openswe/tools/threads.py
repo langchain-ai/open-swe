@@ -25,6 +25,7 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
+from openswe.slack.allowed_bots import authorized_slack_bot_run
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.records import lookup_slack_thread_id
@@ -90,6 +91,7 @@ _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
 _NO_ACTOR = "No verified triggering user is available"
+_NO_READER = f"Thread lookup was unavailable. {_NO_ACTOR}"
 _NO_WRITER = (
     f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
     "but cannot message, manage, or start them."
@@ -110,7 +112,7 @@ class _Actor:
 
     @property
     def admin(self) -> bool:
-        return is_admin(self.email, login=self.login)
+        return not self.automation and is_admin(self.email, login=self.login)
 
 
 def _config() -> dict[str, Any]:
@@ -144,18 +146,25 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
 
 
 async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
-    """Who reads threads: the triggering user, or else the automation whose run this is."""
+    """Who reads threads: the triggering user, else the automation or allowed bot running this."""
     if actor := await _actor(state):
         return actor
-    record = await schedules.authorized_schedule_run(RunConfig.parse(_config().get("configurable")))
-    if record is None:
-        return None
-    return _Actor(
-        login=f"system:schedule:{record['id']}",
-        email=None,
-        name=record.get("name") or "Automation",
-        automation=True,
-    )
+    cfg = RunConfig.parse(_config().get("configurable"))
+    if record := await schedules.authorized_schedule_run(cfg):
+        return _Actor(
+            login=f"system:schedule:{record['id']}",
+            email=None,
+            name=record.get("name") or "Automation",
+            automation=True,
+        )
+    if bot := await authorized_slack_bot_run(cfg):
+        return _Actor(
+            login=f"system:slack-bot:{bot.team_id}:{bot.bot_id}",
+            email=None,
+            name=bot.name,
+            automation=True,
+        )
+    return None
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
@@ -298,7 +307,7 @@ async def list_threads(
     """Implement the `list_threads` tool."""
     actor = await _reader(state)
     if actor is None:
-        return _failure(_NO_ACTOR)
+        return _failure(_NO_READER)
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
@@ -765,6 +774,8 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
+    if actor.automation:
+        return False
     if RunConfig.parse(_config().get("configurable")).mcp_caller:
         return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
@@ -888,7 +899,7 @@ async def get_thread(
     """Inspect a thread, including last_assistant_message (text tail, truncated, timestamp) or None."""
     actor = await _reader(state)
     if actor is None:
-        return _failure(_NO_ACTOR)
+        return _failure(_NO_READER)
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
