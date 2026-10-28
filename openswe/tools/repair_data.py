@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from sqlalchemy import MetaData, Table, and_, delete, insert, update
+from sqlalchemy import MetaData, Table, and_, delete, insert, text, update
 
 from openswe.config import ENV
 from openswe.database import postgres
@@ -24,6 +24,33 @@ def _require_confirmation(confirm: bool) -> None:
         raise ValueError("Data repair tools are only enabled in preview and staging.")
     if not confirm:
         raise ValueError("Review the exact repair with the requester, then pass confirm=true.")
+
+
+@expose_mcp(access="admin")
+@access(Policy(trusted="admin_surface", actor="admin"))
+async def execute_database_sql(query: str, confirm: bool = False) -> dict[str, object]:
+    """Execute an admin-confirmed SQL statement, including DDL and migration repairs."""
+    _require_confirmation(confirm)
+    if not query.strip():
+        raise ValueError("Query cannot be empty.")
+    if len(query) > 200_000:
+        raise ValueError("Query exceeds the 200,000-character limit.")
+    logger.warning(
+        "Admin SQL repair requested",
+        extra={"github_login": configurable().github_login},
+    )
+    async with postgres.engine().connect() as conn:
+        try:
+            async with conn.begin():
+                await conn.exec_driver_sql(f"SET LOCAL search_path TO {postgres.SCHEMA}, public")
+                await conn.exec_driver_sql("SET LOCAL statement_timeout = 60000")
+                await conn.exec_driver_sql("SET LOCAL lock_timeout = 3000")
+                result = await conn.execute(text(query))
+                row_count = result.rowcount
+                result.close()
+        finally:
+            await conn.invalidate()
+    return {"ok": True, "row_count": row_count}
 
 
 @expose_mcp(access="admin")
