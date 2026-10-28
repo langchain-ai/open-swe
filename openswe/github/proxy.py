@@ -12,7 +12,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from openswe.config import ENV
 from openswe.github.app import (
     PermissionKey,
     PermissionMap,
@@ -134,7 +133,7 @@ async def refresh_proxy_token(
     repositories: Sequence[str] | None = None,
 ) -> bool:
     """Re-configure a LangSmith sandbox proxy with a freshly minted token."""
-    if ENV.SANDBOX_TYPE.get() != "langsmith" or not thread_id:
+    if not thread_id:
         return False
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)

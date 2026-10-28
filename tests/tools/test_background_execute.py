@@ -774,34 +774,25 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
     assert bool(tracked) is not launch_fails
 
 
-@pytest.mark.parametrize("replaced", [False, True])
-async def test_reattach_reconciles_tracked_tasks_even_on_a_replacement_sandbox(
-    replaced: bool,
-) -> None:
+async def test_reattach_reconciles_tracked_tasks() -> None:
+    """A reconnect, to the box the thread kept or to the one MDA opened after, finds lost tasks."""
     import asyncio
 
     from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-    from openswe.sandboxes.providers.registry import SandboxGoneError
 
     SANDBOX_BACKENDS.clear()
     sandbox = MagicMock()
-    sandbox.id = "sandbox-replacement" if replaced else "sandbox-old"
+    sandbox.id = "sandbox-mda"
     reconcile = AsyncMock()
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             AsyncMock(
-                return_value={"sandbox_id": "sandbox-old", "running_background_tasks": ["cmd-1"]}
+                return_value={"sandbox_id": "sandbox-mda", "running_background_tasks": ["cmd-1"]}
             ),
         ),
         patch(
             "openswe.sandboxes.lifecycle._connect_existing_sandbox",
-            AsyncMock(
-                side_effect=SandboxGoneError("gone") if replaced else None, return_value=sandbox
-            ),
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             AsyncMock(return_value=sandbox),
         ),
         patch("openswe.sandboxes.lifecycle.client.threads.update", AsyncMock()),

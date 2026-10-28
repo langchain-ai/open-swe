@@ -423,11 +423,6 @@ ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 
 # --- Sandboxes ---------------------------------------------------------------------------------
-ENV.var(
-    "SANDBOX_TYPE",
-    "Sandbox provider: langsmith, modal, daytona, runloop, e2b or local.",
-    default="langsmith",
-)
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_VCPUS", "vCPUs for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_MEM_BYTES", "Memory for new sandboxes.")
@@ -452,8 +447,8 @@ ENV.var(
 ENV.var(
     "OPENSWE_SCRIPT_ROOT",
     "Where a workspace's setup/update scripts and their logs live inside a sandbox. "
-    "The default assumes a sandbox where the agent is root; the local provider runs on a "
-    "developer's own machine, whose filesystem root is not writable.",
+    "The default assumes a sandbox where the agent is root; the E2E's stand-in sandboxes "
+    "run on a developer's own machine, whose filesystem root is not writable.",
     default="/open-swe/environment",
 )
 ENV.var(
@@ -471,21 +466,6 @@ ENV.var(
     "Deadline for capturing a builder sandbox as a workspace's snapshot.",
     aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
 )
-ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
-ENV.var(
-    "GIT_CONFIG_GLOBAL",
-    "Git's global config path; the local provider keeps it out of ~/.gitconfig.",
-)
-ENV.var("MODAL_APP_NAME", "Modal app name for the modal provider.", default="open-swe")
-ENV.var("DAYTONA_API_KEY", "Daytona API key.", secret=True)
-ENV.var(
-    "DAYTONA_SANDBOX_SNAPSHOT",
-    "Daytona snapshot new sandboxes boot from.",
-    default="daytonaio/sandbox:0.6.0",
-)
-ENV.var("E2B_API_KEY", "E2B API key.", secret=True)
-ENV.var("E2B_TEMPLATE", "E2B template new sandboxes boot from.")
-ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 
 # --- Debugging -------------------------------------------------------
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")

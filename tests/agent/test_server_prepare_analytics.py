@@ -7,7 +7,7 @@ lookup hit / null-name / failure / cache paths.
 
 import json
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langgraph.runtime import Runtime
@@ -47,6 +47,9 @@ class _FakeGitHubClient:
 
 
 class _ReadyProxy:
+    def follow(self, _sandbox_id: object) -> None:
+        pass
+
     async def ready(self) -> Any:
         return MagicMock()
 
@@ -104,6 +107,7 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(
         server, "get_or_create_sandbox_backend_proxy", lambda thread_id: _ReadyProxy()
     )
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
 
     async def fake_work_dir(backend: Any) -> str:
         return "/workspace"
