@@ -107,7 +107,7 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 
@@ -150,7 +150,6 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
             head_sha=cfg.head_sha,
         )
         try:

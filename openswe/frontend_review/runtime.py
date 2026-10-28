@@ -19,8 +19,8 @@ from .service import get_review, set_assessment_state
 
 ALLOWED_ENDPOINTS = frozenset(
     {
-        "catalog",
         "prepare",
+        "reports",
         "model_result",
         "tool_started",
         "tool_result",

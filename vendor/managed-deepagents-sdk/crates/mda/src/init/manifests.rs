@@ -5,7 +5,7 @@ use crate::project::Language;
 
 /// Build a minimal `package.json` for a TypeScript project named `name`.
 pub(super) fn package_json(name: &str) -> String {
-    let deps = dependencies::package_json_entries(4, &[]);
+    let deps = dependencies::package_json_entries(4);
     format!(
         r#"{{
   "name": "{name}",
@@ -26,7 +26,7 @@ pub(super) fn package_json(name: &str) -> String {
 
 /// Build a minimal `pyproject.toml` for a Python project named `name`.
 pub(super) fn pyproject_toml(name: &str) -> String {
-    let deps = dependencies::pyproject_entries(4, &[]);
+    let deps = dependencies::pyproject_entries(4);
     format!(
         r#"[project]
 name = "{name}"

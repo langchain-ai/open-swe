@@ -30,6 +30,7 @@ from rt.frontend_review import frontend_assessment_tool, frontend_inspect_tool, 
 from rt.models import build_model
 from rt.search_tools import search_tools_tool
 from rt.tools import operation_tool
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 _TASK_TOOL: Final = "task"
 _EVAL_TOOL: Final = "eval"
@@ -130,6 +131,8 @@ class RunToolsMiddleware(AgentMiddleware):
     serves; the agent itself otherwise.
     """
 
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, toolsets: RunToolsets, *, subagent: str | None = None) -> None:
         self._toolsets = toolsets
         self._subagent = subagent
@@ -185,6 +188,8 @@ class RunToolsMiddleware(AgentMiddleware):
 class RunSubagentMiddleware(AgentMiddleware):
     """Give subagent ``name`` the system prompt and model the run's catalog gives it."""
 
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
     def __init__(self, toolsets: RunToolsets, name: str) -> None:
         self._toolsets = toolsets
         self._name = name
@@ -208,6 +213,8 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     ``active`` says whether a run has code mode at all; one without it is offered no
     ``eval`` and pays nothing for the interpreter.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(
         self,
@@ -287,6 +294,8 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
 
 class RunModelCallLimit(ModelCallLimitMiddleware):
     """End a run at its catalog's limit on model calls, or at ``default`` for a catalog without one."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend, default: int) -> None:
         self._run_backend = backend

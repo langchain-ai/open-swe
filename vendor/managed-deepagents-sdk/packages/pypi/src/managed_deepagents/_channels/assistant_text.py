@@ -74,36 +74,32 @@ def _content_as_text(content: object) -> str:
 QUIET_REPLY = "[quiet]"
 #: Message field (``additional_kwargs`` key) deepagents uses for a task notification.
 NOTIFICATION_KEY = "deepagents_notification"
-
-
-#: State key holding the ID of the message that started the current channel run.
-RUN_START_KEY = "mda_run_start"
-
-
-def run_start_id(values: object) -> str | None:
-    """The current channel run's start message ID, from thread state values."""
-    start = values.get(RUN_START_KEY) if isinstance(values, Mapping) else None
-    return start if isinstance(start, str) else None
+#: Message field MDA uses the same way, for a notification of its own such as a
+#: browser handoff ending.
+MDA_NOTIFICATION_KEY = "mda_notification"
 
 
 def is_task_notification(message: object) -> bool:
-    """Whether a message is a deepagents task notification rather than the user's."""
+    """Whether a message is a deepagents or MDA notification rather than the user's."""
     extra = _field(message, "additional_kwargs")
-    return (isinstance(message, Mapping) and NOTIFICATION_KEY in message) or (
-        isinstance(extra, Mapping) and NOTIFICATION_KEY in extra
+    return any(
+        (isinstance(message, Mapping) and key in message)
+        or (isinstance(extra, Mapping) and key in extra)
+        for key in (NOTIFICATION_KEY, MDA_NOTIFICATION_KEY)
     )
 
 
-def extract_reply_text(run: Mapping[str, object] | object, *, start_id: str | None = None) -> str:
+def extract_reply_text(run: Mapping[str, object] | object, *, after_id: str | None = None) -> str:
     """Return what a run says to the channel: each of its answers, oldest first.
 
     A run answers more than once when deepagents gives it another turn for task
     news that arrived after its answer; ``[quiet]`` answers are left out. The
-    run starts at the message ``start_id``, or else at the last user message. With
-    a ``start_id`` and no answer since it, the reply is empty.
+    run starts after the message ``after_id`` (the last one before its input),
+    or else at the last user message. With an ``after_id`` and no answer since
+    it, the reply is empty.
     """
-    answers = _answers(run, start_id)
-    if start_id is None and len(answers) <= 1:
+    answers = _answers(run, after_id)
+    if _run_start(_messages(run), after_id) is None and len(answers) <= 1:
         return extract_assistant_text(run)
     # A known run start never falls back to an earlier run's answer.
     texts = (_message_text(answer) for answer in answers)
@@ -111,27 +107,33 @@ def extract_reply_text(run: Mapping[str, object] | object, *, start_id: str | No
 
 
 def extract_reply_content(
-    run: Mapping[str, object], *, start_id: str | None = None
+    run: Mapping[str, object], *, after_id: str | None = None
 ) -> MessageContent | None:
     """Content version of ``extract_reply_text``; several answers are joined as text."""
-    answers = _answers(run, start_id)
+    answers = _answers(run, after_id)
     if len(answers) > 1:
-        return extract_reply_text(run, start_id=start_id) or None
-    if start_id is None:
+        return extract_reply_text(run, after_id=after_id) or None
+    if _run_start(_messages(run), after_id) is None:
         return extract_assistant_content(run)
     if not answers or _message_text(answers[0]) == QUIET_REPLY:
         return None
     return _message_content(answers[0])
 
 
-def _answers(run: object, start_id: str | None) -> list[object]:
-    """The run's answers: assistant messages with content (text or media) and no tool calls."""
+def _messages(run: object) -> list[object]:
     messages = run.get("messages") if isinstance(run, Mapping) else None
-    if not isinstance(messages, list):
-        return []
+    return messages if isinstance(messages, list) else []
+
+
+def _answers(run: object, after_id: str | None) -> list[object]:
+    """The run's answers: assistant messages with content (text or media) and no tool calls."""
+    messages = _messages(run)
+    start = _run_start(messages, after_id)
+    if start is None:
+        start = _last_user_message(messages)
     return [
         message
-        for message in messages[_run_start(messages, start_id) :]
+        for message in messages[start:]
         if _is_ai_message(message)
         and not _field(message, "tool_calls")
         and (_message_text(message) or _has_media(message))
@@ -149,13 +151,20 @@ def _has_media(message: object) -> bool:
     )
 
 
-def _run_start(messages: list[object], start_id: str | None) -> int:
-    """Index of the run's first message; past the end when it can't be found."""
+def _run_start(messages: list[object], after_id: str | None) -> int | None:
+    """Index of the run's first message, just after ``after_id``; ``None`` when it isn't there."""
+    if after_id is None:
+        return None
     for index in range(len(messages) - 1, -1, -1):
-        message = messages[index]
-        if start_id is not None and _field(message, "id") == start_id:
-            return index
-        if start_id is None and _is_user_message(message):
+        if _field(messages[index], "id") == after_id:
+            return index + 1
+    return None
+
+
+def _last_user_message(messages: list[object]) -> int:
+    """Index of the last user message; past the end when there is none."""
+    for index in range(len(messages) - 1, -1, -1):
+        if _is_user_message(messages[index]):
             return index
     return len(messages)
 
@@ -171,14 +180,13 @@ def _field(message: object, name: str) -> object:
 
 
 __all__ = [
+    "MDA_NOTIFICATION_KEY",
     "NOTIFICATION_KEY",
     "QUIET_REPLY",
-    "RUN_START_KEY",
     "extract_assistant_text",
     "extract_reply_content",
     "extract_reply_text",
     "is_task_notification",
-    "run_start_id",
 ]
 
 

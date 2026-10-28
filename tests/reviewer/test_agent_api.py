@@ -123,9 +123,9 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         raise AssertionError("A call around a model call never plans the run")
 
     classify = AsyncMock(return_value="fast")
-    refresh = AsyncMock(return_value=False)
+    refresh = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
-    monkeypatch.setattr(graph_module, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
     run = RUN.model_copy(update={"assistant_id": "agent"})
@@ -149,8 +149,103 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     )
     # A thread in no task gets no task context.
     assert context == {"instructions": "", "message": None}
-    assert refreshed == {}
-    refresh.assert_awaited_once_with(run.thread_id)
+    assert refreshed == {"expires_at": None}
+    refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_is_recorded_once_however_often_it_arrives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch stops at the first report that fails, which its next delivery records,
+    and one delivered again after its answer was lost is not recorded twice."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK, STEP_LIMIT_REACHED
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    told = AsyncMock(side_effect=[RuntimeError("Slack is down"), None])
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "notify_step_limit", told)
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[
+            item(endpoint, RunRequest(run_id="run-1"), key=f"run-1:{endpoint.name}", trace={})
+            for endpoint in (STEP_LIMIT_REACHED, SETTLE_REVIEW_CHECK)
+        ]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    first = await deliver()
+    assert first.replies == []
+    assert first.refused == "RuntimeError: Slack is down"
+    # Nothing after a report that failed is tried, so none lands before it.
+    settled.assert_not_awaited()
+
+    second = await deliver()
+    lost_answer = await deliver()
+
+    assert second == lost_answer == ReportsTaken(replies=[{}, {}])
+    assert told.await_count == 2
+    settled.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_whose_reply_was_not_kept_holds_up_nothing_behind_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report is answered and its key given up, so a later delivery records it
+    rather than waiting out another delivery's claim."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.report_receipts import ReportReceipts
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    kept = ReportReceipts.record
+    monkeypatch.setattr(
+        ReportReceipts, "record", AsyncMock(side_effect=[RuntimeError("database went away")])
+    )
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[item(SETTLE_REVIEW_CHECK, RunRequest(run_id="run-1"), key="run-1:settle", trace={})]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    assert await deliver() == ReportsTaken(replies=[{}])
+    monkeypatch.setattr(ReportReceipts, "record", kept)
+    assert await deliver() == ReportsTaken(replies=[{}])
+    assert await deliver() == ReportsTaken(replies=[{}])
+
+    # Done again only by the delivery after the reply was lost, then never again.
+    assert settled.await_count == 2
 
 
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
@@ -526,8 +621,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
-    # A provider MDA declares no box for, so the catalog reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from unittest.mock import AsyncMock
+
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # A thread with no box of MDA's, so the catalog reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.runnables import RunnableConfig
@@ -588,7 +687,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
     graph = RemoteGraph("agent", build)
-    catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
+    run = RUN.granting()
+    started = await graph.start_run(run)
+    catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]
@@ -636,17 +737,11 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     from openswe.prompts import prompt
 
     assert catalog["search_tools_description"] == prompt("tools/search_tools")
-    # A run started without its catalog gets a token that carries what was decided for
-    # it here, and grants its operations under it, but lives no longer than the one it had.
-    token = catalog["run_token"]
-    assert isinstance(token, str)
-    resigned = verify_runtime_token(token)
-    assert resigned.thread_id == RUN.thread_id and resigned.grant_id is not None
-    assert resigned.expires_at == RUN.expires_at
-    assert resigned.settings.draft_prs is False
+    # What planning decided for the run rides in its settings, and each operation is
+    # granted to the run under its grant id.
+    assert started.settings.draft_prs is False
     assert all(
-        isinstance(op, dict) and resigned.granted(str(op["name"]), str(op["grant"]))
-        for op in operations
+        isinstance(op, dict) and run.granted(str(op["name"]), str(op["grant"])) for op in operations
     )
 
 
@@ -790,6 +885,7 @@ async def _call_status(
     monkeypatch: pytest.MonkeyPatch, token: str, endpoint: str
 ) -> tuple[int, list[tuple[str, str]]]:
     """Call ``endpoint`` with ``token`` and report the status and what served it, as whom."""
+    from runtime_api.catalog import Catalog
     from runtime_api.endpoint import Handlers, UnknownEndpointError
     from runtime_api.workers import ADOPT, Adopt, Adopted
 
@@ -798,14 +894,14 @@ async def _call_status(
     served: list[tuple[str, str]] = []
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
-        if called not in {"catalog", "prepare", "before_model", "after_agent"}:
+        if called not in {"prepare", "before_model", "after_agent"}:
             raise UnknownEndpointError(called)
         served.append((called, run.thread_id))
         return {}
 
     async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         served.append(("adopt", grant.coordinator.thread_id))
-        return Adopted(run_token="worker-token")
+        return Adopted(run_token="worker-token", catalog=Catalog())
 
     grants = Handlers[WorkerGrant]()
     grants.serve(ADOPT, adopt)
@@ -893,7 +989,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     assert hook["session_name"] == "turns"
 
 
-async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_else(
+async def test_a_worker_grant_only_adopts_a_run_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
@@ -903,12 +999,15 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     with pytest.raises(RuntimeTokenError):
         verify_worker_grant(sign_runtime_token(coordinator))
 
-    assert await _call_status(monkeypatch, grant, "catalog") == (
-        200,
-        [("catalog", "coordinator")],
-    )
     assert await _call_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
-    for endpoint in ("prepare", "before_model", "operation", "after_agent", "launch_worker"):
+    for endpoint in (
+        "catalog",
+        "prepare",
+        "before_model",
+        "operation",
+        "after_agent",
+        "launch_worker",
+    ):
         assert await _call_status(monkeypatch, grant, endpoint) == (403, [])
     # A run token never adopts: only a launched worker's grant does.
     status, _ = await _call_status(monkeypatch, sign_runtime_token(coordinator), "adopt")
@@ -1006,7 +1105,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
-    # Planned as the worker's own run, so its first run never asks for a catalog.
+    # Planned as the worker's own run.
     assert reply.catalog == planned
     assert graph.start_run.await_args.args[0].thread_id == "worker"
     # The settings the worker's run starts with ride in its token.

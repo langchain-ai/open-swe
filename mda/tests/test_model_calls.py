@@ -5,7 +5,12 @@ from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentState,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -45,7 +50,7 @@ class _WrapsModelCalls(Protocol):
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse: ...
+    ) -> ModelResponse | ExtendedModelResponse: ...
 
 
 async def _forwarded(

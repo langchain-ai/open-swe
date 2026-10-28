@@ -1,8 +1,7 @@
 """What the backend works out for a run as it starts it: its operations, subagents,
 models, sandbox and the rules of its middleware.
 
-The run's context carries it (``CATALOG`` answers a run started without it), and
-the MDA run builds its agent from it: a tool for each operation, the subagents it
+The run's context always carries it, and the MDA run builds its agent from it: a tool for each operation, the subagents it
 may delegate to, the models it calls, the box its file and shell tools run in, and
 what its middleware does around each model call.
 """
@@ -10,9 +9,6 @@ what its middleware does around each model call.
 from typing import Literal
 
 from pydantic import BaseModel, JsonValue
-
-from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
-from runtime_api.operations import RunRequest
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -220,10 +216,3 @@ class Catalog(BaseModel):
     # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
     search_tools: bool = False
     search_tools_description: str | None = None
-    # The run's token, signed again with what the backend decided as it planned the
-    # run here; only for a run started without its catalog.
-    run_token: str | None = None
-
-
-# Only reads the plan, so it is safe to send again.
-CATALOG = Endpoint("catalog", RunRequest, Catalog, seconds=LOOP_CALL_SECONDS, delivery="idempotent")

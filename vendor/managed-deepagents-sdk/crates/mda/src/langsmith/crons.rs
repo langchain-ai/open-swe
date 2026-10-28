@@ -143,7 +143,7 @@ mod tests {
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             }
         });
-        let client = Client::new("http://unused.invalid", "test-key", None).unwrap();
+        let client = Client::for_test("http://unused.invalid");
         let result = client.search_managed_crons(&url).unwrap();
         server.join().unwrap();
         assert_eq!(result.as_array().unwrap().len(), 101);

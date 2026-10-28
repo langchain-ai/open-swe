@@ -1,23 +1,35 @@
 Update the authenticated requester's ordinary personal settings in a private dashboard thread or linked Slack DM.
 
-Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged. No login, email, thread ID, or on-behalf-of identity is accepted. Model selection uses workspace defaults and per-thread overrides, not personal settings.
+Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged.
+No login, email, thread ID, or on-behalf-of identity is accepted.
+Model selection uses workspace defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
-- `workspace_default_repos`: a complete map of workspace slugs to `owner/repo` defaults. Read the current map first and preserve entries the user did not ask to change. Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
+- `workspace_default_repos`: a complete map of workspace slugs to `owner/repo` defaults.
+  Read the current map first and preserve entries the user did not ask to change.
+  Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
-- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record. Browser-local Feature Flags tab visibility cannot be changed here.
+- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
+  Browser-local Feature Flags tab visibility cannot be changed here.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
 Supported dashboard preferences:
 - `default_visibility`: `private` or `public`, for future threads only.
 - `default_workspace`: workspace slug; null clears the default.
-- `follow_up_behavior`: `queue` or `steer`. What a message sent while a run is live does: wait for the run to end, or steer the running agent.
+- `follow_up_behavior`: `queue` or `steer`.
+  What a message sent while a run is live does: wait for the run to end, or steer the running agent.
 
-`concierge_mode` (the user's Slack DM with Open SWE as one conversation) is read-only through agent tools. Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
+`concierge_mode` (the user's Slack DM with Open SWE as one conversation) is read-only through agent tools.
+Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
 
-Only save explicitly requested personal changes. If personal versus shared scope is unclear, ask first. Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills. This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences. Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
+Only save explicitly requested personal changes.
+If personal versus shared scope is unclear, ask first.
+Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills.
+This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences.
+Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
 
-Returns the requester login and the updated fields, or a validation/authorization error. All fields are validated before saving; a storage failure may leave a partial save across the two settings records, so read back before retrying.
+Returns the requester login and the updated fields, or a validation/authorization error.
+All fields are validated before saving; a storage failure may leave a partial save across the two settings records, so read back before retrying.

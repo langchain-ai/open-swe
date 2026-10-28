@@ -21,6 +21,7 @@ from runtime_api.frontend_review import (
     FrontendScreenshot,
     SubmittedFrontendReview,
 )
+from runtime_api.reports import Reports
 
 
 async def test_dedicated_review_reads_images_and_publishes_without_coding_hooks(
@@ -127,6 +128,8 @@ async def test_dedicated_review_reads_images_and_publishes_without_coding_hooks(
                 review_id=review_id,
                 report_url=f"/reviews/run/{review_id}",
             ).model_dump(mode="json")
+        elif hook == "reports":
+            result = {"replies": [{} for _ in Reports.model_validate(json).items]}
         else:
             result = {}
         return httpx2.Response(200, request=request, json=result)
@@ -165,6 +168,7 @@ async def test_dedicated_review_reads_images_and_publishes_without_coding_hooks(
     assert calls[-1] == "run_ended"
     assert set(calls) <= {
         "prepare",
+        "reports",
         "model_result",
         "tool_started",
         "tool_result",

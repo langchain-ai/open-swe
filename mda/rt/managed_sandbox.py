@@ -1,25 +1,42 @@
 """The thread's box as MDA's own sandbox: declared, opened before the run, replaced on request.
 
-The graph declares one box (``BOX``) for every run; each run's catalog says which
+The graph declares one box (``box``) for every run; each run's catalog says which
 box it uses and the options MDA creates it with (``SandboxSpec``), or that it has
-none. MDA keeps one box per thread whatever the backend's options become, which
-apply only when MDA creates it, and leaves its proxy config to the backend. Before the
-run prepares, the box is opened and its name reported, so the backend binds the
-thread to it. ``recreate_sandbox`` on such a box comes back from the backend as
-what to replace it with; MDA replaces it, the backend reconnects, and the call
-answers as it does in-process.
+none, when what the graph keeps itself, such as large tool results, goes to the
+backend's files instead. MDA keeps one box per thread whatever the backend's options
+become, which apply only when MDA creates it, and leaves its proxy config to the
+backend. Before the run prepares, the box is opened and its name reported, so the
+backend binds the thread to it; opening is retried while the sandbox service fails
+transiently, and otherwise the backend hears why it failed. ``recreate_sandbox`` on
+such a box comes back from the backend as what to replace it with; MDA replaces it,
+the backend reconnects, and the call answers as it does in-process.
 """
 
+import asyncio
 import json
 import logging
+import random
+import re
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Final
 
+import httpx2
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from langsmith.sandbox import (
+    ResourceCreationError,
+    ResourceTimeoutError,
+    SandboxAPIError,
+    SandboxClientError,
+    SandboxConnectionError,
+    SandboxNotReadyError,
+)
 from managed_deepagents import define_sandbox
 from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -30,12 +47,23 @@ from runtime_api.operations import RunRequest
 
 from rt.backend import BackendCallError, OpenSweBackend, RunContext, current_run
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
 _json_object = TypeAdapter(dict[str, JsonValue])
 # As the backend's sandbox: a command without a timeout of its own gets five minutes.
 EXECUTE_TIMEOUT_SECONDS: Final = 300
+# A partial sandbox-service outage passes within a minute or two; a run waits that long.
+OPEN_BACKOFF_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+OPEN_MAX_ELAPSED_SECONDS: Final = 90.0
+_CAUSE_LIMIT: Final = 300
+# Creation failures the service, not the box's options, caused; an image or config one is not.
+_UNSCHEDULED: Final = frozenset({"Unschedulable", "ServiceUnavailable"})
+_SECRET = re.compile(
+    r"(?i)\b((?:token|api[_-]?key|secret|password|authorization)\s*[:=]\s*(?:bearer\s+)?|bearer\s+)"
+    r"[^\s,;&\"']+"
+)
 
 
 def _selected(runtime: object) -> SandboxDefinition | None:
@@ -69,28 +97,89 @@ def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinitio
     )
 
 
-BOX: Final = define_sandbox(
-    _openswe_per_thread=True,
-    _openswe_no_manage_proxy=True,
-    _openswe_select=_selected,
-    default_timeout=EXECUTE_TIMEOUT_SECONDS,
-)
+def box(without_box: SandboxBackendProtocol) -> SandboxDefinition:
+    """The box every run's catalog picks from, and ``without_box`` for a run it gives none."""
+    return define_sandbox(
+        _openswe_per_thread=True,
+        _openswe_no_manage_proxy=True,
+        _openswe_select=_selected,
+        _openswe_without_box=without_box,
+        default_timeout=EXECUTE_TIMEOUT_SECONDS,
+    )
 
 
-async def opened_sandbox(runtime: Runtime) -> str | None:
-    """Adopt or create the thread's box now; its name, or None when MDA could not open it.
+@dataclass(frozen=True)
+class OpenedSandbox:
+    """The thread's box as the run opened it: its name, or why it could not be opened."""
 
-    The backend reports a box MDA could not open as unreachable when it prepares.
+    sandbox_id: str | None = None
+    error: str | None = None
+
+
+def _transient(exc: BaseException) -> bool:
+    """Whether opening the box again may succeed: the service, not the request, failed."""
+    if isinstance(
+        exc,
+        SandboxConnectionError
+        | SandboxNotReadyError
+        | SandboxAPIError
+        | ResourceTimeoutError
+        | httpx2.TransportError
+        | TimeoutError
+        | ConnectionError,
+    ):
+        return True
+    if isinstance(exc, ResourceCreationError) and exc.error_type in _UNSCHEDULED:
+        return True
+    if isinstance(exc, SandboxClientError):
+        # The SDK maps some 5xx answers to errors of its own, or to none, such as a 503.
+        status = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
+        return isinstance(status, int) and status >= 500
+    return False
+
+
+def _cause(exc: BaseException) -> str:
+    """``exc`` as the backend reports it to the person: its type and message, secrets removed."""
+    message = _SECRET.sub(r"\1[redacted]", " ".join(str(exc).split()))
+    cause = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+    return cause if len(cause) <= _CAUSE_LIMIT else f"{cause[: _CAUSE_LIMIT - 1]}…"
+
+
+def _not_opened(exc: Exception) -> OpenedSandbox:
+    logger.warning("Could not open the thread's sandbox", exc_info=exc)
+    return OpenedSandbox(error=_cause(exc))
+
+
+async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
+    """Adopt or create the thread's box now, retrying while the sandbox service fails transiently.
+
+    The backend reports a box MDA could not open as unreachable when it prepares, with the cause.
     """
+    backend = getattr(runtime, "backend", None)
+    deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
+    for backoff in OPEN_BACKOFF_SECONDS:
+        try:
+            return OpenedSandbox(sandbox_id=await open_sandbox(backend))
+        except Exception as exc:
+            delay = backoff * random.uniform(0.8, 1.2)
+            if not _transient(exc) or time.monotonic() + delay > deadline:
+                return _not_opened(exc)
+            logger.warning(
+                "Opening the thread's sandbox failed transiently; retrying",
+                exc_info=True,
+                extra={"delay_seconds": delay},
+            )
+            await asyncio.sleep(delay)
     try:
-        return await open_sandbox(getattr(runtime, "backend", None))
-    except Exception:
-        logger.warning("Could not open the thread's sandbox", exc_info=True)
-        return None
+        return OpenedSandbox(sandbox_id=await open_sandbox(backend))
+    except Exception as exc:
+        return _not_opened(exc)
 
 
 class ReplaceSandboxMiddleware(AgentMiddleware):
     """Carry out ``recreate_sandbox`` for the box MDA owns."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend

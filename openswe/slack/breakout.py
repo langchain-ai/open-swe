@@ -96,9 +96,7 @@ async def _root_text(request: SlackRequest, heading: str) -> str:
 
 
 async def _mark_done(request: SlackRequest, target: str, new_ts: str) -> None:
-    await mark_broken_out(
-        request.channel_id, request.thread_ts, _command_ts(request), target, new_ts
-    )
+    await mark_broken_out(request.channel_id, request.thread_ts, target, new_ts)
 
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
@@ -271,7 +269,6 @@ async def process_slack_web(
             await notify_breakout(
                 request.channel_id,
                 request.thread_ts,
-                _command_ts(request),
                 f"<@{request.user_id}> continued in a "
                 f"<{dashboard_thread_url(thread_id)}|private web breakout>.",
             )

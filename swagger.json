@@ -1949,6 +1949,40 @@
         "title": "DesktopConnectExchange",
         "type": "object"
       },
+      "DesktopEnvironment": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "DesktopEnvironment",
+        "type": "object"
+      },
+      "DesktopEnvironments": {
+        "properties": {
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopEnvironment"
+            },
+            "title": "Environments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "environments"
+        ],
+        "title": "DesktopEnvironments",
+        "type": "object"
+      },
       "DesktopHandoffExchange": {
         "properties": {
           "code": {
@@ -11594,6 +11628,27 @@
           }
         ],
         "summary": "Api Report Client Error",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/desktop/environments": {
+      "get": {
+        "operationId": "api_desktop_environments_dashboard_api_desktop_environments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopEnvironments"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Desktop Environments",
         "tags": [
           "dashboard"
         ]

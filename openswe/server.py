@@ -121,7 +121,7 @@ from openswe.middleware.require_user_reply import (
     reply_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.stale_workspace import warn_stale_workspace
+from openswe.middleware.stale_workspace import queue_stale_workspace_notice
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.model_request import (
@@ -151,8 +151,10 @@ from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from openswe.sandboxes.state import (
+    SandboxHandedOverError,
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
+    get_sandbox_metadata,
 )
 from openswe.sandboxes.tool_runtime import (
     FILESYSTEM_TOOL_NAMES,
@@ -164,6 +166,7 @@ from openswe.sandboxes.tool_runtime import (
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
+from openswe.slack.staged_files import deliver_slack_files
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
@@ -208,7 +211,6 @@ from openswe.tools import (
     read_only_sql,
     read_user_settings,
     recreate_sandbox,
-    refresh_workspace_start,
     report_platform_issue,
     request_human_review,
     request_pr_review,
@@ -232,6 +234,7 @@ from openswe.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_start_review_channel,
+    snapshotctl,
     start_thread,
     submit_thread_feedback,
     suggest_task,
@@ -574,7 +577,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_breakout_thread",
         "slack_start_review_channel",
         "publish_workspace",
-        "refresh_workspace_start",
+        "snapshotctl",
         "configure_repository",
         "delete_workspace",
         "create_automation",
@@ -652,7 +655,7 @@ ADMIN_TOOLS = (
     delete_automation,
     list_workspaces,
     publish_workspace,
-    refresh_workspace_start,
+    snapshotctl,
     configure_repository,
     delete_workspace,
     save_organization_skill,
@@ -811,9 +814,7 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
 
 
 async def _reconnect_agent_box(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
-    return await ensure_sandbox_for_thread(
-        thread_id, workspace_slug=workspace, record_stale_boot=True
-    )
+    return await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace)
 
 
 class ThreadFiles:
@@ -979,7 +980,7 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
 
     They are served by the LangSmith box itself, which a bridged thread does not have.
     """
-    return ENV.SANDBOX_TYPE.get() == "langsmith" and cfg.stop_summary is not True and not bridged
+    return cfg.stop_summary is not True and not bridged
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
@@ -1318,7 +1319,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
+        bound = await get_sandbox_metadata(self._thread_id)
         sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+        sandbox_proxy.follow(bound.get("sandbox_id"))
         sandbox_task = asyncio.create_task(
             retry_transient_sandbox_errors(
                 sandbox_proxy.ready,
@@ -1338,11 +1341,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             await post_sandbox_unreachable_notification(
                 self._config or {},
                 sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
+                handed_to_mda=isinstance(exc, SandboxHandedOverError),
             )
             raise
         del github_token
+        async with aphase(self._thread_id, "prepare.slack_files"):
+            await deliver_slack_files(self._thread_id, bound, sandbox_backend)
         if stale_workspace := take_stale_boot(self._thread_id):
-            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
+            queue_stale_workspace_notice(self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None

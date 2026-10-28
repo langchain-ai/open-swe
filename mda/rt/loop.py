@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
 
@@ -76,6 +77,17 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
+# Held state: when the box's GitHub token next needs replacing. It lives in the thread's
+# checkpoint, so it holds for the next run on whichever backend replica serves it.
+_GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
+# A token is replaced this long before it expires. The backend never hands out one with
+# less left, so a replacement is not due again at once.
+_GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
+# A thread whose box has no GitHub proxy is asked again after this long.
+_GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
+# A refresh that failed is tried again after this long, so a failure that keeps happening
+# does not hold up every model call.
+_GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 
@@ -146,6 +158,15 @@ def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     held = state.get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
+
+
+def _moment(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _normalized(route: str) -> str:
@@ -229,15 +250,13 @@ class RunLoop:
         held = _held(state)
         if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        if self.rules.refresh_github_proxy:
-            self._backend.reports.notify(REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+        update = await self._github_proxy(held)
         context = await self._task_context()
         added: list[BaseMessage] = []
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in _visible(state)
         ):
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
-        update: dict[str, JsonValue] = {}
         route = await self._route(held, [*_visible(state), *added])
         if route is not None:
             update["model_route"] = route
@@ -267,6 +286,30 @@ class RunLoop:
             if isinstance(message.artifact, dict) and message.artifact.get(CLIENT_CALL_PENDING):
                 return True
         return False
+
+    async def _github_proxy(self, held: Mapping[str, object]) -> dict[str, JsonValue]:
+        """Put a new GitHub token on the box once the one there is about to expire.
+
+        The call is awaited, so the model's first command never runs on an expired
+        token. A failure leaves the run going and the call is made again a minute later.
+        """
+        if not self.rules.refresh_github_proxy:
+            return {}
+        now = datetime.now(UTC)
+        due = _moment(held.get(_GITHUB_PROXY_DUE))
+        if due is not None and now < due:
+            return {}
+        try:
+            refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+        except Exception:
+            logger.warning("Could not refresh the box's GitHub token", exc_info=True)
+            return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
+        due = (
+            refreshed.expires_at - _GITHUB_PROXY_WINDOW
+            if refreshed.expires_at is not None
+            else now + _GITHUB_PROXY_RECHECK
+        )
+        return {_GITHUB_PROXY_DUE: due.isoformat()}
 
     async def _task_context(self) -> TaskContext:
         if not self.rules.task_coordination:
@@ -454,28 +497,29 @@ class RunLoop:
     async def after_agent(
         self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
     ) -> AfterAgent:
-        """Start the graph's own end-of-run work, then report the run's end.
+        """Ask for the graph's own end-of-run work, then report the run's end.
 
-        The run waits for none of the work, and the work waits for no report: a report
-        that fails takes none of it with it.
+        The work goes out behind the run's reports, and one the backend cannot do takes
+        none of the rest with it.
         """
         messages = _messages(state)
         current = run_id()
-        reports = self._backend.reports
+        outbox = self._backend.outbox
         if messages and _LIMIT_MARKER in content_text(messages[-1].content):
-            reports.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
+            outbox.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
         for work in self.rules.at_end:
             if work == "settle_review_check":
-                reports.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
+                outbox.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
             else:
                 summary = _held(state).get("human_input_summary")
                 finished = ScoutPlanEnd(
                     run_id=current,
                     human_input_summary=summary if isinstance(summary, str) else "",
                 )
-                reports.notify(FINISH_SCOUT_PLAN, finished)
-        # The transcript has every reply and tool call before the run's end.
-        await reports.drain()
+                outbox.notify(FINISH_SCOUT_PLAN, finished)
+        # The transcript has every reply and tool call, and the backend the work, before
+        # the run's end.
+        await outbox.drain()
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(

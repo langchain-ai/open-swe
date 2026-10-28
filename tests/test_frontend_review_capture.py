@@ -365,6 +365,29 @@ async def test_dedicated_assessment_refuses_coding_and_publication_apis(endpoint
         await server._answer(run, endpoint, {})  # noqa: SLF001
 
 
+async def test_dedicated_assessment_rejects_a_batch_with_a_code_review_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = AsyncMock(side_effect=AssertionError("The whole batch must be refused before dispatch"))
+    monkeypatch.setattr(server, "_graph", lambda _: graph)
+    run = RemoteRun(
+        thread_id="visual-thread",
+        assistant_id="reviewer",
+        configurable={"frontend_review_id": str(uuid7())},
+    )
+    with pytest.raises(RefusedCallError, match="cannot batch"):
+        await server._answer(  # noqa: SLF001
+            run,
+            "reports",
+            {
+                "items": [
+                    {"key": "safe", "endpoint": "step_limit_reached", "request": {}},
+                    {"key": "unsafe", "endpoint": "settle_review_check", "request": {}},
+                ]
+            },
+        )
+
+
 async def test_dedicated_assessment_never_prepares_the_regular_code_reviewer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
