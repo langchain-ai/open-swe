@@ -1161,7 +1161,15 @@ function turnMessages(
         const message = humanMessage(state.threadId, row, state.entities)
         if (!message) continue
         turnKey = row.messageId
-        out.push(message)
+        out.push(
+          turn.state === "failed" && turn.startedAt === null
+            ? {
+                ...message,
+                deliveryStatus: "failed",
+                deliveryError: turn.error ?? undefined,
+              }
+            : message
+        )
         continue
       }
       const chunks: Array<Chunk> = []
