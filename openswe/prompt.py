@@ -168,6 +168,7 @@ def construct_turn_context(
     slack_by_the_way: bool = False,
     slack_follow_up_suggestions: bool = False,
     sole_writer: bool = False,
+    admin_unavailable: bool = False,
     default_repo: dict[str, str] | None = None,
 ) -> str:
     """Render the run-specific context block that follows the turn's inbound message."""
@@ -187,6 +188,7 @@ def construct_turn_context(
             else ""
         ),
         sole_writer=sole_writer,
+        admin_unavailable=admin_unavailable,
     )
     return Fields({"instructions": instructions}).element(
         "dynamic-context", {"kind": "run", "id": f"source:{source}"}

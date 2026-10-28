@@ -15,3 +15,7 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% include "system/sole-writer.md" %}
 
 {% endif %}
+{% if admin_unavailable %}
+
+The sender of this run's message is not a workspace admin, so the Admin Thread capabilities are unavailable for their requests: tell them a workspace admin must make those changes.
+{% endif %}

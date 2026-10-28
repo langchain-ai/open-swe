@@ -84,7 +84,7 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
-        admin_workspaces=False,
+        sender_is_admin=False,
         credential_login=credential_login,
     )
 

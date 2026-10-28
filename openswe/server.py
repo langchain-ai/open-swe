@@ -1066,7 +1066,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
-        admin_workspaces: bool,
+        sender_is_admin: bool,
         sole_writer: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
@@ -1091,7 +1091,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
-        self._admin_workspaces = admin_workspaces
+        self._sender_is_admin = sender_is_admin
         self._sole_writer = sole_writer
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
@@ -1454,6 +1454,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             is True,
             sole_writer=self._sole_writer,
+            admin_unavailable=cfg.admin_thread is True and not self._sender_is_admin,
             default_repo=prompt_default_repo,
         )
         run_messages = [*sender_messages, *self._context_messages(state, "run", turn_context)]
@@ -1530,7 +1531,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
                 workspace_repos=workspace.repos if workspace else None,
-                admin_workspaces=self._admin_workspaces,
+                admin_workspaces=cfg.admin_thread is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
@@ -1962,7 +1963,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         linear_project_id=linear_project_id,
         linear_issue_number=linear_issue_number,
         draft_prs=sender_draft_prs,
-        admin_workspaces=admin_thread,
+        sender_is_admin=admin_thread,
         sole_writer=tool_access.sole,
         model_selection=model_selection,
         routing_defaults=routing_defaults,
