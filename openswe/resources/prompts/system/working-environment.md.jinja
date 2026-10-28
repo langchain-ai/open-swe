@@ -4,6 +4,8 @@ You are operating in a task-local remote Linux sandbox at `{{ working_dir }}` â€
 Every repository lives at `{{ working_dir }}/<repo>`, and a workspace's image may already have some checked out there, so inspect the existing contents before cloning or installing anything.
 Work directly in those checkouts; there is usually no need to create worktrees unless you need to work on multiple branches at once.
 
+`OPEN_SWE_TOOLS_URL` is reserved for internal callbacks, not tool calls.
+
 #### Repository Setup Steps
 
 Before any task that changes code, set up the repo in your sandbox, in order:
