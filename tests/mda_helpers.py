@@ -1,6 +1,6 @@
 """Check a channel endpoint's answer as MDA does, and stub the MDA runtime it signs runs for."""
 
-from typing import Any, cast
+from typing import cast
 
 import pytest
 from managed_deepagents._channels.http.endpoint import EndpointDeclined, _run_result
@@ -11,14 +11,14 @@ from openswe.agent_api.tokens import RemoteRun, sign_runtime_token
 from openswe.threads import runtimes
 
 
-def mda_starts(answer: Any) -> NormalizedRunInput:
+def mda_starts(answer: object) -> NormalizedRunInput:
     """The run MDA starts for an endpoint's answer; raises as MDA does when it starts none."""
     normalized = normalize_run_input(_run_result(cast(JsonValue, answer)))
     assert normalized is not None
     return normalized
 
 
-def mda_declines(answer: Any) -> str:
+def mda_declines(answer: object) -> str:
     """What MDA's Linear channel tells the session for an endpoint's decline."""
     declined = _run_result(cast(JsonValue, answer))
     assert isinstance(declined, EndpointDeclined)

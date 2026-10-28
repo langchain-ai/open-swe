@@ -1,9 +1,9 @@
 """A PR thread starts with the latest turns of the channel conversation it continues."""
 
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import JsonValue
 
 from openswe.github import webhook
 from openswe.github.webhook import CHANNEL_HISTORY_MESSAGES, recent_turns
@@ -12,15 +12,15 @@ from openswe.webhooks import common
 pytestmark = pytest.mark.usefixtures("no_local_threads")
 
 
-def _human(n: int) -> dict[str, Any]:
+def _human(n: int) -> dict[str, JsonValue]:
     return {"type": "human", "content": f"h{n}"}
 
 
-def _calls(n: int) -> dict[str, Any]:
+def _calls(n: int) -> dict[str, JsonValue]:
     return {"type": "ai", "content": "", "tool_calls": [{"id": f"c{n}", "name": "x", "args": {}}]}
 
 
-def _result(n: int) -> dict[str, Any]:
+def _result(n: int) -> dict[str, JsonValue]:
     return {"type": "tool", "tool_call_id": f"c{n}", "content": "ok"}
 
 

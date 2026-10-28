@@ -2,11 +2,11 @@
 
 import json
 from datetime import UTC, datetime
-from typing import Any
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import JsonValue
 from standardwebhooks import Webhook
 
 from openswe.mda_channels.resolve_user import router
@@ -23,7 +23,7 @@ def _setup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada")
 
 
-async def _ask(body: dict[str, Any], *, signed: bool = True) -> httpx.Response:
+async def _ask(body: dict[str, JsonValue], *, signed: bool = True) -> httpx.Response:
     app = FastAPI()
     app.include_router(router)
     content = json.dumps(body).encode()

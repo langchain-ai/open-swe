@@ -1,13 +1,14 @@
 """``POST /github/channel/events``: what MDA's GitHub channel starts for an issue mention."""
 
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import JsonValue
 from standardwebhooks import Webhook
 
 from openswe import dispatch
@@ -23,8 +24,8 @@ SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 THREAD = "00000000-0000-4000-8000-0000000000aa"
 
 
-def _issue_payload(**overrides: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+def _issue_payload(**overrides: JsonValue) -> dict[str, JsonValue]:
+    payload: dict[str, JsonValue] = {
         "action": "opened",
         "issue": {
             "id": 101,
@@ -41,16 +42,18 @@ def _issue_payload(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-def _comment_payload(body: str = "@openswe try again", **issue: Any) -> dict[str, Any]:
+def _comment_payload(body: str = "@openswe try again", **issue: JsonValue) -> dict[str, JsonValue]:
     payload = _issue_payload(action="created")
     payload["issue"] = {**payload["issue"], "body": "No mention here", **issue}
     payload["comment"] = {"id": 55, "body": body, "user": {"login": "ada"}}
     return payload
 
 
-def _event(event: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
+def _event(
+    event: str, payload: dict[str, JsonValue], *, interrupted: bool = False
+) -> dict[str, JsonValue]:
     """What MDA's channel POSTs its endpoint."""
-    thread: dict[str, Any] = {"id": THREAD, "channel": {"name": "github"}}
+    thread: dict[str, JsonValue] = {"id": THREAD, "channel": {"name": "github"}}
     if interrupted:
         thread["interrupted"] = True
     return {
@@ -59,7 +62,7 @@ def _event(event: str, payload: dict[str, Any], *, interrupted: bool = False) ->
     }
 
 
-async def _post(body: dict[str, Any], *, signed: bool = True) -> httpx.Response:
+async def _post(body: dict[str, JsonValue], *, signed: bool = True) -> httpx.Response:
     """POST ``body`` as MDA does, signed with the shared secret."""
     app = FastAPI()
     app.include_router(channel.router)
@@ -98,7 +101,9 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         configurable={"source": "github", "github_login": "ada", "repo": {"owner": "acme"}},
     )
 
-    async def adopt_then_prepare(*_args: object, adopt: Any = None) -> object:
+    async def adopt_then_prepare(
+        *_args: object, adopt: Callable[[str], Awaitable[None]] | None = None
+    ) -> object:
         # The real one adopts the thread before it writes the thread's metadata.
         if adopt is not None and prepare.return_value is not None:
             await adopt(THREAD)
@@ -136,7 +141,7 @@ async def test_only_calls_mda_signed_are_answered(prepared: AsyncMock) -> None:
     [("issues.opened", _issue_payload()), ("issue_comment.created", _comment_payload())],
 )
 async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
-    prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch, event: str, payload: dict[str, Any]
+    prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch, event: str, payload: dict[str, JsonValue]
 ) -> None:
     webhook = "https://backend.example/webhooks/run-complete?token=t"
     monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", webhook)
@@ -182,7 +187,7 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     ],
 )
 async def test_events_open_swe_would_not_act_on_start_nothing(
-    prepared: AsyncMock, event: str, payload: dict[str, Any]
+    prepared: AsyncMock, event: str, payload: dict[str, JsonValue]
 ) -> None:
     response = await _post(_event(event, payload))
 

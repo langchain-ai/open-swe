@@ -3,12 +3,12 @@
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import JsonValue
 from standardwebhooks import Webhook
 
 from openswe import dispatch
@@ -37,9 +37,11 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     return api
 
 
-def _call(key: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
+def _call(
+    key: str, payload: dict[str, JsonValue], *, interrupted: bool = False
+) -> dict[str, JsonValue]:
     """What MDA's channel POSTs its endpoint."""
-    thread: dict[str, Any] = {"id": _THREAD, "channel": {"name": "linear"}}
+    thread: dict[str, JsonValue] = {"id": _THREAD, "channel": {"name": "linear"}}
     if interrupted:
         thread["interrupted"] = True
     return {
@@ -49,7 +51,7 @@ def _call(key: str, payload: dict[str, Any], *, interrupted: bool = False) -> di
 
 
 async def _post(
-    app: FastAPI, body: dict[str, Any], secret: str | None = _SERVICE_SECRET
+    app: FastAPI, body: dict[str, JsonValue], secret: str | None = _SERVICE_SECRET
 ) -> httpx.Response:
     """POST ``body`` as MDA does: signed with ``secret``, or unsigned without one."""
     content = json.dumps(body).encode()
@@ -316,11 +318,11 @@ async def test_a_session_turn_the_backend_declines_tells_the_session_why(
     ids=["no-schema-match", "no-issue"],
 )
 async def test_a_session_it_cant_read_is_told_so(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch, agent_session: dict[str, Any]
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, agent_session: dict[str, JsonValue]
 ) -> None:
     prepare = AsyncMock()
     monkeypatch.setattr(channel.LinearSessionTurn, "prepare_run", prepare)
-    payload: dict[str, Any] = {
+    payload: dict[str, JsonValue] = {
         "type": "AgentSessionEvent",
         "action": "created",
         "organizationId": "org-1",
