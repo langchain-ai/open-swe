@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Mapping
 from typing import Self
 from uuid import uuid4
 
@@ -7,8 +6,12 @@ from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
 
 from openswe.github.proxy import maybe_refresh_proxy_token
-from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
-from openswe.middleware.model_call_shape import CallShape
+from openswe.input_messages import (
+    RunMessage,
+    dynamic_context_hash,
+    run_context,
+    visible_dynamic_context_hashes,
+)
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.schemas import Thread
@@ -23,10 +26,14 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         self.thread_id = thread_id
         self.enabled = enabled
         self.context = context
-        self.instructions = prompt(
-            "tasks/role",
-            role=context.membership.role if context else "coordinator",
-            delegation_enabled=self.can_delegate,
+        # The thread's role, told in the conversation so the system prompt never changes.
+        self.instructions = run_context(
+            "task-role",
+            prompt(
+                "tasks/role",
+                role=context.membership.role if context else "coordinator",
+                delegation_enabled=self.can_delegate,
+            ),
         )
 
     @classmethod
@@ -76,14 +83,13 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     async def abefore_model(
         self, state: AgentState, runtime: Runtime
     ) -> dict[str, list[RunMessage]] | None:
-        content = await self.context_message()
-        if content is None or dynamic_context_hash(content) in visible_dynamic_context_hashes(
-            state
-        ):
-            return None
-        return {"messages": [{"role": "user", "id": f"task-context:{uuid4()}", "content": content}]}
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        return call.appending(self.instructions)
+        visible = visible_dynamic_context_hashes(state)
+        added: list[RunMessage] = [
+            {"role": "user", "id": f"{prefix}{uuid4()}", "content": content}
+            for prefix, content in (
+                ("task-role:", self.instructions),
+                ("task-context:", await self.context_message()),
+            )
+            if content is not None and dynamic_context_hash(content) not in visible
+        ]
+        return {"messages": added} if added else None

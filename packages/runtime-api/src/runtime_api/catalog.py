@@ -53,6 +53,8 @@ class OperationSpec(BaseModel):
     code_name: str | None = None
     # The backend's grant of this operation to this run, sent with each call of it.
     grant: str | None = None
+    # How long a call of it may take, when shorter than a tool call's allowance.
+    seconds: float | None = None
 
 
 class SubagentSpec(BaseModel):
@@ -162,8 +164,6 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
-    # Whether the thread's review walkthrough adds its rules to each call.
-    review_guide: bool = False
     # Whether the thread may belong to a task, as its coordinator or a worker.
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.

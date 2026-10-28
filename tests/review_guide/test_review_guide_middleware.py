@@ -1,15 +1,24 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from openswe.middleware.model_call_shape import CallShape
+import pytest
+from langchain_core.messages import HumanMessage
+
+from openswe.review_guide import middleware
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 
 
-async def test_a_resumed_run_keeps_the_walkthrough_rules_from_its_checkpoint() -> None:
-    """A run resumed past its before-agent step builds a fresh middleware; the rules are in state."""
-    shaped = await ReviewGuideMiddleware(thread_id="t", approve_ts="").ashape_model_call(
-        CallShape(system_prompt="base prompt"),
-        {"messages": [], "review_guide_rules": "walkthrough rules"},
-        MagicMock(),
-    )
+async def test_a_closed_walkthrough_tells_the_model_once_that_its_rules_ended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Its rules stay in the conversation, so only a later note can retire them."""
+    closed = MagicMock(closed=True)
+    monkeypatch.setattr(middleware.ReviewGuideSession, "get", AsyncMock(return_value=closed))
+    guide = ReviewGuideMiddleware(thread_id="t", approve_ts="")
 
-    assert shaped.system_prompt == "base prompt\n\nwalkthrough rules"
+    ended = await guide.abefore_agent({"messages": []}, MagicMock())
+    assert ended is not None
+    (note,) = ended["messages"]
+    assert "walkthrough has ended" in note.content
+
+    told = {"messages": [HumanMessage(content=note.content)]}
+    assert await guide.abefore_agent(told, MagicMock()) is None
