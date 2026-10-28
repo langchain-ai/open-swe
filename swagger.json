@@ -5591,6 +5591,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_name": {
+            "default": "",
+            "title": "Channel Name",
+            "type": "string"
+          },
           "claimed": {
             "default": false,
             "title": "Claimed",

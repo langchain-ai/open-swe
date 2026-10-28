@@ -1,5 +1,6 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { useEffect, useRef, useState } from "react"
@@ -106,11 +107,15 @@ function Row({
   const [open, setOpen] = useState(false)
   return (
     <li className="flex flex-col">
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={title}
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full cursor-pointer gap-space-2 px-space-3 py-space-2 text-left hover:bg-surface-level-1-hover"
+        className="h-auto w-full cursor-pointer justify-start gap-space-2 px-space-3 py-space-2 text-left whitespace-normal hover:bg-surface-level-1-hover"
       >
         <Spinner size="xs" className="mt-0.5 shrink-0 text-icon-brand" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -135,7 +140,7 @@ function Row({
             open && "rotate-90"
           )}
         />
-      </button>
+      </Button>
       {open && (
         <div className="flex gap-space-2 px-space-3 pb-space-3">
           {/* Lines the details up under the title. */}
