@@ -36,10 +36,10 @@ export function QAAgentPage() {
           <div className="max-w-xl">
             <div className="mb-space-2 flex items-center gap-space-2 text-secondary">
               <EyeIcon size={20} aria-hidden="true" />
-              <span className="text-xs font-medium">Frontend review</span>
+              <span className="text-xs font-medium">Design QA</span>
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-primary">
-              QA agent
+              Design QA
             </h1>
             <p className="mt-space-2 text-sm text-secondary">
               Review how your pull requests look. Open a PR to compare
@@ -109,9 +109,7 @@ function QAPullRequests({ login, scope }: { login: string; scope: Scope }) {
   return (
     <section
       aria-label={
-        scope === "mine"
-          ? "My PRs for frontend QA"
-          : "Assigned PRs for frontend QA"
+        scope === "mine" ? "My PRs for Design QA" : "Assigned PRs for Design QA"
       }
     >
       <div className="mb-space-4 flex flex-wrap items-center gap-space-3">
@@ -187,7 +185,7 @@ function QAPullRequests({ login, scope }: { login: string; scope: Scope }) {
           <p className="max-w-sm text-sm text-secondary">
             {search.trim()
               ? "Try a different title, repository, or PR number. You can also load more PRs below."
-              : "Paste a GitHub PR link above to open its frontend QA page."}
+              : "Paste a GitHub PR link above to open its Design QA page."}
           </p>
         </Card>
       ) : (
@@ -315,7 +313,7 @@ function QAPullRequestCard({ pr }: { pr: OpenPullRequest }) {
             </p>
           )}
           <span className="mt-auto flex items-center justify-between pt-space-2 text-xs font-medium text-primary">
-            {run ? "Open frontend QA" : "Start frontend QA"}
+            {run ? "Open Design QA" : "Start Design QA"}
             <ArrowUpRightIcon size={16} aria-hidden="true" />
           </span>
         </div>

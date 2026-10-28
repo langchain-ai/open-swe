@@ -155,7 +155,7 @@ it("keeps an unavailable evidence card usable and opens pasted PRs directly in f
   await screen.findByText("Evidence unavailable", {}, { timeout: 5000 })
   expect(screen.getByRole("link", { name: /Refine navigation 7/ })).toBeTruthy()
   const input = screen.getByRole("textbox", {
-    name: "Open frontend QA for a pull request",
+    name: "Open Design QA for a pull request",
   })
   fireEvent.change(input, {
     target: { value: "https://github.com/acme/app/pull/42" },

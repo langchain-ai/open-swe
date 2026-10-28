@@ -41,7 +41,7 @@ export function OpenPullRequestInput({
         size="sm"
         aria-label={
           frontend
-            ? "Open frontend QA for a pull request"
+            ? "Open Design QA for a pull request"
             : "Open a pull request review"
         }
         isError={invalid}

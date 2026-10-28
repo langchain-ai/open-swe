@@ -123,7 +123,7 @@ export function ReviewPage({
             onChange={(view) => onViewChange?.(view)}
             options={[
               { value: "code", display: "Code review" },
-              { value: "frontend", display: "Frontend reviewer" },
+              { value: "frontend", display: "Design QA" },
             ]}
           />
           {frontendActive && (
@@ -133,7 +133,7 @@ export function ReviewPage({
               variant="plain"
               as={<Link to="/agents/qa" />}
             >
-              Back to QA agent
+              Back to Design QA
             </Button>
           )}
         </div>

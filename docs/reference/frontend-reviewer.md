@@ -1,6 +1,6 @@
-# Frontend reviewer
+# Design QA
 
-Open **QA agent** in the Open SWE sidebar to browse your PRs or review assignments as cards. Filter the loaded PRs, paste a GitHub PR link, or open a card to inspect its saved visual evidence. The overview lives at `/agents/qa`; each card links to the pull request's existing review page with **Frontend reviewer** selected beside **Code review**. A shared link keeps the selected run:
+Open **Design QA** in the Open SWE sidebar to browse your PRs or review assignments as cards. Filter the loaded PRs, paste a GitHub PR link, or open a card to inspect its saved visual evidence. The overview lives at `/agents/qa`; each card links to the pull request's existing review page with **Design QA** selected beside **Code review**. A shared link keeps the selected run:
 
 ```text
 /agents/reviews/<owner>/<repo>/<number>?view=frontend&run=<run-id>

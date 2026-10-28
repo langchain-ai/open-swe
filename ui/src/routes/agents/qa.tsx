@@ -5,5 +5,5 @@ import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/qa")({
   component: QAAgentPage,
-  head: () => ({ meta: [{ title: pageTitle("QA agent") }] }),
+  head: () => ({ meta: [{ title: pageTitle("Design QA") }] }),
 })

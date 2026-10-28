@@ -273,7 +273,7 @@ it("keeps an in-flight start disabled after remount and never navigates from its
     </QueryClientProvider>
   )
   const pendingButton = await screen.findByRole("button", {
-    name: "Starting frontend review…",
+    name: "Starting Design QA review…",
   })
   expect((pendingButton as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(pendingButton)

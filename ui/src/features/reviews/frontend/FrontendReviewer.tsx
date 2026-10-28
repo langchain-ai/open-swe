@@ -71,7 +71,7 @@ export function FrontendReviewer({
       }))
       await client.invalidateQueries({ queryKey: key })
     },
-    meta: { errorTitle: "Could not start frontend review" },
+    meta: { errorTitle: "Could not start Design QA review" },
   })
 
   const run = detail.data
@@ -82,7 +82,7 @@ export function FrontendReviewer({
         <div className="flex flex-wrap items-start justify-between gap-space-3">
           <div>
             <div className="mb-space-2 flex items-center gap-space-2">
-              <h2 className="text-lg font-semibold">Frontend reviewer</h2>
+              <h2 className="text-lg font-semibold">Design QA</h2>
               <Badge color="secondary" size="xs">
                 Preview
               </Badge>
@@ -109,7 +109,7 @@ export function FrontendReviewer({
               disabled={list.isPending || starting || captureInProgress}
               onClick={() => setSetupOpen(!setupOpen)}
             >
-              {setupOpen ? "Close setup" : "New frontend review"}
+              {setupOpen ? "Close setup" : "New Design QA review"}
             </Button>
           </div>
         </div>
@@ -136,7 +136,7 @@ export function FrontendReviewer({
           <>
             {list.isPending && (
               <p role="status" className="text-sm text-secondary">
-                Loading frontend reviews…
+                Loading Design QA reviews…
               </p>
             )}
             {empty && (
@@ -147,7 +147,7 @@ export function FrontendReviewer({
                 <p className="max-w-xl text-sm text-secondary">
                   Start with matching base and PR preview URLs. Each run keeps
                   its own screenshots, changed pixels, recordings, and coverage.
-                  No frontend review has run for this PR yet.
+                  No Design QA review has run for this PR yet.
                 </p>
               </Card>
             )}
@@ -230,7 +230,7 @@ function ReviewSetup({
         }}
       >
         <div>
-          <h3 className="text-sm font-medium">Capture a frontend review</h3>
+          <h3 className="text-sm font-medium">Capture a Design QA review</h3>
           <p className="mt-space-1 text-xs text-secondary">
             Use the same routes, viewport, and data on both versions. Use a base
             preview built from the PR base commit.
@@ -308,7 +308,7 @@ function ReviewSetup({
         <div>
           <Button type="submit" size="sm" disabled={pending}>
             {pending
-              ? "Starting frontend review…"
+              ? "Starting Design QA review…"
               : auth === "dummy"
                 ? "Create dummy-auth review"
                 : "Check public preview capture"}
@@ -367,7 +367,7 @@ export function FrontendReportView({
             <span className="font-mono">{run.head_sha.slice(0, 12)}</span>. The
             current PR commit is{" "}
             <span className="font-mono">{currentHeadSha.slice(0, 12)}</span>.
-            Start a new frontend review to check the latest changes.
+            Start a new Design QA review to check the latest changes.
           </p>
         </Card>
       )}
@@ -539,7 +539,7 @@ export function FrontendReportView({
 function ErrorCard({ message }: { message: string }) {
   return (
     <Card role="alert" className="p-space-4 text-sm text-error-secondary">
-      Could not load frontend review: {message}. Refresh to retry.
+      Could not load Design QA review: {message}. Refresh to retry.
     </Card>
   )
 }

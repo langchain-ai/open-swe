@@ -1,3 +1,4 @@
+import { Badge } from "@langchain/macaw-components/Badge"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
@@ -31,7 +32,7 @@ const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
-  { to: "/agents/qa", label: "QA agent", icon: EyeIcon },
+  { to: "/agents/qa", label: "Design QA", icon: EyeIcon },
   { to: "/incidents", label: "Incidents", icon: SirenIcon },
 ] as const
 
@@ -66,6 +67,14 @@ export function SidebarNav({
         >
           <item.icon size={16} weight="regular" className="shrink-0" />
           {item.label}
+          {item.to === "/agents/qa" && (
+            <Badge
+              size="xs"
+              className="shrink-0 bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+            >
+              Beta
+            </Badge>
+          )}
         </Link>
       ))}
       <DropdownMenu>
@@ -89,6 +98,14 @@ export function SidebarNav({
               <Link {...target(item.to)} onClick={onNavigate}>
                 <item.icon size={14} weight="regular" className="shrink-0" />
                 {item.label}
+                {item.to === "/agents/qa" && (
+                  <Badge
+                    size="xs"
+                    className="shrink-0 bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                  >
+                    Beta
+                  </Badge>
+                )}
               </Link>
             </DropdownMenuItem>
           ))}
