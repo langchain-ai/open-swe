@@ -1357,7 +1357,6 @@ TOOL_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
 # The calls answered from the run's plan: its preparation, and every phase and tool
 # call of a run still served from it.
 API: Final = Handlers[RunSession]()
-# Only for runs started without their catalog in the context.
 API.serve(PREPARE, RunSession.prepare)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(AFTER_MODEL, RunSession.after_model)
