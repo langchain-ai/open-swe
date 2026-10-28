@@ -1530,9 +1530,21 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
                     metadata_update["pr_state"] = new_state
 
+                previous_tracked_states = (
+                    [record.get("state") for record in pull_requests if isinstance(record, dict)]
+                    if isinstance(pull_requests, list)
+                    else []
+                )
                 tracked_states = [record.get("state") for record in updated_pull_requests]
                 if not tracked_states and metadata.get("pr_url") == pr_url:
+                    previous_tracked_states = [previous_state]
                     tracked_states = [new_state]
+                was_all_merged = bool(previous_tracked_states) and all(
+                    state == "merged" for state in previous_tracked_states
+                )
+                all_merged = bool(tracked_states) and all(
+                    state == "merged" for state in tracked_states
+                )
                 all_terminal = bool(tracked_states) and all(
                     state in _TERMINAL_PR_STATES for state in tracked_states
                 )
@@ -1578,13 +1590,11 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                     )
                 location = SourceContext.from_metadata(metadata).slack_location
                 if (
-                    location is not None
+                    was_all_merged != all_merged
+                    and location is not None
                     and not skip_on_preview("kitchen_thread_merge_reaction")
                     and await is_kitchen_channel(location[0])
                 ):
-                    all_merged = bool(tracked_states) and all(
-                        state == "merged" for state in tracked_states
-                    )
                     if all_merged:
                         if not await add_slack_reaction(*location, "merged"):
                             await add_slack_reaction(*location, "twisted_rightwards_arrows")

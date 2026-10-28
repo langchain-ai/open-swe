@@ -339,20 +339,25 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("kitchen", "other_state", "state", "merged", "legacy", "preview", "expected"),
+    ("kitchen", "before", "other_state", "state", "merged", "legacy", "preview", "expected"),
     [
-        (True, "merged", "closed", True, False, False, "add"),
-        (True, "open", "closed", True, False, False, "remove"),
-        (True, "closed", "closed", True, False, False, "remove"),
-        (True, "merged", "closed", False, False, False, "remove"),
-        (True, "merged", "open", False, False, False, "remove"),
-        (True, "merged", "closed", True, True, False, "add"),
-        (False, "merged", "closed", True, False, False, "none"),
-        (True, "merged", "closed", True, False, True, "none"),
+        (True, "open", "merged", "closed", True, False, False, "add"),
+        (True, "open", "open", "closed", True, False, False, "none"),
+        (True, "open", "closed", "closed", True, False, False, "none"),
+        (True, "open", "merged", "closed", False, False, False, "none"),
+        (True, "merged", "merged", "open", False, False, False, "remove"),
+        (True, "open", "merged", "closed", True, True, False, "add"),
+        (True, "merged", "merged", "open", False, True, False, "remove"),
+        (True, "open", "merged", "open", False, False, False, "none"),
+        (True, "merged", "merged", "closed", True, False, False, "none"),
+        (True, "open", "open", "open", False, False, False, "none"),
+        (False, "open", "merged", "closed", True, False, False, "none"),
+        (True, "open", "merged", "closed", True, False, True, "none"),
     ],
 )
 async def test_kitchen_thread_merge_reaction(
     kitchen: bool,
+    before: str,
     other_state: str,
     state: str,
     merged: bool,
@@ -363,12 +368,12 @@ async def test_kitchen_thread_merge_reaction(
     metadata = {
         "kind": "agent",
         "pr_url": "https://github.com/lc/repo/pull/7",
-        "pr_state": "merged",
+        "pr_state": before,
         "source_context": {"slack_thread": {"channel_id": "C_KITCHEN", "thread_ts": "1.0"}},
     }
     if not legacy:
         metadata["pull_requests"] = [
-            {"url": metadata["pr_url"], "state": "merged"},
+            {"url": metadata["pr_url"], "state": before},
             {"url": "https://github.com/lc/other/pull/9", "state": other_state},
         ]
     with (
