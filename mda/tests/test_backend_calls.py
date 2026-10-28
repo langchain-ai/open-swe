@@ -77,7 +77,6 @@ from runtime_api.loop import (
     AFTER_MODEL,
     BEFORE_MODEL,
     PREPARE,
-    TASK_CONTEXT,
     AfterAgent,
     BeforeModel,
     Inbox,
@@ -90,7 +89,7 @@ from runtime_api.loop import (
     ToolCallReport,
     ToolResultReply,
 )
-from runtime_api.operations import OperationResult, RunRequest, ShellVerdict
+from runtime_api.operations import OperationResult, ShellVerdict
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 from runtime_api.workers import LAUNCH_WORKER
 
@@ -118,16 +117,15 @@ def _run_backend(
     *,
     worker_grant: str | None = None,
     invocation_id: str | None = None,
-    catalog: Catalog | None = _NO_PLAN,
+    catalog: Catalog = _NO_PLAN,
 ) -> OpenSweBackend:
-    """The backend as a run of its own, outside any graph's run, started with ``catalog``,
-    or asking for it when None."""
+    """The backend as a run of its own, outside any graph's run, started with ``catalog``."""
     context = RunContext.model_validate(
         {
             "__run_token": token,
             "__worker_grant": worker_grant,
             "invocation_id": invocation_id,
-            "__catalog": None if catalog is None else catalog.model_dump(mode="json"),
+            "__catalog": catalog.model_dump(mode="json"),
         }
     )
     return Run(context).backend
@@ -1564,39 +1562,6 @@ async def test_a_worker_launch_mda_failed_to_start_is_made_again_while_it_may_pa
         assert "MDA answered" in str(result.content)
         assert "start_async_task again is safe" in str(result.content)
         assert "worker_launched" not in [hook for hook, _ in calls]
-
-
-async def test_a_run_started_without_its_catalog_calls_with_the_token_it_came_back_with(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    request = httpx2.Request("POST", "https://backend.invalid")
-    bearers: list[str] = []
-
-    async def post(
-        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
-    ) -> httpx2.Response:
-        bearers.append(headers["Authorization"])
-        if url.endswith("/catalog"):
-            catalog = Catalog(
-                operations=[
-                    OperationSpec(name="web_search", description="", parameters={}, grant="g1")
-                ],
-                run_token="settled-token",
-            )
-            return httpx2.Response(200, request=request, json=catalog.model_dump(mode="json"))
-        return httpx2.Response(200, request=request, json={})
-
-    client = MagicMock(is_closed=False)
-    client.post = AsyncMock(side_effect=post)
-    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    backend = _run_backend("started-token", catalog=None)
-
-    catalog = await backend.run.plan()
-    await call(backend, TASK_CONTEXT, RunRequest())
-
-    assert bearers == ["Bearer started-token", "Bearer settled-token"]
-    assert backend.grant(catalog.operations[0]) == "g1"
 
 
 async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(

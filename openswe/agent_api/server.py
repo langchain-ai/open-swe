@@ -17,7 +17,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import CATALOG
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
 from starlette.requests import Request
@@ -67,12 +66,7 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
     if isinstance(principal, WorkerGrant):
         if async_workers.GRANT_API.serves(endpoint):
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
-        if endpoint != CATALOG.name:
-            raise RefusedCallError("A worker grant only adopts a run token")
-        # Its tools, models and schemas only: the worker reads them before it has an
-        # identity, and never its coordinator's token.
-        catalog = await _graph(principal.coordinator)(principal.coordinator, endpoint, body)
-        return {**catalog, "run_token": None} if isinstance(catalog, dict) else catalog
+        raise RefusedCallError("A worker grant only adopts a run token")
     if async_workers.RUN_API.serves(endpoint):
         return await async_workers.RUN_API.dispatch(endpoint, principal, body)
     return await _graph(principal)(principal, endpoint, body)
