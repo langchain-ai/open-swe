@@ -888,13 +888,10 @@ async def slack_webhook(
                 extra={"agent_thread_id": mda_thread_id, "slack_subtype": event.subtype},
             )
             return ignored("MDA's Slack channel doesn't take this kind of message")
+        mda_owned_thread_id = mda_thread_id or new_mda_thread_id
         try:
-            thread_id = (
-                mda_thread_id
-                or new_mda_thread_id
-                or await common.resolve_slack_thread_id(
-                    get_langgraph_client(), channel_id, thread_ts
-                )
+            thread_id = mda_owned_thread_id or await common.resolve_slack_thread_id(
+                get_langgraph_client(), channel_id, thread_ts
             )
         except common.SlackThreadMappingError as exc:
             raise SlackRequestError(_THREAD_CONFLICT) from exc
