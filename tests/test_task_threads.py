@@ -310,26 +310,6 @@ async def test_task_participants_require_verified_identity_and_thread_access(
             await service.task_status(actor)
 
 
-@pytest.mark.parametrize("operation", ["message", "cancel"])
-async def test_verified_participant_cannot_steer_workers(client: MagicMock, operation: str) -> None:
-    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
-        f"user:{client.participant.id}"
-    )
-    actor = service.Actor(COORDINATOR, "participant")
-    with pytest.raises(PermissionError, match="thread owner"):
-        if operation == "message":
-            await service.message_task_thread(
-                actor,
-                message="Push to a private repo",
-                worker_thread_id="worker",
-                request_id="scope",
-            )
-        else:
-            await service.control_worker(actor, worker_thread_id="worker", action="cancel")
-    assert not client.created_runs
-    client.runs.cancel_many.assert_not_awaited()
-
-
 async def test_verified_participant_cannot_launch_workers(
     client: MagicMock, launch: Launch
 ) -> None:
@@ -625,22 +605,20 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
 
 
 @pytest.mark.usefixtures("registry_db")
-@pytest.mark.parametrize("as_participant", [False, True])
 async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch, as_participant: bool
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     first = await launch(actor, "first", "Implement login fix")
     worker_id = str(first["worker_thread_id"])
     client.statuses[worker_id] = "idle"
-    if as_participant:
-        client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
-            f"user:{client.participant.id}"
-        )
-        actor = service.Actor(COORDINATOR, "participant")
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    participant = service.Actor(COORDINATOR, "participant")
 
-    status = await service.task_status(actor)
+    status = await service.task_status(participant)
     workers = status["workers"]
     assert isinstance(workers, list)
     (worker,) = workers
@@ -648,19 +626,22 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert worker["worker_thread_id"] == worker_id
     assert worker["status"] == "idle"
 
-    worker_status = await service.control_worker(actor, worker_thread_id=worker_id, action="status")
+    worker_status = await service.control_worker(
+        participant, worker_thread_id=worker_id, action="status"
+    )
     assert worker_status["worker_thread_id"] == worker_id
-    if as_participant:
-        with pytest.raises(PermissionError, match="thread owner"):
-            await service.message_task_thread(
-                actor,
-                message="Push to a private repo",
-                worker_thread_id=worker_id,
-                request_id="denied",
-            )
-        assert await TaskMessage.owed(worker_id) == []
-        assert not client.created_runs
-    actor = service.Actor(COORDINATOR, OWNER)
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.message_task_thread(
+            participant,
+            message="Push to a private repo",
+            worker_thread_id=worker_id,
+            request_id="denied",
+        )
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.control_worker(participant, worker_thread_id=worker_id, action="cancel")
+    assert await TaskMessage.owed(worker_id) == []
+    assert not client.created_runs
+    client.runs.cancel_many.assert_not_awaited()
     sent = await service.message_task_thread(
         actor,
         message="Check logout too",
