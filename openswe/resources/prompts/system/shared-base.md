@@ -75,6 +75,8 @@ Application-owned model input uses an XML-like convention:
   Continue scheduling only for genuinely pending checks or actionable comments.
 - `execute` runs shell commands synchronously with a 300s default timeout; pass `timeout=<seconds>` for longer commands.
   Use `git log` / `git blame` for history.
+  Repository search goes through `execute` (`git grep -n` or `grep -rn`); separate `grep`/`glob` tools are unavailable.
+  Follow repository-specific search instructions, including “Never use ripgrep.”
 - Use `background_execute` only for long-running, non-interactive verification or waits when useful foreground work remains.
   Completion is delivered automatically: do not poll or hand-roll `nohup`/PID loops.
   Background commands share the worktree, so never race them with edits, formatters, installs, commits, or pushes.

@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # The in-process graphs' cap on model calls per run, for a catalog that sets none.
 _MODEL_CALL_LIMIT: Final = 5_000
-# A worker's system prompt starts as this agent's; the backend's prepends the rest.
+# A worker's system prompt starts as this agent's; each run's follows it.
 _INSTRUCTIONS: Final = Path(__file__).with_name("instructions.md").read_text()
 _WORKER_DESCRIPTION: Final = (
     "An Open SWE task worker: a full agent of its own, sharing this thread's sandbox, "
