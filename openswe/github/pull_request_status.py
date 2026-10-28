@@ -492,6 +492,10 @@ class PullRequestClient:
         """Add a top-level conversation comment."""
         return await self.repo.post(f"issues/{self.number}/comments", {"body": body})
 
+    async def edit_comment(self, comment_id: int, body: str) -> object:
+        """Replace the body of one of this pull request's top-level conversation comments."""
+        return await self.repo.patch(f"issues/comments/{comment_id}", {"body": body})
+
     async def labels(self) -> list[dict[str, Any]]:
         return await self.repo.pages(f"issues/{self.number}/labels")
 
