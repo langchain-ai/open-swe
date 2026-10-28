@@ -261,7 +261,10 @@ export type GitHubTriggerEvent =
 
 export type SlackTriggerEvent = "message.posted"
 export type SlackTriggerSenders = "anyone" | "people" | "bots"
-export type LinearTriggerEvent = "issue.created" | "issue.labeled"
+export type LinearTriggerEvent =
+  | "issue.created"
+  | "issue.labeled"
+  | "issue.accepted"
 
 /** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
@@ -310,6 +313,7 @@ export const AUTOMATION_EVENT_PROVIDERS = {
     events: {
       "issue.created": "Issue created",
       "issue.labeled": "Label added",
+      "issue.accepted": "Accepted from Triage",
     } satisfies Record<LinearTriggerEvent, string>,
   },
 } as const

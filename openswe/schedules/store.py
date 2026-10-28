@@ -77,11 +77,16 @@ SLACK_EVENT_DESCRIPTIONS: dict[SlackTriggerEvent, str] = {
 SlackSenders = Literal["anyone", "people", "bots"]
 _SLACK_TRIGGER_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 _SLACK_MESSAGE_MAX_CHARS = 8_000
-LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
+LinearTriggerEvent = Literal["issue.created", "issue.labeled", "issue.accepted"]
 LINEAR_EVENT_DESCRIPTIONS: dict[LinearTriggerEvent, str] = {
     "issue.created": "an issue was created",
     "issue.labeled": "a label was added to an issue",
+    "issue.accepted": "an issue was accepted out of Triage",
 }
+# Workflow state types an issue accepted out of Triage lands in.
+_LINEAR_ACCEPTED_STATE_TYPES = frozenset({"backlog", "unstarted", "started"})
+# An issue is accepted once; this outlives any realistic redelivery or re-triage.
+_LINEAR_ACCEPTED_CLAIM_TTL = timedelta(days=365)
 _LINEAR_TEAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,9}$")
 _LINEAR_DESCRIPTION_MAX_CHARS = 8_000
 _RATE_WINDOW = timedelta(hours=1)
@@ -1355,15 +1360,20 @@ def _slack_event_prompt(
 
 
 async def _claim_delivery(
-    claim_key: str, group: str, max_runs_per_hour: object, schedule_id: str
+    claim_key: str,
+    group: str,
+    max_runs_per_hour: object,
+    schedule_id: str,
+    *,
+    ttl: timedelta = _DELIVERY_CLAIM_TTL,
 ) -> bool:
     """Claim a delivery for one automation, within its trigger's hourly run cap."""
     if not isinstance(max_runs_per_hour, int):
-        return await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL)
+        return await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=ttl)
     outcome = await event_claims.claim_within_limit(
         _DELIVERY_CLAIM_SCOPE,
         claim_key,
-        ttl=_DELIVERY_CLAIM_TTL,
+        ttl=ttl,
         group=group,
         limit=max_runs_per_hour,
         within=_RATE_WINDOW,
@@ -1483,106 +1493,119 @@ def _named(items: object) -> dict[str, str]:
     }
 
 
-def _linear_issue_events(payload: dict[str, Any]) -> tuple[set[LinearTriggerEvent], set[str]]:
-    """The trigger events one Linear delivery stands for, and the label names it added."""
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    if payload.get("type") != "Issue" or not isinstance(data, dict):
-        return set(), set()
-    if payload.get("action") == "create":
-        return {"issue.created"}, set()
-    updated_from = payload.get("updatedFrom")
-    if payload.get("action") != "update" or not isinstance(updated_from, dict):
-        return set(), set()
-    before = updated_from.get("labelIds")
-    after = data.get("labelIds")
-    if not isinstance(before, list) or not isinstance(after, list):
-        return set(), set()
-    added = {str(label) for label in after} - {str(label) for label in before}
-    names = _named(data.get("labels"))
-    added_names = {names.get(label_id, "") for label_id in added} - {""}
-    return ({"issue.labeled"}, added_names) if added else (set(), set())
+class LinearIssueChange:
+    """What one Linear issue delivery did, read from its payload."""
 
+    def __init__(self, payload: dict[str, Any]) -> None:
+        data = payload.get("data")
+        self.data: dict[str, Any] = data if isinstance(data, dict) else {}
+        self.events: set[LinearTriggerEvent] = set()
+        self.added_labels: set[str] = set()
+        names = _named(self.data.get("labels"))
+        self.labels = set(names.values()) - {""}
+        project = self.data.get("project")
+        self.project = str(project.get("name") or "") if isinstance(project, dict) else ""
+        self.team = self._team_key()
+        if payload.get("type") != "Issue" or not self.data:
+            return
+        if payload.get("action") == "create":
+            self.events.add("issue.created")
+            return
+        updated_from = payload.get("updatedFrom")
+        if payload.get("action") != "update" or not isinstance(updated_from, dict):
+            return
+        before = updated_from.get("labelIds")
+        after = self.data.get("labelIds")
+        if isinstance(before, list) and isinstance(after, list):
+            added = {str(label) for label in after} - {str(label) for label in before}
+            self.added_labels = {names.get(label_id, "") for label_id in added} - {""}
+            if added:
+                self.events.add("issue.labeled")
+        if self._accepted(updated_from):
+            self.events.add("issue.accepted")
 
-def _linear_team_key(data: dict[str, Any]) -> str:
-    team = data.get("team")
-    if isinstance(team, dict) and isinstance(team.get("key"), str) and team["key"]:
-        return team["key"].upper()
-    identifier = data.get("identifier")
-    if isinstance(identifier, str) and "-" in identifier:
-        return identifier.rsplit("-", 1)[0].upper()
-    return ""
+    def _team_key(self) -> str:
+        team = self.data.get("team")
+        if isinstance(team, dict) and isinstance(team.get("key"), str) and team["key"]:
+            return team["key"].upper()
+        identifier = self.data.get("identifier")
+        if isinstance(identifier, str) and "-" in identifier:
+            return identifier.rsplit("-", 1)[0].upper()
+        return ""
 
+    def _accepted(self, updated_from: dict[str, Any]) -> bool:
+        # Linear stamps triagedAt as an issue leaves Triage, so a move that also
+        # changed it is that exit; declining, duplicating or closing isn't accepting.
+        state = self.data.get("state")
+        return (
+            "stateId" in updated_from
+            and "triagedAt" in updated_from
+            and bool(self.data.get("triagedAt"))
+            and isinstance(state, dict)
+            and state.get("type") in _LINEAR_ACCEPTED_STATE_TYPES
+        )
 
-def _linear_trigger_fires(
-    config: dict[str, Any],
-    team: str,
-    event: LinearTriggerEvent,
-    *,
-    labels: set[str],
-    added_labels: set[str],
-    project: str,
-) -> bool:
-    if config.get("team") != team or event not in (config.get("events") or []):
-        return False
-    wanted_project = config.get("project")
-    if wanted_project and wanted_project.lower() != project.lower():
-        return False
-    wanted = {label.lower() for label in config.get("labels") or []}
-    if not wanted:
-        return True
-    candidates = added_labels if event == "issue.labeled" else labels
-    return bool(wanted & {label.lower() for label in candidates})
+    def fires(self, config: dict[str, Any], event: LinearTriggerEvent) -> bool:
+        """Whether a Linear trigger's ``config`` runs for ``event``."""
+        if config.get("team") != self.team or event not in (config.get("events") or []):
+            return False
+        wanted_project = config.get("project")
+        if wanted_project and wanted_project.lower() != self.project.lower():
+            return False
+        wanted = {label.lower() for label in config.get("labels") or []}
+        if not wanted:
+            return True
+        candidates = self.added_labels if event == "issue.labeled" else self.labels
+        return bool(wanted & {label.lower() for label in candidates})
 
+    def claim(self, event: LinearTriggerEvent, delivery_id: str) -> tuple[str, timedelta]:
+        """The claim key suffix and lifetime that make ``event`` run only once."""
+        issue_id = self.data.get("id")
+        if event == "issue.accepted" and isinstance(issue_id, str) and issue_id:
+            return f"accepted:{issue_id}", _LINEAR_ACCEPTED_CLAIM_TTL
+        return delivery_id, _DELIVERY_CLAIM_TTL
 
-async def _linear_event_prompt(
-    record: dict[str, Any],
-    data: dict[str, Any],
-    event: LinearTriggerEvent,
-    *,
-    team: str,
-    labels: set[str],
-    project: str,
-) -> str:
-    creator = data.get("creator") if isinstance(data.get("creator"), dict) else {}
-    creator_email = creator.get("email") if isinstance(creator, dict) else None
-    state = data.get("state") if isinstance(data.get("state"), dict) else {}
-    lines = [
-        f"Issue: {data.get('identifier') or ''} {data.get('title') or ''}",
-        f"URL: {data.get('url') or ''}",
-        f"Team: {team}",
-        f"Project: {project or '(none)'}",
-        f"Labels: {', '.join(sorted(labels)) or '(none)'}",
-        f"State: {state.get('name') if isinstance(state, dict) else ''}",
-        f"Creator: {creator.get('name') if isinstance(creator, dict) else ''}",
-    ]
-    description = str(data.get("description") or "")[:_LINEAR_DESCRIPTION_MAX_CHARS]
-    context = "\n".join(lines) + f"\n\n{description}"
-    registered = bool(await User.login_for_email(creator_email))
-    return prompt(
-        "runs/linear-automation-event",
-        prompt=record["prompt"],
-        event_description=LINEAR_EVENT_DESCRIPTIONS[event],
-        event_context=fence_github_comment_body(context, registered=registered),
-    )
+    async def prompt(self, record: dict[str, Any], event: LinearTriggerEvent) -> str:
+        """The automation's prompt with this issue as fenced, untrusted context."""
+        creator = self.data.get("creator") if isinstance(self.data.get("creator"), dict) else {}
+        creator_email = creator.get("email") if isinstance(creator, dict) else None
+        state = self.data.get("state") if isinstance(self.data.get("state"), dict) else {}
+        lines = [
+            f"Issue: {self.data.get('identifier') or ''} {self.data.get('title') or ''}",
+            f"URL: {self.data.get('url') or ''}",
+            f"Team: {self.team}",
+            f"Project: {self.project or '(none)'}",
+            f"Labels: {', '.join(sorted(self.labels)) or '(none)'}",
+            f"State: {state.get('name') if isinstance(state, dict) else ''}",
+            f"Creator: {creator.get('name') if isinstance(creator, dict) else ''}",
+        ]
+        description = str(self.data.get("description") or "")[:_LINEAR_DESCRIPTION_MAX_CHARS]
+        context = "\n".join(lines) + f"\n\n{description}"
+        registered = bool(await User.login_for_email(creator_email))
+        return prompt(
+            "runs/linear-automation-event",
+            prompt=record["prompt"],
+            event_description=LINEAR_EVENT_DESCRIPTIONS[event],
+            event_context=fence_github_comment_body(context, registered=registered),
+        )
 
 
 async def launch_linear_automations(
     payload: dict[str, Any], delivery_id: str
 ) -> list[dict[str, Any]]:
-    """Run every automation a Linear issue delivery triggers, each at most once per delivery."""
-    events, added_labels = _linear_issue_events(payload)
-    if not events:
+    """Run every automation a Linear issue delivery triggers.
+
+    Each runs at most once per delivery, and for ``issue.accepted`` once per issue.
+    """
+    change = LinearIssueChange(payload)
+    if not change.events:
         return []
     if not delivery_id:
         logger.warning("Linear automation delivery is missing a delivery ID")
         return []
-    data: dict[str, Any] = payload["data"]
-    team = _linear_team_key(data)
+    team = change.team
     if not _LINEAR_TEAM_KEY_RE.fullmatch(team):
         return []
-    labels = set(_named(data.get("labels")).values()) - {""}
-    project_value = data.get("project")
-    project = str(project_value.get("name") or "") if isinstance(project_value, dict) else ""
     async with transaction() as conn:
         records = await _load_records(
             conn,
@@ -1598,15 +1621,8 @@ async def launch_linear_automations(
                 (trigger.get("config") or {}, event)
                 for trigger in record.get("triggers") or []
                 if trigger.get("kind") == "linear"
-                for event in sorted(events)
-                if _linear_trigger_fires(
-                    trigger.get("config") or {},
-                    team,
-                    event,
-                    labels=labels,
-                    added_labels=added_labels,
-                    project=project,
-                )
+                for event in sorted(change.events)
+                if change.fires(trigger.get("config") or {}, event)
             ),
             None,
         )
@@ -1614,18 +1630,15 @@ async def launch_linear_automations(
             continue
         config, event = match
         claim_prefix = f"{schedule_id}:linear:{team}:"
-        claim_key = f"{claim_prefix}{delivery_id}"
+        claim_suffix, claim_ttl = change.claim(event, delivery_id)
+        claim_key = f"{claim_prefix}{claim_suffix}"
         if not await _claim_delivery(
-            claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id
+            claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id, ttl=claim_ttl
         ):
             continue
         try:
             result = await _launch_agent_schedule_record(
-                record,
-                repo=None,
-                prompt=await _linear_event_prompt(
-                    record, data, event, team=team, labels=labels, project=project
-                ),
+                record, repo=None, prompt=await change.prompt(record, event)
             )
         except Exception:
             logger.exception(

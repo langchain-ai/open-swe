@@ -12,7 +12,7 @@ Args:
   - ``{"kind": "github", "repo": "owner/repo", "events": [...]}`` runs on events in that repository, passed to the run as untrusted context: "issues.opened", "pull_request.opened", "pull_request.closed" (merged or not), and "pull_request.merged".
   - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}`` runs on new top-level messages in a Slack channel Open SWE is a member of, passed to the run as untrusted context.
     Optional filters: ``senders`` ("anyone", "people", or "bots"), ``match`` (a case-insensitive regular expression the text must match), and ``max_runs_per_hour``.
-  - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created" and "issue.labeled" (a label was added).
+  - ``{"kind": "linear", "team": "ENG", "events": [...]}`` runs on issue events in a Linear team, passed to the run as untrusted context: "issue.created", "issue.labeled" (a label was added) and "issue.accepted" (moved out of Triage into the backlog or a planned state; once per issue).
     Optional filters: ``labels`` (names; the issue must carry, or for "issue.labeled" gain, one of them), ``project`` (a project name), and ``max_runs_per_hour``.
     A GitHub trigger's ``repo`` must be one the configuring admin can access.
 - name: Short display name.

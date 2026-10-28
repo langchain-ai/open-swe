@@ -791,6 +791,8 @@ def _linear_issue(
     labels: dict[str, str] | None = None,
     labels_before: list[str] | None = None,
     project: str | None = None,
+    state_type: str = "triage",
+    updated_from: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     labels = labels or {}
     payload: dict[str, Any] = {
@@ -807,10 +809,14 @@ def _linear_issue(
             "labels": [{"id": label_id, "name": name} for label_id, name in labels.items()],
             "project": {"name": project} if project else None,
             "creator": {"name": "Outsider", "email": "outsider@example.com"},
+            "state": {"id": f"state-{state_type}", "name": state_type.title(), "type": state_type},
+            "triagedAt": None if state_type == "triage" else "2026-10-28T09:00:00.000Z",
         },
     }
     if labels_before is not None:
         payload["updatedFrom"] = {"labelIds": labels_before}
+    if updated_from is not None:
+        payload["updatedFrom"] = {**payload.get("updatedFrom", {}), **updated_from}
     return payload
 
 
@@ -869,6 +875,49 @@ async def test_linear_triggers_fire_on_created_and_labeled_issues_within_their_f
     assert "ENG-7 Checkout fails" in prompt
     # An unregistered creator's issue text is fenced as untrusted.
     assert "<dangerous-external-untrusted-users-comment>" in prompt
+
+
+async def test_linear_issue_accepted_fires_once_when_an_issue_leaves_triage(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Fix the SDK issue",
+            triggers=[LinearTrigger(team="LSDK", events=["issue.accepted"], labels=["sdk"])],
+        ),
+    )
+
+    async def move(state_type: str, delivery: str, **updated_from: object) -> list[str]:
+        payload = _linear_issue(
+            "update",
+            team="LSDK",
+            labels={"l1": "sdk"},
+            state_type=state_type,
+            updated_from={"stateId": "state-triage", "triagedAt": None, **updated_from},
+        )
+        return [
+            r["schedule_id"] for r in await schedules.launch_linear_automations(payload, delivery)
+        ]
+
+    # Declining or marking a duplicate leaves Triage without accepting.
+    assert await move("canceled", "d1") == []
+    assert await move("duplicate", "d2") == []
+    assert await move("backlog", "d3") == [created["id"]]
+    # Back in Triage and accepted again, the issue still runs only once.
+    assert await move("unstarted", "d4") == []
+    # Moving on later, from a state that isn't Triage, is not an acceptance.
+    payload = _linear_issue(
+        "update",
+        team="LSDK",
+        labels={"l1": "sdk"},
+        state_type="started",
+        updated_from={"stateId": "state-unstarted"},
+    )
+    assert payload["data"]["triagedAt"]
+    assert await schedules.launch_linear_automations(payload, "d5") == []
+    assert len(fake_client.runs.created) == 1
 
 
 async def test_open_swe_events_do_not_trigger_automations(

@@ -637,7 +637,9 @@ export function AutomationEditor({
                 {hint(
                   draft.events.includes("issue.labeled")
                     ? "Label added fires when the issue gains one of these labels, or any label when none are listed."
-                    : "Issue details reach the run as untrusted context."
+                    : draft.events.includes("issue.accepted")
+                      ? "Accepted from Triage fires once per issue, when it moves out of Triage into the backlog or a planned state."
+                      : "Issue details reach the run as untrusted context."
                 )}
               </TriggerCard>
             )
