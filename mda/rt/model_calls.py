@@ -203,5 +203,8 @@ def model_call_guards(
         ModelCallTimeoutMiddleware(timeout_seconds),
         # Its default answers with the error as the model's reply instead of raising.
         ModelRetryMiddleware(retry_on=(TimeoutError,), on_failure="error"),
+        # With BackendRunMiddleware's static-prompt breakpoint this fills all four of a
+        # request's cache breakpoints (static prompt, last system block, last tool, automatic);
+        # Anthropic rejects a fifth, so anything adding one must give one up.
         AnthropicPromptCachingMiddleware(ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"),
     ]

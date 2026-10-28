@@ -67,9 +67,10 @@ Every call is authenticated with the run token.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
-- **One graph for every run:** the factory builds each graph once per process from what is the same for every run that plays it (`GraphInputs`: the graph, and where its workers report) and declares that to MDA (`_openswe_graph_inputs`, `vendor/mda-changes/2026-10-26-openswe-graph-inputs.md`), which compiles it once and shares it between every run, thread and person, and every read of a thread's state.
+- **One graph per graph and models:** `agent` is a `shared_factory` (`vendor/mda-changes/2026-10-27-shared-factory.md`).
+  MDA builds it only from what is the same for every run that plays the graph on the same models (`GraphInputs`: the graph, the run's models, and where its workers report), once per process for each distinct inputs, and shares its compiled graph between every such run, thread and person, and every read of a thread's state.
   Every graph has the same middleware, so a thread reads alike through any of them.
-  Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the models, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
+  Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the model a call is routed to, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
 
 The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model).
 The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them.
@@ -104,7 +105,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 |---|---|
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 
 The backend:
@@ -150,7 +151,6 @@ uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
 CI and manual deploys run the CLI from this project's locked environment.
-The deploy CLI passes the checkout's commit SHA as `LANGSMITH_REVISION_ID` so traces identify the MDA code they ran; a project deployed without git can set it in `.env`.
 `managed-deepagents` is the SDK vendored in [`vendor/managed-deepagents-sdk`](../vendor/README.md): `mda/` installs its runtime as an editable path source, and `make mda-cli` builds its CLI with cargo into that runtime, where the `mda` command runs it.
 Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI, and it rebuilds whenever the vendored CLI changed; `mda build` and `mda deploy` bundle that runtime, so what deploys is exactly the vendored tree.
 Only the SDK's `main` is vendored: `uv run scripts/vendor.py [sha]` vendors main's head or a commit on it, records the exact commit in `UPSTREAM`, three-way merges upstream's changes into the files we edited there, and relocks `mda/`; `--pr <n>` carries an upstream pull request not yet on main, recorded in `vendor/mda-upstream-prs`; `--diff` prints our changes ([`vendor/README.md`](../vendor/README.md)).

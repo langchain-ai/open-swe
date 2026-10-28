@@ -263,6 +263,10 @@ class SystemPromptRecord:
 
 LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
+# Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
+# empty reply so background titling never renames threads or code channels mid-spec.
+_THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
+
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
 _ATTRIBUTION_RE = re.compile(r"@([A-Za-z0-9-]+):")
@@ -1711,6 +1715,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("followup", lambda ctx: "E2E_FOLLOWUP" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
         "human_review_resummarize",
@@ -1784,6 +1789,8 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
+                if _text(message.content).startswith(_THREAD_TITLE_PROMPT_PREFIX):
+                    return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
                 LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
         humans = _script_humans(messages)

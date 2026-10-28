@@ -207,7 +207,10 @@ export function AllowedSlackBotsSection({
                         item.bot_id === bot.bot_id
                     )
                     return (
-                      <button
+                      <Button
+                        color="secondary"
+                        variant="plain"
+                        size="sm"
                         key={`${bot.team_id}:${bot.bot_id}`}
                         type="button"
                         disabled={allowed || unavailable}
@@ -217,7 +220,7 @@ export function AllowedSlackBotsSection({
                             : `Allow ${bot.name}`
                         }
                         onClick={() => allow(bot.user_id)}
-                        className="flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-2 text-left transition-colors focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-elevated-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        className="h-auto w-full justify-start gap-space-3 px-space-2 py-space-2 text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none enabled:hover:bg-elevated-hover disabled:cursor-not-allowed disabled:bg-transparent disabled:opacity-50"
                       >
                         <span aria-hidden="true">
                           <Avatar
@@ -245,7 +248,7 @@ export function AllowedSlackBotsSection({
                               ? "Verifying…"
                               : "Allow"}
                         </span>
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>
@@ -302,10 +305,14 @@ export function AllowedSlackBotsSection({
               key={`${bot.team_id}:${bot.bot_id}`}
               className="flex items-center gap-space-3 px-space-3 py-space-3"
             >
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`${bot.name} ${bot.bot_id} Enabled`}
                 type="button"
                 onClick={() => onBotChange?.(`${bot.team_id}:${bot.bot_id}`)}
-                className="flex min-w-0 flex-1 items-center gap-space-3 rounded-md py-space-1 text-left hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="h-auto min-w-0 flex-1 justify-start gap-space-3 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 disabled={!onBotChange}
               >
                 <span aria-hidden="true">
@@ -333,7 +340,7 @@ export function AllowedSlackBotsSection({
                     className="text-icon-secondary"
                   />
                 )}
-              </button>
+              </Button>
               <Button
                 color="secondary"
                 variant="plain"

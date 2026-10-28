@@ -1,7 +1,7 @@
 import shutil
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock
@@ -487,3 +487,59 @@ async def test_a_plan_left_at_an_older_merge_base_is_replanned_without_base_bran
     assert [file.path for file in workspace.index.files] == ["feature.py"]
     stored = await Walkthrough.get(pull_request.id, with_index=True)
     assert stored is not None and stored.merge_base_sha == base
+
+
+async def test_a_head_change_during_planning_ends_the_scout(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from runtime_api.loop import RunCall
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.database import postgres
+    from openswe.review_scout.graph import PrepareReviewScoutRunMiddleware
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.tools import plan_walkthrough
+
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"cli.py": "print(1)\n"}, "feature")
+    index = await _pin(checkout, base, head)
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, base, index, Plan.start(head, index))
+    stored = SimpleNamespace(head_sha=head)
+    session = AsyncMock()
+    session.scalar.return_value = stored
+
+    @asynccontextmanager
+    async def database_session() -> AsyncIterator[AsyncMock]:
+        yield session
+
+    monkeypatch.setattr(postgres, "session", database_session)
+    monkeypatch.setattr(plan_walkthrough, "_workspace", AsyncMock(return_value=workspace))
+    config = {"configurable": {"thread_id": "scout"}}
+    model = ModelChoice("anthropic:claude-sonnet-4-5", {})
+    surface = ToolSurface(
+        base_tools=[plan_walkthrough.walkthrough_describe_other],
+        middleware=[PrepareReviewScoutRunMiddleware(thread_id="scout", config=config)],
+        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+    )
+    await surface.prepare()
+    run = RunSession(surface, config, None, started_here=True)
+    stored.head_sha = _commit(repo, {"cli.py": "print(2)\n"}, "push")
+
+    result = await run.operation(
+        RunOperation(
+            name="walkthrough_describe_other",
+            arguments={"summary": "Noise"},
+            state={"scout_nothing_to_plan": False},
+            request_id="call-1",
+        )
+    )
+    assert result.state == {"scout_nothing_to_plan": True}
+    next_step = await run.before_model(RunCall(state=result.state))
+    assert next_step.jump_to == "end"
+    assert next_step.call is None
+    assert workspace.plan.other_summary == ""
+    session.commit.assert_not_awaited()
