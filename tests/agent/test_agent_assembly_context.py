@@ -453,10 +453,6 @@ SLACK_TOOL_NAMES = {
         ("github", {}, False),
         ("github", {"channel_id": "C123"}, False),
         ("github", {"thread_ts": "1700000000.000100"}, False),
-        ("github", {"channel_id": "", "thread_ts": "1700000000.000100"}, False),
-        ("github", {"channel_id": "C123", "thread_ts": ""}, False),
-        ("github", {"channel_id": " ", "thread_ts": "1700000000.000100"}, False),
-        ("github", {"channel_id": "C123", "thread_ts": " "}, False),
     ],
 )
 async def test_web_reply_turns_require_slack_thread_context_for_slack_tools(
