@@ -20,7 +20,7 @@ from pydantic import JsonValue
 
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.sandboxes.paths import resolve_sandbox_work_dir
+from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.walkthrough.diff import Carry, DiffIndex, LineMaps
@@ -46,7 +46,8 @@ class PinnedCheckout:
     async def locate(cls, backend: SandboxBackendProtocol, repo: str) -> Self:
         if not _REPO_NAME_RE.fullmatch(repo):
             raise CheckoutError("walkthrough repository name is invalid")
-        return cls(backend, f"{await resolve_sandbox_work_dir(backend)}/{repo}")
+        work_dir = await resolve_sandbox_work_dir(backend)
+        return cls(backend, await resolve_checkout_dir(backend, work_dir, repo))
 
     async def _run(self, script: str, *, cwd: str = "") -> str:
         result = await self.backend.aexecute(
@@ -57,13 +58,21 @@ class PinnedCheckout:
             raise CheckoutError(result.output.strip()[-2000:])
         return result.output
 
-    async def pinned(self) -> tuple[str, str] | None:
+    async def pinned(self, *, allow_missing: bool = False) -> tuple[str, str] | None:
         """The ``(merge base, head)`` this checkout is pinned to, or ``None`` when there is none."""
         result = await self.backend.aexecute(
             f"cd {shlex.quote(self.repo_dir)} 2>/dev/null && "
+            f"test -e .git || exit 72\n"
             f"git rev-parse -q --verify {MERGE_BASE_REF} && git rev-parse -q --verify {HEAD_REF}",
             timeout=GIT_TIMEOUT_SECONDS,
         )
+        if result.exit_code == 72:
+            if allow_missing:
+                return None
+            raise CheckoutError(
+                f"Repository not found at {self.repo_dir}; restore or prepare the repository "
+                "checkout in this sandbox before opening the walkthrough."
+            )
         lines = result.output.split()
         if result.exit_code not in (0, None) or len(lines) != 2:
             return None
@@ -82,7 +91,7 @@ class PinnedCheckout:
                 merge_base_sha = await pull.merge_base(head_sha)
         except (GitHubAppUnavailable, httpx2.HTTPError, ValueError) as exc:
             raise CheckoutError(f"could not find the pull request's merge base: {exc}") from exc
-        if await self.pinned() == (merge_base_sha, head_sha):
+        if await self.pinned(allow_missing=True) == (merge_base_sha, head_sha):
             return False
         work_dir, _, name = self.repo_dir.rpartition("/")
         merge_base, head = shlex.quote(merge_base_sha), shlex.quote(head_sha)

@@ -18,6 +18,7 @@ until a run receives it.
 """
 
 from datetime import datetime
+from typing import Final
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
@@ -25,6 +26,10 @@ from pydantic import BaseModel, JsonValue
 from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
+
+# Held state a call carries once summarization replaced the conversation's start: the
+# index of the first message the model still sees.
+VISIBLE_FROM: Final = "visible_from"
 
 
 class RunCall(RunRequest):
@@ -186,6 +191,9 @@ class GitHubProxyRefreshed(BaseModel):
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
+    # False when the classifier could not decide; the run uses the route for this
+    # call only, so a later turn classifies again instead of keeping a fallback.
+    persist: bool = True
 
 
 class ChosenModel(RunRequest):
@@ -198,8 +206,9 @@ class ChosenModel(RunRequest):
 class TaskContext(BaseModel):
     """The task the thread belongs to, as each model call tells the model."""
 
-    # Added to each call's system prompt: the thread's role in the task.
-    instructions: str = ""
+    # The thread's role in the task, added to the conversation when it differs from the
+    # role the model last saw there.
+    instructions: str | None = None
     # The task's context, added to the conversation where the model no longer sees it.
     message: str | None = None
 
@@ -210,8 +219,9 @@ class ReplyOnBehalf(RunCall):
     text: str
 
 
-# Preparation the runtime makes again on a restarted run anyway.
-PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
+# Preparation the runtime makes again on a restarted run anyway. It waits up to ten
+# minutes on the review scout's walkthrough.
+PREPARE = Endpoint("prepare", Prepare, PhaseResult, seconds=900.0, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
@@ -223,7 +233,9 @@ INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
+AFTER_MODEL = Endpoint(
+    "after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)

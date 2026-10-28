@@ -1309,8 +1309,29 @@ def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: 
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
-def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
-    return JSONResponse([])
+def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:
+    required_checks: set[str] = {
+        check[context_key]
+        for pull in fakes.pulls()
+        if (pull["owner"], pull["repo"], pull["base"]) == (owner, repo, branch)
+        for checks, context_key in ((pull["check_runs"], "name"), (pull["statuses"], "context"))
+        for check in checks
+        if check.get("required")
+    }
+    return JSONResponse(
+        [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": name} for name in sorted(required_checks)
+                    ]
+                },
+            }
+        ]
+        if required_checks
+        else []
+    )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")

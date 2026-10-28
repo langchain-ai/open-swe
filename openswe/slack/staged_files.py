@@ -9,7 +9,7 @@ the model runs, downloads the files and writes them there.
 import logging
 import posixpath
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 PENDING_SLACK_FILES_KEY = "slack_files_pending"
 SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
+_MAX_SLACK_FILE_ATTACHMENTS = 10
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,46 @@ class StagedSlackFile:
 
     filename: str
     sandbox_path: str
+
+
+def slack_file_entries(messages: Sequence[Mapping[str, object]]) -> list[SlackFileEntry]:
+    """Non-image files attached to the given messages, in first-seen order."""
+    entries: list[SlackFileEntry] = []
+    seen: set[str] = set()
+    for message in messages:
+        files = message.get("files")
+        if not isinstance(files, list):
+            continue
+        for file_info in files:
+            if not isinstance(file_info, dict) or file_info.get("url_private") in (None, ""):
+                continue
+            mimetype = file_info.get("mimetype")
+            if isinstance(mimetype, str) and mimetype.startswith("image/"):
+                continue
+            url = str(file_info["url_private"])
+            if url in seen:
+                continue
+            seen.add(url)
+            name = file_info.get("name")
+            entries.append(SlackFileEntry(name=name if isinstance(name, str) else "", url=url))
+            if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
+                return entries
+    return entries
+
+
+def slack_files_section(staged: list[StagedSlackFile]) -> str:
+    """The prompt section listing files staged for the thread's sandbox, or empty."""
+    if not staged:
+        return ""
+    lines = [
+        "## Slack File Attachments",
+        "These files from Slack were staged into this thread's sandbox:",
+        *[
+            f"- `{file.sandbox_path}` (originally uploaded to Slack as `{file.filename}`)"
+            for file in staged
+        ],
+    ]
+    return "\n".join(lines)
 
 
 class _PendingFile(BaseModel):

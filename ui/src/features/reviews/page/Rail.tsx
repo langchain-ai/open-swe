@@ -145,13 +145,17 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
       <ul className="mt-space-3 flex flex-col gap-space-2">
         {starters.slice(0, 4).map((text) => (
           <li key={text}>
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={text}
               type="button"
               onClick={() => askInChat(text)}
-              className="w-full rounded-lg border border-default px-space-3 py-space-2 text-left text-xs text-primary transition-colors hover:border-strong hover:bg-surface-level-1-hover"
+              className="h-auto w-full justify-start rounded-lg border border-default px-space-3 py-space-2 text-left whitespace-normal text-primary hover:border-strong hover:bg-surface-level-1-hover"
             >
               {text}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>

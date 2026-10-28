@@ -161,6 +161,7 @@ from managed_deepagents._telemetry.run import (
     start_run,
 )
 from managed_deepagents._telemetry.run_wrapper import observe_run
+from managed_deepagents.agent_entry import SharedAgentFactory
 from managed_deepagents.define_deep_agent import DeepAgentDefinition
 from managed_deepagents.run_context import ManagedChannelContext, ManagedRunContext
 
@@ -179,6 +180,7 @@ if TYPE_CHECKING:
     from langgraph_sdk.runtime import ServerRuntime
     from langsmith.sandbox import Sandbox
     from langsmith.sandbox import SandboxClient as LangSmithSandboxClient
+    from pydantic import BaseModel
 
     from managed_deepagents._managed_tools import RuntimeBackendFactory
     from managed_deepagents._sandbox_proxy import SandboxProxyConfigSync
@@ -799,7 +801,11 @@ async def compile_managed_agent_async(
     )
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
-    definition = await resolve_agent_definition(entry, factory_runtime)
+    shared_inputs: str | None = None
+    if isinstance(entry, SharedAgentFactory):
+        definition, shared_inputs = await _SharedDefinitions.resolve(entry, factory_runtime)
+    else:
+        definition = await resolve_agent_definition(entry, factory_runtime)
     if GENERAL_PURPOSE in (async_subagent_graphs or {}) or async_subagent == GENERAL_PURPOSE:
         definition = with_async_general_purpose(definition)
     if async_subagent is not None:
@@ -827,6 +833,7 @@ async def compile_managed_agent_async(
         skip_factory_inspection_tools=factory_inspection,
         factory_entry=factory_entry,
         shared_graph=async_subagent or "lead",
+        shared_inputs=shared_inputs,
     )
 
 
@@ -852,12 +859,14 @@ async def _compile_resolved_managed_agent_async(
     skip_factory_inspection_tools: bool = False,
     factory_entry: bool = False,
     shared_graph: str | None = None,
+    shared_inputs: str | None = None,
 ) -> CompiledAgent:
     """Select native context schema and memory access for a resolved definition.
 
-    A definition that declares ``_openswe_graph_inputs`` is compiled once per process
-    for those inputs and shared by every run and read of ``shared_graph`` (the lead's
-    graph, or an async subagent's), whichever thread or caller it serves.
+    A definition a shared factory built (``shared_inputs``, the digest of its inputs)
+    is compiled once per process for those inputs and shared by every run and read of
+    ``shared_graph`` (the lead's graph, or an async subagent's), whichever thread or
+    caller it serves.
     """
     started_monotonic_ms = time.monotonic() * 1000
 
@@ -932,10 +941,9 @@ async def _compile_resolved_managed_agent_async(
             policy_schema,
             selected_by_dynamic_resolver=memory_selected_by_dynamic_resolver,
         )
-    inputs = definition.config.get("_openswe_graph_inputs")
     key = (
-        _SharedGraphs.key(shared_graph, inputs)
-        if shared_graph is not None and isinstance(inputs, Mapping)
+        (shared_graph, shared_inputs)
+        if shared_graph is not None and shared_inputs is not None
         else None
     )
     policy = (allow_agent, user_access.user_id, user_access.denied_reason) if is_run else None
@@ -1033,19 +1041,51 @@ class _BuiltGraph:
 _SHARED_GRAPHS_KEPT = 32
 
 
-class _SharedGraphs:
-    """Compiled graphs shared by every run and read, by graph and declared inputs.
+class _SharedDefinitions:
+    """Each shared factory's definitions, by the digest of their inputs: one build each.
 
-    Only a definition that declares ``_openswe_graph_inputs`` is kept: it promises
-    that nothing it builds belongs to one run, thread or caller.
+    A shared factory builds from its inputs alone, so the same inputs always build the
+    same definition, and an access whose inputs have one kept never builds again.
+    """
+
+    _built: ClassVar[
+        OrderedDict[tuple[SharedAgentFactory[BaseModel], str], DeepAgentDefinition]
+    ] = OrderedDict()
+
+    @classmethod
+    async def resolve(
+        cls, entry: SharedAgentFactory[BaseModel], runtime: ManagedServerRuntime
+    ) -> tuple[DeepAgentDefinition, str]:
+        """The definition for this access's inputs, built on the first access with them."""
+        try:
+            resolved = await entry.resolve(runtime)
+        except Exception:  # noqa: BLE001 - callback failures cross an untrusted boundary
+            raise RuntimeError("agent factory failed") from None
+        key = (entry, resolved.digest)
+        definition = cls._built.get(key)
+        if definition is None:
+            try:
+                selected = entry.build(resolved)
+            except Exception:  # noqa: BLE001 - callback failures cross an untrusted boundary
+                raise RuntimeError("agent factory failed") from None
+            if not isinstance(selected, DeepAgentDefinition):
+                raise TypeError("agent factory must return define_deep_agent(...)")
+            definition = _snapshot_factory_definition(selected)
+            cls._built[key] = definition
+        cls._built.move_to_end(key)
+        while len(cls._built) > _SHARED_GRAPHS_KEPT:
+            cls._built.popitem(last=False)
+        return definition, resolved.digest
+
+
+class _SharedGraphs:
+    """Compiled graphs shared by every run and read, by graph and shared inputs.
+
+    Only a shared factory's definitions are kept: it builds them from its inputs
+    alone, so nothing in them belongs to one run, thread or caller.
     """
 
     _built: ClassVar[OrderedDict[tuple[str, str], _BuiltGraph]] = OrderedDict()
-
-    @staticmethod
-    def key(graph: str, inputs: Mapping[str, object]) -> tuple[str, str]:
-        canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        return graph, hashlib.sha256(canonical.encode()).hexdigest()
 
     @classmethod
     def built(
@@ -1150,7 +1190,6 @@ def _compile_managed_agent(
     merged.pop("sandbox", None)
     merged.pop("browser", None)
     merged.pop("replicate_traces", None)
-    merged.pop("_openswe_graph_inputs", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (

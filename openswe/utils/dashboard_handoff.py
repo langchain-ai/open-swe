@@ -14,6 +14,8 @@ DASHBOARD_HANDOFF_BODY = (
 # Stamped by the proxy, never trusted from a client: another agent thread sent
 # this on its person's behalf, so it must not move the conversation to Web.
 RELAYED_FROM_KEY = "relayed_from_thread_id"
+# The run whose inbox carried ``RELAYED_FROM_KEY`` into run state.
+RELAY_RUN_ID_KEY = "relay_run_id"
 # Where a dashboard message carries its replies: beside the content, so they
 # survive both the transcript and the SDK stream paths.
 REPLIES_KEY = "replies"

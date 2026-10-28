@@ -42,7 +42,7 @@ from pydantic import (
 )
 from runtime_api.catalog import Catalog, OperationSpec
 from runtime_api.endpoint import Delivery, call
-from runtime_api.loop import RunCall
+from runtime_api.loop import VISIBLE_FROM, RunCall
 from runtime_api.workers import ADOPT, Adopt
 
 from rt.outbox import Outbox
@@ -53,6 +53,8 @@ logger = logging.getLogger(__name__)
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
+# What MDA's summarization records; the backend hears only where it cut the conversation.
+_SUMMARIZATION_EVENT: Final = "_summarization_event"
 # What a call takes past its own ``timeout`` before it answers that it ran out: the
 # sandbox's grace for an overrunning command, and killing it.
 TOOL_CALL_SLACK_SECONDS: Final = 300.0
@@ -124,6 +126,10 @@ def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     """The graph state the backend's hooks keep, which goes back with every call."""
     held = state.get("open_swe_state")
     forwarded = {key: state[key] for key in _FORWARDED_STATE_KEYS if key in state}
+    event = state.get(_SUMMARIZATION_EVENT)
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    if isinstance(cutoff, int):
+        forwarded[VISIBLE_FROM] = cutoff
     return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
 
 
@@ -417,6 +423,7 @@ class OpenSweBackend:
         }
         waits = iter(_RETRY_SECONDS)
         while True:
+            started = asyncio.get_running_loop().time()
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}{path}",
@@ -427,6 +434,13 @@ class OpenSweBackend:
                 response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:
+                logger.warning(
+                    "Backend call timed out",
+                    extra={
+                        "endpoint": label,
+                        "elapsed_seconds": asyncio.get_running_loop().time() - started,
+                    },
+                )
                 raise BackendTimeoutError(f"{label} failed ({type(exc).__name__})") from exc
             except httpx2.HTTPError as exc:
                 status = (
