@@ -149,8 +149,15 @@ class TestLinearSessionRepository:
             (ThreadRecord(True, {"repo": {"owner": "acme", "name": "api"}}), None, "api"),
             # "repo setup" is prose, not a choice; the explicit token is.
             (_NEW_THREAD, "Fix the repo setup. It crashes in repo:acme/web on login.", "web"),
+            # An uploaded screenshot or a gist isn't a repository; the link after them is.
+            (
+                _NEW_THREAD,
+                "![shot](https://github.com/user-attachments/assets/0b1c) "
+                "https://gist.github.com/ada/123 https://github.com/acme/app/issues/7",
+                "app",
+            ),
         ],
-        ids=["the-thread-remembers", "the-issue-names"],
+        ids=["the-thread-remembers", "the-issue-names", "the-issue-links"],
     )
     async def test_a_turn_naming_no_repository_works_where_the_session_does(
         self, thread: ThreadRecord, description: str | None, name: str
