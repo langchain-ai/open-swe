@@ -78,6 +78,7 @@ from runtime_api.catalog import (
     InboxSpec,
     ModelSpec,
     OperationSpec,
+    RunModels,
     SandboxCreate,
     SandboxSpec,
 )
@@ -960,6 +961,85 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
 
     assert result["messages"][-1].content == "done"
     assert fallback.sent
+
+
+@pytest.mark.parametrize("selection", ["primary", "route", "vision", "fallback"])
+async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
+    monkeypatch: pytest.MonkeyPatch, selection: str
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    primary = ModelSpec(model_id="anthropic:primary", kwargs={})
+    routed = ModelSpec(model_id="anthropic:routed", kwargs={})
+    vision = ModelSpec(model_id="anthropic:vision", kwargs={})
+    fallback = ModelSpec(model_id="anthropic:fallback", kwargs={})
+    built: dict[str, ChatAnthropic] = {
+        spec.model_id: _RecordingAnthropic(model_name=spec.model_id, api_key="test", sent=[])
+        for spec in (primary, routed, vision, fallback)
+    }
+    if selection == "fallback":
+        built[routed.model_id] = _StalledAnthropic(model_name=routed.model_id, api_key="test")
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
+    backend = _run_backend(
+        invocation_id="turn",
+        catalog=Catalog(models=RunModels(model=primary, subagent_model=primary, use_gateway=False)),
+    )
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "before_model":
+            return BeforeModel(
+                call=ModelCall(
+                    system_prompt="test",
+                    model=None if selection == "primary" else routed,
+                    vision=vision if selection == "vision" else None,
+                    fallback=fallback if selection == "fallback" else None,
+                )
+            )
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    client = MagicMock(spec=Client)
+    patches: dict[object, dict[str, object]] = {}
+
+    def update(run_id: object, **kwargs: object) -> None:
+        patches[run_id] = deepcopy(kwargs)
+
+    client.update_run.side_effect = update
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=cast(
+            list[AgentMiddleware],
+            [BackendRunMiddleware(backend), *model_call_guards(timeout_seconds=0.05)],
+        ),
+    )
+    message = (
+        HumanMessage(content=[{"type": "image_url", "image_url": {"url": "https://image.invalid"}}])
+        if selection == "vision"
+        else HumanMessage("hi")
+    )
+    with tracing_context(enabled=True):
+        result = await graph.ainvoke(
+            {"messages": [message]},
+            {
+                "callbacks": [LangChainTracer(client=client, project_name="test")],
+                "metadata": {"invocation_id": "turn"},
+            },
+        )
+    assert result["messages"][-1].content == "done"
+    created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
+    root_id = next(run_id for run_id, run in created.items() if not run.get("parent_run_id"))
+    expected = {"primary": primary, "route": routed, "vision": vision, "fallback": fallback}
+    assert _run_metadata(patches[root_id])["model"] == expected[selection].model_id
+    llms = [run_id for run_id, run in created.items() if run["run_type"] == "llm"]
+    assert len(llms) == (2 if selection == "fallback" else 1)
+    expected_calls = (
+        [routed.model_id, fallback.model_id]
+        if selection == "fallback"
+        else [expected[selection].model_id]
+    )
+    assert [
+        _run_metadata(patches.get(run_id, created[run_id]))["model"] for run_id in llms
+    ] == expected_calls
 
 
 async def test_a_stalled_subagent_call_answers_with_the_timeout() -> None:

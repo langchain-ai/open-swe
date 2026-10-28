@@ -65,6 +65,11 @@ class TurnTrace:
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
 
+    def record_model(self, model_id: str) -> None:
+        """Tag the turn with its most recently attempted model, without relabeling child calls."""
+        if self.root is not None:
+            self.root.metadata["model"] = model_id
+
     @staticmethod
     def current_headers() -> dict[str, str]:
         """Distributed-tracing headers for the running call's span, so a backend hook nests under it.
