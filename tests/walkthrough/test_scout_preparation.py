@@ -18,10 +18,13 @@ from openswe.sandboxes.repo_prep import ReviewRepoPreparationError
         (2, ["head", "new"], "stale"),
         (0, ["new"], "stale"),
         (0, ["head"], "moved"),
+        (0, [RuntimeError("GitHub unavailable")], "planned"),
+        (1, [RuntimeError("GitHub unavailable"), "head"], "planned"),
+        (2, [RuntimeError("GitHub unavailable")] * 2, "error"),
     ],
 )
 async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checkout(
-    monkeypatch: pytest.MonkeyPatch, failures: int, heads: list[str], expected: str
+    monkeypatch: pytest.MonkeyPatch, failures: int, heads: list[str | Exception], expected: str
 ) -> None:
     checkout = MagicMock(repo_dir="/work/widgets", pin=AsyncMock())
     monkeypatch.setattr(graph, "_ensure_scout_sandbox", AsyncMock())

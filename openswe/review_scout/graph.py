@@ -165,15 +165,22 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
                     extra={"pr_number": cfg.pr_number, "prep_attempt": attempt + 1},
                     exc_info=True,
                 )
-            async with PullRequestClient.as_app(
-                cfg.repo.owner, cfg.repo.name, cfg.pr_number
-            ) as pull:
-                if await pull.head_sha() != cfg.head_sha:
-                    logger.info(
-                        "Review scout head is stale; nothing to plan",
-                        extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
-                    )
-                    return nothing_to_plan
+            try:
+                async with PullRequestClient.as_app(
+                    cfg.repo.owner, cfg.repo.name, cfg.pr_number
+                ) as pull:
+                    if await pull.head_sha() != cfg.head_sha:
+                        logger.info(
+                            "Review scout head is stale; nothing to plan",
+                            extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                        )
+                        return nothing_to_plan
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Review scout could not check the current pull request head",
+                    extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                    exc_info=True,
+                )
             if failure is None:
                 break
             if attempt == 1:
