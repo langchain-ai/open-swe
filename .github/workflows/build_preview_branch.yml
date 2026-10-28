@@ -93,7 +93,6 @@ jobs:
           sparse-checkout: scripts
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Roll out the preview revision
-        id: rollout
         env:
           DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
           EXPECTED_SHA: ${{ needs.build.outputs.sha }}
@@ -102,8 +101,9 @@ jobs:
         run: uv run scripts/deploy_preview.py
 
   # The Managed Deep Agents runtime the preview backend calls (open-swe-mda-preview), from
-  # the same tree. Apart from the backend rollout, which a newer tree supersedes: with its
-  # own queue, a deploy that starts always finishes, and the pending one is the newest tree.
+  # the same tree, just after the backend serves it or a newer tree. Apart from the backend
+  # rollout, which a newer tree supersedes: with its own queue, a deploy that starts always
+  # finishes, and the pending one is the newest tree.
   deploy-mda:
     name: Deploy the MDA preview
     needs: build
@@ -116,8 +116,13 @@ jobs:
     concurrency:
       group: deploy-mda-preview
       cancel-in-progress: false
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+          persist-credentials: false
+          sparse-checkout: scripts
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.build.outputs.sha }}
@@ -146,6 +151,15 @@ jobs:
         working-directory: preview-tree
         # From the vendored SDK, into the runtime mda/ installs.
         run: make mda-cli
+      # After the build, so MDA trails the backend by little more than its deploy.
+      - name: Wait for the backend to serve this tree or a newer one
+        if: steps.mda-changed.outputs.deploy == 'true'
+        env:
+          DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
+          EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_WORKSPACE_ID: ${{ vars.PREVIEW_WORKSPACE_ID }}
+        run: uv run scripts/deploy_preview.py --follow
       - name: Deploy the MDA preview
         id: mda-deploy
         if: steps.mda-changed.outputs.deploy == 'true'

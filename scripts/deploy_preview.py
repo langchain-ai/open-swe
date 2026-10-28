@@ -2,7 +2,11 @@
 # requires-python = ">=3.14"
 # dependencies = ["httpx>=0.28", "pydantic>=2.12"]
 # ///
-"""Wait for the automatic preview deployment and verify the published commit deploys."""
+"""Wait for the automatic preview deployment and verify the published commit deploys.
+
+With --follow, wait instead until the backend serves the published commit or a newer
+one, however often the preview branch moves meanwhile: the MDA preview deploys after it.
+"""
 
 import asyncio
 import os
@@ -122,24 +126,31 @@ class Deployer:
                 "this run is superseded, replacement deployment not verified"
             )
 
-    async def wait_for_revision(self) -> Revision:
-        print(f"waiting for automatic deployment of {self.expected_sha}", flush=True)
+    async def revisions_through_expected(self) -> list[Revision]:
+        """The revisions from the newest through the published commit's, or none if it has none yet."""
+        revisions: list[Revision] = []
         offset = 0
-        while time.monotonic() < self.deadline:
-            await self.check_superseded()
+        while True:
             response = await self.client.get(
                 f"{self.path}/revisions", params={"limit": 100, "offset": offset}
             )
             response.raise_for_status()
             page = Revisions.model_validate_json(response.content)
             for revision in page.resources:
+                revisions.append(revision)
                 if revision.commit == self.expected_sha:
-                    return revision
-            if page.resources and page.offset > offset:
-                offset = page.offset
-            else:
-                offset = 0
-                await asyncio.sleep(POLL_SECONDS)
+                    return revisions
+            if not page.resources or page.offset <= offset:
+                return []
+            offset = page.offset
+
+    async def wait_for_revision(self) -> Revision:
+        print(f"waiting for automatic deployment of {self.expected_sha}", flush=True)
+        while time.monotonic() < self.deadline:
+            await self.check_superseded()
+            if revisions := await self.revisions_through_expected():
+                return revisions[-1]
+            await asyncio.sleep(POLL_SECONDS)
         raise DeployError(f"no automatic revision for {self.expected_sha} appeared before timeout")
 
     async def revision(self, revision_id: str) -> Revision:
@@ -188,10 +199,6 @@ class Deployer:
                 await self.check_superseded()
         except SupersededDeploy as exc:
             print(f"::warning::{exc}", flush=True)
-            # The workflow skips the superseded tree's MDA deploy, so the newer tree's deploy starts.
-            if output := os.environ.get("GITHUB_OUTPUT"):
-                with open(output, "a") as file:
-                    file.write("superseded=true\n")
             return
         if revision.status != "DEPLOYED":
             await self.print_logs(revision)
@@ -203,6 +210,23 @@ class Deployer:
                 f"not the published {self.expected_sha}"
             )
         print(f"revision {revision.id} deployed {revision.commit}")
+
+    async def follow(self) -> None:
+        print(f"waiting for the backend to serve {self.expected_sha} or a newer commit", flush=True)
+        while time.monotonic() < self.deadline:
+            if revisions := await self.revisions_through_expected():
+                if deployed := next((r for r in revisions if r.status == "DEPLOYED"), None):
+                    print(f"revision {deployed.id} deployed {deployed.commit}")
+                    return
+                # Nothing left to build: the backend stays older until the branch moves again.
+                if not any(revision.status in IN_PROGRESS for revision in revisions):
+                    newest = revisions[0]
+                    raise DeployError(
+                        f"the backend serves neither {self.expected_sha} nor a newer commit: "
+                        f"revision {newest.id} ({newest.commit}) ended {newest.status}"
+                    )
+            await asyncio.sleep(POLL_SECONDS)
+        raise DeployError(f"the backend did not serve {self.expected_sha} or newer before timeout")
 
 
 async def main() -> None:
@@ -216,7 +240,10 @@ async def main() -> None:
         transport=httpx.AsyncHTTPTransport(retries=3),
     ) as client:
         deployer = Deployer(client, os.environ["DEPLOYMENT_ID"], os.environ["EXPECTED_SHA"])
-        await deployer.deploy()
+        if sys.argv[1:] == ["--follow"]:
+            await deployer.follow()
+        else:
+            await deployer.deploy()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ name: Deploy Managed Deep Agents
 
 # Deploys mda/ to the open-swe-mda-* deployments the backends' MDA_RUNTIME_URL
 # points at. Staging follows main and prod follows the promotion to prod; preview
-# follows the preview tree, which build_preview_branch.yml deploys alongside the backend.
+# follows the preview tree, which build_preview_branch.yml deploys after the backend.
 # A deployment is skipped when nothing it runs changed since its mda-deployed/<env>
 # tag, which a successful deploy moves, so a failed one is retried next time.
 # Only commits already on main are deployed: `mda deploy` can run project code
