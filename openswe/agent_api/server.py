@@ -20,6 +20,7 @@ from typing import Final
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
+from runtime_api.loop import PREPARE
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -137,7 +138,12 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     set_logging_context(context)
     try:
         with traced_under(Request(scope).headers):
-            result = await _unless_disconnected(receive, _answer(principal, endpoint, body))
+            call = _answer(principal, endpoint, body)
+            result = (
+                await _unless_disconnected(receive, call)
+                if endpoint == PREPARE.name
+                else await call
+            )
     except CallerHungUpError:
         logger.info("Agent API caller hung up before the call answered")
         return

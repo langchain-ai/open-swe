@@ -1220,14 +1220,27 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
 
 
 @pytest.mark.parametrize(
-    "outcome", ["disconnect", "disconnect_cancel", "cancel", "success", "unknown", "failure"]
+    ("endpoint", "outcome"),
+    [
+        ("prepare", outcome)
+        for outcome in (
+            "disconnect",
+            "disconnect_cancel",
+            "cancel",
+            "success",
+            "unknown",
+            "failure",
+        )
+    ]
+    + [("operation", "finish"), ("run_ended", "finish")],
 )
-async def test_a_call_lives_only_as_long_as_its_request(
-    monkeypatch: pytest.MonkeyPatch, outcome: str
+async def test_only_preparation_is_cancelled_on_disconnect(
+    monkeypatch: pytest.MonkeyPatch, endpoint: str, outcome: str
 ) -> None:
     from runtime_api.endpoint import UnknownEndpointError
 
     started = asyncio.Event()
+    finish = asyncio.Event()
     cleaning_up = asyncio.Event()
     allow_cleanup = asyncio.Event()
     cleaned_up = asyncio.Event()
@@ -1238,6 +1251,8 @@ async def test_a_call_lives_only_as_long_as_its_request(
     async def graph(run: RemoteRun, name: str, body: JsonValue) -> JsonValue:
         try:
             started.set()
+            if outcome == "finish":
+                await finish.wait()
             if outcome in ("disconnect", "disconnect_cancel", "cancel"):
                 await asyncio.Event().wait()
             if outcome == "unknown":
@@ -1259,15 +1274,19 @@ async def test_a_call_lives_only_as_long_as_its_request(
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/agent-api/prepare",
+        "path": f"/agent-api/{endpoint}",
         "headers": [],
-        "path_params": {"endpoint": "prepare"},
+        "path_params": {"endpoint": endpoint},
         "state": {"remote_run": RUN},
     }
     task = asyncio.create_task(server.api_endpoint(scope, messages.get, send))
     await asyncio.wait_for(started.wait(), 5)
-    if outcome in ("disconnect", "disconnect_cancel"):
+    if outcome in ("disconnect", "disconnect_cancel", "finish"):
         messages.put_nowait({"type": "http.disconnect"})
+    if outcome == "finish":
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        finish.set()
     if outcome == "disconnect_cancel":
         await asyncio.wait_for(cleaning_up.wait(), 5)
         task.cancel()
@@ -1285,11 +1304,15 @@ async def test_a_call_lives_only_as_long_as_its_request(
     if outcome in ("disconnect", "disconnect_cancel", "cancel"):
         assert sent == []
     else:
-        assert sent[0]["status"] == {"success": 200, "unknown": 404, "failure": 500}[outcome]
+        assert (
+            sent[0]["status"]
+            == {"success": 200, "finish": 200, "unknown": 404, "failure": 500}[outcome]
+        )
         assert (
             json.loads(sent[1]["body"])
             == {
                 "success": {"prepared": True},
+                "finish": {"prepared": True},
                 "unknown": {"detail": "Unknown endpoint prepare"},
                 "failure": {"error": "RuntimeError", "message": "checkout failed"},
             }[outcome]
