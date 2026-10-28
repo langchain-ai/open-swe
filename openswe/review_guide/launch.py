@@ -121,7 +121,9 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
     )
     origin_channel_id, origin_message_ts = await origin.message(pull_request, head.title)
     thread_id = (
-        await _fork(langgraph_client(), origin.source_thread_id, user, is_private=origin.is_private)
+        await _fork(
+            langgraph_client(), origin.source_thread_id, login, is_private=origin.is_private
+        )
         if origin.source_thread_id
         else str(uuid.uuid4())
     )
@@ -216,7 +218,7 @@ class _SourceMetadata(BaseModel):
 
 
 async def _fork(
-    client: LangGraphClient, source_thread_id: str, owner: User, *, is_private: bool = False
+    client: LangGraphClient, source_thread_id: str, login: str, *, is_private: bool = False
 ) -> str:
     """A copy of the asking thread that shares its sandbox, so the walkthrough knows its work.
 
@@ -224,6 +226,9 @@ async def _fork(
     Slack location, title and run bookkeeping belong to the conversation it came
     from. It joins the source's sandbox as a guest, the way other threads borrow one.
     """
+    owner = await User.for_login("github", login)
+    if owner is None:
+        raise GuideStartError("the requester has no GitHub account linked to Open SWE")
     try:
         source = _SourceMetadata.model_validate(
             thread_metadata(await client.threads.get(source_thread_id))
@@ -236,7 +241,7 @@ async def _fork(
                 **dict.fromkeys(copied.metadata),
                 "visibility": "private" if is_private else "public",
                 "owner_type": "user",
-                "owner_login": owner.github_login,
+                "owner_login": login,
                 "owner_user_id": str(owner.id),
                 "created_at_ms": int(time.time() * 1000),
                 **(
