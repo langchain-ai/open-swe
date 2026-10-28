@@ -48,6 +48,8 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
         ({}, {}, "own"),
         ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, {}, "own"),
         ({"sandbox_id": "backend-box"}, {}, None),
+        # The box the backend made is gone: this run starts in MDA's instead of failing.
+        ({"sandbox_id": "gone-box"}, {}, "own"),
         ({"sandbox_id": "bridge:abc"}, {}, None),
         ({**_WORKER}, {"sandbox_id": "box", "sandbox_owner": "mda"}, None),
         ({**_WORKER, "sandbox_id": "box"}, {"sandbox_id": "box", "sandbox_owner": "mda"}, _HOST),
@@ -73,10 +75,25 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
     async def read_metadata(thread_id: str) -> dict[str, str]:
         return host if thread_id == _HOST else metadata
 
+    async def exists(sandbox_id: str) -> bool:
+        return sandbox_id != "gone-box"
+
+    unbound: list[dict[str, object]] = []
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        unbound.append(metadata)
+
     monkeypatch.setattr("openswe.sandboxes.lifecycle.load_workspace", load)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr("openswe.sandboxes.providers.langsmith.sandbox_exists", exists)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
 
     sandbox = await ManagedSandbox.for_thread("thread-1", None)
+
+    handed_over = metadata.get("sandbox_id") == "gone-box"
+    assert unbound == (
+        [{"sandbox_id": None, "sandbox_base_proxy_config": None}] if handed_over else []
+    )
 
     if owner is None:
         assert sandbox is None

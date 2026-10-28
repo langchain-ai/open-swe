@@ -476,6 +476,16 @@ async def capture_snapshot_with_tag(
         client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
+async def sandbox_exists(sandbox_id: str) -> bool:
+    """Whether LangSmith still has the sandbox; raises when it cannot tell."""
+    async with get_async_sandbox_client() as client:
+        try:
+            await client.get_sandbox(name=sandbox_id)
+        except ResourceNotFoundError:
+            return False
+    return True
+
+
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
     client = get_async_sandbox_client()
     try:

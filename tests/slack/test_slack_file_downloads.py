@@ -189,7 +189,15 @@ async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
     )
     backend.aupload_files.assert_not_awaited()
 
-    await staged_files.deliver_slack_files("thread-1", dict(metadata), backend)
+    run_read = dict(metadata)
+    # A message queued after the run read the thread waits for the next run, not lost.
+    racing = await staged_files.queue_slack_files(
+        "thread-1", [_entry("late.csv", "https://files.slack.com/late.csv")]
+    )
+    await staged_files.deliver_slack_files("thread-1", run_read, backend)
+    assert metadata[staged_files.PENDING_SLACK_FILES_KEY] == [
+        {"url": "https://files.slack.com/late.csv", "path": racing[0].sandbox_path}
+    ]
     await staged_files.deliver_slack_files("thread-1", dict(metadata), backend)
 
     assert [*first, *later] == [
@@ -197,7 +205,7 @@ async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
         slack_webhook.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
         slack_webhook.StagedSlackFile("bundle-2", "/workspace/.open-swe/slack-files/bundle-2"),
     ]
-    assert backend.aupload_files.await_count == 3
+    assert backend.aupload_files.await_count == 4
     assert (tmp_path / "bundle-2").read_bytes() == b"zip"
     assert metadata[staged_files.PENDING_SLACK_FILES_KEY] is None
 

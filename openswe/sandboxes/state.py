@@ -52,6 +52,10 @@ class SandboxUnreachableError(RuntimeError):
         )
 
 
+class SandboxHandedOverError(SandboxUnreachableError):
+    """The thread's old box is gone or set aside: its next run starts in a fresh one MDA opens."""
+
+
 _SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
 _DEFAULT_EXECUTE_TIMEOUT_SECONDS = 300
 
@@ -95,6 +99,15 @@ class SandboxBackendProxy(BaseSandbox):
         """Forget the box; the next call connects to whatever the thread is bound to then."""
         self._backend = None
         self._startup_task = None
+
+    def follow(self, sandbox_id: object) -> None:
+        """Forget a cached box the thread is no longer bound to, on whichever replica holds it.
+
+        A thread moved off a Mac, or handed to MDA, is bound to a new box by another
+        process; this one would otherwise keep using the box the thread left.
+        """
+        if self._backend is not None and self._backend.id != sandbox_id:
+            self.detach()
 
     @property
     def has_backend(self) -> bool:

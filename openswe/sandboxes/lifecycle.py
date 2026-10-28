@@ -41,6 +41,7 @@ from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
     SANDBOX_CONNECTIONS,
     SandboxBackendProxy,
+    SandboxHandedOverError,
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_metadata,
@@ -50,7 +51,6 @@ from openswe.sandboxes.state import (
     unwrap_sandbox_backend,
 )
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
-from openswe.slack.staged_files import deliver_slack_files
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
@@ -535,7 +535,6 @@ async def ensure_sandbox_for_thread(
             bridged = await BridgeSandboxBackend.connect(thread_id, bridge_id)
         async with aphase(thread_id, "sandbox.handoff"):
             await complete_handoff(thread_id, sandbox_metadata, bridged)
-            await deliver_slack_files(thread_id, sandbox_metadata, bridged)
         return set_sandbox_backend(thread_id, bridged)
     metadata_proxy_config = sandbox_metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
@@ -566,6 +565,7 @@ async def ensure_sandbox_for_thread(
         owned_by_mda = sandbox_metadata.get("sandbox_owner") == "mda"
         if not owned_by_mda and (isinstance(exc, SandboxGoneError) or abandon_unreachable):
             await _hand_to_mda(thread_id, sandbox_id)
+            raise SandboxHandedOverError(thread_id, sandbox_id, str(exc)) from exc
         # MDA recreates a deleted box of its own under its name when the next run opens it.
         raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
 
@@ -577,7 +577,6 @@ async def ensure_sandbox_for_thread(
 
     async with aphase(thread_id, "sandbox.handoff"):
         await complete_handoff(thread_id, sandbox_metadata, sandbox_backend)
-        await deliver_slack_files(thread_id, sandbox_metadata, sandbox_backend)
     published = set_sandbox_backend(thread_id, sandbox_backend)
     if sandbox_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
         from openswe.background_tasks import reconcile_background_tasks
@@ -684,6 +683,28 @@ async def reconnect_replaced_sandbox(
         github_proxy_repositories=github_proxy_repositories,
         github_proxy_permissions=github_proxy_permissions,
     )
+
+
+async def hand_gone_sandbox_to_mda(thread_id: str, sandbox_id: str) -> bool:
+    """Hand the thread to MDA if the box the backend made for it is gone; whether it was.
+
+    Checked before the run is planned, so the run starts in MDA's box rather than
+    failing on the deleted one. A box LangSmith cannot account for stays bound.
+    """
+    from openswe.sandboxes.providers.langsmith import sandbox_exists
+
+    try:
+        if await sandbox_exists(sandbox_id):
+            return False
+    except Exception:
+        logger.warning(
+            "Could not tell whether a thread's old sandbox still exists",
+            extra={"thread_id": thread_id, "sandbox_id": sandbox_id},
+            exc_info=True,
+        )
+        return False
+    await _hand_to_mda(thread_id, sandbox_id)
+    return True
 
 
 async def _hand_to_mda(thread_id: str, sandbox_id: str) -> None:

@@ -16,7 +16,11 @@ from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandb
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.providers.registry import SandboxGoneError
-from openswe.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
+from openswe.sandboxes.state import (
+    SandboxHandedOverError,
+    SandboxUnreachableError,
+    set_sandbox_backend,
+)
 
 _HANDED_OVER = {"sandbox_id": None, "sandbox_base_proxy_config": None}
 
@@ -56,8 +60,9 @@ async def test_an_old_sandbox_that_cannot_be_reached_is_handed_to_mda_or_fails(
     ):
         await ensure_sandbox_for_thread(thread_id, abandon_unreachable=abandon)
 
-    # Typed, so callers still recognize it and tell the person.
+    # Typed, so callers still recognize it and tell the person whether a fresh box follows.
     assert excinfo.value.sandbox_id == "sandbox-old"
+    assert isinstance(excinfo.value, SandboxHandedOverError) is handed_over
     writes = [call.kwargs["metadata"] for call in update_thread.await_args_list]
     assert writes == ([_HANDED_OVER] if handed_over else [])
     SANDBOX_BACKENDS.clear()
@@ -111,7 +116,8 @@ async def test_reviewer_opts_into_abandoning_an_unreachable_sandbox() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_notifies_when_replacement_also_fails() -> None:
+@pytest.mark.parametrize("handed_over", [True, False])
+async def test_reviewer_says_whether_its_next_run_gets_a_fresh_sandbox(handed_over: bool) -> None:
     config: RunnableConfig = {
         "configurable": {"repo": {"owner": "langchain-ai", "name": "open-swe"}}
     }
@@ -123,7 +129,9 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
         patch(
             "openswe.reviewer.ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
-            side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
+            side_effect=(SandboxHandedOverError if handed_over else SandboxUnreachableError)(
+                "thread-reviewer", "sandbox-deleted", "not found"
+            ),
         ),
         patch(
             "openswe.reviewer.post_sandbox_unreachable_notification",
@@ -137,5 +145,5 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
     assert notify.await_args is not None
     assert notify.await_args.kwargs == {
         "sandbox_id": "sandbox-deleted",
-        "replacement_attempted": True,
+        "handed_to_mda": handed_over,
     }

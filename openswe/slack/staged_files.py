@@ -103,11 +103,25 @@ async def deliver_slack_files(
     """Download the files waiting for the thread's sandbox and write them there, once.
 
     Best-effort, as staging always was: a failed download or write only skips that file.
+    Files a message queued after ``metadata`` was read stay queued for the next run.
     """
     pending = _pending(metadata)
     if not pending:
         return
-    await get_client().threads.update(thread_id=thread_id, metadata={PENDING_SLACK_FILES_KEY: None})
+    from openswe.sandboxes.state import get_sandbox_metadata
+
+    delivered = {(file.url, file.path) for file in pending}
+    left = [
+        file
+        for file in _pending(await get_sandbox_metadata(thread_id))
+        if (file.url, file.path) not in delivered
+    ]
+    await get_client().threads.update(
+        thread_id=thread_id,
+        metadata={
+            PENDING_SLACK_FILES_KEY: _pending_files.dump_python(left, mode="json") if left else None
+        },
+    )
     for file in pending:
         try:
             content = await slack_utils.download_slack_file(file.url)

@@ -1,6 +1,5 @@
 """Sandbox capabilities for calling back to the associated thread."""
 
-from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import jwt
@@ -11,9 +10,6 @@ from pydantic import BaseModel, Field, ValidationError
 from openswe.config import ENV
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.utils.dashboard_links import dashboard_api_base_url
-
-if TYPE_CHECKING:
-    pass
 
 # Under /dashboard/api so a dashboard deployment that fronts the backend forwards it.
 TOOLS_PATH = "/dashboard/api/sandbox-tools"

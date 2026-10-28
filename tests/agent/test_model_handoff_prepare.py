@@ -55,6 +55,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         "get_or_create_sandbox_backend_proxy",
         lambda _: MagicMock(ready=AsyncMock(return_value=MagicMock(id="sandbox-1"))),
     )
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))
     for name in (
         "resolve_triggering_user_identity",
