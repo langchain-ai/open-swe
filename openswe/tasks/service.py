@@ -304,8 +304,8 @@ async def notify(
         await TaskMessage.deliver(recipient_thread_id, "enqueue")
 
 
-async def _owner_actor(actor: Actor) -> Actor:
-    """The coordinator owner's identity, for a verified participant acting on its workers."""
+async def _status_owner_actor(actor: Actor) -> Actor:
+    """The coordinator owner's identity, solely to validate read-only worker status access."""
     own = await thread_metadata(actor.thread_id)
     if own.owner_type == "system" or not actor.login:
         return actor
@@ -338,7 +338,7 @@ async def owned_worker(
         raise PermissionError("Choose a worker belonging to this task")
     if allow_participants:
         # Workers run as the coordinator's owner, so they are validated as that owner.
-        actor = await _owner_actor(actor)
+        actor = await _status_owner_actor(actor)
     try:
         metadata = await authorized_metadata(actor, worker_thread_id)
         if metadata.workspace != context.task.workspace.slug:
@@ -617,15 +617,13 @@ async def message_task_thread(
     actor = await Actor.resolve(actor)
     if not message.strip() or not request_id:
         raise ValueError("A message and stable tool-call identity are required")
-    context = await authorized_context(actor, allow_participants=True)
+    context = await authorized_context(actor)
     sender_label = await presentation.sender_label(actor.thread_id)
     if context.membership.role == "coordinator":
         if not worker_thread_id:
             raise ValueError("Choose an explicit worker_thread_id")
-        await owned_worker(actor, worker_thread_id, allow_participants=True)
+        await owned_worker(actor, worker_thread_id)
         recipient = worker_thread_id
-        if actor.login and (await _owner_actor(actor)).login != actor.login:
-            sender_label = actor.login
     else:
         if worker_thread_id is not None:
             raise PermissionError("Workers can only message their coordinator")

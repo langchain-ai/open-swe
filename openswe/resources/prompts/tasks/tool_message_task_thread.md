@@ -1,5 +1,5 @@
 Send an explicit, durable coordination message without interrupting the recipient.
-The coordinator's owner or a verified participant with read/post access to its thread may relay scope changes to its task workers, which continue running as the owner.
+Only the coordinator's owner may send instructions to its workers, which run under the owner's identity. Other participants may inspect status but cannot send worker instructions.
 A coordinator must choose worker_thread_id from its own task: answer actionable worker questions here, and message each affected worker when a decision applies to several.
 A worker's owner omits worker_thread_id to reach its permanent coordinator.
 Use this for questions, blockers, dependencies, shared-state conflicts, explicitly requested progress, or a material development that changes the plan.

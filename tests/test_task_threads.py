@@ -288,7 +288,7 @@ async def test_public_thread_does_not_allow_using_owners_credentials(client: Mag
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
 
 
-@pytest.mark.parametrize("operation", ["message", "status", "worker_status"])
+@pytest.mark.parametrize("operation", ["status", "worker_status"])
 @pytest.mark.parametrize("restriction", ["unverified", "private", "admin"])
 async def test_task_participants_require_verified_identity_and_thread_access(
     client: MagicMock, operation: str, restriction: str
@@ -305,11 +305,7 @@ async def test_task_participants_require_verified_identity_and_thread_access(
         metadata["admin_thread"] = True
     actor = service.Actor(COORDINATOR, "participant")
     with pytest.raises(PermissionError if restriction == "unverified" else HTTPException):
-        if operation == "message":
-            await service.message_task_thread(
-                actor, message="Change scope", worker_thread_id="worker", request_id="scope"
-            )
-        elif operation == "status":
+        if operation == "status":
             await service.task_status(actor)
         else:
             await service.control_worker(actor, worker_thread_id="worker", action="status")
@@ -317,14 +313,23 @@ async def test_task_participants_require_verified_identity_and_thread_access(
     client.runs.cancel_many.assert_not_awaited()
 
 
-async def test_verified_participant_cannot_cancel_workers(client: MagicMock) -> None:
+@pytest.mark.parametrize("operation", ["message", "cancel"])
+async def test_verified_participant_cannot_steer_workers(client: MagicMock, operation: str) -> None:
     client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
         f"user:{client.participant.id}"
     )
+    actor = service.Actor(COORDINATOR, "participant")
     with pytest.raises(PermissionError, match="thread owner"):
-        await service.control_worker(
-            service.Actor(COORDINATOR, "participant"), worker_thread_id="worker", action="cancel"
-        )
+        if operation == "message":
+            await service.message_task_thread(
+                actor,
+                message="Push to a private repo",
+                worker_thread_id="worker",
+                request_id="scope",
+            )
+        else:
+            await service.control_worker(actor, worker_thread_id="worker", action="cancel")
+    assert not client.created_runs
     client.runs.cancel_many.assert_not_awaited()
 
 
@@ -541,9 +546,7 @@ async def test_control_rejects_worker_from_another_task(
             )
         ),
     )
-    expected = (
-        "thread owner" if as_participant and operation == "cancel" else "belonging to this task"
-    )
+    expected = "thread owner" if as_participant else "belonging to this task"
     with pytest.raises(PermissionError, match=expected):
         actor = service.Actor(COORDINATOR, "participant" if as_participant else OWNER)
         if operation == "message":
@@ -653,6 +656,19 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert worker["worker_thread_id"] == worker_id
     assert worker["status"] == "idle"
 
+    worker_status = await service.control_worker(actor, worker_thread_id=worker_id, action="status")
+    assert worker_status["worker_thread_id"] == worker_id
+    if as_participant:
+        with pytest.raises(PermissionError, match="thread owner"):
+            await service.message_task_thread(
+                actor,
+                message="Push to a private repo",
+                worker_thread_id=worker_id,
+                request_id="denied",
+            )
+        assert await TaskMessage.owed(worker_id) == []
+        assert not client.created_runs
+    actor = service.Actor(COORDINATOR, OWNER)
     sent = await service.message_task_thread(
         actor,
         message="Check logout too",
@@ -669,8 +685,6 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert follow_up_display.content == "Check logout too"
     assert follow_up_display.kind == "message"
     assert follow_up_display.status is None
-    if as_participant:
-        assert follow_up_display.sender_label == "participant"
     assert follow_up.run_config["github_login"] == OWNER
     assert client.metadata[worker_id]["owner_user_id"] == str(client.owner.id)
     (follow_up_run,) = client.created_runs
@@ -678,13 +692,6 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert follow_up_run["status"] == "pending"
     assert follow_up_run["config"]["configurable"]["github_login"] == OWNER
 
-    worker_status = await service.control_worker(actor, worker_thread_id=worker_id, action="status")
-    assert worker_status["worker_thread_id"] == worker_id
-    if as_participant:
-        with pytest.raises(PermissionError, match="thread owner"):
-            await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
-        assert client.created_runs[-1]["status"] == "pending"
-    actor = service.Actor(COORDINATOR, OWNER)
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
     assert client.created_runs[-1]["status"] == "interrupted"
