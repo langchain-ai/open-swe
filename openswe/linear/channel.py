@@ -55,9 +55,12 @@ class LinearChannelCall(TypedDict):
 
 
 async def _record(request: Request, payload: dict[str, JsonValue], delivery_id: str) -> None:
-    """Log the event and wake the threads that listen for Linear events."""
+    """Log the event and wake the threads that listen for Linear events, once per delivery.
+
+    MDA asks again for a delivery Linear retries, or after an answer it didn't get.
+    """
     body = json.dumps(payload).encode()
-    await EventLog.record(
+    await EventLog.record_once(
         request,
         body,
         "linear",
