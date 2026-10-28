@@ -25,7 +25,7 @@ _THREAD = str(uuid.uuid4())
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
     record = AsyncMock(return_value=True)
-    monkeypatch.setattr("openswe.linear.channel.EventLog.record", record)
+    monkeypatch.setattr("openswe.linear.channel.EventLog.record_once", record)
     automations = AsyncMock()
     monkeypatch.setattr(channel, "_launch_automations", automations)
     api = FastAPI()
