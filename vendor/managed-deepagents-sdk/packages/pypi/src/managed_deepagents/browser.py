@@ -49,7 +49,7 @@ from deepagents.middleware.async_subagents import (
 )
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState, OmitFromInput
-from langchain.tools import BaseTool, tool
+from langchain.tools import BaseTool, ToolRuntime, tool
 from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
 from langchain_core.messages.content import create_text_block
 from langgraph.config import get_config
@@ -158,10 +158,6 @@ _REPLACED = (  # before what the call returned, once the thread's browser was ma
     "signed out of everything, and nothing you or the user did in the old one carried over."
 )
 _LOST = "error: the browser was deleted, so the recording is lost."
-_CLOSE_TIMEOUT_S = 30.0  # for freeing the extension from a client that never closed
-_STILL_CLOSING = (
-    "The browser is still finishing a call from a client that went away. Try again shortly."
-)
 _LOG = logging.getLogger("mda.browser")
 
 
@@ -317,8 +313,9 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         self.tools = self._tools()
         self._arguments = {tool.name: set(tool.args) for tool in self.tools}
         self._instructions = f"{facade_instructions()}\n\n{_INSTRUCTIONS}"
-        # By tool call: the browser sandbox it ran on, which `awrap_tool_call` notes in state.
-        self._boxes: dict[str | None, str | None] = {}
+        # By thread and tool call: the browser sandbox the call ran on, which
+        # `awrap_tool_call` notes in state.
+        self._boxes: dict[tuple[str | None, str | None], str | None] = {}
 
     def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
         """The LangSmith browser this run's browser tools use, whether or not it exists yet.
@@ -349,7 +346,7 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                 if key not in _SESSIONS:
                     _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
-                self._boxes[runtime.tool_call_id] = _SESSIONS[key].box
+                self._boxes[_call_key(runtime)] = _SESSIONS[key].box
                 return await fn(_SESSIONS[key])
             except StagehandFacadeInputError as err:
                 return f"error: {err}"
@@ -515,9 +512,12 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         if extra:
             return ToolMessage(_unexpected(extra), tool_call_id=call["id"], name=call["name"])
         result = await handler(request)
-        if call["id"] not in self._boxes or not isinstance(result, ToolMessage):
+        if not isinstance(result, ToolMessage):
             return result
-        content, noted = _note_box(request.state, self._boxes.pop(call["id"]), result.content)
+        ran = _call_key(request.runtime)
+        if ran not in self._boxes:
+            return result
+        content, noted = _note_box(request.state, self._boxes.pop(ran), result.content)
         if not noted:
             return result
         message = result.model_copy(update={"content": content})
@@ -878,6 +878,12 @@ async def _langsmith_ui_origin(api: httpx.AsyncClient) -> str:
     return f"{dashboard.scheme}://{dashboard.netloc.decode()}"
 
 
+def _call_key(runtime: ToolRuntime) -> tuple[str | None, str | None]:
+    """A tool call's thread and id: some harnesses reuse an id in each thread."""
+    info = runtime.execution_info
+    return (info.thread_id if info else None, runtime.tool_call_id)
+
+
 def _thread_id(runtime: ManagedToolRuntime | Runtime) -> str:
     if (info := runtime.execution_info) and info.thread_id:
         return str(info.thread_id)
@@ -1028,10 +1034,11 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
     except Exception as err:
         if "already initialized" not in str(err):
             raise
-    # A client that never closed (a crash, a dropped connection) left its claim in the
-    # extension; closing it frees it.
-    # Known limit: closing a live client on another replica leaves both clients attached.
-    await _close_stale_client(cdp_url, headers)
+    # A client that never closed (a crash, another replica) left its claim in the
+    # extension; reloading it clears the claim without restarting Chrome.
+    # Known limit: two live clients of one browser (two replicas, user scope) take it from
+    # each other; the loser fails a call (~13 s RPC timeout) and reopens, never on the wrong window.
+    await _reload_extension(cdp_url, headers)
     return await _connect(*where, box=box.id)
 
 
@@ -1274,67 +1281,22 @@ def _recorder_command(folder: str, action: str, *args: str) -> str:
     return f"PYTHONPATH={shlex.quote(_RECORDER_PACKAGES_DIR)} {_RECORDER_PYTHON} {words}"
 
 
-async def _close_stale_client(cdp_url: str, headers: dict[str, str]) -> None:
-    """Send Stagehand's extension ``stagehand.close``, as the client that never did would have.
+async def _reload_extension(cdp_url: str, headers: dict[str, str]) -> None:
+    """Load Stagehand's extension again over CDP, which reloads it in place.
 
-    The extension's worker keeps a client's claim after the client is gone. Reinstalling
-    the extension is no way out: Chrome won't uninstall one browserd loaded at launch.
+    Not uninstalled first: Chrome uninstalls over CDP only an extension loaded over
+    CDP, and browserd loads it otherwise when Chrome starts.
     """
-    deadline = asyncio.timeout(_CLOSE_TIMEOUT_S)
-    try:
-        async with deadline:
-            await _send_close(cdp_url, headers)
-    except TimeoutError:
-        if not deadline.expired():
-            raise
-        # The worker closes a client once its calls end, and a dead client's may run on.
-        raise TimeoutError(_STILL_CLOSING) from None
-
-
-async def _send_close(cdp_url: str, headers: dict[str, str]) -> None:
-    """Over CDP, hand the worker of Stagehand's extension ``stagehand.close``."""
-    # Once it adds the worker's binding, it hears the worker's replies to every client.
-    connect = websockets.connect(cdp_url, additional_headers=headers, max_size=None)
-    async with connect as ws:
-
-        async def cdp(
-            id_: int, method: str, session: str | None = None, **params: object
-        ) -> dict[str, Any]:
-            message: dict[str, object] = {"id": id_, "method": method, "params": params}
-            if session:
-                message["sessionId"] = session
-            await ws.send(json.dumps(message))
-            while (reply := json.loads(await ws.recv())).get("id") != id_:
-                pass  # events share the socket
-            if "error" in reply:
-                msg = f"CDP {method} failed: {reply['error']}"
-                raise RuntimeError(msg)
-            return reply.get("result", {})
-
-        extensions = (await cdp(0, "Extensions.getExtensions"))["extensions"]
-        ours = next(
-            (e["id"] for e in extensions if e["name"] == "Stagehand Runtime" and e.get("enabled")),
-            None,
+    async with asyncio.timeout(30), websockets.connect(cdp_url, additional_headers=headers) as ws:
+        await ws.send(
+            json.dumps(
+                {"id": 0, "method": "Extensions.loadUnpacked", "params": {"path": _EXTENSION_DIR}}
+            )
         )
-        url = f"chrome-extension://{ours}/service-worker.js"
-        targets = (await cdp(1, "Target.getTargets"))["targetInfos"]
-        worker = next((t["targetId"] for t in targets if t["url"] == url), None)
-        if worker is None:
-            return  # a stopped worker keeps no claim, and connecting wakes it
-        attached = await cdp(2, "Target.attachToTarget", targetId=worker, flatten=True)
-        session = attached["sessionId"]
-        binding = "__stagehandSendToHost"  # where the worker replies
-        await cdp(3, "Runtime.addBinding", session, name=binding)
-        # Clients number their calls from 1, so one still attached drops this reply.
-        close = json.dumps({"jsonrpc": "2.0", "id": 0, "method": "stagehand.close", "params": {}})
-        expression = f"globalThis.__stagehandReceiveFromHost({json.dumps(close)})"
-        # Awaited, the evaluate returns once the worker has closed the client.
-        evaluated = await cdp(
-            4, "Runtime.evaluate", session, expression=expression, awaitPromise=True
-        )
-        if details := evaluated.get("exceptionDetails"):
-            why = details.get("exception", {}).get("description") or details.get("text")
-            msg = f"Stagehand's extension did not close the client holding it: {why}"
+        while (reply := json.loads(await ws.recv())).get("id") != 0:
+            pass  # events share the socket
+        if "error" in reply:
+            msg = f"CDP Extensions.loadUnpacked failed: {reply['error']}"
             raise RuntimeError(msg)
 
 
