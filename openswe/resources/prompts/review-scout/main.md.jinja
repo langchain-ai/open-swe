@@ -18,6 +18,7 @@ Read the change with `git diff --no-renames refs/walkthrough/merge-base refs/wal
 
 {% include "walkthrough/planning.md" %}
 
+For the review scout, the following unit-test rules override the shared guide's advice to keep related tests alongside behavior and one scenario per behavior in chunks.
 Default to placing unit-test changes in Other, including new cases and assertions that verify behavior already explained by production-code chunks.
 Include a unit-test hunk in a chunk only when it is essential to understanding the behavior and the production code alone does not make it clear.
 Mention the unit-test coverage in Other's summary rather than walking through each test.
