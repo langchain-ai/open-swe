@@ -1,6 +1,7 @@
-//! What the channels that keep an app in Agent Auth share during `mda
-//! deploy`: GitHub ([`super::github_channel`]) and Linear
-//! ([`super::linear_channel`]).
+//! What the channels that set up an app during `mda deploy` share: GitHub
+//! ([`super::github_channel`]) and Linear ([`super::linear_channel`]), which
+//! keep theirs in Agent Auth, and Slack ([`super::trigger_channels`]), which
+//! Trigger Server keeps.
 //!
 //! - the Agent Auth client, with the hidden overrides that point only its
 //!   calls at another LangSmith;
@@ -14,6 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use cliclack::log;
@@ -25,6 +27,7 @@ use serde_json::Value;
 use crate::compile::ChannelRequirements;
 use crate::deploy::helpers::validated_agent_server_url;
 use crate::error::is_cancellation;
+use crate::interrupt::Interrupt;
 use crate::langsmith::{self, ConnectionSummary};
 
 /// Hidden overrides that send only Agent Auth calls to another LangSmith,
@@ -66,7 +69,7 @@ pub(crate) struct AppChannelManifest<C> {
     #[serde(default)]
     #[expect(
         dead_code,
-        reason = "part of the channel manifest schema; unused by app setup"
+        reason = "part of the channel manifest schema; read by connection checks"
     )]
     agent_connections: Option<Value>,
     pub(crate) provider_config: C,
@@ -120,11 +123,11 @@ pub(crate) fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
-/// A hidden override from the project's `.env`, else from the shell, like
+/// A CLI-only setting from the shell, else from the project's `.env`, like
 /// other CLI settings. The deploy never uploads these as secrets (see
 /// `RESERVED_ENV_VARS`).
 pub(crate) fn override_value(key: &str, env_vars: &BTreeMap<String, String>) -> Option<String> {
-    langsmith::lookup_env(key, env_vars, &mut |key| std::env::var(key).ok())
+    langsmith::lookup_env_or_process(key, env_vars)
 }
 
 /// The client for Agent Auth calls, honoring the hidden overrides in the shell
@@ -149,7 +152,7 @@ pub(crate) fn agent_auth_client(
         format!("{AGENT_AUTH_URL_ENV} is set, so {AGENT_AUTH_API_KEY_ENV} must be set too")
     })?;
     let tenant = lookup(AGENT_AUTH_TENANT_ENV);
-    langsmith::Client::new_with_platform(&url, Some(&url), api_key, tenant)
+    langsmith::Client::new(&url, &url, langsmith::ApiKey::new(api_key), tenant)
 }
 
 /// Where Agent Auth's OAuth callback is, for an app that must list it before
@@ -188,6 +191,24 @@ fn configured_oauth_callback(configured: Option<String>) -> Result<Option<String
         anyhow::bail!("{OAUTH_CALLBACK_ENV} must be an http(s) URL");
     }
     Ok(Some(url))
+}
+
+/// `a`, `a and b`, `a, b and c`.
+pub(crate) fn join_names(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// What deploy says when a channel's app comes from CLI-only env vars: which
+/// ones, and that every one of them can go once `store` keeps the app.
+pub(crate) fn env_app_notice(app: &str, store: &str, vars: &[&str]) -> String {
+    let names = join_names(vars);
+    format!(
+        "Using the {app} from {names}. {store} keeps its credentials, so you can remove {names} afterwards."
+    )
 }
 
 /// Validated `https://` Agent Server URL plus the channel's events path.
@@ -280,6 +301,27 @@ where
     }
 }
 
+/// How a wait while setup polls for the user's action ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WaitTick {
+    Elapsed,
+    Interrupted,
+}
+
+/// Sleep for `duration`, or until Ctrl-C.
+pub(crate) fn wait(duration: Duration) -> WaitTick {
+    let Ok(interrupt) = Interrupt::install() else {
+        std::thread::sleep(duration);
+        return WaitTick::Elapsed;
+    };
+    interrupt.sleep_until_interrupted(duration);
+    if interrupt.is_requested() {
+        WaitTick::Interrupted
+    } else {
+        WaitTick::Elapsed
+    }
+}
+
 /// [`SetupUi::retry_or_skip`] in a terminal: `setup` names what did not
 /// finish ("GitHub App setup"), `channel` the channel ("GitHub").
 pub(crate) fn ask_retry_or_skip(setup: &str, channel: &str, error: &anyhow::Error) -> Result<bool> {
@@ -366,7 +408,13 @@ mod tests {
             "MDA_AGENT_AUTH_URL".to_string(),
             "http://localhost:1980".to_string(),
         )]);
-        let client = langsmith::Client::new("http://localhost:1", "lsv2_deploy", None).unwrap();
+        let client = langsmith::Client::new(
+            "http://localhost:1",
+            "http://localhost:1",
+            langsmith::ApiKey::new("lsv2_deploy"),
+            None,
+        )
+        .unwrap();
         let Err(error) = agent_auth_client(&client, |key| missing_key.get(key).cloned()) else {
             panic!("an Agent Auth URL without an API key must be rejected");
         };
@@ -396,7 +444,13 @@ mod tests {
             return;
         }
         let client = |url: &str| {
-            let deploy = langsmith::Client::new("http://localhost:1", "lsv2_deploy", None).unwrap();
+            let deploy = langsmith::Client::new(
+                "http://localhost:1",
+                "http://localhost:1",
+                langsmith::ApiKey::new("lsv2_deploy"),
+                None,
+            )
+            .unwrap();
             agent_auth_client(&deploy, |key| match key {
                 AGENT_AUTH_URL_ENV => Some(url.to_string()),
                 AGENT_AUTH_API_KEY_ENV => Some("lsv2_local".to_string()),
@@ -436,6 +490,17 @@ mod tests {
                 "{status}: {error:#}"
             );
         }
+    }
+
+    #[test]
+    fn env_notices_name_every_variable_they_used() {
+        assert_eq!(join_names(&["A"]), "A");
+        assert_eq!(join_names(&["A", "B"]), "A and B");
+        assert_eq!(join_names(&["A", "B", "C"]), "A, B and C");
+        assert_eq!(
+            env_app_notice("Slack app", "LangSmith", &["X", "Y"]),
+            "Using the Slack app from X and Y. LangSmith keeps its credentials, so you can remove X and Y afterwards."
+        );
     }
 
     #[test]

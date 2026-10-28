@@ -27,6 +27,7 @@ def sandbox_unreachable_message(
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
+    reason: str | None = None,
 ) -> str:
     """User-facing text for a sandbox that stopped answering.
 
@@ -44,6 +45,11 @@ def sandbox_unreachable_message(
         if part
     ]
     which = f" ({', '.join(identifiers)})" if identifiers else ""
+    if reason:
+        return warning(
+            f"Open SWE could not open this thread's sandbox{which}: `{reason.replace('`', "'")}`. "
+            "Retrigger this thread to try again."
+        )
     if replacement_attempted:
         return warning(
             f"This thread's sandbox{which} stopped responding and Open SWE could "
@@ -111,6 +117,7 @@ async def post_sandbox_unreachable_notification(
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
+    reason: str | None = None,
 ) -> None:
     cfg = RunConfig.from_config(config)
 
@@ -118,6 +125,7 @@ async def post_sandbox_unreachable_notification(
         sandbox_id=sandbox_id,
         sandbox_name=sandbox_name,
         replacement_attempted=replacement_attempted,
+        reason=reason,
     )
 
     slack_target = await get_slack_target(cfg)

@@ -521,11 +521,7 @@ async def slack_breakout_thread(
         or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
     }
     if isinstance(current_thread_ts, str) and current_thread_ts:
-        request_ts = breakout_from["message_ts"]
-        if request_ts:
-            await mark_broken_out(
-                source_channel, current_thread_ts, request_ts, clean_channel_id, message_ts
-            )
+        await mark_broken_out(source_channel, current_thread_ts, clean_channel_id, message_ts)
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."
         )

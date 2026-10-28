@@ -101,7 +101,7 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
                 "sandbox_base_proxy_config": {"rules": []},
             },
         ),
-        # MDA could not open the box: the thread stays MDA's, and preparing reports it.
+        # MDA could not open the box: the thread stays MDA's, and binding reports why.
         ({}, None, {"sandbox_owner": "mda"}),
         ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, "mda-box", None),
         ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, None, None),
@@ -150,12 +150,16 @@ async def test_the_backend_binds_the_box_mda_reports(
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.maybe_start_update", _no_update)
 
-    await bind_mda_sandbox("thread-1", reported)
-
-    assert updates == ([] if update is None else [update])
     if reported is None and "sandbox_id" not in metadata:
+        with pytest.raises(SandboxUnreachableError, match="could not open.*HTTP 503") as raised:
+            await bind_mda_sandbox("thread-1", reported, open_error="SandboxClientError: HTTP 503")
+        assert raised.value.reason == "SandboxClientError: HTTP 503"
         with pytest.raises(SandboxUnreachableError, match="could not open"):
             await ensure_sandbox_for_thread("thread-1")
+    else:
+        await bind_mda_sandbox("thread-1", reported)
+
+    assert updates == ([] if update is None else [update])
 
 
 @pytest.mark.asyncio

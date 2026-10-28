@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
 
+from managed_deepagents._channels.binding import binding_with_messages
+from managed_deepagents._channels.run_input import run_start_options
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._ingress import (
     _create_ingress_loopback_client,
@@ -22,6 +24,7 @@ from managed_deepagents._ingress_runs import (
     lookup_status,
     observe_ingress_run,
     record_thread_delivery,
+    rejected_as_busy,
     start_ingress_run,
     wait_for_idle_thread,
 )
@@ -155,25 +158,21 @@ async def start_http_ingress_agent(
     prepared, started_binding = await _turn_input(input, prepare, binding)
     if prepared is None:
         return {"skipped": "ignored"}
-    # The handler's metadata goes under MDA's own.
-    metadata: dict[str, JsonValue] = {**prepared.get("metadata", {})}
-    if delivery_key is not None:
-        metadata[DELIVERY_KEY_METADATA] = delivery_key
     try:
         started = await start_ingress_run(
             client=client,
             thread_id=thread_id,
             assistant_id=assistant_id,
-            messages=prepared["messages"],
-            state=prepared["state"] or None,
-            metadata=metadata or None,
-            webhook=prepared.get("webhook"),
             multitask_strategy=multitask_strategy,
+            **run_start_options(
+                prepared,
+                None if delivery_key is None else {DELIVERY_KEY_METADATA: delivery_key},
+            ),
+            thread_origin={"binding": started_binding, "sender": user_id},
             **build_ingress_run_context(binding=started_binding, context=prepared.get("context")),
         )
     except Exception as error:
-        # A run started meanwhile: `reject` leaves the thread to it.
-        if multitask_strategy != "reject" or lookup_status(error) != HTTPStatus.CONFLICT:
+        if not rejected_as_busy(multitask_strategy, error):
             raise
         return {"skipped": "rejected"}
     await _record_delivery(client, thread_id, delivery_key, multitask_strategy)
@@ -220,13 +219,7 @@ async def _turn_input(
         prepared = None if prepare is None else await prepare()
         started_binding = binding
         if prepared is not None:
-            started_binding = cast(
-                "ChannelBinding",
-                {
-                    **binding,
-                    "event": {"type": "message", "messages": list(prepared["messages"])},
-                },
-            )
+            started_binding = binding_with_messages(binding, prepared["messages"])
     return prepared, started_binding
 
 

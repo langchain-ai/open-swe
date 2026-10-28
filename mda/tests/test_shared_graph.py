@@ -3,6 +3,7 @@ import gc
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
@@ -17,6 +18,12 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
+from langsmith.sandbox import (
+    ResourceCreationError,
+    SandboxAuthenticationError,
+    SandboxClientError,
+)
+from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from managed_deepagents.sandbox import SandboxDefinition
@@ -33,11 +40,13 @@ from runtime_api.catalog import (
     SandboxSpec,
     SubagentSpec,
 )
+from runtime_api.reports import Reports
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
 type BackendCalls = list[tuple[str, str, str | None]]
-type Prepared = list[JsonValue]
+type Prepared = list[tuple[JsonValue, JsonValue]]
+type Browsers = list[tuple[JsonValue, JsonValue]]
 
 
 def _thread(thread_id: str) -> ManagedRunConfig:
@@ -88,12 +97,20 @@ def _calling(*calls: ToolCall) -> GenericFakeChatModel:
 
 @pytest.fixture
 def prepared() -> Prepared:
-    """The box each run reported as it prepared."""
+    """The box each run reported as it prepared, and why it could not open one."""
     return []
 
 
 @pytest.fixture
-def backend_calls(monkeypatch: pytest.MonkeyPatch, prepared: Prepared) -> BackendCalls:
+def browsers() -> Browsers:
+    """Each browser a run reported, and whether the agent had opened it."""
+    return []
+
+
+@pytest.fixture
+def backend_calls(
+    monkeypatch: pytest.MonkeyPatch, prepared: Prepared, browsers: Browsers
+) -> BackendCalls:
     """Every call the runs make on the backend: its endpoint, its bearer and, for an
     operation, the name and grant it was called with."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
@@ -109,9 +126,14 @@ def backend_calls(monkeypatch: pytest.MonkeyPatch, prepared: Prepared) -> Backen
         operation = f"{json['name']}:{json['grant']}" if hook == "operation" else None
         calls.append((hook, headers["Authorization"], operation))
         if hook == "prepare":
-            prepared.append(json.get("sandbox_id"))
+            prepared.append((json.get("sandbox_id"), json.get("sandbox_error")))
+        if hook == "browser":
+            browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
+        if hook == "reports":
+            taken = {"replies": [{} for _ in Reports.model_validate(json).items]}
+            return httpx2.Response(200, request=request, json=taken)
         return httpx2.Response(200, request=request, json={"files": []} if hook == "skills" else {})
 
     client = MagicMock(is_closed=False)
@@ -223,8 +245,53 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     )
 
     assert second.nodes["model"] is first.nodes["model"]
-    assert prepared == ["box-thread-1", "box-thread-2"]
+    assert prepared == [("box-thread-1", None), ("box-thread-2", None)]
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
+
+
+async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_reports_why_it_gave_up(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
+) -> None:
+    """A 503 while opening or creating the box is retried until it opens; a refusal that will not
+    change is not, and the backend hears its cause without the secret in it."""
+    request = httpx2.Request("POST", "https://sandbox.invalid/boxes")
+    response = httpx2.Response(503, request=request)
+    unavailable = SandboxClientError("Service Unavailable")
+    unavailable.__cause__ = httpx2.HTTPStatusError("503", request=request, response=response)
+    unscheduled = ResourceCreationError("No capacity", error_type="Unschedulable")
+    unscheduled.__cause__ = httpx2.HTTPStatusError("503", request=request, response=response)
+    failures: dict[object, list[Exception]] = {
+        "thread-1": [unavailable, unscheduled],
+        "thread-2": [SandboxAuthenticationError("Invalid api_key=lsv2-secret")],
+    }
+    attempts: list[object] = []
+
+    def resolve(
+        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
+    ) -> StateBackend:
+        thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
+        attempts.append(thread_id)
+        if failures[thread_id]:
+            raise failures[thread_id].pop(0)
+        box = MagicMock(spec=StateBackend)
+        box.id = f"box-{thread_id}"
+        return box
+
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
+    monkeypatch.setattr("rt.managed_sandbox.asyncio.sleep", AsyncMock())
+    answers = iter([AIMessage(content="done"), AIMessage(content="done")])
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=answers))
+    store = InMemoryStore()
+
+    for thread_id, token in (("thread-1", "token-1"), ("thread-2", "token-2")):
+        catalog = _catalog("web_search", token, snapshot="a")
+        await _run(store, thread_id, _context("agent", token, catalog))
+
+    assert attempts == ["thread-1", "thread-1", "thread-1", "thread-2"]
+    assert prepared == [
+        ("box-thread-1", None),
+        (None, "SandboxAuthenticationError: Invalid api_key=[redacted]"),
+    ]
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
@@ -475,3 +542,56 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
         ("Bearer token-0", "operation_0:grant-0"),
         ("Bearer token-1", "operation_1:grant-1"),
     ]
+
+
+async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, browsers: Browsers, tmp_path: Path
+) -> None:
+    """The coding agent gets the browser's tools and instructions but no browser_handoff,
+    and its first browse reports the browser it named when the run started; the
+    reviewer has no browser."""
+    offered: dict[str, set[str]] = {}
+    instructed: dict[str, bool] = {}
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[BaseTool], **kwargs: object
+    ) -> GenericFakeChatModel:
+        offered[current_run().bearer or ""] = {tool.name for tool in tools}
+        return model
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        bearer = current_run().bearer or ""
+        system = "\n".join(m.text for m in messages if isinstance(m, SystemMessage))
+        instructed[bearer] = "browser_snapshot" in system
+        browsed = any(isinstance(message, ToolMessage) for message in messages)
+        if "browser_snapshot" in offered[bearer] and not browsed:
+            reply = AIMessage(
+                content="", tool_calls=[ToolCall(name="browser_snapshot", args={}, id="look")]
+            )
+        else:
+            reply = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    async def open_browser(key: str, window: str, idle_ttl_seconds: int) -> mda_browser._Session:
+        tools = MagicMock(snapshot=AsyncMock(return_value="a page"))
+        name = mda_browser._browser_name(key)
+        return mda_browser._Session(window, MagicMock(), tools, str(tmp_path), name)
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    monkeypatch.setattr(mda_browser, "_open", open_browser)
+    monkeypatch.setattr(mda_browser, "_RELEASE_AFTER_S", 0)
+    store = InMemoryStore()
+    await _run(store, "reviewed", _context("reviewer", "reviewer", _catalog("lookup", "grant")))
+    await _run(store, "browsed", _context("agent", "agent", _catalog("lookup", "grant")))
+    await asyncio.sleep(0)
+
+    tools = {"browser_run", "browser_snapshot", "browser_screenshot"}
+    assert tools <= offered["agent"] and "browser_handoff" not in offered["agent"]
+    assert not {name for name in offered["reviewer"] if name.startswith("browser_")}
+    assert instructed == {"agent": True, "reviewer": False}
+    browser = mda_browser._browser_name("thread:browsed")
+    assert browsers == [(browser, False), (browser, True)]

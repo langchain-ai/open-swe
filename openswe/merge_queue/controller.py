@@ -25,7 +25,7 @@ class QueueController:
             DispatchGateway(
                 str(config.dispatch_url), SecretStr(ENV.MERGE_QUEUE_DISPATCH_SECRET.require())
             )
-            if config.mode == "custom"
+            if config.mode == "custom" or config.check_app_id is not None
             else None
         )
 
@@ -53,11 +53,13 @@ class QueueController:
                 "statuses": "read",
             }
         )
+        if self.config.mode == "native" and self.dispatcher is not None:
+            permissions.update({"actions": "read", "checks": "read"})
         async with GitHubClient.as_app(owner, name, permissions=permissions) as github:
             repo = github.repo(*self.config.repository.split("/", 1))
             if (await repo.info()).get("id") != self.config.repository_id:
                 raise ValueError("Queue GitHub repository identity changed")
-            if self.config.mode == "custom":
+            if self.dispatcher is not None:
                 revision = await repo.branch_sha("main")
                 workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", revision)
                 if (
@@ -75,7 +77,13 @@ class QueueController:
         self.queue = queue
         if self.config.mode == "native":
             await queue.enable_native_observation()
-            controller = NativeQueueRuntime(queue.id, self.config.repository_id, self.open_repo)
+            controller = NativeQueueRuntime(
+                queue.id,
+                self.config.repository_id,
+                self.open_repo,
+                config=self.config,
+                dispatcher=self.dispatcher,
+            )
         else:
             if queue.mode != "custom":
                 raise ValueError("Cannot restart a custom controller for a native queue")

@@ -20,6 +20,7 @@ class QueueConfiguration(BaseModel):
     mode: Literal["custom", "native"] = "custom"
     dispatch_url: HttpUrl | None = None
     workflow_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    check_app_id: int | None = Field(default=None, gt=0, strict=True)
     operator_emails: frozenset[str] = Field(min_length=1)
     policy: QueuePolicy = Field(default_factory=lambda: QueuePolicy(checks={}))
     retention_days: int = Field(default=90, ge=7, le=365)
@@ -52,6 +53,15 @@ class QueueConfiguration(BaseModel):
             or self.workflow_digest is None
         ):
             raise ValueError("The queue needs validation and required-check provenance")
+        if self.check_app_id is not None and (
+            self.mode != "native"
+            or self.policy.validation is None
+            or self.dispatch_url is None
+            or self.workflow_digest is None
+        ):
+            raise ValueError(
+                "Native validation needs a trusted workflow, dispatcher and check issuer"
+            )
         if any(
             not email.strip() or email != email.strip().lower() for email in self.operator_emails
         ):
