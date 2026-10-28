@@ -124,7 +124,7 @@ class TestConfigureSandboxProxy:
         assert proxy_config["rules"][2:] == [
             tools_rule,
             custom_rule,
-            static_cloud_rule,
+            *([static_cloud_rule] if existing_identity == "absent" else []),
             *existing_rules,
         ]
         assert proxy_config["rules"][0]["headers"][0]["value"] == "Bearer token"
@@ -153,11 +153,13 @@ class TestConfigureSandboxProxy:
             successful_response.raise_for_status = MagicMock()
             mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
             _mock_async_client(mock_client_cls, mock_client)
+            mock_client.get.side_effect = [response, mock_client.get.return_value]
 
             await configure_sandbox_proxy("sandbox-abc", "token")
 
+            assert mock_client.get.call_count == 2
             assert mock_client.patch.call_count == 2
-            mock_sleep.assert_awaited_once_with(7.0)
+            assert mock_sleep.await_args_list == [((7.0,),), ((7.0,),)]
 
     @pytest.mark.parametrize("suspend_seconds", [170.0, PROXY_CONFIG_RETRY_WINDOW_SECONDS + 30])
     async def test_outlasts_a_host_suspend_within_the_retry_window(
