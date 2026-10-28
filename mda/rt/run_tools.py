@@ -272,7 +272,8 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         model call's system prompt. The interpreter has no hook for its reference, so
         this seeds the per-slot cache it renders from.
         """
-        if self._toolsets.get().catalog.search_tools:
+        catalog = self._toolsets.get().catalog
+        if catalog.search_tools and catalog.compact_code_tool_reference:
             exposed = tuple(
                 filter_tools_for_ptc(
                     [tool for tool in request.tools if isinstance(tool, BaseTool)],

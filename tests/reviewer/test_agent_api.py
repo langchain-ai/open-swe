@@ -617,8 +617,10 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
 
 
+@pytest.mark.parametrize("compact", [False, True])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
+    compact: bool,
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     from unittest.mock import AsyncMock
@@ -686,10 +688,20 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         choice = ModelChoice("openai:gpt-6.1-sol", {})
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
+    from openswe.dashboard.workspace_settings import WorkspaceSettings
+
+    settings = AsyncMock(
+        return_value=WorkspaceSettings({"compact_code_tool_reference": True} if compact else {})
+    )
+    monkeypatch.setattr("openswe.agent_api.graph.get_workspace_settings", settings)
     graph = RemoteGraph("agent", build)
-    run = RUN.granting()
+    run = RUN.model_copy(
+        update={"configurable": {**RUN.configurable, "workspace": "tool-reference-test"}}
+    ).granting()
     started = await graph.start_run(run)
     catalog = started.catalog.model_dump(mode="json")
+    settings.assert_awaited_once_with("tool-reference-test")
+    assert catalog["compact_code_tool_reference"] is compact
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]

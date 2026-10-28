@@ -460,11 +460,11 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
     assert "second_parameter" in prompts[1] and "first_parameter" not in prompts[1]
 
 
+@pytest.mark.parametrize("compact", [False, True])
 async def test_code_prompt_documents_only_common_tools_where_search_finds_the_rest(
-    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, compact: bool
 ) -> None:
-    """A large catalog offered from code stays callable from ``eval`` without each tool's
-    signature in every prompt; the common tools' argument schemas are spelled out."""
+    """Compacting the reference is opt-in and leaves every tool callable."""
     parameters: dict[str, JsonValue] = {
         "type": "object",
         "properties": {"channel": {"type": "string"}},
@@ -488,6 +488,7 @@ async def test_code_prompt_documents_only_common_tools_where_search_finds_the_re
             ],
             "code_only": names,
             "search_tools": True,
+            "compact_code_tool_reference": compact,
         }
     )
     prompts: list[str] = []
@@ -516,10 +517,14 @@ async def test_code_prompt_documents_only_common_tools_where_search_finds_the_re
 
     assert "integration_tool_399:grant" in {operation for _, _, operation in backend_calls}
     assert results[0].status == "success"
-    assert "Integration documentation" not in prompts[0]
-    assert "search_tools" in prompts[0]
-    schemas = json.loads(prompts[0].split("keyed by `code_name`:\n", 1)[1].split("\n", 1)[0])
-    assert schemas == {"homebaseReleasesActive": parameters, "slackAddReaction": parameters}
+    if compact:
+        assert "Integration documentation" not in prompts[0]
+        assert "search_tools" in prompts[0]
+        schemas = json.loads(prompts[0].split("keyed by `code_name`:\n", 1)[1].split("\n", 1)[0])
+        assert schemas == {"homebaseReleasesActive": parameters, "slackAddReaction": parameters}
+    else:
+        assert "Integration documentation" in prompts[0]
+        assert "integrationTool_399" in prompts[0]
 
 
 async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(

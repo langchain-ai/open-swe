@@ -186,6 +186,7 @@ from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
+from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
@@ -442,9 +443,12 @@ class RunSession:
         of each operation to the run this session serves."""
         sandbox = await self.sandbox()
         catalog = self.catalog()
+        settings = await get_workspace_settings(RunConfig.from_config(self.config).workspace_slug)
         run = self.run
         return catalog.model_copy(
             update={
+                "compact_code_tool_reference": settings.get("compact_code_tool_reference", False)
+                is True,
                 "trace_metadata": TurnGitMetadata(self.config).actor,
                 "sandbox": None
                 if sandbox is None

@@ -206,6 +206,7 @@ class Catalog(BaseModel):
     # What the runtime's middleware does around each model call; None leaves it to the
     # backend's phase calls, for the runs still answered from their plan.
     loop: LoopRules | None = None
+    compact_code_tool_reference: bool = False
     # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
     search_tools: bool = False
     search_tools_description: str | None = None

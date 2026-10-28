@@ -73,6 +73,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     model_routing_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    compact_code_tool_reference: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     gateway_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -325,6 +328,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "model_routing_enabled": None,
+        "compact_code_tool_reference": False,
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
