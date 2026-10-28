@@ -39,26 +39,6 @@ Homepage = "https://github.com/langchain-ai/deepagents/tree/main/libs/partners/q
 Repository = "https://github.com/langchain-ai/deepagents"
 Documentation = "https://github.com/langchain-ai/deepagents/tree/main/libs/partners/quickjs"
 
-[dependency-groups]
-test = [
-    "langgraph-checkpoint-postgres>=3.2.0,<4.0.0",
-    "psycopg[binary]>=3.3.4,<4.0.0",
-    "pytest>=9.1.1,<10.0.0",
-    "pytest-benchmark",
-    "pytest-codspeed>=5.0.3,<6.0.0",
-    "pytest-cov",
-    "pytest-socket",
-    "pytest-xdist",
-    "pytest-timeout>=2.4.0,<3.0.0",
-    "pytest-asyncio>=1.4.0",
-    "pytest-watcher>=0.6.3,<1.0.0",
-    "ruff>=0.15.20,<0.16.0",
-    "testcontainers[postgres]>=4.14.2,<5.0.0",
-    "ty>=0.0.54,<1.0.0",
-    "twine",
-    "build",
-]
-
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
 
