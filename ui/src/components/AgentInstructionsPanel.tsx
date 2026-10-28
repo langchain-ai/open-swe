@@ -201,9 +201,9 @@ export function AgentInstructionsPanel() {
                     aria-pressed={selected === s.full_name}
                     className={cn(
                       "h-auto justify-start whitespace-normal",
-                      "w-full truncate px-space-2 py-space-2 text-left",
+                      "w-full truncate px-space-2 py-space-2 text-left text-inherit",
                       selected === s.full_name
-                        ? "bg-selected font-medium"
+                        ? "bg-selected font-medium hover:bg-selected dark:hover:bg-selected"
                         : "hover:bg-surface-level-1-hover"
                     )}
                     onClick={() => setSelected(s.full_name)}

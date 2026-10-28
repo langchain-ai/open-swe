@@ -361,7 +361,7 @@ const FileDiffSection = memo(
           aria-label={file.treePath}
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="h-auto w-full justify-start gap-space-2 bg-surface-level-1 px-space-3 py-space-2 text-left whitespace-normal hover:bg-surface-level-1-hover"
+          className="h-auto w-full justify-start gap-space-2 bg-surface-level-1 px-space-3 py-space-2 text-left whitespace-normal text-inherit hover:bg-surface-level-1-hover"
         >
           <CaretDownIcon
             weight="regular"

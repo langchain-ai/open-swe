@@ -256,7 +256,7 @@ export function AgentThreadHeader({
               <Button
                 color="secondary"
                 variant="plain"
-                size="sm"
+                size="md"
                 type="button"
                 aria-label="Rename thread"
                 ref={titleButtonRef}
@@ -264,7 +264,7 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 shrink justify-start truncate px-space-2 py-space-1 text-left hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="h-auto min-w-0 shrink justify-start truncate px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 onClick={startRename}
               >
                 <span className="truncate">{savingTitle ?? title}</span>

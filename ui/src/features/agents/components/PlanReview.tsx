@@ -376,7 +376,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                               size="sm"
                               aria-label={`Comment ${index + 1} by ${comment.author}: ${comment.body}`}
                               type="button"
-                              className="block h-auto w-full justify-start text-left whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                              className="block h-auto w-full justify-start border-0 p-0 text-left whitespace-normal text-inherit hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
                               onClick={() => openComment(comment.id)}
                             >
                               <span className="text-xs font-semibold">

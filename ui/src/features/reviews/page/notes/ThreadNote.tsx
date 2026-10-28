@@ -163,7 +163,7 @@ export function ThreadSummary({
       aria-expanded={false}
       type="button"
       onClick={onOpen}
-      className="h-auto w-full min-w-0 flex-col justify-start gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover"
+      className="h-auto w-full min-w-0 flex-col justify-start gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left whitespace-normal text-inherit hover:bg-surface-level-1-hover"
     >
       <span className="flex w-full min-w-0 items-center gap-space-2">
         <CaretRightIcon className="size-3 shrink-0 text-secondary" />

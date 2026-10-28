@@ -47,7 +47,7 @@ export function ReplyBox({
           focusNext.current = true
           setDraft(threadId, "")
         }}
-        className="w-full justify-start border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-placeholder hover:border-strong"
+        className="w-full justify-start border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-secondary hover:border-strong"
       >
         {placeholder}
       </Button>

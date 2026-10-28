@@ -77,7 +77,7 @@ export function SidebarNav({
             type="button"
             className={cn(
               ROW,
-              "text-secondary data-[state=open]:bg-surface-level-2-hover",
+              "justify-start text-secondary data-[state=open]:bg-surface-level-2-hover",
               hidden.some((item) => item.to === activeSection) &&
                 cn(SELECTED_ROW, "text-primary")
             )}

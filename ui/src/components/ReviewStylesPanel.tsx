@@ -193,9 +193,9 @@ export function ReviewStylesPanel() {
                     aria-pressed={selected === s.full_name}
                     className={cn(
                       "justify-start",
-                      "max-w-full gap-space-2 border px-space-2 py-space-1 text-left hover:bg-surface-level-1-hover",
+                      "max-w-full gap-space-2 border px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-1-hover",
                       selected === s.full_name
-                        ? "border-brand bg-selected font-medium"
+                        ? "border-brand bg-selected font-medium hover:bg-selected dark:hover:bg-selected"
                         : "border-default"
                     )}
                     onClick={() => setSelected(s.full_name)}

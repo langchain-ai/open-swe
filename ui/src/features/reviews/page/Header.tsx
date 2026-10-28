@@ -236,7 +236,7 @@ export function Header({
               <Button
                 color="secondary"
                 variant="plain"
-                size="xs"
+                size="sm"
                 aria-label="Go to the changes"
                 type="button"
                 title="Go to the changes"

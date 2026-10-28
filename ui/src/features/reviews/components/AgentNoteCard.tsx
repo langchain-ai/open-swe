@@ -39,7 +39,7 @@ export function AgentNoteCard({
           <Button
             color="secondary"
             variant="plain"
-            size="xs"
+            size="sm"
             aria-label={location}
             type="button"
             onClick={onShow}

@@ -408,8 +408,8 @@ export function AutomationEditor({
           disabled={!canManage}
           placeholder="Untitled automation"
           aria-label="Automation name"
-          className="w-full"
-          inputContainerClassName="text-base font-medium border-strong/70 [&:hover:not(:focus-within)]:border-strong"
+          className="w-full [&_input]:text-base"
+          inputContainerClassName="font-medium border-strong/70 [&:hover:not(:focus-within)]:border-strong"
         />
 
         <div className="mt-space-3 flex items-center gap-space-3 text-xs">
@@ -751,7 +751,7 @@ function EventChips<E extends string>({
             className={cn(
               "gap-space-1 rounded-full border px-space-2 py-space-1 disabled:pointer-events-none",
               on
-                ? "border-brand bg-brand-subtle text-primary"
+                ? "border-brand bg-brand-subtle text-primary hover:bg-brand-subtle dark:hover:bg-brand-subtle"
                 : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary"
             )}
           >

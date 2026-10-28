@@ -63,7 +63,9 @@ export function PullRequestCard({
         className={cn(
           "h-auto justify-start whitespace-normal",
           "w-full gap-space-3 py-space-2 pr-space-2 pl-space-2 text-left",
-          selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
+          selected
+            ? "bg-selected hover:bg-selected dark:hover:bg-selected"
+            : "hover:bg-surface-level-1-hover",
           outcome && "opacity-60"
         )}
       >

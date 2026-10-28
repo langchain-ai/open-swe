@@ -415,7 +415,7 @@ export function OwnershipPicker({
                   <Button
                     color="secondary"
                     variant="plain"
-                    size="xs"
+                    size="sm"
                     aria-label={`${hiddenCount} hidden by the filter`}
                     type="button"
                     className="h-auto cursor-help border-0 px-0 underline decoration-dotted underline-offset-4"
