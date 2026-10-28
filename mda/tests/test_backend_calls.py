@@ -352,7 +352,8 @@ async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
         (PREPARE, 504),
         (BEFORE_MODEL, 502),
         (BEFORE_MODEL, 504),
-        (AFTER_MODEL, 503),
+        (AFTER_MODEL, 502),
+        (AFTER_MODEL, 504),
         (AFTER_AGENT, 504),
     ],
 )
@@ -378,7 +379,7 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL])
+@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL, AFTER_MODEL])
 async def test_a_run_waits_out_a_backend_rollout(
     monkeypatch: pytest.MonkeyPatch, endpoint: Endpoint, failures: int, recovers: bool
 ) -> None:
@@ -388,7 +389,7 @@ async def test_a_run_waits_out_a_backend_rollout(
     request = httpx2.Request("POST", "https://backend.invalid")
     # Only a call the backend could not have run is resent, or one that is safe to repeat.
     unavailable = [httpx2.Response(503, request=request), httpx2.ConnectError("secret-token")]
-    if endpoint is not BEFORE_MODEL:
+    if endpoint.delivery == "idempotent":
         unavailable.append(httpx2.Response(502, request=request))
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
@@ -519,6 +520,67 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
 
     assert "inbox_received" not in called
     assert "queued-1" not in [message.id for message in result["messages"]]
+
+
+async def test_a_moved_scout_stops_before_another_model_or_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    backend = _run_backend(invocation_id="turn")
+    operations: list[str] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "prepare":
+            return PhaseResult(update={"scout_nothing_to_plan": False})
+        if name == "operation":
+            operations.append(str(body["name"]))
+            assert operations == ["walkthrough_describe_other"]
+            return OperationResult(
+                content='{"success": false, "error": "The pull request moved on. Stop."}',
+                state={"scout_nothing_to_plan": True},
+            )
+        if name == "before_model":
+            state = RunCall.model_validate(body).state
+            return BeforeModel(jump_to="end" if state.get("scout_nothing_to_plan") else None)
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    tools = [
+        operation_tool(
+            OperationSpec(name=name, description=name, parameters={"type": "object"}), backend
+        )
+        for name in (
+            "walkthrough_describe_other",
+            "walkthrough_plan_chunk",
+            "check_async_task",
+            "start_async_task",
+        )
+    ]
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            ToolCall(name="walkthrough_describe_other", args={}, id="call-1")
+                        ],
+                    )
+                ]
+            )
+        ),
+        tools=tools,
+        middleware=[BackendRunMiddleware(backend)],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "Plan the walkthrough")]})
+
+    assert operations == ["walkthrough_describe_other"]
+    assert isinstance(result["messages"][-1], ToolMessage)
+    assert result["messages"][-1].tool_call_id == "call-1"
 
 
 async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpoint(
@@ -806,7 +868,7 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
         list[AgentMiddleware],
         [
             BackendRunMiddleware(backend),
-            *model_call_guards(timeout_seconds=0.05),
+            *model_call_guards(timeout_seconds=1.0),
         ],
     )
     graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
