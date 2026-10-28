@@ -218,6 +218,9 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_linear_notification", notify)
+    task_messages, wakes = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(completion.TaskMessage, "deliver_to", task_messages)
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", wakes)
 
     # MDA's Linear channel started this run; it reports the failure in the session.
     result = await completion.handle_run_completion(
@@ -225,6 +228,9 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     )
     assert result == {"status": "ignored", "reason": "the channel reports the failure"}
     notify.assert_not_awaited()
+    # What arrived for the thread during the run doesn't wait for some later run.
+    task_messages.assert_awaited_once_with("t1")
+    wakes.assert_awaited_once_with("t1", "enqueue")
 
     # A run the backend started on the same thread still gets its notice.
     await completion.handle_run_completion(
