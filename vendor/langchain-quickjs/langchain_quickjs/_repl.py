@@ -459,6 +459,13 @@ class _ThreadREPL:
             self._task_calls = asyncio.Semaphore(self._max_subagent_concurrency)
             self._register_task_bridge()
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the REPL's context or its engine has been closed."""
+        return (
+            self._ctx is None or self._ctx._closed or self._ctx._engine_ctx.is_closed()
+        )
+
     def _require_ctx(self) -> Context:
         """Return the live QuickJS context or raise if this REPL is closed."""
         if self._ctx is None:
@@ -816,13 +823,42 @@ class _ThreadREPL:
         outer_runtime: ToolRuntime | None = None,
         outer_loop: asyncio.AbstractEventLoop | None = None,
     ) -> EvalOutcome:
-        return await self._worker.run_async(
-            self._aeval_async(
-                code,
-                outer_runtime=outer_runtime,
-                outer_loop=outer_loop,
-            )
-        )
+        caller_loop = asyncio.get_running_loop()
+        unwound = asyncio.Event()
+        # Whichever side takes `claim` first decides: the worker starts the eval,
+        # or the cancelled caller abandons it before it touches the context.
+        claim = threading.Lock()
+        started = False
+        abandoned = False
+
+        async def evaluate() -> EvalOutcome:
+            nonlocal started
+            with claim:
+                if abandoned:
+                    raise asyncio.CancelledError
+                started = True
+            try:
+                return await self._aeval_async(
+                    code,
+                    outer_runtime=outer_runtime,
+                    outer_loop=outer_loop,
+                )
+            finally:
+                caller_loop.call_soon_threadsafe(unwound.set)
+
+        try:
+            return await self._worker.run_async(evaluate())
+        except asyncio.CancelledError:
+            # The cross-thread future cancels before the worker finishes unwinding.
+            # Keep the context alive until its pending jobs have stopped touching it.
+            # A coroutine cancelled before its first step never runs its `finally`,
+            # so wait only for an eval that started.
+            with claim:
+                abandoned = True
+                running = started
+            if running:
+                await unwound.wait()
+            raise
 
     def create_snapshot(self) -> bytes:
         """Capture the current context snapshot as bytes."""
