@@ -104,3 +104,9 @@ async def test_a_main_workflow_change_still_publishes_with_the_published_workflo
     assert (await preview.git("show", f"FETCH_HEAD:{preview.WORKFLOWS}/ci.yml")).stdout == (
         "published\n"
     )
+
+    # Nothing changed since: the build takes the unchanged-tree shortcut, with no typecheck.
+    checked = AsyncMock(return_value=None)
+    monkeypatch.setattr(preview, "typecheck", checked)
+    await preview.Preview(preview.Settings.from_env()).build()
+    checked.assert_not_awaited()

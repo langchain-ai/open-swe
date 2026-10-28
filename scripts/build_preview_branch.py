@@ -776,6 +776,8 @@ The preview resets to plain `main` every Sunday, in the
         published = await self.fetch_published()
         await self.assemble(prompt)
         if published is not None:
+            # Before the unchanged-tree check: the published tree keeps its own workflows.
+            await self.keep_published_workflows()
             await self.reuse_fixup()
         errors = None
         if self.settings.force or await rev_parse("HEAD^{tree}") != published:
@@ -786,6 +788,7 @@ The preview resets to plain `main` every Sunday, in the
             summary("", "### Typecheck failed — nothing published", "", "```", errors, "```")
             raise PreviewError("the preview tree fails typecheck; nothing was published")
         if published is not None:
+            # Again, should verify have reassembled the tree from main.
             await self.keep_published_workflows()
         await self.publish(published)
 
