@@ -31,12 +31,15 @@ class Git:
         return self.pool.submit(self.run, path, args)
 
     def run(self, path: Path, args: Tuple[str, ...]) -> "subprocess.CompletedProcess[bytes]":
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise Skipped(f"git {args[0]} did not start before the scan deadline")
         try:
             return subprocess.run(
                 ["git", "--no-optional-locks", "-C", str(path), *args],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                timeout=max(self.deadline - time.monotonic(), 0.5),
+                timeout=remaining,
                 check=False,
             )
         except subprocess.TimeoutExpired:
