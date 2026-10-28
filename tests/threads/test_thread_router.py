@@ -952,6 +952,12 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     harness.runtimes.mda_runtime._read_http = httpx.AsyncClient(
         base_url=harness.runtimes.mda_runtime.url, transport=httpx.MockTransport(reads)
     )
+    monkeypatch.setattr(
+        harness.runtimes.mda,
+        "reads",
+        LangGraphClient(harness.runtimes.mda_runtime._read_http),
+        raising=False,
+    )
     # MDA creates the PR's thread as the backend's own, through the recorded transport.
     mda = harness.runtimes.mda_runtime
     monkeypatch.setattr(mda, "sdk", lambda: LangGraphClient(mda._http))

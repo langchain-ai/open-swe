@@ -79,7 +79,7 @@ async def test_only_who_may_prompt_a_private_conversation_continues_it(
         ),
     )
     create = AsyncMock()
-    monkeypatch.setattr(webhook, "create_thread", create)
+    monkeypatch.setattr(webhook.THREADS, "create", create)
     trigger = AsyncMock(return_value=True)
     monkeypatch.setattr(common, "trigger_or_queue_run", trigger)
 
