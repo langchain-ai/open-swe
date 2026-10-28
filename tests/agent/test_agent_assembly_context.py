@@ -804,7 +804,7 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
 
 
 async def test_anthropic_title_model_omits_thinking_without_affecting_agent() -> None:
-    captured = await _capture_create_deep_agent_kwargs(
+    captured = await _plan_agent(
         workspace_settings=WorkspaceSettings(
             {
                 **_MODEL_DEFAULTS,
