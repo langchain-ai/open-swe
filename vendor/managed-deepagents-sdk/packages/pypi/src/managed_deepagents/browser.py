@@ -57,7 +57,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk import get_client
-from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient
+from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient, ResourceNotFoundError
 from langsmith.utils import get_env_var
 from pydantic import TypeAdapter, ValidationError
 from stagehand import BrowserContext, Page, Stagehand, get_extension_archive, local_browser
@@ -153,6 +153,11 @@ _NO_RECORDER = (
     "error: browser_record needs a sandbox to save recordings in, and this run has none. "
     "Screenshots still save."
 )
+_REPLACED = (  # before what the call returned, once the thread's browser was made again
+    "This is a new browser: the one you used before is gone. It started on a blank page, "
+    "signed out of everything, and nothing you or the user did in the old one carried over."
+)
+_LOST = "error: the browser was deleted, so the recording is lost."
 _CLOSE_TIMEOUT_S = 30.0  # for freeing the extension from a client that never closed
 _STILL_CLOSING = (
     "The browser is still finishing a call from a client that went away. Try again shortly."
@@ -178,10 +183,18 @@ class PendingBrowserHandoff(TypedDict):
     """When the user's link runs out, in epoch seconds."""
 
 
+def _latest(_: str | None, new: str | None) -> str | None:
+    return new
+
+
 class BrowserState(AgentState):
-    """The thread's handoff that waits on the user, as deepagents keeps its async tasks."""
+    """The thread's handoff that waits on the user, as deepagents keeps its async tasks,
+    and the browser it last used."""
 
     mda_browser_handoff: Annotated[NotRequired[PendingBrowserHandoff | None], OmitFromInput]
+    mda_browser: Annotated[NotRequired[str | None], OmitFromInput, _latest]
+    """The browser sandbox's id: one made again under the same name has a new one.
+    Calls side by side may each write it."""
 
 
 @dataclass
@@ -191,6 +204,7 @@ class _Session:
     tools: StagehandFacadeTools
     artifacts: str  # where the facade writes run code's screenshots
     browser: str  # the browser's name, which a later generation may have replaced
+    box: str | None = None  # the browser sandbox's id, which a browser made again changes
     closing: bool = False  # run code called `browser.close()`: released after the call
     # The sandbox whose localhost the browser shares. By handle, not name: one MDA
     # replaces mid-run keeps its name but gets a new handle.
@@ -225,6 +239,7 @@ class _Take:
     folder: str  # where the recorder keeps the take, in that sandbox
     sandbox: BackendProtocol  # the agent's sandbox, where the recording is saved
     path: str | None  # where `start` said to save it
+    box: str | None  # the browser sandbox's id: the take is lost with it
 
 
 # By browser key and window: a user's threads record their own windows.
@@ -302,6 +317,8 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         self.tools = self._tools()
         self._arguments = {tool.name: set(tool.args) for tool in self.tools}
         self._instructions = f"{facade_instructions()}\n\n{_INSTRUCTIONS}"
+        # By tool call: the browser sandbox it ran on, which `awrap_tool_call` notes in state.
+        self._boxes: dict[str | None, str | None] = {}
 
     def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
         """The LangSmith browser this run's browser tools use, whether or not it exists yet.
@@ -332,6 +349,7 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                 if key not in _SESSIONS:
                     _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
+                self._boxes[runtime.tool_call_id] = _SESSIONS[key].box
                 return await fn(_SESSIONS[key])
             except StagehandFacadeInputError as err:
                 return f"error: {err}"
@@ -429,7 +447,9 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             async with _LOCKS.setdefault(key, asyncio.Lock()):
                 await _release(key)
                 try:
-                    browser, window_id, url = await _hand_over(key, window, self.idle_ttl_seconds)
+                    browser, window_id, url, box = await _hand_over(
+                        key, window, self.idle_ttl_seconds
+                    )
                 except Exception as err:  # noqa: BLE001 - reported to the model
                     failed = f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
                     return _with_recording(failed, ended)
@@ -447,13 +467,11 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         # What clients such as Studio show the user: the ask, and a link that lets
         # whoever holds it drive the window, for 15 minutes.
         handoff = {"type": "browser_handoff", "message": reason, "url": url}
+        text, noted = _note_box(runtime.state, box, _with_recording(_HANDED_OVER, ended))
         reply = ToolMessage(
-            _with_recording(_HANDED_OVER, ended),
-            artifact=handoff,
-            name="browser_handoff",
-            tool_call_id=runtime.tool_call_id,
+            text, artifact=handoff, name="browser_handoff", tool_call_id=runtime.tool_call_id
         )
-        return Command(update={"mda_browser_handoff": pending, "messages": [reply]})
+        return Command(update={"mda_browser_handoff": pending, **noted, "messages": [reply]})
 
     async def _record(  # noqa: PLR0911 - one return per refusal
         self, runtime: ManagedToolRuntime, action: Literal["start", "stop"], path: str | None
@@ -485,7 +503,8 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
-        """Turn away argument names a browser tool lacks, such as snake_case ones.
+        """Turn away argument names a browser tool lacks, such as snake_case ones, and note
+        the browser a call ran on, telling the model if it replaced the thread's.
 
         JSON-schema tools take their arguments unchecked, so an unknown name would reach
         the tool's function and fail the run.
@@ -493,9 +512,16 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         call = request.tool_call
         accepted = self._arguments.get(call["name"])
         extra = [arg for arg in call["args"] if accepted is not None and arg not in accepted]
-        if not extra:
-            return await handler(request)
-        return ToolMessage(_unexpected(extra), tool_call_id=call["id"], name=call["name"])
+        if extra:
+            return ToolMessage(_unexpected(extra), tool_call_id=call["id"], name=call["name"])
+        result = await handler(request)
+        if call["id"] not in self._boxes or not isinstance(result, ToolMessage):
+            return result
+        content, noted = _note_box(request.state, self._boxes.pop(call["id"]), result.content)
+        if not noted:
+            return result
+        message = result.model_copy(update={"content": content})
+        return Command(update={**noted, "messages": [message]})
 
     def _tools(self) -> list[BaseTool]:
         """The facade's tools as its hosts advertise them, names prefixed ``browser_``."""
@@ -581,6 +607,23 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
 
 def _pending(state: BrowserState | Mapping[str, Any] | None) -> PendingBrowserHandoff | None:
     return state.get("mda_browser_handoff") if isinstance(state, Mapping) else None
+
+
+def _note_box(
+    state: object, box: str | None, content: str | list[Any]
+) -> tuple[str | list[Any], dict[str, str]]:
+    """What a call on browser sandbox ``box`` returns, and the update that notes ``box``.
+
+    A box the thread hasn't used is noted; if it used another, it was deleted, and the
+    model reads so first.
+    """
+    used = state.get("mda_browser") if isinstance(state, Mapping) else None
+    if box is None or box == used:
+        return content, {}
+    if used is not None:
+        replaced = {"type": "text", "text": _REPLACED}
+        content = f"{_REPLACED}\n{content}" if isinstance(content, str) else [replaced, *content]
+    return content, {"mda_browser": box}
 
 
 async def _start_watcher(runtime: ManagedToolRuntime, pending: PendingBrowserHandoff) -> None:
@@ -714,9 +757,14 @@ async def _finish_take(take: _Take, path: str | None) -> list[dict[str, str]] | 
     Returns what was saved and the first and last frames, for the model to check.
     """
     try:
-        reply, (video, timeline, first, last) = await _stop_take(take)
+        stopped = await _stop_take(take)
     except Exception as err:  # noqa: BLE001 - reported to the model
-        return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
+        if not _deleted(err):
+            return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
+        stopped = None
+    if stopped is None:
+        return _LOST
+    reply, (video, timeline, first, last) = stopped
     default = f"{_RECORDINGS}/{time.strftime('%Y%m%d-%H%M%S')}.mp4"
     path = path or default
     saved = await _save(take.sandbox, path, video)
@@ -885,15 +933,12 @@ async def _usable_browser(
     """
     for generation in range(_BROWSER_GENERATIONS):
         name = _browser_name(key, generation)
+        await _create(api, browsers, name, idle_ttl_seconds)
         try:
-            # HiDPI renders at twice the resolution, so a person watching or driving
-            # the window sees it sharp; it can only be chosen at creation.
-            create = {"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": True}
-            await api.post(browsers, json=create)
-        except httpx.HTTPStatusError as err:
-            if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
-                raise
-        box = await sandboxes.get_sandbox(name)
+            box = await sandboxes.get_sandbox(name)
+        except ResourceNotFoundError:  # it finished deleting since: its name is free
+            await _create(api, browsers, name, idle_ttl_seconds)
+            box = await sandboxes.get_sandbox(name)
         if box.status in _UNUSABLE:
             continue
         if box.status == "stopped":
@@ -901,6 +946,18 @@ async def _usable_browser(
         return name, box
     msg = "could not find or create a usable browser"
     raise RuntimeError(msg)
+
+
+async def _create(api: httpx.AsyncClient, browsers: str, name: str, idle_ttl_seconds: int) -> None:
+    """Create browser ``name``, unless it exists."""
+    try:
+        # HiDPI renders at twice the resolution, so a person watching or driving the
+        # window sees it sharp; it can only be chosen at creation.
+        create = {"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": True}
+        await api.post(browsers, json=create)
+    except httpx.HTTPStatusError as err:
+        if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
+            raise
 
 
 # --- LangSmith: create the browser, put Stagehand's extension on it, connect -------
@@ -965,8 +1022,9 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
         port = await _window_port(box, window["id"])
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
+    where = (key, window_name, name, cdp_url, local_url, headers)
     try:
-        return await _connect(key, window_name, name, cdp_url, local_url, headers)
+        return await _connect(*where, box=box.id)
     except Exception as err:
         if "already initialized" not in str(err):
             raise
@@ -974,7 +1032,7 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
     # extension; closing it frees it.
     # Known limit: closing a live client on another replica leaves both clients attached.
     await _close_stale_client(cdp_url, headers)
-    return await _connect(key, window_name, name, cdp_url, local_url, headers)
+    return await _connect(*where, box=box.id)
 
 
 async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, Any]:
@@ -986,11 +1044,13 @@ async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, 
     return (await api.post(f"{browser}/attachments", json=body)).json()
 
 
-async def _hand_over(key: str, window_name: str, idle_ttl_seconds: int) -> tuple[str, str, str]:
+async def _hand_over(
+    key: str, window_name: str, idle_ttl_seconds: int
+) -> tuple[str, str, str, str | None]:
     """Give the user ``key``'s window, creating either as needed.
 
-    Returns the browser's name, the window's id, and a short-lived link the user
-    drives it with.
+    Returns the browser's name, the window's id, a short-lived link the user drives it
+    with, and the browser sandbox's id.
     """
     url, headers = _api()
     browsers = f"{url}/browsers"
@@ -998,13 +1058,13 @@ async def _hand_over(key: str, window_name: str, idle_ttl_seconds: int) -> tuple
         httpx.AsyncClient(headers=headers, timeout=90, event_hooks={"response": [_raise]}) as api,
         AsyncSandboxClient(api_key=headers["X-Api-Key"], headers=headers) as sandboxes,
     ):
-        name, _ = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
+        name, box = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
         window = await _window(api, f"{browsers}/{name}", window_name)
         window_api = f"{browsers}/{name}/attachments/{window['id']}"
         await api.post(f"{window_api}/controller", json={"controller": "user"})
         body = {"ttl_seconds": _HANDOFF_LINK_TTL_S, "embed_origins": await _embed_origins(api)}
         link = (await api.post(f"{window_api}/links", json=body)).json()["act_url"]
-    return name, window["id"], link
+    return name, window["id"], link, box.id
 
 
 async def _share_localhost(name: str, sandbox: str) -> None:
@@ -1043,7 +1103,14 @@ async def _raise(response: httpx.Response) -> None:
 
 
 async def _connect(
-    key: str, window: str, browser_name: str, cdp_url: str, local_url: str, headers: dict[str, str]
+    key: str,
+    window: str,
+    browser_name: str,
+    cdp_url: str,
+    local_url: str,
+    headers: dict[str, str],
+    *,
+    box: str | None = None,
 ) -> _Session:
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
@@ -1067,7 +1134,7 @@ async def _connect(
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
     tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts, browser_name, local_url=local_url)
+    return _Session(window, stagehand, tools, artifacts, browser_name, box, local_url=local_url)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:
@@ -1115,7 +1182,7 @@ async def _start_take(
         except RuntimeError as err:  # the recorder's own; the client is fine
             await _remove_take(box, folder)
             return f"error: {sanitize_error_message(str(err))}"
-    _TAKES[where] = _Take(session.browser, folder, sandbox, path)
+    _TAKES[where] = _Take(session.browser, folder, sandbox, path, box.id)
     width, height = _RECORD_VIEWPORT
     return (
         f"Recording. The viewport is {width}x{height} until you stop, "
@@ -1123,14 +1190,16 @@ async def _start_take(
     )
 
 
-async def _stop_take(take: _Take) -> tuple[_StopReply, list[bytes]]:
+async def _stop_take(take: _Take) -> tuple[_StopReply, list[bytes]] | None:
     """Stop ``take``, wait while the recorder encodes it, and download it.
 
     Returns the recorder's reply, then the video, its timeline, and its first and last
-    frames.
+    frames; None if its browser was deleted and made again, without the take.
     """
     stop = _recorder_command(take.folder, "stop")
     async with _browser_box(take.browser) as box:
+        if box.id != take.box:
+            return None
         try:
             reply = await _recorder(box, stop, _RECORDER_STOP_TIMEOUT_S, _STOP_REPLY)
             files = [
@@ -1140,6 +1209,11 @@ async def _stop_take(take: _Take) -> tuple[_StopReply, list[bytes]]:
         finally:
             await _remove_take(box, take.folder)  # the take holds what the tab showed
     return reply, files
+
+
+def _deleted(err: Exception) -> bool:
+    """Whether ``err`` says the browser's sandbox is gone."""
+    return isinstance(err, ResourceNotFoundError) and err.resource_type == "sandbox"
 
 
 async def _remove_take(box: AsyncSandbox, folder: str) -> None:

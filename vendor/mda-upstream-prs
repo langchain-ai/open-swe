@@ -1,1 +1,2 @@
 1088 970921f47b8d33931963a954aee3f9e61853075e fix(browser): save screenshots without a sandbox, and free a browser a dead client holds
+1097 1485c2fe7bcb8a02693e393901f5bfe3caecb8ee fix(browser): tell the model when its browser was replaced or a recording lost
