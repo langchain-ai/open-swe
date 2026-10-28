@@ -48,8 +48,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
 from openswe.threads.access import agent_version_metadata, resolve_run_email
 from openswe.threads.creation import create_thread
+from openswe.threads.store import THREADS
 from openswe.users import User
-from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
@@ -443,6 +443,11 @@ async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
             text(f"UPDATE automation SET {assignments} WHERE id = :id"),
             {**values, "id": uuid.UUID(record["id"])},
         )
+
+
+async def record_run_error(record: dict[str, Any], error: str) -> None:
+    """Show ``error`` on the automation, as a failed launch does."""
+    await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
 
 
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
@@ -890,7 +895,10 @@ async def _schedule_thread_metadata(cfg: RunConfig) -> dict[str, Any] | None:
     """Metadata of the public system thread an automation run executes on, if it is one."""
     if cfg.source != "schedule" or not cfg.thread_id or cfg.github_login or cfg.user_email:
         return None
-    metadata = thread_metadata(await langgraph_client().threads.get(cfg.thread_id))
+    thread = await THREADS.get(cfg.thread_id)
+    if thread is None:
+        return None
+    metadata = dict(thread.metadata)
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
         return None
     return metadata
