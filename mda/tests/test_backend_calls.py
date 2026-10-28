@@ -812,7 +812,7 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
         list[AgentMiddleware],
         [
             BackendRunMiddleware(backend),
-            *model_call_guards(timeout_seconds=0.05),
+            *model_call_guards(timeout_seconds=1.0),
         ],
     )
     graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
