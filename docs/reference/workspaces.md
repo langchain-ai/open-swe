@@ -102,6 +102,47 @@ A workspace's preferred repositories are what its image preloads: the setup and 
 Any other repository is cloned on demand to the same place by the run that needs it.
 A refresh writes only snapshot and refresh state and an edit writes only the definition, so neither reverts the other.
 
+### Sandbox cloud workload identity
+
+Admins configure AWS, GCP, and Azure workload identity in **Workspaces → Sandbox Proxy**.
+These are nonsecret federation profiles, stored alongside the existing sandbox creation settings:
+AWS role ARN, GCP workload identity provider and optional service account email, or Azure tenant/client UUIDs and optional resources.
+Only one rule per cloud is allowed, and federated rules must remain enabled.
+The JSON editor and the admin workspace API/tools edit the same configuration; no cloud keys or client secrets are accepted.
+Existing non-federated cloud rules keep their JSON contract, subject to the existing secret restrictions; federation-only validation does not require those rules to be enabled.
+
+Every federated rule, and any federated mount auth, must use a governed tag scope, `tag:<tag value UUID>`.
+Every Open SWE workspace creates sandboxes in the same LangSmith workspace, so a `workspace` scope would let all of them use the role; Open SWE rejects it.
+Add the existing tag value UUID to **Governed Tag Value IDs** and use the same UUID in the rule's subject scope.
+Before enabling a profile, configure cloud trust for the LangSmith deployment's OIDC issuer and the exact subject `ws:<LangSmith workspace UUID>:sandbox:tag:<tag value UUID>`.
+The LangSmith workspace UUID is **not** the Open SWE workspace UUID or slug.
+Open SWE validates UUIDs and scope membership; LangSmith validates tag ownership and the deployment API key's assignment permissions when creating the sandbox, and rechecks tag scope on credential refresh.
+Saving a profile does not verify that the cloud will accept it; invalid cloud trust fails sandbox creation.
+
+Cloud permissions apply to every matching guest request, not just filesystem mounts.
+Grant only the required cloud permissions, without unnecessary role-chaining or service-account impersonation rights.
+Credentials are exchanged and applied by the sandbox host proxy, not stored in the image or passed to the guest.
+The LangSmith deployment and sandbox hosts must support workload identity and have their issuer/signing keys configured first.
+
+Image inheritance shares the default workspace's snapshot, sizing, and update tracking, **not** its creation settings.
+Proxy rules, mounts, environment variables, and tag assignments remain explicit on the child workspace.
+This changes the earlier behavior that inherited all creation settings: configure any settings the child needs directly.
+An inherited image can still contain files or credentials written by its build scripts; only share images with trusted workspace users.
+Deployment-wide `SANDBOX_CREATE_EXTRA_JSON` remains an operator-controlled default for every workspace, including cloud authority; do not configure it with global cloud rules or tag assignments when workspace separation is required.
+
+Federated authority is included when a new sandbox is created and preserved while GitHub and tool credentials refresh.
+Workspace image builders use the workspace's same explicit creation settings.
+Saving or removing a profile does not modify existing sandboxes: start a new thread or explicitly recreate its sandbox to apply changes.
+Recreation discards the old sandbox's filesystem, so preserve work first; removing cloud trust or the governed tag in LangSmith is the separate revocation mechanism for existing sandboxes.
+
+### Sandbox LangSmith access
+
+**LangSmith Access** in the same section lists LangSmith permissions (for example `projects:read, datasets:read`) that code in new sandboxes may use against the LangSmith API.
+Open SWE saves them as an explicit `access_delegation` grant; the sandbox proxy injects a short-lived credential, so no key enters the sandbox.
+The delegator is Open SWE's own sandbox-creating LangSmith key, not the person running the thread, so every thread in the workspace gets the same access, capped by what that key holds.
+`INHERIT` grants and tenant administration (`workspaces:manage*`, `organization:manage*`, `organization:pats:*`) are refused.
+Like cloud identity, the grant is fixed when a sandbox is created.
+
 ### Access
 
 Every signed-in user may view and use every workspace, and every configured admin may administer every workspace.
