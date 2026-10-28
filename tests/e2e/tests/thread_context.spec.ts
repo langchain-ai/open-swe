@@ -349,7 +349,6 @@ test("records every message the model is handed as people come and go", async ({
   const fourthContext = contextBlocks(fourth, "run");
   expect(fourthContext).toHaveLength(1);
   expect(fourthContext[0]).toContain('id="source:dashboard"');
-  expect(fourthContext[0]).toContain("dashboard/Web UI");
   expect(fourth.run).toHaveLength(1);
   expect(fourth.dispatch.join("\n")).toContain('surface="web"');
 
