@@ -201,11 +201,18 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     return blockers
 
 
-async def _review_author_allowed(author: str) -> bool:
-    return (
-        author.lower() in OPEN_SWE_GITHUB_LOGINS
-        or await User.for_login("github", author) is not None
-    )
+async def _review_author_allowed(author: str, owner: str, repo: str) -> bool | None:
+    if author.lower() in OPEN_SWE_GITHUB_LOGINS or await User.for_login("github", author):
+        return True
+    try:
+        async with GitHubClient.as_app(owner, repo) as github:
+            settings = await RepoSettings.fetch(github.repo(owner, repo), strict=True)
+    except GitHubAppUnavailable, RepoFileUnreadableError:
+        logger.exception("Could not read review author allow-list")
+        return None
+    return bool(author) and author.lower() in {
+        login.strip().lower() for login in settings.review_allowed_authors
+    }
 
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
@@ -214,8 +221,13 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if readiness is None:
         return None
     blockers = request_blockers(readiness.snapshot)
-    if not await _review_author_allowed(readiness.snapshot.author):
-        blockers.append("its author is not an Open SWE user")
+    author_allowed = await _review_author_allowed(
+        readiness.snapshot.author, pull.repo.owner, pull.repo.name
+    )
+    if author_allowed is None:
+        return None
+    if not author_allowed:
+        blockers.append("its author is not an Open SWE user or in reviewAllowedAuthors")
     return blockers
 
 
@@ -1011,8 +1023,11 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     if readiness is None:
         return False
     snapshot = readiness.snapshot
-    if not await _review_author_allowed(snapshot.author):
-        await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
+    author_allowed = await _review_author_allowed(snapshot.author, pull.repo.owner, pull.repo.name)
+    if author_allowed is None:
+        return False
+    if not author_allowed:
+        await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return True
     if snapshot.merged:
         await ReviewCard(request).mark_merged()
@@ -1160,8 +1175,12 @@ async def _auto_assign(
     replacing = trigger is not None and trigger.kind in ("declined", "expired")
     if not replacing and (request.reviewers or request.picks):
         return AutoAssignResult("claimed")
-    if not await _review_author_allowed(request.pull_request.author):
-        await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
+    pr = request.pull_request
+    author_allowed = await _review_author_allowed(pr.author, pr.owner, pr.repo)
+    if author_allowed is None:
+        return AutoAssignResult("failed")
+    if not author_allowed:
+        await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)
     if isinstance(choice, Wait):
