@@ -5578,6 +5578,11 @@
             "title": "Channel Mismatch",
             "type": "boolean"
           },
+          "channel_name": {
+            "default": "",
+            "title": "Channel Name",
+            "type": "string"
+          },
           "claimed": {
             "default": false,
             "title": "Claimed",

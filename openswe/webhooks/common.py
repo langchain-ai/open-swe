@@ -98,6 +98,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
+    add_slack_reaction,
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_permalink,
@@ -107,6 +108,7 @@ from openswe.slack.client import (
     post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
+    remove_slack_reaction,
     resolve_slack_links_in_context,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
     strip_bot_mention,  # noqa: F401
@@ -163,11 +165,16 @@ from openswe.utils.multimodal import (
     fetch_image_block,  # noqa: F401
     vision_not_supported_warning,  # noqa: F401
 )
+from openswe.utils.preview import skip_on_preview
 from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
-from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
+from openswe.workspaces.routing import (
+    is_kitchen_channel,
+    workspace_for_repo,
+    workspace_for_slack_channel,
+)
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 __all__ = [
@@ -1523,9 +1530,21 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
                     metadata_update["pr_state"] = new_state
 
+                previous_tracked_states = (
+                    [record.get("state") for record in pull_requests if isinstance(record, dict)]
+                    if isinstance(pull_requests, list)
+                    else []
+                )
                 tracked_states = [record.get("state") for record in updated_pull_requests]
                 if not tracked_states and metadata.get("pr_url") == pr_url:
+                    previous_tracked_states = [previous_state]
                     tracked_states = [new_state]
+                was_all_merged = bool(previous_tracked_states) and all(
+                    state == "merged" for state in previous_tracked_states
+                )
+                all_merged = bool(tracked_states) and all(
+                    state == "merged" for state in tracked_states
+                )
                 all_terminal = bool(tracked_states) and all(
                     state in _TERMINAL_PR_STATES for state in tracked_states
                 )
@@ -1569,6 +1588,19 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update
                     )
+                location = SourceContext.from_metadata(metadata).slack_location
+                if (
+                    was_all_merged != all_merged
+                    and location is not None
+                    and not skip_on_preview("kitchen_thread_merge_reaction")
+                    and await is_kitchen_channel(location[0])
+                ):
+                    if all_merged:
+                        if not await add_slack_reaction(*location, "merged"):
+                            await add_slack_reaction(*location, "twisted_rightwards_arrows")
+                    else:
+                        await remove_slack_reaction(*location, "merged")
+                        await remove_slack_reaction(*location, "twisted_rightwards_arrows")
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
