@@ -10,6 +10,7 @@ import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -51,6 +52,7 @@ from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
+from openswe.utils.time import parse_iso
 from openswe.workspaces.refresh import is_snapshot_stale, maybe_start_update
 from openswe.workspaces.store import (
     SandboxResources,
@@ -297,6 +299,34 @@ async def _refresh_github_proxy_or_fail(
         )
         raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
+
+
+async def refresh_thread_github_proxy(
+    thread_id: str, *, workspace_slug: str | None = None
+) -> datetime | None:
+    """Give the thread's box a freshly minted GitHub token; when it expires, if it has a proxy.
+
+    Everything it needs is read from the thread: the box, its proxy rules, the scope
+    its token is limited to. So it works on whichever replica gets the call, whatever
+    that replica has connected to before.
+    """
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        return None
+    metadata = await get_sandbox_metadata(thread_id)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is not None:
+        return None
+    repositories, permissions = await _thread_proxy_scope(thread_id, metadata)
+    access = await _proxy_token(thread_id, workspace_slug, repositories, permissions)
+    base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    async with aphase(thread_id, "sandbox.proxy_refresh"):
+        await _configure_proxy(
+            sandbox_id,
+            access,
+            base_proxy_config if isinstance(base_proxy_config, dict) else None,
+            thread_id=thread_id,
+        )
+    return parse_iso(access.expires_at)
 
 
 _WORK_DIR_READY = "__open_swe_work_dir_ready__"
@@ -684,21 +714,38 @@ async def ensure_sandbox_for_thread(
 
 
 async def bind_mda_sandbox(
-    thread_id: str, sandbox_id: str | None, *, workspace_slug: str | None = None
+    thread_id: str,
+    sandbox_id: str | None,
+    *,
+    open_error: str | None = None,
+    workspace_slug: str | None = None,
 ) -> None:
     """Bind a thread to the box Managed Deep Agents opened for it, and mark the thread MDA's.
 
     MDA names, creates and replaces the box; the next connection configures it as it
     does any reused box: proxy credentials, git identity, the tool channel. With no
-    ``sandbox_id`` MDA could not open the box, and the thread stays MDA's, so preparing
-    reports it unreachable rather than creating one here. A task worker attaches to its
-    coordinator's box through the backend, as before.
+    ``sandbox_id`` MDA could not open the box (``open_error`` says why), and the thread
+    stays MDA's: preparing connects to the box it was bound to before, and a thread
+    bound to none is unreachable rather than given one here. A task worker attaches to
+    its coordinator's box through the backend, as before.
     """
     metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
     if metadata.task_id is not None:
         return
-    if metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id):
-        return
+    if not (metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id)):
+        await _bind_mda_sandbox(thread_id, sandbox_id, metadata, workspace_slug)
+    if sandbox_id is None and metadata.sandbox_id is None:
+        raise SandboxUnreachableError(
+            thread_id,
+            None,
+            "Managed Deep Agents could not open this thread's sandbox",
+            reason=open_error,
+        )
+
+
+async def _bind_mda_sandbox(
+    thread_id: str, sandbox_id: str | None, metadata: ThreadMetadata, workspace_slug: str | None
+) -> None:
     bind_metadata: dict[str, Any] = {"sandbox_owner": "mda"}
     config = await SandboxCreateConfig.resolve(workspace_slug)
     if sandbox_id is not None and sandbox_id != metadata.sandbox_id:

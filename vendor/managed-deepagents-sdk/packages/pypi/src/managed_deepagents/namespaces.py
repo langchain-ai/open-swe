@@ -14,26 +14,20 @@ contribute its own — :mod:`managed_deepagents._extension` stays internal.
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, field_validator
-from typing_extensions import Unpack
 
 from managed_deepagents._channels.github import github_channel
 from managed_deepagents._channels.http import http_channel
 from managed_deepagents._channels.linear import linear_channel
 from managed_deepagents._channels.trigger.channel import slack_channel
-from managed_deepagents._connectors.mcp import McpServersConfig, McpServersDefinition, define_mcp
+from managed_deepagents._connectors.mcp import define_mcp
 from managed_deepagents.identity import auth
 from managed_deepagents.sandbox import ProxyConfig, SandboxDefinition, normalize_sandbox_options
 
-__all__ = ["auth", "channels", "connectors", "define_mcp", "define_sandbox"]
-
-_CONNECTORS_MCP_DEPRECATION = (
-    "connectors.mcp(...) is deprecated; use define_mcp(...) instead. It will be removed in 0.8.0."
-)
+__all__ = ["auth", "channels", "define_mcp", "define_sandbox"]
 
 
 class _Namespace:
@@ -59,20 +53,6 @@ class _Channels(_Namespace):
     linear = staticmethod(linear_channel)
     slack = staticmethod(slack_channel)
     http = staticmethod(http_channel)
-
-
-def _deprecated_mcp(**kwargs: Unpack[McpServersConfig]) -> McpServersDefinition:
-    warnings.warn(_CONNECTORS_MCP_DEPRECATION, FutureWarning, stacklevel=2)
-    return define_mcp(**kwargs)
-
-
-class _Connectors(_Namespace):
-    """Deprecated MCP namespace. Use :func:`define_mcp` instead.
-
-    ``connectors.mcp`` will be removed in 0.8.0.
-    """
-
-    mcp = staticmethod(_deprecated_mcp)
 
 
 class _SandboxRegistryArgs(BaseModel):
@@ -172,4 +152,3 @@ def define_sandbox(
 
 
 channels = _Channels()
-connectors = _Connectors()

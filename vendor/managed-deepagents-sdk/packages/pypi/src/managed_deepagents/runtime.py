@@ -105,6 +105,7 @@ from managed_deepagents._identity_runtime import (
 from managed_deepagents._log import logger
 from managed_deepagents._managed_composition import (
     assert_dynamic_memory_selection,
+    snapshot_browser_selection,
     snapshot_managed_composition,
     snapshot_mcp_selection,
     snapshot_memory_selection,
@@ -663,14 +664,21 @@ async def parent_run(config: Mapping[str, object]) -> AsyncIterator[None]:
     The generated entry holds this open for the whole run. For a run that
     deepagents launched from another run, the Agent Server is asked once whether
     this run's caller may access the launching (lead) thread, under MDA's usual
-    thread ownership. Only then may the run share the lead's sandbox.
+    thread ownership. Only then may the run share the lead's sandbox, and read
+    the lead's thread record as its own ``runtime.thread``.
     """
-    token = _VERIFIED_LEAD_THREAD.set(await _accessible_lead_thread(config))
+    from managed_deepagents._managed_thread import _verified_lead_metadata  # noqa: PLC0415
+
+    lead = await _accessible_lead_thread(config)
+    token = _VERIFIED_LEAD_THREAD.set(lead[0] if lead is not None else None)
+    metadata_token = _verified_lead_metadata.set(lead)
     try:
         with _parent_trace(config):
             yield
     finally:
         # The Agent Server enters and exits the entry in one task; tolerate otherwise.
+        with suppress(ValueError):
+            _verified_lead_metadata.reset(metadata_token)
         with suppress(ValueError):
             _VERIFIED_LEAD_THREAD.reset(token)
 
@@ -708,8 +716,10 @@ def _launching_parent(configurable: Mapping[str, object]) -> RunTree | None:
         return None
 
 
-async def _accessible_lead_thread(config: Mapping[str, object]) -> str | None:
-    """Return the lead's thread when this run's caller owns it, else ``None``.
+async def _accessible_lead_thread(
+    config: Mapping[str, object],
+) -> tuple[str, Mapping[str, object]] | None:
+    """Return the lead's thread and its metadata when this run's caller owns it, else ``None``.
 
     Reads the thread in process under the caller's identity, then requires its
     ``owner`` to be the caller's owner key, MDA's rule for changing a thread.
@@ -724,11 +734,12 @@ async def _accessible_lead_thread(config: Mapping[str, object]) -> str | None:
     except Exception:  # noqa: BLE001 — missing or not allowed: keep this run's own sandbox
         logger.warning("lead thread not accessible to this run; using its own sandbox")
         return None
-    owner = (thread.get("metadata") or {}).get("owner")
+    metadata = thread.get("metadata") or {}
+    owner = metadata.get("owner")
     if owner is not None and owner != _caller_owner_key(config):
         logger.warning("lead thread belongs to another caller; using this run's own sandbox")
         return None
-    return lead_thread
+    return lead_thread, metadata
 
 
 def _caller_owner_key(config: Mapping[str, object]) -> str | None:
@@ -775,8 +786,7 @@ async def compile_managed_agent_async(
     factory_runtime = (
         runtime if runtime is not None else _internal_server_runtime(config, run_context, is_run)
     )
-    from managed_deepagents._channels.binding import resolve_runtime_channel  # noqa: PLC0415
-    from managed_deepagents._run_input import execution_context  # noqa: PLC0415
+    from managed_deepagents._run_input import execution_context, run_thread  # noqa: PLC0415
 
     register_channel_messaging(channels or [])
     binding, authored_context, _ = (
@@ -785,9 +795,7 @@ async def compile_managed_agent_async(
     factory_runtime = adapt_server_runtime(
         factory_runtime,
         authored_context,
-        resolve_runtime_channel({"mda_channel": binding}, resolve_runtime_configurable(config))
-        if binding is not None
-        else None,
+        run_thread(binding, config, None).thread if is_run else None,
     )
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
@@ -864,6 +872,10 @@ async def _compile_resolved_managed_agent_async(
     )
     if run_sandbox is not None and sandbox_selection_fingerprint and is_run and sandbox_setup:
         run_sandbox = _inherit_setup_recipe(run_sandbox, sandbox)
+    # Eval builds ship no browser, like no nested sandbox.
+    run_browser = (
+        None if trial_root_dir is not None else _select_run_browser(definition.config, browser)
+    )
     register_channel_messaging(channels or [])
     memory_selected_by_dynamic_resolver = "memory" in definition.config
     run_memory = (
@@ -886,7 +898,7 @@ async def _compile_resolved_managed_agent_async(
         "channels": channels,
         "identity": identity,
         "memory": run_memory,
-        "browser": browser,
+        "browser": run_browser,
         "trial_root_dir": trial_root_dir,
     }
     context_schema = definition.config.get("context_schema")
@@ -911,7 +923,7 @@ async def _compile_resolved_managed_agent_async(
         # Memory policies keep their public channel field after routing normalization.
         policy_context = _policy_run_context(run_context, config)
         if policy_schema is ManagedChannelContext:
-            policy_context = await _with_saved_channel(policy_context, config)
+            policy_context = _with_thread_origin(policy_context, config)
         allow_agent = await resolve_agent_memory_access(agent_layer, policy_context, policy_schema)
         user_access = await resolve_user_memory_access(
             user_memory_layer(declared_memory_layers),
@@ -1083,6 +1095,23 @@ def _select_run_sandbox(
     return snapshot_sandbox_selection(config["sandbox"])
 
 
+def _select_run_browser(
+    config: Mapping[str, object],
+    declared: BrowserDefinition | None,
+) -> BrowserDefinition | None:
+    """Keep, disable, or replace ``browser.py``'s browser for this run."""
+    if "browser" not in config:
+        return declared
+    selected = snapshot_browser_selection(config["browser"])
+    if selected is not None and declared is None:
+        msg = (
+            "The agent factory selected a browser, but the project has no browser.py. "
+            "Declare `browser = define_browser()` there so the deployment installs Stagehand."
+        )
+        raise ValueError(msg)
+    return selected
+
+
 def _compile_managed_agent(
     definition: DeepAgentDefinition,
     config: ManagedRunConfig | None = None,
@@ -1119,6 +1148,7 @@ def _compile_managed_agent(
     merged.pop("memory", None)
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
+    merged.pop("browser", None)
     merged.pop("replicate_traces", None)
     merged.pop("_openswe_graph_inputs", None)
     merged["context_schema"] = context_schema
@@ -1223,9 +1253,6 @@ def _compile_managed_agent(
         merged["tools"] = authored_tools + connector_tools
 
     # Managed prompt behavior surrounds authored middleware in the same order as TS.
-    _prepend_schedule_delivery_middleware(merged)
-    if channels:
-        _prepend_channel_notification_middleware(merged)
     _append_channel_response_format_middleware(merged)
     if mounted_memory:
         _append_memory_instructions_middleware(
@@ -1293,47 +1320,25 @@ def _policy_run_context(run_context: object, config: RunnableConfig | None) -> o
     return run_context
 
 
-async def _with_saved_channel(policy_context: object, config: RunnableConfig | None) -> object:
-    """Give a task notification run's memory policy the channel its thread saved.
+def _with_thread_origin(policy_context: object, config: RunnableConfig | None) -> object:
+    """Give the memory policy of a run with no live channel its thread origin's channel.
 
-    A notification waking the lead has no channel of its own; its reply goes to the
-    channel its thread saved (for a caller who may deliver there), so the policy sees
-    that channel too. The saved binding has no provider event, so MDA's default
-    policy still denies user memory; only an authored policy can allow it. Other runs
-    are unchanged.
+    A run no channel message started (a task notification waking the lead, a
+    resume) still answers in the thread's channel conversation, so the policy
+    sees that channel too. The origin has no provider event, so MDA's default
+    policy still denies user memory outside a live Slack DM; only an authored
+    policy can allow it. The origin comes from the run's metadata, so this needs
+    no extra request.
     """
-    from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
-        SAVED_CHANNEL_KEY,
-        is_task_notification_input,
-        restored_channel,
-    )
+    from managed_deepagents._run_input import run_thread  # noqa: PLC0415
 
-    configurable = resolve_runtime_configurable(config)
-    thread_id = configurable.get("thread_id") if configurable is not None else None
-    metadata = config.get("metadata") if config is not None else None
-    run_id = (configurable or {}).get("run_id") or _field(metadata, "run_id")
-    if _field(policy_context, "mda_channel") is not None or not (
-        isinstance(thread_id, str) and isinstance(run_id, str)
-    ):
+    if _field(policy_context, "mda_channel") is not None:
         return policy_context
-    try:
-        client = get_client()
-        run = await client.runs.get(thread_id, run_id)
-        kwargs = run.get("kwargs")
-        if not is_task_notification_input(
-            kwargs.get("input") if isinstance(kwargs, Mapping) else None
-        ):
-            return policy_context
-        values = (await client.threads.get(thread_id)).get("values")
-    except Exception:  # noqa: BLE001 — a missing or unreadable run or thread restores nothing
-        return policy_context
-    binding = restored_channel(
-        values.get(SAVED_CHANNEL_KEY) if isinstance(values, Mapping) else None, configurable
-    )
-    if binding is None:
+    origin = run_thread(None, config, None).origin
+    if origin is None:
         return policy_context
     context = policy_context if isinstance(policy_context, Mapping) else {}
-    return {**context, "mda_channel": binding, "channel": binding}
+    return {**context, "mda_channel": origin, "channel": origin}
 
 
 def _detect_run_channel(config: Mapping[str, object] | None) -> RunChannel:
@@ -1699,37 +1704,6 @@ def _wrap_declarative_subagents(
     return wrapped
 
 
-def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
-    """Install schedule channel delivery middleware ahead of authored hooks."""
-    from managed_deepagents._channels.http.reply import (  # noqa: PLC0415
-        create_channel_reply_middleware,
-    )
-    from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
-        create_schedule_delivery_middleware,
-    )
-
-    schedule_mw = create_schedule_delivery_middleware()
-    middleware_value = merged.get("middleware")
-    authored = (
-        list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
-    )
-    # An HTTP channel run posts its own answer, before authored hooks as in TS.
-    merged["middleware"] = [schedule_mw, create_channel_reply_middleware(), *authored]
-
-
-def _prepend_channel_notification_middleware(merged: dict[str, object]) -> None:
-    """Install delivery of task notification replies to the channel thread they belong to."""
-    from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
-        create_channel_notification_middleware,
-    )
-
-    middleware_value = merged.get("middleware")
-    authored = (
-        list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
-    )
-    merged["middleware"] = [create_channel_notification_middleware(), *authored]
-
-
 def _prepend_credential_gate_middleware(
     merged: dict[str, object],
     connectors: list[Connector] | None,
@@ -1797,15 +1771,22 @@ def _append_memory_instructions_middleware(
 def _prepend_slack_files_middleware(
     merged: dict[str, object], channels: list[Channel] | None
 ) -> None:
-    """Enable file transfers when the agent declares a Slack channel."""
+    """Enable file transfers, and status choosers, when the agent declares Slack."""
     if any(getattr(channel, "kind", None) == "slack" for channel in channels or []):
         from managed_deepagents._channels.slack.middleware import (  # noqa: PLC0415
             SlackFileTransferMiddleware,
         )
+        from managed_deepagents._channels.slack.status import (  # noqa: PLC0415
+            SlackStatusMiddleware,
+            slack_status_choosers,
+        )
 
+        choosers = slack_status_choosers(channels)
         authored_middleware = merged.get("middleware")
         merged["middleware"] = [
             SlackFileTransferMiddleware(),
+            # Show each Slack channel's status chooser while the run works.
+            *([SlackStatusMiddleware(choosers)] if choosers else []),
             *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
         ]
 
@@ -1826,16 +1807,25 @@ def _append_browser_middleware(
 
 
 def _append_channel_response_format_middleware(merged: dict[str, object]) -> None:
-    """Install managed channel response guidance after authored middleware."""
+    """Install managed channel response guidance after authored middleware.
+
+    The run-output recorder goes first, so a stateless run's delivery reads
+    what the agent ended with.
+    """
     from managed_deepagents._channels.response_format import (  # noqa: PLC0415
         create_channel_response_format_middleware,
     )
+    from managed_deepagents._channels.run_output import RunOutputMiddleware  # noqa: PLC0415
 
     middleware_value = merged.get("middleware")
     existing = (
         list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
     )
-    merged["middleware"] = [*existing, create_channel_response_format_middleware()]
+    merged["middleware"] = [
+        RunOutputMiddleware(),
+        *existing,
+        create_channel_response_format_middleware(),
+    ]
 
 
 #: Refusal returned instead of globbing the sandbox root.
@@ -1978,6 +1968,18 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if not self._shared:
             self._resolved_backend = backend
 
+    def opened(self) -> SandboxBackendProtocol | None:
+        """This thread's sandbox if this process opened it, by any handle; never opens one."""
+        if self._resolved_backend is not None:
+            return self._resolved_backend
+        try:
+            key = _thread_scope_key(self._config(), self._source.selection_fingerprint)
+        except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
+            return None
+        with _managed_sandbox_lock:
+            entry = _managed_sandboxes.get(key)
+        return entry.backend if entry is not None else None
+
     @property
     def id(self) -> str:
         # deepagents' sandbox protocol guards require a non-empty ``id``
@@ -1995,20 +1997,6 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
-
-    def opened(self) -> SandboxBackendProtocol | None:
-        """This thread's sandbox if this process opened it, by any handle; never opens one."""
-        if self._resolved_backend is not None:
-            return self._resolved_backend
-        try:
-            key = _sandbox_scope_key(
-                self._sandbox(), self._config(), self._source.selection_fingerprint
-            )
-        except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
-            return None
-        with _managed_sandbox_lock:
-            entry = _managed_sandboxes.get(key)
-        return entry.backend if entry is not None else None
 
     def ls(self, path: str = "/") -> LsResult:
         return self._call(lambda backend: backend.ls(path))

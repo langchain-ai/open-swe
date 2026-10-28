@@ -321,6 +321,11 @@ ENV.var(
     "Local development only: Vite dev server the backend forwards UI requests to instead of "
     "serving a build, so the dashboard hot-reloads on the backend's origin.",
 )
+ENV.var(
+    "OPENSWE_ALTERNATIVE_ENVS",
+    "Comma-separated name:url backends (e.g. preview:https://...,staging:https://...) the "
+    "desktop app connected to this one offers to switch to until it restarts.",
+)
 ENV.var("DASHBOARD_ALLOWED_ORIGINS", "Comma-separated extra origins allowed for credentialed CORS.")
 ENV.var(
     "DASHBOARD_JWT_SECRET",

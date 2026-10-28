@@ -89,7 +89,6 @@ class SandboxDefinition:
         "snapshot",
         "image_name",
         "template_name",
-        "scope",
     )
 
     #: Options that shape how MDA resolves the box rather than the create request.
@@ -113,13 +112,13 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
     definition. A fixed definition reuses one sandbox per thread; a dynamic
     entrypoint may select a different definition for a run.
     """
-    if "scope" in options and options["scope"] != "thread":
+    if "scope" in options:
         raise TypeError(
-            'sandbox scope is managed as "thread". Remove scope or pass the legacy value "thread".'
+            "sandbox scope was removed: sandbox reuse is always one box per thread. "
+            "Remove scope from the sandbox declaration."
         )
 
     normalized = {**options}
-    normalized.pop("scope", None)
 
     managed = [key for key in SandboxDefinition.MANAGED_OPTION_KEYS if key in normalized]
     if managed:

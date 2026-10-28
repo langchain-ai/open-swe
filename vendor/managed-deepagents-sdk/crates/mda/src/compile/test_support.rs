@@ -58,7 +58,8 @@ pub(super) fn compile_for_deploy(
 
 pub(super) fn compile_for_eval(project: &Project, out_dir: &Path) -> Result<CompileSummary> {
     let runtime_source = mock_runtime_source(project);
-    super::compile_for_eval(project, out_dir, &runtime_source)
+    let api_version = super::resolved_langgraph_api_version()?;
+    super::compile_for_eval_with_api_version(project, out_dir, &runtime_source, &api_version, None)
 }
 
 pub(super) fn compile_for_eval_with_model_override(
