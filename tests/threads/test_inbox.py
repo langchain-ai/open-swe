@@ -55,11 +55,20 @@ async def test_system_notes_reach_the_agent_without_waiting_in_the_dashboard(
 
     with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
         assert await get_dashboard_thread_queued_messages("thread-1", "octocat") == []
-    envelopes = "".join(_envelope(message) for message in (await _read()).messages)
-    assert (
-        '<input-message sender="system:slack-note" surface="automation" kind="system">' in envelopes
+    await QueuedMessage.put("thread-1", {"text": "My follow-up"})
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        previews = await get_dashboard_thread_queued_messages("thread-1", "octocat")
+    assert [preview.text for preview in previews] == ["My follow-up"]
+    taken = await _read()
+    envelope = _envelope(taken.messages[0])
+    assert envelope.startswith(
+        '<input-message sender="system:slack-note" surface="automation" kind="system">'
     )
-    assert "Review accepted" in envelopes
+    assert envelope.count("<input-message") == 1
+    assert "Review accepted" in envelope
+    assert "My follow-up" in _envelope(taken.messages[-1])
+    await ThreadInbox("thread-1").receive(taken.queued)
+    assert await QueuedMessage.for_thread("thread-1") == []
 
 
 @pytest.mark.asyncio

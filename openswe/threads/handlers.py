@@ -209,7 +209,7 @@ async def get_dashboard_thread_queued_messages(
     return [
         await message.preview()
         for message in await QueuedMessage.for_thread(thread_id)
-        if message.system_note is None
+        if not message.hidden
     ]
 
 

@@ -249,22 +249,9 @@ class ThreadInbox:
 
         for queued in queued_messages:
             content = queued.content
-            if queued.system_note is not None:
+            if (message := queued.run_message) is not None:
                 _flush_blocks(queued_updates, content_blocks, injected)
-                queued_updates.extend(
-                    cast(
-                        list[dict[str, Any]],
-                        build_input_messages(
-                            queued.system_note,
-                            {
-                                "sender_id": "system:slack-note",
-                                "surface": "automation",
-                                "kind": "system",
-                            },
-                            injected_dynamic_context_hashes=injected,
-                        ),
-                    )
-                )
+                queued_updates.append(cast(dict[str, Any], message))
                 continue
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
