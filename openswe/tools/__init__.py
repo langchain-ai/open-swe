@@ -46,6 +46,7 @@ _TOOL_MODULES = {
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
     "configure_repository": ".workspaces",
+    "configure_workspace": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
@@ -129,6 +130,7 @@ __all__ = [
     "record_human_input",
     "recreate_sandbox",
     "configure_repository",
+    "configure_workspace",
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
@@ -245,6 +247,7 @@ if TYPE_CHECKING:
     from openswe.tools.web_search import web_search
     from openswe.tools.workspaces import (
         configure_repository,
+        configure_workspace,
         delete_workspace,
         list_workspaces,
         publish_workspace,
