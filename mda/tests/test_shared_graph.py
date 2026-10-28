@@ -44,14 +44,14 @@ from runtime_api.catalog import (
     Catalog,
     LoopRules,
     ModelSpec,
-    OperationSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
     SubagentSpec,
+    ToolSpec,
 )
 from runtime_api.reports import Reports
-from runtime_api.tool_search import FoundOperation, ListedOperations
+from runtime_api.tool_search import ResolvedTool, ToolSpecs
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
@@ -64,25 +64,25 @@ def _thread(thread_id: str) -> ManagedRunConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
-# Each run's catalog by its token, whose operations the fake backend lists to it.
+# Each run's catalog by its token, whose tool specs the fake backend reads to it.
 _CATALOGS: dict[str, Catalog] = {}
 
 
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
-    """A run as dispatch starts it: its catalog's operations by name alone."""
+    """A run as dispatch starts it: its catalog's tools by name alone."""
     _CATALOGS[token] = catalog
     return {
         "graph": graph,
         "__run_token": token,
         "invocation_id": f"invocation-{token}",
-        "__catalog": catalog.carried().model_dump(mode="json"),
+        "__catalog": catalog.names_only().model_dump(mode="json"),
     }
 
 
 def _catalog(operation: str, grant: str, *, snapshot: str | None = None) -> Catalog:
     return Catalog(
         operations=[
-            OperationSpec(name=operation, description="An operation.", parameters={}, grant=grant)
+            ToolSpec(name=operation, description="An operation.", parameters={}, grant=grant)
         ],
         subagents=[SubagentSpec(name="reviewer", description="Reviews.", system_prompt="")],
         skill_sources=["/skills/org/"],
@@ -148,20 +148,18 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
-        if hook == "listed_operations":
+        if hook == "tool_specs":
             catalog = _CATALOGS[headers["Authorization"].removeprefix("Bearer ")]
             names = json["names"]
             assert isinstance(names, list)
-            listed = ListedOperations(
-                operations=[op for op in catalog.operations if op.name in names]
-            )
+            listed = ToolSpecs(tools=[tool for tool in catalog.operations if tool.name in names])
             return httpx2.Response(200, request=request, json=listed.model_dump(mode="json"))
-        if hook == "find_operation":
+        if hook == "resolve_tool":
             calls[-1] = (hook, headers["Authorization"], str(json["name"]))
-            found = FoundOperation(
-                operation=OperationSpec(
+            resolved = ResolvedTool(
+                tool=ToolSpec(
                     name="withheld_lookup",
-                    description="An operation the catalog leaves out.",
+                    description="A tool the catalog leaves out.",
                     parameters={},
                     code_name="withheldLookup",
                     grant="found-grant",
@@ -169,7 +167,7 @@ def backend_calls(
                 if json["name"] == "withheldLookup"
                 else None
             )
-            return httpx2.Response(200, request=request, json=found.model_dump(mode="json"))
+            return httpx2.Response(200, request=request, json=resolved.model_dump(mode="json"))
         if hook == "reports":
             taken = {"replies": [{} for _ in Reports.model_validate(json).items]}
             return httpx2.Response(200, request=request, json=taken)
@@ -381,7 +379,7 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     assert not interpreter._ptc_tools_by_slot
 
 
-async def test_code_mode_calls_operations_its_catalog_leaves_out(
+async def test_code_mode_calls_tools_its_catalog_leaves_out(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
     """The backend names what ``tools.<name>`` is, with the run's grant; a name it has none for throws."""
@@ -418,16 +416,16 @@ async def test_code_mode_calls_operations_its_catalog_leaves_out(
     assert missing.status == "error" and "noTool" in missing.text
     assert '<error type="TypeError">notOne is not one of this run' in evaluated.text
     called = [(hook, detail) for hook, _, detail in backend_calls if detail]
-    # Its context names its own operations, whose specs it reads once.
-    assert [hook for hook, _, _ in backend_calls].count("listed_operations") == 1
-    # The rest found once, each called with the grant the backend gave.
+    # Its context names its own tools, whose specs it reads once.
+    assert [hook for hook, _, _ in backend_calls].count("tool_specs") == 1
+    # The rest resolved once, each called with the grant the backend gave.
     assert called == [
-        ("find_operation", "withheldLookup"),
+        ("resolve_tool", "withheldLookup"),
         ("operation", "withheld_lookup:found-grant"),
         ("operation", "withheld_lookup:found-grant"),
-        ("find_operation", "notOne"),
+        ("resolve_tool", "notOne"),
         ("operation", "withheld_lookup:found-grant"),
-        ("find_operation", "noTool"),
+        ("resolve_tool", "noTool"),
     ]
 
 
@@ -532,7 +530,7 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
         catalog = _catalog("lookup", "grant").model_copy(
             update={
                 "operations": [
-                    OperationSpec(
+                    ToolSpec(
                         name="lookup",
                         description=f"Uses {parameter}",
                         parameters={

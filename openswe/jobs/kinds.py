@@ -15,9 +15,9 @@ from openswe import event_claims
 from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
 from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
 from openswe.agent_api.report_receipts import purge_report_receipts
-from openswe.agent_api.run_operations import PURGE_JOB as RUN_OPERATIONS_PURGE
-from openswe.agent_api.run_operations import PURGE_SCHEDULE as RUN_OPERATIONS_SCHEDULE
-from openswe.agent_api.run_operations import purge_run_operations
+from openswe.agent_api.tool_sets import PURGE_JOB as TOOL_SETS_PURGE
+from openswe.agent_api.tool_sets import PURGE_SCHEDULE as TOOL_SETS_SCHEDULE
+from openswe.agent_api.tool_sets import purge_tool_sets
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
@@ -188,9 +188,9 @@ async def _report_receipt_purge(_job: Job) -> None:
     logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
 
 
-@WORKER.register(RUN_OPERATIONS_PURGE)
-async def _run_operations_purge(_job: Job) -> None:
-    logger.info("Run operations purged", extra={"purged": await purge_run_operations()})
+@WORKER.register(TOOL_SETS_PURGE)
+async def _tool_sets_purge(_job: Job) -> None:
+    logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
 @WORKER.register(WAKE_THREAD_JOB)
@@ -223,9 +223,7 @@ async def start_jobs() -> None:
         lambda: queue.schedule(
             REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
-        lambda: queue.schedule(
-            RUN_OPERATIONS_PURGE, cron=RUN_OPERATIONS_SCHEDULE, key=RUN_OPERATIONS_PURGE
-        ),
+        lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
     ]
     for step in steps:
         try:

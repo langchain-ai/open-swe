@@ -64,7 +64,7 @@ from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
 from rt.run_tools import (
-    FoundOperations,
+    BackendTools,
     RunCodeInterpreter,
     RunModelCallLimit,
     RunSubagentMiddleware,
@@ -183,7 +183,7 @@ class _Parts:
 
 
 def _code_mode(
-    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware, found: FoundOperations
+    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware, backend_tools: BackendTools
 ) -> RunCodeInterpreter:
     """The graph's code mode, with every tool the run offers from code callable from it:
     those its catalog lists, and those ``search_tools`` finds on the backend."""
@@ -199,11 +199,11 @@ def _code_mode(
     # for a run that offers tools from code.
     return RunCodeInterpreter(
         toolsets,
-        # Also for a run whose catalog leaves operations out: code mode calls those.
+        # Also for a run whose catalog leaves tools out: code mode calls those.
         active=lambda tools: bool(tools.from_code) or tools.catalog.search_tools,
         subagents=False,
         mode="turn",
-        found=found,
+        backend_tools=backend_tools,
     )
 
 
@@ -223,7 +223,7 @@ def _parts(graph: Graph) -> _Parts:
     )
     toolsets = RunToolsets(backend, files)
     # What the run calls that its catalog leaves out, as the backend names it.
-    found = FoundOperations(backend)
+    backend_tools = BackendTools(backend)
     skills = RunSkillsMiddleware(backend, skill_files)
     replace_sandbox = ReplaceSandboxMiddleware(backend)
     # The backend's transcript and usage see every reply and every tool call.
@@ -264,8 +264,8 @@ def _parts(graph: Graph) -> _Parts:
             skills,
             files,
             task_retry(),
-            RunToolsMiddleware(toolsets, found=found),
-            _code_mode(graph, toolsets, files, found),
+            RunToolsMiddleware(toolsets, backend_tools=backend_tools),
+            _code_mode(graph, toolsets, files, backend_tools),
             DescribedToolsMiddleware(backend),
             # The coding agent's browser, a LangSmith browser per thread the dashboard
             # shows; the deployment's workspace needs the LangSmith browser beta.

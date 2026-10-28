@@ -2,7 +2,7 @@
 
 Code mode keeps most tools off the model's list, so the model finds them here, with
 the schemas it needs to call them and the name code mode calls them by. The run's
-catalog leaves its integrations out; the backend keeps every operation, so the
+catalog leaves its integrations out; the backend keeps every tool, so the
 search runs there (``runtime_api.tool_search``).
 """
 
@@ -17,11 +17,13 @@ from rt.tools import run_id
 
 
 def search_tools_tool(backend: OpenSweBackend, description: str | None = None) -> BaseTool:
-    """``search_tools`` over every operation the run may call."""
+    """``search_tools`` over every tool the run may call."""
 
     async def search_tools(query: str, limit: int = 5) -> list[dict[str, JsonValue]]:
-        found = await call(backend, SEARCH, ToolSearch(run_id=run_id(), query=query, limit=limit))
-        return [match.model_dump(mode="json") for match in found.matches]
+        searched = await call(
+            backend, SEARCH, ToolSearch(run_id=run_id(), query=query, limit=limit)
+        )
+        return [match.model_dump(mode="json") for match in searched.matches]
 
     return StructuredTool.from_function(
         coroutine=search_tools,

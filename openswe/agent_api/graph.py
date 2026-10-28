@@ -9,9 +9,9 @@ import (``runtime_api``):
   the rules of its middleware around each model call. It is worked out once as the
   run starts and rides in the run's context (``RemoteGraph.start_run``); the
   settings later calls read are signed into the run's token (``RunSettings``). It
-  lists every operation but the run's integrations, and the context names them
-  only: every operation is kept by digest (``run_operations``), which
-  ``listed_operations``, ``search_tools`` and ``find_operation`` read
+  lists every tool but the run's integrations, and the context names them only:
+  every tool is kept by digest (``run_tool_sets``), which
+  ``tool_specs``, ``search_tools`` and ``resolve_tool`` read
 - ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
   prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
   plans the run again
@@ -72,10 +72,10 @@ from runtime_api.catalog import (
     Catalog,
     FilesSpec,
     ModelSpec,
-    OperationSpec,
     RunModels,
     SandboxSpec,
     SubagentSpec,
+    ToolSpec,
 )
 from runtime_api.endpoint import Handlers, UnknownEndpointError
 from runtime_api.files import (
@@ -161,16 +161,16 @@ from runtime_api.operations import (
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.skills import SKILLS, RunSkills
 from runtime_api.tool_search import (
-    FIND,
-    LISTED,
+    RESOLVE,
     SEARCH,
-    FoundOperation,
-    ListedOperations,
-    OperationLookup,
-    OperationNames,
+    TOOL_SPECS,
+    ResolvedTool,
+    ToolLookup,
     ToolMatch,
     ToolMatches,
+    ToolNames,
     ToolSearch,
+    ToolSpecs,
 )
 
 from openswe.agent_api.caller_trace import traced_under
@@ -197,11 +197,11 @@ from openswe.agent_api.loop import (
 )
 from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
-from openswe.agent_api.run_operations import OperationsNotKeptError, RunOperations
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
+from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
@@ -378,7 +378,7 @@ class RunSession:
     def state(self, call: RunCall) -> dict[str, object]:
         return call_state(call, self._restore)
 
-    def _operation_tools(self) -> dict[str, BaseTool]:
+    def _backend_tools(self) -> dict[str, BaseTool]:
         return {name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS}
 
     def _excluded(self) -> frozenset[str]:
@@ -387,33 +387,33 @@ class RunSession:
             | self._unoffered_delegation_tools()
         )
 
-    def _specs(self) -> list[OperationSpec]:
-        operations = self._operation_tools()
+    def _specs(self) -> list[ToolSpec]:
+        tools = self._backend_tools()
         return [
-            OperationSpec(
+            ToolSpec(
                 name=described.name,
                 description=described.description,
                 parameters=described.parameters,
-                reads=(injections := Injections.of(operations[described.name])).reads,
+                reads=(injections := Injections.of(tools[described.name])).reads,
                 reads_all=injections.reads_all,
                 code_name=code_name(described.name),
                 seconds=call_seconds(described.name),
             )
             for described in self.surface.catalog()
-            if described.name in operations
+            if described.name in tools
         ]
 
-    def operations(self) -> RunOperations:
-        """Every operation the run may call, which the backend keeps for the run to read."""
-        return RunOperations(self._specs(), self._excluded())
+    def tool_set(self) -> ToolSet:
+        """Every tool the run may call, which the backend keeps for the run to read."""
+        return ToolSet(self._specs(), self._excluded())
 
     def catalog(self) -> Catalog:
-        operations = self._operation_tools()
+        tools = self._backend_tools()
         excluded = self._excluded()
         # Called from MDA's code mode, never offered to the model as schemas.
         from_code_only = {
             name
-            for name in operations.keys() - excluded
+            for name in tools.keys() - excluded
             if code_only(name)
             and (self.surface.code_mode or name in self.surface.integration_names)
         }
@@ -422,7 +422,7 @@ class RunSession:
         # context. The graph's own tools stay listed, so the model knows them unsearched.
         withheld = from_code_only & set(self.surface.integration_names)
         searches = self.surface.code_mode or bool(withheld)
-        offered = operations.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
+        offered = tools.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
         # Code mode calls tools past the model's list, so what the graph excludes stays out.
         from_code = offered - excluded if self.surface.code_mode else frozenset()
         return Catalog(
@@ -995,44 +995,39 @@ class TokenRun:
             ready=self._ready,
         )
 
-    async def _operations(self) -> RunOperations:
-        if self.run.settings.operations is None:
-            raise OperationsNotKeptError("This run started before the backend kept its operations")
-        return await RunOperations.kept(self.run.settings.operations)
+    async def _tool_set(self) -> ToolSet:
+        if self.run.settings.tools is None:
+            raise ToolSetNotKeptError("This run started before the backend kept its tools")
+        return await ToolSet.kept(self.run.settings.tools)
 
-    async def listed_operations(self, request: OperationNames) -> ListedOperations:
-        """The specs of the operations the run's catalog names, with the run's grant of each."""
-        named = (await self._operations()).named(request.names)
-        return ListedOperations(
-            operations=[
-                operation.model_copy(update={"grant": self.run.grant(operation.name)})
-                for operation in named
-            ]
+    async def tool_specs(self, request: ToolNames) -> ToolSpecs:
+        """The specs of the tools the run's catalog names, with the run's grant of each."""
+        specs = (await self._tool_set()).specs(request.names)
+        return ToolSpecs(
+            tools=[tool.model_copy(update={"grant": self.run.grant(tool.name)}) for tool in specs]
         )
 
     async def search_tools(self, request: ToolSearch) -> ToolMatches:
-        """The run's operations that best match what the model looks for."""
-        found = (await self._operations()).search(request.query, request.limit)
+        """The run's tools that best match what the model looks for."""
+        matches = (await self._tool_set()).search(request.query, request.limit)
         return ToolMatches(
             matches=[
                 ToolMatch(
-                    name=operation.name,
-                    description=operation.description,
-                    parameters=operation.parameters,
-                    code_name=operation.code_name,
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                    code_name=tool.code_name,
                 )
-                for operation in found
+                for tool in matches
             ]
         )
 
-    async def find_operation(self, request: OperationLookup) -> FoundOperation:
-        """The operation the run calls as ``request.name``, with the run's grant of it."""
-        operation = (await self._operations()).called(request.name)
-        if operation is None:
-            return FoundOperation()
-        return FoundOperation(
-            operation=operation.model_copy(update={"grant": self.run.grant(operation.name)})
-        )
+    async def resolve_tool(self, request: ToolLookup) -> ResolvedTool:
+        """The tool the run calls as ``request.name``, with the run's grant of it."""
+        tool = (await self._tool_set()).resolve(request.name)
+        if tool is None:
+            return ResolvedTool()
+        return ResolvedTool(tool=tool.model_copy(update={"grant": self.run.grant(tool.name)}))
 
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
         """Whether the push and pull request guards let ``request``'s command run as it is."""
@@ -1207,8 +1202,8 @@ class RemoteGraph:
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        operations = await session.operations().keep()
-        settings = session.settings().model_copy(update={"operations": operations})
+        tools = await session.tool_set().keep()
+        settings = session.settings().model_copy(update={"tools": tools})
         return RunStart(catalog=await session.plan(), settings=settings)
 
     async def session(
@@ -1415,9 +1410,9 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
 RUN_CALLS: Final = Handlers[TokenRun]()
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
 RUN_CALLS.serve(SKILLS, TokenRun.skills)
-RUN_CALLS.serve(LISTED, TokenRun.listed_operations)
+RUN_CALLS.serve(TOOL_SPECS, TokenRun.tool_specs)
 RUN_CALLS.serve(SEARCH, TokenRun.search_tools)
-RUN_CALLS.serve(FIND, TokenRun.find_operation)
+RUN_CALLS.serve(RESOLVE, TokenRun.resolve_tool)
 RUN_CALLS.serve(INBOX, TokenRun.inbox)
 RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)

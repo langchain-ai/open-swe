@@ -40,10 +40,10 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from runtime_api.catalog import Catalog, OperationSpec
+from runtime_api.catalog import Catalog, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall
-from runtime_api.tool_search import LISTED, OperationNames
+from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
 from rt.outbox import Outbox
@@ -245,9 +245,9 @@ class Run:
         self._planned: Catalog | None = None
         # The worker's own catalog, once it adopted a run token.
         self.adopted: Catalog | None = None
-        # Operations its catalog leaves out that it called, as the backend named each
-        # with the run's grant, by the name it called it by; None for none.
-        self.found: dict[str, OperationSpec | None] = {}
+        # Tools its catalog leaves out that it called, as the backend resolved each with
+        # the run's grant, by the name it called it by; None for no such tool.
+        self.backend_tools: dict[str, ToolSpec | None] = {}
         self.backend = OpenSweBackend(self)
         # What the run tells the backend happened, until the backend takes it.
         self.outbox = Outbox(self.backend)
@@ -272,17 +272,17 @@ class Run:
         """A launched worker that has not yet traded its grant for a run token of its own."""
         return self._token is None and self._worker_grant is not None
 
-    async def read_operations(self, run_id: str | None) -> None:
-        """Read the specs of the operations its catalog names, once: its context names them only.
+    async def load_tool_specs(self, run_id: str | None) -> None:
+        """Read the specs of the tools its catalog names, once: its context names them only.
 
         A worker that has yet to adopt reads none; its own catalog comes with its run token.
         """
         planned = self.planned
-        if not planned.awaits_operations or self._token is None:
+        if not planned.needs_tool_specs or self._token is None:
             return
-        names = OperationNames(run_id=run_id, names=planned.operation_names)
-        listed = await call(self.backend, LISTED, names)
-        self._planned = planned.model_copy(update={"operations": listed.operations})
+        names = ToolNames(run_id=run_id, names=planned.tool_names)
+        listed = await call(self.backend, TOOL_SPECS, names)
+        self._planned = planned.model_copy(update={"operations": listed.tools})
 
     @property
     def planned(self) -> Catalog:
@@ -312,13 +312,15 @@ class Run:
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
         self.adopted = adopted.catalog
-        # Found under the coordinator's grants.
-        self.found.clear()
+        # Resolved under the coordinator's grants.
+        self.backend_tools.clear()
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
-        found = (op for op in self.found.values() if op is not None)
-        own = next((op for op in (*self.catalog.operations, *found) if op.name == name), None)
+        resolved = (tool for tool in self.backend_tools.values() if tool is not None)
+        own = next(
+            (tool for tool in (*self.catalog.operations, *resolved) if tool.name == name), None
+        )
         return None if own is None else own.grant
 
 
@@ -490,5 +492,5 @@ class OpenSweBackend:
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
 
-    def grant(self, spec: OperationSpec) -> str | None:
+    def grant(self, spec: ToolSpec) -> str | None:
         return self.run.grant(spec.name)

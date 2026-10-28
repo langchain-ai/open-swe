@@ -750,15 +750,13 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     )
 
     # The run's context names its operations; it reads their specs and grants by its token.
-    from runtime_api.tool_search import FoundOperation, ListedOperations, ToolMatches
+    from runtime_api.tool_search import ResolvedTool, ToolMatches, ToolSpecs
 
     started_run = run.model_copy(update={"settings": started.settings})
     names = [str(op["name"]) for op in operations if isinstance(op, dict)]
-    listed = ListedOperations.model_validate(
-        await graph.api(started_run, "listed_operations", {"names": names})
-    )
-    assert sorted(op.name for op in listed.operations) == sorted(names)
-    assert all(run.granted(op.name, op.grant) for op in listed.operations)
+    listed = ToolSpecs.model_validate(await graph.api(started_run, "tool_specs", {"names": names}))
+    assert sorted(spec.name for spec in listed.tools) == sorted(names)
+    assert all(run.granted(spec.name, spec.grant) for spec in listed.tools)
     # The run's search and code mode reach what its catalog leaves out, by its token.
     found = ToolMatches.model_validate(
         await graph.api(started_run, "search_tools", {"query": "mcp search", "limit": 1})
@@ -771,47 +769,47 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "overridden_scopes": ["instance", "user"],
     }
     assert json.dumps(expected, separators=(",", ":")) in match.description
-    looked_up = FoundOperation.model_validate(
-        await graph.api(started_run, "find_operation", {"name": "mcpSearch"})
+    looked_up = ResolvedTool.model_validate(
+        await graph.api(started_run, "resolve_tool", {"name": "mcpSearch"})
     )
-    assert looked_up.operation is not None and looked_up.operation.name == "mcp_search"
-    assert run.granted("mcp_search", looked_up.operation.grant)
+    assert looked_up.tool is not None and looked_up.tool.name == "mcp_search"
+    assert run.granted("mcp_search", looked_up.tool.grant)
     # Called directly, by its own name, it is the same operation.
-    by_name = FoundOperation.model_validate(
-        await graph.api(started_run, "find_operation", {"name": "mcp_search"})
+    by_name = ResolvedTool.model_validate(
+        await graph.api(started_run, "resolve_tool", {"name": "mcp_search"})
     )
-    assert by_name.operation == looked_up.operation
-    unknown = await graph.api(started_run, "find_operation", {"name": "load_integration_tools"})
+    assert by_name.tool == looked_up.tool
+    unknown = await graph.api(started_run, "resolve_tool", {"name": "load_integration_tools"})
     # What the graph excludes is never found, so the run cannot call it either.
-    assert FoundOperation.model_validate(unknown).operation is None
+    assert ResolvedTool.model_validate(unknown).tool is None
 
 
 def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
-    from runtime_api.catalog import OperationSpec
+    from runtime_api.catalog import ToolSpec
 
-    from openswe.agent_api.run_operations import RunOperations
+    from openswe.agent_api.tool_sets import ToolSet
 
-    def operation(name: str, description: str, code_name: str | None) -> OperationSpec:
-        return OperationSpec(
+    def tool(name: str, description: str, code_name: str | None) -> ToolSpec:
+        return ToolSpec(
             name=name,
             description=description,
             parameters={"type": "object", "properties": {"query": {"type": "string"}}},
             code_name=code_name,
         )
 
-    operations = RunOperations(
+    tools = ToolSet(
         [
-            operation("searchDatadogLogs", "Search raw Datadog log entries.", "searchDatadogLogs"),
-            operation("get_datadog_metric", "Query metrics from Datadog.", "getDatadogMetric"),
-            operation("save_issue", "Create or update a Linear issue.", "saveIssue"),
-            operation("slack_reply", "Reply in Slack.", None),
+            tool("searchDatadogLogs", "Search raw Datadog log entries.", "searchDatadogLogs"),
+            tool("get_datadog_metric", "Query metrics from Datadog.", "getDatadogMetric"),
+            tool("save_issue", "Create or update a Linear issue.", "saveIssue"),
+            tool("slack_reply", "Reply in Slack.", None),
         ]
     )
 
-    found = operations.search("datadog logs", 2)
+    matches = tools.search("datadog logs", 2)
 
-    assert [op.name for op in found] == ["searchDatadogLogs", "get_datadog_metric"]
-    assert operations.search("kubernetes", 5) == []
+    assert [spec.name for spec in matches] == ["searchDatadogLogs", "get_datadog_metric"]
+    assert tools.search("kubernetes", 5) == []
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:

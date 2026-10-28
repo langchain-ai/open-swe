@@ -400,7 +400,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
-        await self._backend.run.read_operations(run_id())
+        await self._backend.run.load_tool_specs(run_id())
         # What an earlier run left unsent goes out before anything this one does.
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
@@ -874,7 +874,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                             reply.grant,
                             # A worker runs on its coordinator's catalog until it adopts its own.
                             _json_object.validate_python(
-                                self._backend.run.catalog.carried().model_dump(mode="json")
+                                self._backend.run.catalog.names_only().model_dump(mode="json")
                             ),
                         ),
                     )

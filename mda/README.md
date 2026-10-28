@@ -21,15 +21,15 @@ Every call is authenticated with the run token.
   The deployment's workspace needs the LangSmith browser beta.
   It has no `browser_handoff`: MDA's watcher run would start the run that wakes the agent when the user hands the browser back, and Open SWE runs only what its backend signs (`rt/browser.py`).
 - **`catalog`:** the run's operations, subagents, models, box and loop rules (`runtime_api.catalog.Catalog`), in every run's context: dispatch does not start a run it cannot plan.
-  The context names the operations and carries none of their specs, since the Agent Server copies the context into every checkpoint; the run reads their specs and grants from the backend as it starts (`listed_operations`).
+  The context names the tools and carries none of their specs, since the Agent Server copies the context into every checkpoint; the run reads their specs and grants from the backend as it starts (`tool_specs`).
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
   A tool call is this runtime's: it sends the operation its arguments and the run state its spec says it reads (`reads`, `reads_all`), and turns what it answers into the tool's result, the run state it changed, its stream events and git evidence.
   The backend runs no tools node and no tool-call middleware.
   An operation whose box stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
-- **`search_tools`, `find_operation`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
-  The backend keeps every operation the run started with in PostgreSQL by digest (`run_operations`), which the run token signs.
-  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `find_operation` which operation that is, with the run's grant of it (`FoundOperations` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
+- **`search_tools`, `resolve_tool`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
+  The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs.
+  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `resolve_tool` which tool that is, with the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   Where MDA owns the box they run in it.
@@ -77,7 +77,7 @@ Every call is authenticated with the run token.
   Every graph has the same middleware, so a thread reads alike through any of them.
   Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the model a call is routed to, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
 
-The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model, and the digest of its operations).
+The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model, and the digest of its tools).
 The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them.
 The backend reads the thread and run configuration from the token, never from the request body.
 This deployment holds no GitHub, Slack or database credentials.

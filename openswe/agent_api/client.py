@@ -101,9 +101,9 @@ class StartedRun:
         context: RemoteRunContext = {
             "graph": self.graph,
             "__run_token": self.token,
-            # Its operations by name alone; the run reads their specs from the backend.
+            # Its tools by name alone; the run reads their specs from the backend.
             "__catalog": _json_object.validate_python(
-                self.catalog.carried().model_dump(mode="json")
+                self.catalog.names_only().model_dump(mode="json")
             ),
         }
         if self.invocation_id:
