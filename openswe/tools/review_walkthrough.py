@@ -35,6 +35,7 @@ from openswe.walkthrough.plan import (
     FileSplits,
     claim,
 )
+from openswe.walkthrough.record import PlanMovedError
 
 _ONE_PER_TURN = (
     "you already put something on screen this turn; end your turn and wait for the reader"
@@ -148,7 +149,7 @@ async def walkthrough_show_lines(
         state = await _State.load()
         lines = claim(show, state.reader.remaining(state.reader.unseen))
         code = await state.ctx.workspace.checkout.render(lines)
-    except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
+    except (GuideUnavailableError, PlanMovedError, *PLANNING_ERRORS) as exc:
         return {"success": False, "error": str(exc)}
     if state.shown_this_turn():
         return {"success": False, "error": _ONE_PER_TURN}
@@ -227,7 +228,7 @@ async def _plan(
     try:
         ctx = await GuideContext.current()
         result = await change(ctx)
-    except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
+    except (GuideUnavailableError, PlanMovedError, *PLANNING_ERRORS) as exc:
         return {"success": False, "error": str(exc)}
     state = await _State.of(ctx)
     return state.report(
