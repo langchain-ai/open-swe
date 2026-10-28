@@ -364,8 +364,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return self._carrying(state, await self._before_agent(state, runtime))
 
     async def _before_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
-        # Every call the run makes reads its catalog; the graph holds none of it.
-        await self._backend.run.plan()
         trace = self._traces.get(self._backend.run)
         trace.start(self._trace_metadata())
         if self._backend.awaiting_adoption:

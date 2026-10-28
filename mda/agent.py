@@ -163,7 +163,7 @@ async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
         # A read: through the agent's graph, which has every graph's shape.
         return GraphInputs()
     context = RunContext.model_validate(execution.context or {})
-    return GraphInputs.of(context.graph, await context.run().plan())
+    return GraphInputs.of(context.graph, context.run().planned)
 
 
 @dataclass(frozen=True)
