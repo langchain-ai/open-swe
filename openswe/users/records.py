@@ -42,6 +42,7 @@ def user_id_for_login(login: str) -> ScalarSelect[UUID]:
         select(UserIdentity.user_id)
         .where(
             UserIdentity.provider == "github",
+            UserIdentity.login != "",
             func.lower(UserIdentity.login) == login.strip().lower(),
         )
         .order_by(UserIdentity.last_seen_at.desc())

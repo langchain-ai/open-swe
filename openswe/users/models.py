@@ -366,7 +366,7 @@ class User(Base):
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person holding a mutable handle now; for Slack, the most recently seen one."""
-        if not postgres.configured():
+        if not login.strip() or not postgres.configured():
             return None
         async with postgres.session() as session:
             return await session.scalar(

@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from openswe.dashboard.oauth import DashboardSession, issue_session
 from openswe.database import postgres
 from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
+from openswe.users.records import user_id_for_login
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -102,6 +103,9 @@ async def test_a_session_answers_to_its_users_current_login_not_to_whoever_took_
 
     holder = await User.for_login("github", "ada")
     assert holder is not None and holder.id == taker.id
+    assert await User.for_login("github", "") is None
+    async with postgres.session() as session:
+        assert await session.scalar(select(user_id_for_login(""))) is None
     with pytest.raises(HTTPException) as stale:
         await DashboardSession.from_token(cookie)
     assert stale.value.status_code == 401
