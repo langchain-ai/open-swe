@@ -417,6 +417,7 @@ class OpenSweBackend:
         }
         waits = iter(_RETRY_SECONDS)
         while True:
+            started = asyncio.get_running_loop().time()
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}{path}",
@@ -427,6 +428,13 @@ class OpenSweBackend:
                 response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:
+                logger.warning(
+                    "Backend call timed out",
+                    extra={
+                        "endpoint": label,
+                        "elapsed_seconds": asyncio.get_running_loop().time() - started,
+                    },
+                )
                 raise BackendTimeoutError(f"{label} failed ({type(exc).__name__})") from exc
             except httpx2.HTTPError as exc:
                 status = (

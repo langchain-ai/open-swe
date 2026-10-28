@@ -453,7 +453,11 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
     from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
-    schema: dict[str, JsonValue] = {"type": "object", "properties": {}}
+    schema: dict[str, JsonValue] = {
+        "type": "object",
+        "properties": {"repo": {"type": "string"}, "limit": {"type": "integer"}},
+        "required": ["repo"],
+    }
     if additional is not None:
         schema["additionalProperties"] = additional
 
@@ -464,7 +468,7 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
         coroutine=homebase, name="homebase", description="Homebase tool", args_schema=schema
     )
     session = RunSession(ToolSurface(tools={tool.name: tool}), {}, None, started_here=True)
-    arguments: dict[str, JsonValue] = {"commit": "abc123"}
+    arguments: dict[str, JsonValue] = {"repo": "open-swe", "commit": "abc123"}
 
     result = await session.operation(
         RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
@@ -476,7 +480,10 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
         assert json.loads(result.content) == arguments
     else:
         assert result.status == "error"
-        assert result.content == "Unexpected arguments for homebase: commit"
+        assert result.content == (
+            "Unexpected arguments for homebase: commit. "
+            "Accepted parameters: limit, repo* (* = required)"
+        )
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
@@ -1209,3 +1216,82 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
             "error": "boom",
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "method"),
+    [
+        (
+            "walkthrough_plan_chunk",
+            {"title": "Change", "show": [], "explanation": "Why"},
+            "plan_chunk",
+        ),
+        ("walkthrough_split_hunks", {"files": []}, "split"),
+        ("walkthrough_move_to_other", {"files": []}, "move_to_other"),
+        ("walkthrough_describe_other", {"summary": "Noise"}, "describe_other"),
+    ],
+)
+@pytest.mark.parametrize("scout", [False, True])
+@pytest.mark.parametrize("moved", [False, True])
+async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    arguments: dict[str, JsonValue],
+    method: str,
+    scout: bool,
+    moved: bool,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import RunCall
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.review_scout.graph import PrepareReviewScoutRunMiddleware
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.tools import plan_walkthrough, review_walkthrough
+    from openswe.walkthrough.plan import RangeError
+    from openswe.walkthrough.record import PlanMovedError
+
+    error = (
+        PlanMovedError("the pull request moved on; start from its new head")
+        if moved
+        else RangeError("another planner just placed some of these lines; check again")
+    )
+    workspace = AsyncMock()
+    getattr(workspace, method).side_effect = error
+    monkeypatch.setattr(plan_walkthrough, "_workspace", AsyncMock(return_value=workspace))
+    monkeypatch.setattr(
+        review_walkthrough.GuideContext,
+        "current",
+        AsyncMock(return_value=SimpleNamespace(workspace=workspace)),
+    )
+    config = {"configurable": {"thread_id": "scout" if scout else "guide"}}
+    middleware = PrepareReviewScoutRunMiddleware(thread_id="scout", config=config)
+    model = ModelChoice("anthropic:claude-sonnet-4-5", {})
+    surface = ToolSurface(
+        base_tools=[getattr(plan_walkthrough if scout else review_walkthrough, name)],
+        middleware=[middleware] if scout else [],
+        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+    )
+    await surface.prepare()
+    session = RunSession(surface, config, None, started_here=True)
+    state: dict[str, JsonValue] = {"scout_nothing_to_plan": False} if scout else {}
+
+    result = await session.operation(
+        RunOperation(name=name, arguments=arguments, state=state, request_id="call-1")
+    )
+
+    if scout and moved:
+        assert result.state == {"scout_nothing_to_plan": True}
+        state.update(result.state)
+        next_step = await session.before_model(RunCall(state=state))
+        assert next_step.jump_to == "end"
+        assert next_step.call is None
+        assert json.loads(str(result.content))["success"] is False
+    else:
+        assert result.state == {}
+        assert json.loads(str(result.content)) == {"success": False, "error": str(error)}
+        if scout:
+            assert (await session.before_model(RunCall(state=state))).jump_to is None

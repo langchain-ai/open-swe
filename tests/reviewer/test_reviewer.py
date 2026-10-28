@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.agents.middleware import AgentMiddleware, AgentState
-from langchain_core.messages import HumanMessage
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -14,7 +13,6 @@ from openswe.sandboxes.tool_runtime import ToolSurface
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
         repo_owner="acme",
         repo_name="repo",
         pr_number=42,
@@ -218,8 +216,7 @@ def test_format_pr_overview_neutralizes_whitespace_padded_closers() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("event", ["first_review", "re_review", "finding_reply"])
-async def test_reviewer_continues_when_thread_fetch_raises(event: str) -> None:
+async def test_reviewer_continues_when_thread_fetch_raises() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -233,14 +230,7 @@ async def test_reviewer_continues_when_thread_fetch_raises(event: str) -> None:
         },
         "metadata": {},
     }
-    config["configurable"].update(
-        reviewer_event=event,
-        re_review=event == "re_review",
-        last_reviewed_sha="previous" if event == "re_review" else "",
-        finding_reply_id="finding-1",
-        finding_reply_author="octocat",
-        finding_reply_body="Please check this reply",
-    )
+    captured: dict[str, object] = {}
 
     with (
         patch(
@@ -268,52 +258,15 @@ async def test_reviewer_continues_when_thread_fetch_raises(event: str) -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("network down"),
         ),
-        patch(
-            "openswe.reviewer.ReviewScoutTarget.await_walkthrough",
-            new_callable=AsyncMock,
-            return_value=reviewer.WalkthroughView(
-                head_sha="head",
-                human_input="Requested behavior",
-                steps=[
-                    {
-                        "index": 1,
-                        "title": "Walkthrough step",
-                        "summary": "Changed behavior",
-                        "other": False,
-                        "files": [],
-                    }
-                ],
-            ),
-        ),
-        patch("openswe.reviewer.list_findings_async", new_callable=AsyncMock, return_value=[]),
         patch("openswe.reviewer.make_model", return_value=MagicMock()),
     ):
         prepare = await _planned_prepare(config)
         updates = await _run_prepare(prepare)
-        system_prompt = updates["rendered_system_prompt"]
-        assert isinstance(system_prompt, str)
-        messages = updates["messages"]
-        assert isinstance(messages, list)
-        [message] = messages
-        assert isinstance(message, HumanMessage)
-        assert message.type == "human"
-        assert "https://github.com/acme/repo/pull/42" in message.content
-        assert "https://github.com/acme/repo/pull/42" not in system_prompt
-        if event != "finding_reply":
-            assert "Walkthrough step" in message.content
-            assert "Requested behavior" in message.content
-            assert "Walkthrough step" not in system_prompt
-            assert "Requested behavior" not in system_prompt
-        if event == "re_review":
-            assert "previous" in message.content
-        if event == "finding_reply":
-            assert "Please check this reply" in message.content
-        config["configurable"]["finding_reply_body"] = "A different reply"
-        config["configurable"]["invocation_id"] = "next-review"
-        next_updates = await _run_prepare(await _planned_prepare(config))
-        assert next_updates["rendered_system_prompt"] == system_prompt
-        if event == "finding_reply":
-            assert "A different reply" in next_updates["messages"][0].content
+        captured["run_context"] = updates["messages"][0].text
+
+    # The reviewer must still produce a usable prompt even if the thread
+    # fetch fails; the first-review user-message context should still appear.
+    assert "https://github.com/acme/repo/pull/42" in captured["run_context"]
 
 
 @pytest.mark.asyncio
@@ -385,3 +338,103 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
     )
     assert updates["diff_text"] == pr_diff
     assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
+
+
+@pytest.mark.parametrize("repo_ready", [True, False])
+async def test_re_review_context_appends_after_history_without_changing_system_prompt(
+    monkeypatch: pytest.MonkeyPatch, repo_ready: bool
+) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
+
+    from openswe.agent_api.loop import run_hooks
+    from openswe.walkthrough.record import WalkthroughStepView, WalkthroughView
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "reviewer-cache-thread",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "base_sha": "base",
+            "last_reviewed_sha": "previous-head",
+            "re_review": True,
+        }
+    }
+    for name, value in {
+        "ensure_reviewer_github_token": "token",
+        "ensure_reviewer_sandbox_for_thread": MagicMock(),
+        "resolve_sandbox_work_dir": "/workspace",
+        "prepare_review_repo": repo_ready,
+        "materialize_trusted_skills": [],
+        "fetch_pr_diff": None,
+        "fetch_pr_metadata": ("Title", "Body"),
+        "fetch_pr_review_threads": [],
+        "fetch_agents_md": "Stable conventions",
+        "fetch_scoped_agents_md": {},
+        "_cached_org_guidelines": None,
+        "_cached_api_standards_skill": None,
+        "approval_policy_for_review": None,
+    }.items():
+        monkeypatch.setattr(reviewer, name, AsyncMock(return_value=value))
+    monkeypatch.setattr(
+        "openswe.review.styles.get_repo_custom_prompt", AsyncMock(return_value=None)
+    )
+    walkthrough = AsyncMock()
+    monkeypatch.setattr(reviewer.ReviewScoutTarget, "await_walkthrough", walkthrough)
+    findings = AsyncMock(return_value=[])
+    monkeypatch.setattr(reviewer, "list_findings_async", findings)
+    history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]
+    state: dict[str, object] = {"messages": history.copy()}
+    system_prompts: list[str] = []
+    for last_reviewed, head in (("previous-head", "first-head"), ("first-head", "second-head")):
+        config["configurable"]["last_reviewed_sha"] = last_reviewed
+        config["configurable"]["head_sha"] = head
+        config["configurable"]["invocation_id"] = head
+        monkeypatch.setattr(
+            reviewer, "resolve_sandbox_work_dir", AsyncMock(return_value=f"/{head}")
+        )
+        walkthrough.return_value = WalkthroughView(
+            head_sha=head,
+            human_input=f"Requirements at {head}",
+            steps=[
+                WalkthroughStepView(
+                    index=1,
+                    title=f"Walkthrough at {head}",
+                    summary="Summary",
+                    other=False,
+                    files=[],
+                )
+            ],
+        )
+        findings.return_value = [
+            {
+                "id": "finding-id",
+                "title": f"Finding at {head}",
+                "status": "open",
+                "file": "app.py",
+                "start_line": 1,
+                "end_line": 1,
+                "severity": "high",
+                "category": "bug",
+                "description": "Changed finding",
+            }
+        ]
+        middleware = reviewer.PrepareReviewerRunMiddleware(
+            thread_id="reviewer-cache-thread", config=config, use_gateway=False
+        )
+        previous = list(state["messages"])
+        result = await run_hooks([middleware], "before_agent", state, Runtime())
+        [context] = messages_from_dict(result.messages)
+        assert f"previous reviewed SHA: {last_reviewed}" in context.text
+        assert f"new HEAD SHA: {head}" in context.text
+        assert f"Finding at {head}" in context.text
+        assert f"Walkthrough at {head}" in context.text
+        assert f"Requirements at {head}" in context.text
+        assert f"/{head}/repo" in context.text
+        rendered = result.update["rendered_system_prompt"]
+        assert isinstance(rendered, str)
+        assert head not in rendered
+        if not repo_ready:
+            assert f"git checkout --force {head}" in context.text
+        assert state["messages"] == [*previous, context]
+        system_prompts.append(rendered)
+    assert system_prompts[0] == system_prompts[1]
