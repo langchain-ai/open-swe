@@ -4,8 +4,8 @@ Imported FIRST by both the agent graph entrypoint and the HTTP harness, before
 any ``agent.*`` module — several webapp/auth/slack constants are read into module
 globals at import time, so the env must be set beforehand.
 
-Everything here only configures *boundaries* (which sandbox, which fake API
-URLs, where git writes its global config). The agent code itself is unchanged.
+Everything here only configures *boundaries* (where the stand-in sandboxes live,
+which fake API URLs, where git writes its global config). The agent code itself is unchanged.
 """
 
 import os
@@ -52,12 +52,12 @@ BARE_REMOTE = _GH_DIR / f"{OWNER}__{REPO}.git"
 SECOND_BARE_REMOTE = _GH_DIR / f"{SECOND_OWNER}__{SECOND_REPO}.git"
 
 _DEFAULTS = {
-    # Sandbox: real local provider, rooted in a throwaway temp dir.
-    "SANDBOX_TYPE": "local",
-    "LOCAL_SANDBOX_ROOT_DIR": str(_WORK_DIR),
+    # Sandboxes: the stand-in for LangSmith's sandbox service (sandbox_service.py)
+    # roots every box MDA or the backend opens in this throwaway temp dir.
+    "E2E_SANDBOX_ROOT": str(_WORK_DIR),
     # Workspace scripts write themselves and their logs here. The default,
-    # /open-swe/environment, assumes a sandbox where the agent is root; this
-    # provider runs on the developer's own machine, whose root is not writable.
+    # /open-swe/environment, assumes a sandbox where the agent is root; the
+    # stand-in runs on the developer's own machine, whose root is not writable.
     "OPENSWE_SCRIPT_ROOT": str(TMP / "open-swe" / "environment"),
     # Keep git's --global writes (bot identity) out of the user's ~/.gitconfig.
     "GIT_CONFIG_GLOBAL": str(TMP / "gitconfig-global"),
