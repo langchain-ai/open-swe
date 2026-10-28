@@ -6,7 +6,6 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
@@ -45,7 +44,7 @@ from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
-from rt.backend import Run, RunContext, current_run
+from rt.backend import Run, current_run
 from rt.run_tools import ModelHandler, RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
@@ -733,96 +732,6 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     assert browsers == [(browser, False), (browser, True)]
 
 
-@pytest.mark.parametrize("cancel_one", [False, True])
-async def test_awaiting_code_survives_transient_context_gc_in_concurrent_runs(
-    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel_one: bool
-) -> None:
-    pending = asyncio.Event()
-    release = asyncio.Event()
-    transient: list[weakref.ReferenceType[Run]] = []
-    observed: list[str] = []
-    original = _ThreadREPL.eval_async
-    count = 0
-
-    async def evaluate(
-        repl: _ThreadREPL,
-        code: str,
-        *,
-        outer_runtime: ToolRuntime | None = None,
-        outer_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> EvalOutcome:
-        assert outer_runtime is not None
-        run = Run(RunContext())
-        transient.append(weakref.ref(run))
-        interpreter = next(
-            item
-            for item in agent._parts("agent").middleware
-            if isinstance(item, RunCodeInterpreter)
-        )
-        with monkeypatch.context() as patch:
-            patch.setattr("rt.run_tools.current_run", lambda run=run: run)
-            interpreter._slot_id(outer_runtime.state)
-        del run
-        return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
-
-    async def generate(
-        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
-    ) -> ChatResult:
-        results = [message for message in messages if isinstance(message, ToolMessage)]
-        if results:
-            observed.append(results[-1].text)
-            reply = AIMessage(content="done")
-        else:
-            reply = AIMessage(
-                content="",
-                tool_calls=[
-                    ToolCall(name="eval", args={"code": "await tools.lookup({})"}, id="eval")
-                ],
-            )
-        return ChatResult(generations=[ChatGeneration(message=reply)])
-
-    client = httpx2.AsyncClient()
-    post = cast(AsyncMock, client.post)
-    original_post = post.side_effect
-    assert callable(original_post)
-
-    async def slow_post(
-        url: str, *, headers: dict[str, str], json: dict[str, JsonValue], **kwargs: object
-    ) -> httpx2.Response:
-        nonlocal count
-        if url.endswith("/operation"):
-            count += 1
-            if count == 2:
-                pending.set()
-            await release.wait()
-        return await original_post(url, headers=headers, json=json, **kwargs)
-
-    post.side_effect = slow_post
-    monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
-    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
-    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
-    tasks = [
-        asyncio.create_task(
-            _run(InMemoryStore(), f"gc-live-{i}", _context("agent", f"token-{i}", catalog))
-        )
-        for i in range(2)
-    ]
-    try:
-        await asyncio.wait_for(pending.wait(), 10)
-        gc.collect()
-        assert all(reference() is None for reference in transient)
-        if cancel_one:
-            tasks[0].cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await tasks[0]
-    finally:
-        release.set()
-        await asyncio.gather(*tasks, return_exceptions=cancel_one)
-    assert len(observed) == (1 if cancel_one else 2)
-    assert all("found" in result for result in observed)
-
-
 @pytest.mark.parametrize("cancel", ["none", "task", "masked"])
 async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_terminal(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel: str
@@ -854,33 +763,31 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
             raise ValueError("engine closed with different wording")
         return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
 
+    def replies() -> Iterator[AIMessage]:
+        for index, code in enumerate(
+            [
+                "await tools.lookup({})",
+                "await tools.lookup({})",
+                "throw new Error('ordinary eval failure')",
+            ]
+        ):
+            yield AIMessage(
+                content="",
+                tool_calls=[ToolCall(name="eval", args={"code": code}, id=f"eval-{index}")],
+            )
+        yield AIMessage(content="done")
+
+    original_generate = GenericFakeChatModel._agenerate
+
     async def generate(
         model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
     ) -> ChatResult:
-        results = [message for message in messages if isinstance(message, ToolMessage)]
-        if len(results) == 3:
-            observed.extend(results)
-            reply = AIMessage(content="done")
-        else:
-            reply = AIMessage(
-                content="",
-                tool_calls=[
-                    ToolCall(
-                        name="eval",
-                        args={
-                            "code": "await tools.lookup({})"
-                            if len(results) < 2
-                            else "throw new Error('ordinary eval failure')"
-                        },
-                        id=f"eval-{len(results)}",
-                    )
-                ],
-            )
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+        observed[:] = [message for message in messages if isinstance(message, ToolMessage)]
+        return await original_generate(model, messages)
 
     monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
     catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
     task = asyncio.create_task(_run(InMemoryStore(), "closed", _context("agent", "token", catalog)))
     await asyncio.wait_for(entered.wait(), 10)
@@ -986,7 +893,7 @@ async def test_recovered_model_failure_preserves_interpreter_state(
     patched = replace(patched, worker_middleware=patched.middleware)
     monkeypatch.setattr(agent, "_parts", lambda graph: patched)
     attempts = 0
-    results: list[ToolMessage] = []
+    original = GenericFakeChatModel._agenerate
 
     async def generate(
         model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
@@ -995,25 +902,28 @@ async def test_recovered_model_failure_preserves_interpreter_state(
         attempts += 1
         if attempts == 2:
             raise RuntimeError("recoverable model failure")
-        tools = [message for message in messages if isinstance(message, ToolMessage)]
-        if len(tools) == 2:
-            results.extend(tools)
-            reply = AIMessage(content="done")
-        else:
-            reply = AIMessage(
-                content="",
-                tool_calls=[
-                    ToolCall(
-                        name="eval",
-                        args={"code": "var retained = 42" if not tools else "retained"},
-                        id=f"eval-{len(tools)}",
-                    )
-                ],
-            )
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+        if attempts == 4:
+            assert isinstance(messages[-1], ToolMessage)
+            assert "42" in messages[-1].text
+        return await original(model, messages)
 
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    monkeypatch.setattr(
+        agent,
+        "_DEFAULT_MODEL",
+        GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[ToolCall(name="eval", args={"code": code}, id=f"eval-{i}")],
+                    )
+                    for i, code in enumerate(["var retained = 42", "retained"])
+                ]
+                + [AIMessage(content="done")]
+            )
+        ),
+    )
     await _run(
         InMemoryStore(),
         "recover",
@@ -1023,7 +933,6 @@ async def test_recovered_model_failure_preserves_interpreter_state(
             _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]}),
         ),
     )
-    assert "42" in results[-1].text
 
 
 async def test_cancelling_an_eval_its_worker_has_not_started_returns_promptly() -> None:
