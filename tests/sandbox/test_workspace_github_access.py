@@ -78,6 +78,8 @@ def github(
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     def handle_proxy(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return httpx2.Response(200, json={"proxy_config": {}})
         if request.method == "PATCH":
             payloads.append(json.loads(request.content))
             return httpx2.Response(200, json={})

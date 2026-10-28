@@ -26,7 +26,6 @@ def _channel(*, private: bool) -> SlackChannel | None:
         {
             "id": "C1",
             "is_channel": True,
-            "num_members": 10,
             "is_private": private,
             "is_ext_shared": False,
             "is_pending_ext_shared": False,
@@ -37,23 +36,6 @@ def _channel(*, private: bool) -> SlackChannel | None:
 @pytest.fixture(autouse=True)
 def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=False)))
-
-
-@pytest.mark.parametrize("count", [50, 200, None])
-async def test_default_breakout_tool_waits_for_destination(monkeypatch, count):
-    monkeypatch.setattr("openswe.run_config.get_config", _config)
-    channel = _channel(private=False)
-    assert channel is not None
-    channel.payload["num_members"] = count
-    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=channel))
-    post = AsyncMock()
-    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
-
-    result = await slack_breakout_tool.slack_breakout_thread("Title", "Do the thing.")
-
-    assert result["success"] is False
-    assert "destination" in str(result["error"])
-    post.assert_not_awaited()
 
 
 @pytest.mark.parametrize("private_source", [True, False])

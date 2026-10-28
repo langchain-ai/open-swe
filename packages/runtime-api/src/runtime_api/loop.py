@@ -216,8 +216,9 @@ class ReplyOnBehalf(RunCall):
     text: str
 
 
-# Preparation the runtime makes again on a restarted run anyway.
-PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
+# Preparation the runtime makes again on a restarted run anyway. It waits up to ten
+# minutes on the review scout's walkthrough.
+PREPARE = Endpoint("prepare", Prepare, PhaseResult, seconds=900.0, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"

@@ -45,9 +45,10 @@ const BACKEND_PREFIXES = [
 function matchesBackendPrefix(url?: string): boolean {
   return (
     !!url &&
-    BACKEND_PREFIXES.some(
-      (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
-    )
+    (url.split("?")[0] === "/desktop-ui.json" ||
+      BACKEND_PREFIXES.some(
+        (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
+      ))
   )
 }
 
@@ -154,11 +155,14 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production"
 const devRouteRules = IS_PRODUCTION
   ? {}
   : Object.fromEntries(
-      BACKEND_PREFIXES.map((prefix) => [
-        `${prefix}/**`,
+      [
+        "/desktop-ui.json",
+        ...BACKEND_PREFIXES.map((prefix) => `${prefix}/**`),
+      ].map((route) => [
+        route,
         {
           proxy: {
-            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
+            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${route}`,
             fetchOptions: { redirect: "manual" as const },
           },
         },
@@ -327,6 +331,10 @@ const config = defineConfig({
       // shadow nitro's assets.
       handlers: IS_PRODUCTION
         ? [
+            {
+              route: "/desktop-ui.json",
+              handler: "./server/backend-proxy.ts",
+            },
             {
               route: "/.well-known/apple-app-site-association",
               handler: "./server/apple-app-site-association.ts",

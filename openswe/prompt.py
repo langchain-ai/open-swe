@@ -153,6 +153,8 @@ class TurnContext:
     sandbox_file_downloads: bool = False
     local_checkout: bool = False
     local_checkout_client: BridgeClient = "cli"
+    # Why the run's managed tool catalog could not be read, if it could not.
+    tool_catalog_note: str = ""
 
     def environment(self) -> str:
         environment = prompt(
@@ -164,6 +166,8 @@ class TurnContext:
         )
         if self.sandbox_file_downloads:
             environment += "\n\n" + prompt("system/sandbox-file-downloads")
+        if note := self.tool_catalog_note.strip():
+            environment += "\n\n" + note
         return environment
 
     def source_guidance(self) -> str:

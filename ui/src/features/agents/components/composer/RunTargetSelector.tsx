@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import {
@@ -332,12 +333,18 @@ export function LocalBranchSelector({
             </div>
           ) : (
             filtered.map((ref) => (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={ref.name}
                 key={ref.name}
                 type="button"
                 onClick={() => select(ref.name)}
                 className={cn(
-                  "flex w-full items-center gap-space-2 rounded-sm px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover hover:text-primary focus-visible:bg-elevated-hover focus-visible:outline-none",
+                  "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                  "h-auto justify-start whitespace-normal",
+                  "w-full gap-space-2 px-space-2 py-space-1 text-left hover:bg-elevated-hover hover:text-primary focus-visible:bg-elevated-hover",
                   ref.name === selectedBranch
                     ? "text-primary"
                     : "text-secondary"
@@ -349,7 +356,7 @@ export function LocalBranchSelector({
                     {badge(ref)}
                   </span>
                 )}
-              </button>
+              </Button>
             ))
           )}
         </div>

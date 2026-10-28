@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
@@ -68,18 +69,23 @@ export function SidebarNav({
       ))}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label="More"
             type="button"
             className={cn(
               ROW,
-              "text-secondary data-[state=open]:bg-surface-level-2-hover",
+              // Match the Link rows' height and hover; Macaw's plain variant adds its own dark hover.
+              "h-auto justify-start text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover",
               hidden.some((item) => item.to === activeSection) &&
-                cn(SELECTED_ROW, "text-primary")
+                cn(SELECTED_ROW, "text-primary dark:hover:bg-selected-hover")
             )}
           >
             <CaretRightIcon size={16} weight="regular" className="shrink-0" />
             More
-          </button>
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" className="w-48">
           {hidden.map((item) => (

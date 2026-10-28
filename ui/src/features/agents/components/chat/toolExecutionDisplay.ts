@@ -54,7 +54,7 @@ const TEXT_ARGUMENTS = [
   "title",
 ]
 
-export function toolTextArguments(
+function toolTextArguments(
   input: Record<string, unknown> | undefined
 ): Array<[string, string]> {
   return TEXT_ARGUMENTS.flatMap((key) => {

@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { Kbd } from "@langchain/macaw-components/Kbd"
 import type { SelectedLineRange } from "@pierre/diffs"
 import { ChatTextIcon } from "@phosphor-icons/react/dist/ssr/ChatText"
@@ -88,23 +89,31 @@ export function SelectionBar({
       style={{ left: position.left, top: position.top }}
       className="fixed z-selection-action-bar flex items-center gap-0.5 rounded-lg border border-subtle bg-elevated p-0.5 font-sans text-xs shadow-md"
     >
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label="Ask Open SWE"
         type="button"
         onClick={onAsk}
-        className="flex items-center gap-space-2 rounded-md px-space-2 py-space-1 font-medium hover:bg-elevated-hover"
+        className="gap-space-2 px-space-2 py-space-1 font-medium hover:bg-elevated-hover"
       >
         <AgentMark />
         Ask Open SWE
         <Kbd>{askShortcut}</Kbd>
-      </button>
-      <button
+      </Button>
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label="Comment"
         type="button"
         onClick={onComment}
-        className="flex items-center gap-space-2 rounded-md px-space-2 py-space-1 hover:bg-elevated-hover"
+        className="gap-space-2 px-space-2 py-space-1 hover:bg-elevated-hover"
       >
         <ChatTextIcon className="size-3.5" weight="regular" />
         Comment
-      </button>
+      </Button>
     </div>
   )
 }
