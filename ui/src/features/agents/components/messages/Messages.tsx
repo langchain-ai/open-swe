@@ -10,7 +10,7 @@ import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
-import { UserMessage } from "./UserMessage"
+import { SentReply, UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
@@ -50,6 +50,9 @@ function QueuedMessages({
             data-queued-pending={message.pending ? "true" : "false"}
             data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
           >
+            {message.replies?.map((reply, replyIndex) => (
+              <SentReply key={replyIndex} reply={reply} />
+            ))}
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
                 <SkillPromptText text={message.content} />
