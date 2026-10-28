@@ -37,6 +37,7 @@ async def _start_watch() -> baby_sit.BabySitWatch:
 @pytest.mark.parametrize(
     ("read_method", "status_code", "body", "retryable"),
     [
+        ("token", None, "Token unavailable", True),
         ("pull", 403, "API rate limit exceeded for installation", True),
         ("pull", 503, "Service unavailable", True),
         ("pull", None, "Connection failed", True),
@@ -56,9 +57,8 @@ async def test_github_read_failures_only_end_watches_when_persistent(
     retryable: bool,
 ) -> None:
     watch = await _start_watch()
-    monkeypatch.setattr(
-        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
-    )
+    token = AsyncMock(return_value="t")
+    monkeypatch.setattr(github_app, "get_github_app_installation_token", token)
     reads = {
         "pull": AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
         "check_runs": AsyncMock(return_value=[{"name": "tests", "status": "in_progress"}]),
@@ -78,8 +78,11 @@ async def test_github_read_failures_only_end_watches_when_persistent(
         if status_code is not None
         else httpx2.ConnectError(body)
     )
-    read = reads[read_method]
-    read.side_effect = failure
+    read = token if read_method == "token" else reads[read_method]
+    if read_method == "token":
+        read.return_value = None
+    else:
+        read.side_effect = failure
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(baby_sit, "_notify_watch", notify)
     dispatch = AsyncMock()
@@ -100,6 +103,7 @@ async def test_github_read_failures_only_end_watches_when_persistent(
         notify.assert_not_awaited()
         dispatch.assert_not_awaited()
         read.side_effect = None
+        token.return_value = "t"
         assert await baby_sit.evaluate_watch(watch.key) == "pending"
         stored = await baby_sit.WATCHES.get(watch.key)
         assert stored is not None and stored.active

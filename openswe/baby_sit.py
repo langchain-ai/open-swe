@@ -552,7 +552,7 @@ async def _evaluate_watch(key: str) -> str:
                 watch, github.repo(watch.owner, watch.repo).pull_request(watch.pr_number)
             )
     except GitHubAppUnavailable:
-        return await _record_evaluation_error(watch, "GitHub token unavailable")
+        return await _record_evaluation_error(watch, "GitHub token unavailable", retryable=True)
 
 
 async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
