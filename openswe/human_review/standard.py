@@ -41,7 +41,7 @@ from openswe.github.http import (
     RepoClient,
     or_none,
 )
-from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
+from openswe.github.org_membership import INTERNAL_BOT_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -200,8 +200,7 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
 
 async def _review_author_allowed(author: str) -> bool:
     return (
-        author.lower() in OPEN_SWE_GITHUB_LOGINS
-        or await User.for_login("github", author) is not None
+        author.lower() in INTERNAL_BOT_LOGINS or await User.for_login("github", author) is not None
     )
 
 

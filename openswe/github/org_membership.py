@@ -21,9 +21,14 @@ _MEMBERSHIP_REQUEST_TIMEOUT = 5.0
 OPEN_SWE_GITHUB_LOGINS: frozenset[str] = frozenset(
     {"open-swe[bot]", "open-swe-preview[bot]", "openswe-dev[bot]"}
 )
+# GitHub logins are case-insensitive; these are lowercase so callers compare ``login.lower()``.
 INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
     OPEN_SWE_GITHUB_LOGINS
-    | {login.strip() for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",") if login.strip()}
+    | {
+        login.strip().lower()
+        for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",")
+        if login.strip()
+    }
 )
 
 

@@ -12,6 +12,7 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
@@ -829,11 +830,12 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         ("open-swe[bot]", None, False, []),
         ("open-swe-preview[bot]", None, False, []),
         ("openswe-dev[bot]", None, False, []),
+        ("Configured[bot]", None, False, []),
         ("another[bot]", None, False, ["its author is not an Open SWE user"]),
         ("open-swe[bot]", None, True, ["it is a draft"]),
     ],
 )
-async def test_review_blockers_require_an_account_or_an_open_swe_bot(
+async def test_review_blockers_require_an_account_or_an_internal_bot(
     author: str, user: User | None, draft: bool, expected: list[str]
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
@@ -843,6 +845,10 @@ async def test_review_blockers_require_an_account_or_an_open_swe_bot(
     with (
         patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch(
+            "openswe.human_review.standard.INTERNAL_BOT_LOGINS",
+            OPEN_SWE_GITHUB_LOGINS | {"configured[bot]"},
+        ),
     ):
         blockers = await review_blockers(MagicMock())
     assert blockers == expected

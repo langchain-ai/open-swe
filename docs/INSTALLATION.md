@@ -596,7 +596,7 @@ The dashboard also reports two custom duration vitals, `thread_load` and `agent_
 **Mention handles.**
 The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev`; set `OPEN_SWE_MENTION_TAGS` to change them.
 Handles match on a word boundary, so `@openswe` does not fire on `@openswe-staging`.
-Set `EXTRA_INTERNAL_BOT_LOGINS` (e.g. `openswe-staging[bot]`) to treat other Open SWE deployments' comments as internal rather than untrusted.
+Set `EXTRA_INTERNAL_BOT_LOGINS` (e.g. `openswe-staging[bot]`) to treat other trusted bots, such as other Open SWE deployments, as internal: their comments are not marked untrusted, and their pull requests can be put up for human review in Slack.
 
 **Allowlists.**
 

@@ -269,7 +269,10 @@ ENV.var(
     "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
 )
 ENV.var("OPEN_SWE_MENTION_TAGS", "Comma-separated handles this deployment answers to.")
-ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as internal commenters.")
+ENV.var(
+    "EXTRA_INTERNAL_BOT_LOGINS",
+    "Comma-separated bot logins treated as internal commenters and pull request authors.",
+)
 ENV.var(
     "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."
 )
