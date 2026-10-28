@@ -12,7 +12,7 @@
 ## Why
 
 - Out of the monorepo, `../../deepagents` points nowhere: `uv lock` in `mda/` fails to resolve the vendored package, and `mda build` would copy a source entry that cannot resolve into the deployment. `mda/` pins `deepagents` from PyPI itself.
-- The package's tests are not vendored, so its test group installs nothing here; kept, it only adds packages to `mda/uv.lock` and to dependency scans of this repository.
+- The package's unit tests run in `mda/`'s environment (`make vendor-check`), against what Open SWE deploys, so its own test and release tooling installs nothing here; kept, it only adds packages to `mda/uv.lock` and to dependency scans of this repository.
 
 ## Upstream
 

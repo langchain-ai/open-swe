@@ -199,7 +199,7 @@ def _run_context(context: object) -> dict[str, JsonValue]:
     for key in ("channel", "mda_channel"):
         if key in context:
             raise InvalidRunInput(f"context.{key} is reserved for managed ingress")
-    return cast("dict[str, JsonValue]", dict(context))
+    return dict(context)
 
 
 def _run_metadata(metadata: object) -> dict[str, JsonValue]:
@@ -214,7 +214,7 @@ def _run_metadata(metadata: object) -> dict[str, JsonValue]:
             )
         if _RESERVED_METADATA_KEY.fullmatch(key):
             raise InvalidRunInput(f"run metadata key is reserved: {_named(key)}")
-    return cast("dict[str, JsonValue]", dict(metadata))
+    return dict(metadata)
 
 
 def _normalize_input(value: object) -> NormalizedRunInput:

@@ -1,0 +1,261 @@
+"""Async end-to-end tests for `CodeInterpreterMiddleware` with a fake LLM.
+
+Covers the same integration surfaces as the prior quickjs e2e suite:
+agent wiring, REPL execution, PTC tool calls, runtime propagation,
+error surfacing, and concurrent agent runs.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import (
+    Iterator,  # noqa: TC003 — pydantic resolves field annotations at runtime
+)
+from typing import Any
+
+import pytest
+from deepagents import create_deep_agent
+from langchain.tools import (
+    ToolRuntime,  # noqa: TC002  # tool decorator resolves type hints at import time
+)
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
+
+from langchain_quickjs import CodeInterpreterMiddleware
+from tests._common import FakeChatModel
+
+
+@tool
+def list_user_ids() -> list[str]:
+    """Return example user identifiers for QuickJS bridging tests."""
+    return ["user_1", "user_2", "user_3"]
+
+
+@tool("sync_label")
+def sync_label_tool(value: str) -> str:
+    """Return a labeled value from a synchronous LangChain tool."""
+    return f"sync:{value}"
+
+
+@tool("async_label")
+async def async_label_tool(value: str) -> str:
+    """Return a labeled value from an asynchronous LangChain tool."""
+    await asyncio.sleep(0)
+    return f"async:{value}"
+
+
+@tool("runtime_configurable")
+def runtime_configurable(value: str, runtime: ToolRuntime) -> str:
+    """Return configurable runtime data for testing ToolRuntime context propagation."""
+    return f"{value}:{runtime.config['configurable']['user_id']}"
+
+
+@tool("always_fails")
+async def always_fails(value: str) -> str:
+    """Raise to verify host-call failures surface to the model."""
+    await asyncio.sleep(0)
+    msg = f"boom:{value}"
+    raise RuntimeError(msg)
+
+
+def _script(code: str, *, final_message: str = "done") -> Iterator[AIMessage]:
+    return iter(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "eval",
+                        "args": {"code": code},
+                        "id": "call_1",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+            AIMessage(content=final_message),
+        ]
+    )
+
+
+def _make_agent(
+    code: str,
+    middleware: CodeInterpreterMiddleware,
+    *,
+    final_message: str = "done",
+) -> Any:
+    return create_deep_agent(
+        model=FakeChatModel(messages=_script(code, final_message=final_message)),
+        middleware=[middleware],
+    )
+
+
+def _eval_tool_message(result: dict[str, Any]) -> ToolMessage:
+    messages = [
+        m for m in result["messages"] if isinstance(m, ToolMessage) and m.name == "eval"
+    ]
+    assert messages, "expected at least one eval ToolMessage"
+    return messages[-1]
+
+
+def _assert_result_contains(content: str, expected: str) -> None:
+    assert "<error" not in content, content
+    assert "<result" in content, content
+    assert expected in content, content
+
+
+async def test_deepagent_with_quickjs_interpreter() -> None:
+    """Basic async test with QuickJS interpreter."""
+    result = await _make_agent(
+        "6 * 7",
+        CodeInterpreterMiddleware(),
+        final_message="The answer is 42.",
+    ).ainvoke(
+        {"messages": [HumanMessage(content="Use the eval tool to calculate 6 * 7")]}
+    )
+
+    tool_message = _eval_tool_message(result)
+    _assert_result_contains(tool_message.content, "42")
+    assert result["messages"][-1].content == "The answer is 42."
+
+
+async def test_deepagent_with_quickjs_list_returning_foreign_function() -> None:
+    """A PTC tool returning a Python `list` surfaces as a native JS Array."""
+    code = "const ids = await tools.listUserIds({});\nids.join(',');"
+    result = await _make_agent(
+        code, CodeInterpreterMiddleware(ptc=[list_user_ids])
+    ).ainvoke(
+        {
+            "messages": [
+                HumanMessage(
+                    content="Use the eval tool to print the available user ids"
+                )
+            ]
+        }
+    )
+
+    tool_message = _eval_tool_message(result)
+    _assert_result_contains(tool_message.content, "user_1,user_2,user_3")
+
+
+async def test_deepagent_with_quickjs_async_foreign_function() -> None:
+    """Verify the eval tool can call sync and async LangChain tools in one run."""
+    code = (
+        "const [left, right] = await Promise.all([\n"
+        "  tools.syncLabel({value: 'left'}),\n"
+        "  tools.asyncLabel({value: 'right'}),\n"
+        "]);\n"
+        "`${left}|${right}`;"
+    )
+    result = await _make_agent(
+        code,
+        CodeInterpreterMiddleware(ptc=[sync_label_tool, async_label_tool]),
+    ).ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="Use the eval tool to call sync and async tools")
+            ]
+        }
+    )
+
+    tool_message = _eval_tool_message(result)
+    _assert_result_contains(tool_message.content, "sync:left|async:right")
+
+
+async def test_quickjs_async_timeout_error() -> None:
+    """Verify the async eval path surfaces QuickJS eval timeouts."""
+    result = await _make_agent(
+        "while (true) {}",
+        CodeInterpreterMiddleware(timeout=1),
+        final_message="timeout hit",
+    ).ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="Use the eval tool and keep looping until timeout")
+            ]
+        }
+    )
+
+    tool_message = _eval_tool_message(result)
+    assert '<error type="Timeout">' in tool_message.content
+    assert result["messages"][-1].content == "timeout hit"
+
+
+async def test_quickjs_async_tool_exception_propagates() -> None:
+    """Tool exceptions propagate as the original Python exception so
+    ToolNode's default handler reraises and the agent crashes — same
+    semantics as a non-quickjs tool that raises."""
+    agent = _make_agent(
+        "await tools.alwaysFails({value: 'x'})",
+        CodeInterpreterMiddleware(ptc=[always_fails]),
+    )
+    with pytest.raises(RuntimeError, match="boom:x"):
+        await agent.ainvoke(
+            {
+                "messages": [
+                    HumanMessage(
+                        content="Use the eval tool to call the async tool that raises"
+                    )
+                ]
+            }
+        )
+
+
+async def test_quickjs_async_host_call_budget_exceeded() -> None:
+    """Verify async eval surfaces per-eval PTC call budget exhaustion."""
+    result = await _make_agent(
+        "await tools.syncLabel({value: 'a'});\n"
+        "await tools.syncLabel({value: 'b'});\n"
+        "'done'",
+        CodeInterpreterMiddleware(ptc=[sync_label_tool], max_ptc_calls=1),
+    ).ainvoke(
+        {"messages": [HumanMessage(content="Use eval and call sync_label twice.")]}
+    )
+    tool_message = _eval_tool_message(result)
+    assert '<error type="PTCCallBudgetExceeded">' in tool_message.content
+    assert "limit=1" in tool_message.content
+
+
+async def test_quickjs_async_toolruntime_configurable_foreign_function() -> None:
+    """Verify async PTC tool calls see configurable runtime data."""
+    result = await _make_agent(
+        "await tools.runtimeConfigurable({value: 'value'})",
+        CodeInterpreterMiddleware(ptc=[runtime_configurable]),
+    ).ainvoke(
+        {
+            "messages": [
+                HumanMessage(
+                    content="Use the eval tool to inspect configurable runtime"
+                )
+            ]
+        },
+        config={"configurable": {"user_id": "user-123"}},
+    )
+
+    tool_message = _eval_tool_message(result)
+    _assert_result_contains(tool_message.content, "value:user-123")
+
+
+async def test_quickjs_async_parallel_agents() -> None:
+    """Verify many async agents can run in parallel with REPL middleware."""
+
+    async def _run_agent(index: int) -> tuple[int, dict[str, object]]:
+        result = await _make_agent(
+            f"{index} * 10",
+            CodeInterpreterMiddleware(),
+            final_message=f"done-{index}",
+        ).ainvoke(
+            {
+                "messages": [
+                    HumanMessage(content=f"Use the eval tool to multiply {index} by 10")
+                ]
+            }
+        )
+        return index, result
+
+    runs = await asyncio.gather(*(_run_agent(index) for index in range(25)))
+
+    assert len(runs) == 25
+    for index, result in runs:
+        tool_message = _eval_tool_message(result)
+        _assert_result_contains(tool_message.content, str(index * 10))
+        assert result["messages"][-1].content == f"done-{index}"

@@ -23,11 +23,11 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import (
-    AsyncIterator,
+    AsyncGenerator,
     Awaitable,
     Callable,
+    Generator,
     Iterable,
-    Iterator,
     Mapping,
     Sequence,
 )
@@ -660,7 +660,7 @@ def compile_managed_agent(
 
 
 @asynccontextmanager
-async def parent_run(config: Mapping[str, object]) -> AsyncIterator[None]:
+async def parent_run(config: Mapping[str, object]) -> AsyncGenerator[None]:
     """Set up a run for async subagents: verify its lead, then nest its trace.
 
     The generated entry holds this open for the whole run. For a run that
@@ -686,7 +686,7 @@ async def parent_run(config: Mapping[str, object]) -> AsyncIterator[None]:
 
 
 @contextmanager
-def _parent_trace(config: Mapping[str, object]) -> Iterator[None]:
+def _parent_trace(config: Mapping[str, object]) -> Generator[None]:
     """Nest this run's trace under the async subagent call that launched it.
 
     Only acts on runs deepagents marked as launched by an async subagent tool,
@@ -2552,7 +2552,7 @@ def _replace_managed_sandbox(
     )
 
 
-def _managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
+def managed_sandbox_of(backend: object) -> _LazyManagedSandboxBackend:
     """The run's managed sandbox behind ``runtime.backend``."""
     if isinstance(backend, CompositeBackend):
         backend = backend.default

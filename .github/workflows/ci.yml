@@ -155,6 +155,48 @@ jobs:
       - name: Run MDA unit tests
         run: make mda-test
 
+  # The vendored code, checked the way its upstream checks it (vendor/README.md).
+  vendor-sdk-rust:
+    name: Vendored MDA CLI checks
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.vendor == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: vendor/managed-deepagents-sdk
+      - name: Format, clippy and test the mda CLI
+        run: make vendor-sdk-rust-check
+
+  vendor-sdk-python:
+    name: Vendored MDA runtime checks
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.vendor == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Lint, type-check and test the managed-deepagents runtime
+        run: make vendor-sdk-python-check
+
+  vendor-quickjs:
+    name: Vendored langchain-quickjs checks
+    needs: e2e-changes
+    if: ${{ needs.e2e-changes.outputs.vendor == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Lint, type-check and test langchain-quickjs
+        run: make vendor-quickjs-check
+
   js-format:
     name: JS format check
     runs-on: ubuntu-latest
@@ -284,6 +326,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       agent_unit_tests: ${{ steps.changes.outputs.agent_unit_tests }}
+      vendor: ${{ steps.changes.outputs.vendor }}
       browser: ${{ steps.changes.outputs.browser }}
       desktop: ${{ steps.changes.outputs.desktop }}
     steps:
@@ -296,6 +339,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
+            echo "vendor=true" >> "$GITHUB_OUTPUT"
             echo "browser=true" >> "$GITHUB_OUTPUT"
             echo "desktop=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -306,6 +350,14 @@ jobs:
             echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
           else
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # The vendored quickjs tests run in mda/'s environment.
+          vendor_paths=(vendor mda/pyproject.toml mda/uv.lock Makefile .github/workflows/ci.yml)
+          if git diff --quiet "$BASE_SHA" HEAD -- "${vendor_paths[@]}"; then
+            echo "vendor=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "vendor=true" >> "$GITHUB_OUTPUT"
           fi
 
           paths=(openswe packages mda vendor/managed-deepagents-sdk vendor/langchain-quickjs ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)

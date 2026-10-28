@@ -7,7 +7,8 @@ Any project whose agent varies per run in a few ways, such as its model, needs i
 - `_SharedDefinitions`, `_SharedGraphs` and `_BuiltGraph`;
 - `compile_managed_agent_async` resolves a shared factory's inputs before any build;
 - `_for_call`;
-- `_compile_managed_agent` returns the graph and its telemetry configuration instead of wrapping it.
+- `_compile_managed_agent` returns the graph and its telemetry configuration instead of wrapping it;
+- `tests/test_agent_factory_runtime.py` (its stand-in for `_compile_managed_agent` returns the pair) and `tests/test_authoring.py` (the exports).
 
 ## What
 

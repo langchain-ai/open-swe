@@ -173,9 +173,9 @@ async def open_sandbox(backend: object) -> str:
 
     ``backend`` is ``runtime.backend``. The box is otherwise opened on first use.
     """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
+    from managed_deepagents.runtime import managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).aopen()
+    return await managed_sandbox_of(backend).aopen()
 
 
 async def replace_sandbox(
@@ -187,9 +187,9 @@ async def replace_sandbox(
     The old box is stopped and kept, renamed, until its lifecycle deletes it.
     ``backend`` is ``runtime.backend``.
     """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
+    from managed_deepagents.runtime import managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox)
+    return await managed_sandbox_of(backend).areplace(sandbox)
 
 
 def owning_thread(options: Mapping[str, object]) -> str | None:

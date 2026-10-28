@@ -412,8 +412,11 @@ class _ThreadREPL:
     @property
     def is_closed(self) -> bool:
         """Whether the REPL's context or its engine has been closed."""
+        # quickjs_rs exposes neither state publicly.
         return (
-            self._ctx is None or self._ctx._closed or self._ctx._engine_ctx.is_closed()
+            self._ctx is None
+            or self._ctx._closed  # noqa: SLF001
+            or self._ctx._engine_ctx.is_closed()  # noqa: SLF001
         )
 
     def _require_ctx(self) -> Context:
