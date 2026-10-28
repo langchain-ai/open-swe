@@ -122,6 +122,14 @@ class WorkspaceConflictError(ValueError):
     """
 
 
+class RefreshInFlightError(WorkspaceConflictError):
+    """A refresh of this workspace is already running; ``run_id`` names it."""
+
+    def __init__(self, slug: str, run_id: str | None) -> None:
+        super().__init__(f"a refresh of {slug!r} is already running")
+        self.run_id = run_id
+
+
 # The unique constraints a workspace write can land on that mean "taken", as
 # opposed to a constraint failure that is a bug and must propagate.
 _CONFLICT_CONSTRAINTS = frozenset(
@@ -157,6 +165,7 @@ REFRESH_LOG_MAX_CHARS = 40_000
 STALE_REFRESH_SECONDS = 3 * 60 * 60
 SNAPSHOT_NAME_MAX_CHARS = 128
 LOG_EXCERPT_LINES = 10
+REFRESH_LOG_TAIL_CHARS = 6_000
 SNAPSHOT_TAG = "latest"
 
 # Scripts and their logs live under a fixed root that is captured with the
@@ -670,6 +679,25 @@ class Workspace(BaseModel):
         if started_at is None:
             return False
         return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
+
+    def assert_refreshable(self, kind: RefreshKind) -> None:
+        """Raise ``ValueError`` when a refresh of ``kind`` cannot start now."""
+        if self.inherit_default_sandbox:
+            raise ValueError(f"workspace {self.slug!r} boots the default workspace's image")
+        if kind == "full" and not self.setup_script:
+            raise ValueError(f"workspace {self.slug!r} has no setup script to run")
+        if kind == "update" and not self.update_script:
+            raise ValueError(f"workspace {self.slug!r} has no update script to run")
+        if kind == "update" and self.ready_snapshot_id is None:
+            raise ValueError(f"workspace {self.slug!r} has no snapshot to update")
+        if self.refresh_in_flight():
+            raise RefreshInFlightError(self.slug, self.refresh_run_id)
+
+    def refresh_log_tail(self, *, chars: int = REFRESH_LOG_TAIL_CHARS) -> str | None:
+        """The end of the last settled refresh's log, where a failing script says why."""
+        if not self.refresh_log or not self.refresh_log.strip():
+            return None
+        return self.refresh_log.strip()[-chars:]
 
     @property
     def instructions(self) -> str | None:

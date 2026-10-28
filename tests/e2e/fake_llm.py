@@ -974,9 +974,9 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
 
 def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
+    task_id = _tool_payload(messages, "snapshotctl").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("refresh_workspace_start did not return a task id")
+        raise ValueError("snapshotctl did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -1596,8 +1596,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
             "Checking the setup script reproduces the image.",
-            "refresh_workspace_start",
-            {"name": WORKSPACE_NAME},
+            "snapshotctl",
+            {"action": "rebuild", "workspace": WORKSPACE_NAME},
             "call-env-refresh",
         ),
         _dynamic_step(_workspace_poll_step),
