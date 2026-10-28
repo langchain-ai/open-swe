@@ -18,6 +18,7 @@ from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec
 from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
@@ -27,6 +28,7 @@ from openswe.tasks import events, presentation, store
 from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
+from openswe.threads.inbox import ThreadInbox
 
 _WORKER = "86186b55-1999-52e2-bf4b-ca3de907043e"
 _COORDINATOR = "3b8f4848-78b4-45d5-a617-3f4610feff4d"
@@ -349,9 +351,9 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     if not busy:
         with pytest.raises(ConnectionError, match="temporary dispatch failure"):
             await events.worker_finished(_WORKER, "run", "success", payload)
-        assert len(await TaskMessage.owed(_COORDINATOR, [])) == 1
+        assert len(await TaskMessage.owed(_COORDINATOR)) == 1
     assert await events.worker_finished(_WORKER, "run", "success", payload)
-    (original,) = await TaskMessage.owed(_COORDINATOR, [])
+    (original,) = await TaskMessage.owed(_COORDINATOR)
     assert "Login passes" in original.content
     assert len(dispatched) == (0 if busy else 1)
 
@@ -362,7 +364,7 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
             .values(matched_at=datetime.now(UTC) - timedelta(days=3))
         )
     assert await events.worker_finished(_WORKER, "run", "success", payload)
-    (retried,) = await TaskMessage.owed(_COORDINATOR, [])
+    (retried,) = await TaskMessage.owed(_COORDINATOR)
     assert retried.id == original.id
     assert len(dispatched) == (0 if busy else 1)
 
@@ -390,8 +392,8 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert isinstance(envelope, str)
     serialized = ElementTree.fromstring(envelope)
     assert TaskEventMetadata.model_validate_json(serialized.attrib["task_event"]) == display
-    assert await TaskMessage.owed(_COORDINATOR, messages) == []
-    client.threads.get_state.return_value = {"values": {"messages": messages}}
+    await TaskMessage.received(_COORDINATOR, [retried.id])
+    assert await TaskMessage.owed(_COORDINATOR) == []
     client.threads.get.return_value = {"status": "idle"}
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     assert len(dispatched) == 1
@@ -428,15 +430,15 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
         await session.execute(
             update(TaskMessage).values(matched_at=datetime.now(UTC) - timedelta(days=30))
         )
-    checkpoint = TaskMessage.messages([delivered])
-    assert await TaskMessage.owed(_COORDINATOR, checkpoint) == []
+    await TaskMessage.received(_COORDINATOR, [delivered.id])
+    assert await TaskMessage.owed(_COORDINATOR) == []
     async with postgres.session() as session:
         await session.execute(
             update(TaskMessage)
             .where(TaskMessage.id == delivered.id)
             .values(delivered_at=datetime.now(UTC) - timedelta(days=30))
         )
-    assert [message.id for message in await TaskMessage.owed(_WORKER, [])] == [pending.id]
+    assert [message.id for message in await TaskMessage.owed(_WORKER)] == [pending.id]
     async with postgres.session() as session:
         assert await session.get(TaskMessage, delivered.id) is None
         replay = TaskMessage(
@@ -448,7 +450,6 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
         )
         await replay.record(session)
     assert replay.id == delivered.id
-    assert await TaskMessage.owed(_COORDINATOR, checkpoint) == []
 
 
 @pytest.mark.parametrize(
@@ -456,12 +457,9 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
 )
 async def test_repaired_task_thread_checkpoints_owed_messages_once(
     registry_db: None,
-    monkeypatch: pytest.MonkeyPatch,
     thread_id: str,
     missing_task_message: bool,
 ) -> None:
-    from openswe.middleware import task_coordination
-
     task, _ = await store.Task.reserve_worker(
         _COORDINATOR,
         _WORKER,
@@ -496,20 +494,14 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     if missing_task_message:
         async with postgres.session() as session:
             await message.record(session)
-    context = await store.TaskMembership.context_for_thread(thread_id)
-    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
-    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
+    inbox = ThreadInbox(thread_id)
+    spec = InboxSpec(events=True)
 
-    delivered = await middleware.abefore_model({"messages": []}, Runtime())
-    assert delivered is not None
-    assert delivered["messages"][-1]["id"] == f"event-match:{message.id}"
-    assert "Check logout too" in delivered["messages"][-1]["content"]
-    checkpoint: AgentState = {"messages": []}
-    for entry in delivered["messages"]:
-        content = entry["content"]
-        assert isinstance(content, str)
-        checkpoint["messages"].append(HumanMessage(content=content, id=entry.get("id")))
-    assert await middleware.abefore_model(checkpoint, Runtime()) is None
+    taken = await inbox.read("run-1", spec)
+    assert taken.messages[-1]["id"] == f"event-match:{message.id}"
+    assert "Check logout too" in taken.messages[-1]["content"]
+    await inbox.receive(events=taken.events)
+    assert (await inbox.read("run-1", spec)).messages == []
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None
@@ -726,5 +718,5 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     dispatch.assert_not_awaited()
     event.delivery_id = "late-ci"
     assert not await subscription.match(event, EventSummary.of(event))
-    assert await EventMatch.owed(_WORKER, []) == []
+    assert await EventMatch.owed(_WORKER) == []
     assert await EventSubscription.for_thread(_WORKER) == []

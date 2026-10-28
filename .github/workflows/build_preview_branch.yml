@@ -161,7 +161,7 @@ jobs:
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # its gateway key, and the secret they share.
           printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
-          uv run --project mda --locked --python 3.13 mda deploy mda \
+          uv run --project mda --locked mda deploy mda \
             --name open-swe-mda-preview \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \

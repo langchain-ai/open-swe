@@ -12,6 +12,7 @@ from openswe.agent_api import server
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
     RemoteRun,
+    RunSettings,
     RuntimeTokenError,
     WorkerGrant,
     sign_runtime_token,
@@ -24,6 +25,7 @@ RUN = RemoteRun(
     thread_id="thread-1",
     assistant_id="reviewer",
     configurable={"repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7},
+    expires_at=int(time.time()) + 3600,
 )
 
 
@@ -84,18 +86,14 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
 
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
-    from openswe.agent_api.graph import RunSession
-    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from runtime_api.catalog import ModelSpec, RunModels
+
+    from openswe.agent_api.loop import ModelChoices
     from openswe.utils.model import provider_model_kwargs
 
-    main = ModelChoice("openai:gpt-6.1-sol", {})
-    session = RunSession(
-        ToolSurface(models=SurfaceModels(main=main, subagent=main, use_gateway=False)),
-        {},
-        None,
-        started_here=True,
-    )
-    choice = session.model_for(
+    main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    choices = ModelChoices(RunModels(model=main, subagent_model=main, use_gateway=False))
+    choice = choices.model_for(
         {
             "model_route": "default",
             "requested_model": requested,
@@ -107,14 +105,221 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+async def test_the_named_calls_around_a_model_call_never_plan_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from langchain_core.messages import HumanMessage, messages_to_dict
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.utils.model import provider_model_kwargs
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A call around a model call never plans the run")
+
+    classify = AsyncMock(return_value="fast")
+    refresh = AsyncMock(return_value=None)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+
+    route = await graph.api(run, "route_model", {"run_id": "run-1", "humans": asked})
+    chosen = await graph.api(
+        run,
+        "model_choice",
+        {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
+    )
+    context = await graph.api(run, "task_context", {"run_id": "run-1"})
+    refreshed = await graph.api(run, "refresh_github_proxy", {"run_id": "run-1"})
+
+    assert route == {"route": "fast"}
+    classify.assert_awaited_once_with("Fix the login")
+    assert isinstance(chosen, dict)
+    assert chosen["model_id"] == "anthropic:claude-opus-5-5"
+    assert chosen["kwargs"] == provider_model_kwargs(
+        "anthropic:claude-opus-5-5", "high", max_tokens=64_000
+    )
+    # A thread in no task gets no task context.
+    assert context == {"instructions": "", "message": None}
+    assert refreshed == {"expires_at": None}
+    refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_is_recorded_once_however_often_it_arrives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch stops at the first report that fails, which its next delivery records,
+    and one delivered again after its answer was lost is not recorded twice."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK, STEP_LIMIT_REACHED
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    told = AsyncMock(side_effect=[RuntimeError("Slack is down"), None])
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "notify_step_limit", told)
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[
+            item(endpoint, RunRequest(run_id="run-1"), key=f"run-1:{endpoint.name}", trace={})
+            for endpoint in (STEP_LIMIT_REACHED, SETTLE_REVIEW_CHECK)
+        ]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    first = await deliver()
+    assert first.replies == []
+    assert first.refused == "RuntimeError: Slack is down"
+    # Nothing after a report that failed is tried, so none lands before it.
+    settled.assert_not_awaited()
+
+    second = await deliver()
+    lost_answer = await deliver()
+
+    assert second == lost_answer == ReportsTaken(replies=[{}, {}])
+    assert told.await_count == 2
+    settled.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_whose_reply_was_not_kept_holds_up_nothing_behind_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report is answered and its key given up, so a later delivery records it
+    rather than waiting out another delivery's claim."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.report_receipts import ReportReceipts
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    kept = ReportReceipts.record
+    monkeypatch.setattr(
+        ReportReceipts, "record", AsyncMock(side_effect=[RuntimeError("database went away")])
+    )
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[item(SETTLE_REVIEW_CHECK, RunRequest(run_id="run-1"), key="run-1:settle", trace={})]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    assert await deliver() == ReportsTaken(replies=[{}])
+    monkeypatch.setattr(ReportReceipts, "record", kept)
+    assert await deliver() == ReportsTaken(replies=[{}])
+    assert await deliver() == ReportsTaken(replies=[{}])
+
+    # Done again only by the delivery after the reply was lost, then never again.
+    assert settled.await_count == 2
+
+
+async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from langchain_core.tools import tool
+    from langgraph.config import get_config
+
+    from openswe.agent_api import agent
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def draft_preference(note: str) -> str:
+        """Say whether this run opens pull requests as drafts."""
+        return f"{note}: {get_config()['configurable'].get('draft_prs')}"
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A tool or shell call never plans the run")
+
+    monkeypatch.setattr(
+        agent, "agent_tools_by_name", lambda: {draft_preference.name: draft_preference}
+    )
+    monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    # The settings decided as the run started, signed into its token.
+    run = RUN.model_copy(
+        update={"assistant_id": "agent", "settings": RunSettings(draft_prs=False)}
+    ).granting()
+    call = {
+        "run_id": "run-1",
+        "name": "draft_preference",
+        "arguments": {"note": "drafts"},
+        "request_id": "call-1",
+    }
+
+    result = await graph.api(run, "operation", {**call, "grant": run.grant("draft_preference")})
+    # Only an operation the run's catalog granted it runs, however the call names it.
+    ungranted = await graph.api(run, "operation", call)
+    regranted = await graph.api(
+        run, "operation", {**call, "grant": run.granting().grant("draft_preference")}
+    )
+    verdict = await graph.api(
+        run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
+    )
+
+    assert isinstance(result, dict) and result["content"] == "drafts: False"
+    assert verdict == {"allowed": True, "command": None, "refusal": None}
+    for refused in (ungranted, regranted):
+        assert isinstance(refused, dict) and refused["status"] == "error"
+        assert "not one of this run's operations" in str(refused["content"])
+
+    # A token from before operations were granted reaches only the tools its plan offers.
+    async def offers_nothing(config: object, surface: ToolSurface) -> None:
+        return None
+
+    planned = RemoteGraph("agent", offers_nothing, agent.AgentParts())
+    unplanned = await planned.api(
+        RUN.model_copy(update={"assistant_id": "agent"}), "operation", call
+    )
+    assert isinstance(unplanned, dict) and unplanned["status"] == "error"
+    assert "drafts" not in str(unplanned["content"])
+
+
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import tool
     from langgraph.runtime import Runtime
+    from runtime_api.catalog import ModelSpec, RunModels
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.loop import RunLoop
     from openswe.middleware.model_call_shape import CallShape
-    from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
     def plan(step: str) -> str:
@@ -132,15 +337,15 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
         ) -> CallShape:
             return call if state.get("asked") else call.hiding(["record"])
 
-    session = RunSession(
-        ToolSurface(tools={"plan": plan, "record": record}, middleware=[HideRecordUntilAsked()]),
-        {},
-        None,
-        started_here=True,
+    model = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    loop = RunLoop(
+        [HideRecordUntilAsked()],
+        RunModels(model=model, subagent_model=model, use_gateway=False),
+        offered={plan.name, record.name},
     )
 
-    assert (await session.model_call({"messages": []}, None)).hidden_tools == ["record"]
-    assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
+    assert (await loop.model_call({"messages": []}, Runtime())).hidden_tools == ["record"]
+    assert (await loop.model_call({"messages": [], "asked": True}, Runtime())).hidden_tools == []
 
 
 @pytest.mark.parametrize("environment", ["preview", "staging", "production"])
@@ -171,7 +376,7 @@ async def test_remote_prompts_include_deployment_context(
         started_here=True,
     )
     main_prompt = (
-        await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
+        await session.loop.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
     ).system_prompt
     subagent_prompt = session.catalog().subagents[0].system_prompt
 
@@ -238,6 +443,40 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         await session.rejoin_preparation(None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
+@pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
+async def test_operation_respects_open_tool_argument_schemas(additional: JsonValue) -> None:
+    from langchain_core.tools import StructuredTool
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    schema: dict[str, JsonValue] = {"type": "object", "properties": {}}
+    if additional is not None:
+        schema["additionalProperties"] = additional
+
+    async def homebase(**arguments: JsonValue) -> str:
+        return json.dumps(arguments)
+
+    tool = StructuredTool.from_function(
+        coroutine=homebase, name="homebase", description="Homebase tool", args_schema=schema
+    )
+    session = RunSession(ToolSurface(tools={tool.name: tool}), {}, None, started_here=True)
+    arguments: dict[str, JsonValue] = {"commit": "abc123"}
+
+    result = await session.operation(
+        RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
+    )
+
+    if additional is True or isinstance(additional, dict):
+        assert result.status == "success"
+        assert isinstance(result.content, str)
+        assert json.loads(result.content) == arguments
+    else:
+        assert result.status == "error"
+        assert result.content == "Unexpected arguments for homebase: commit"
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
@@ -382,10 +621,15 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
-    # A provider MDA declares no box for, so the catalog reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from unittest.mock import AsyncMock
+
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # A thread with no box of MDA's, so the catalog reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
@@ -406,7 +650,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
-    async def build(config: object, surface: ToolSurface) -> None:
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        # What the planner decides for the run, such as the sender's draft preference.
+        config["configurable"]["draft_prs"] = False
         search = integration("mcp_search")
         search.metadata = {
             "mcp_provenance": MCPToolProvenance(
@@ -440,11 +686,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         choice = ModelChoice("openai:gpt-6.1-sol", {})
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
-    async def start_models(cfg: object) -> object:
-        raise AssertionError("not asked for")
-
-    graph = RemoteGraph("agent", build, start_models)
-    catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
+    graph = RemoteGraph("agent", build)
+    run = RUN.granting()
+    started = await graph.start_run(run)
+    catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]
@@ -483,9 +728,21 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "execute",
         "ls",
         "read_file",
+        "search_tools",
         "web_search",
         "write_file",
     ]
+    assert catalog["search_tools"] is True
+    # MDA's search_tools reads as the backend describes it, with how to call what it finds.
+    from openswe.prompts import prompt
+
+    assert catalog["search_tools_description"] == prompt("tools/search_tools")
+    # What planning decided for the run rides in its settings, and each operation is
+    # granted to the run under its grant id.
+    assert started.settings.draft_prs is False
+    assert all(
+        isinstance(op, dict) and run.granted(str(op["name"]), str(op["grant"])) for op in operations
+    )
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
@@ -628,6 +885,7 @@ async def _call_status(
     monkeypatch: pytest.MonkeyPatch, token: str, endpoint: str
 ) -> tuple[int, list[tuple[str, str]]]:
     """Call ``endpoint`` with ``token`` and report the status and what served it, as whom."""
+    from runtime_api.catalog import Catalog
     from runtime_api.endpoint import Handlers, UnknownEndpointError
     from runtime_api.workers import ADOPT, Adopt, Adopted
 
@@ -636,14 +894,14 @@ async def _call_status(
     served: list[tuple[str, str]] = []
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
-        if called not in {"catalog", "prepare", "before_model", "after_agent"}:
+        if called not in {"prepare", "before_model", "after_agent"}:
             raise UnknownEndpointError(called)
         served.append((called, run.thread_id))
         return {}
 
     async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         served.append(("adopt", grant.coordinator.thread_id))
-        return Adopted(run_token="worker-token")
+        return Adopted(run_token="worker-token", catalog=Catalog())
 
     grants = Handlers[WorkerGrant]()
     grants.serve(ADOPT, adopt)
@@ -731,7 +989,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     assert hook["session_name"] == "turns"
 
 
-async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_else(
+async def test_a_worker_grant_only_adopts_a_run_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
@@ -741,12 +999,15 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     with pytest.raises(RuntimeTokenError):
         verify_worker_grant(sign_runtime_token(coordinator))
 
-    assert await _call_status(monkeypatch, grant, "catalog") == (
-        200,
-        [("catalog", "coordinator")],
-    )
     assert await _call_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
-    for endpoint in ("prepare", "before_model", "operation", "after_agent", "launch_worker"):
+    for endpoint in (
+        "catalog",
+        "prepare",
+        "before_model",
+        "operation",
+        "after_agent",
+        "launch_worker",
+    ):
         assert await _call_status(monkeypatch, grant, endpoint) == (403, [])
     # A run token never adopts: only a launched worker's grant does.
     status, _ = await _call_status(monkeypatch, sign_runtime_token(coordinator), "adopt")
@@ -809,10 +1070,11 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
-    from runtime_api.catalog import ModelSpec, RunModels
+    from runtime_api.catalog import Catalog
     from runtime_api.workers import Adopt
 
     from openswe.agent_api import async_workers, hosted
+    from openswe.agent_api.graph import RunStart
     from openswe.prompts import prompt
 
     coordinator = RemoteRun(
@@ -827,12 +1089,9 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
         AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
-    spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-    graph = MagicMock(
-        start_models=AsyncMock(
-            return_value=RunModels(model=spec, subagent_model=spec, use_gateway=False)
-        )
-    )
+    planned = Catalog(skill_sources=["/skills/worker/"])
+    started = RunStart(catalog=planned, settings=RunSettings(draft_prs=True))
+    graph = MagicMock(start_run=AsyncMock(return_value=started))
     monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
 
     # The worker's first message: the assignment its launch rendered.
@@ -846,6 +1105,11 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
+    # Planned as the worker's own run.
+    assert reply.catalog == planned
+    assert graph.start_run.await_args.args[0].thread_id == "worker"
+    # The settings the worker's run starts with ride in its token.
+    assert adopted.settings == RunSettings(draft_prs=True)
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
 

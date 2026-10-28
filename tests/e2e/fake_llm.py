@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 from e2e_env import (
     BASE_BRANCH,
+    BASE_URL,
     DEMO_CHANNEL,
     FAKE_GITHUB_API,
     FEATURE_BRANCH,
@@ -283,6 +284,14 @@ BACKGROUND_WORK_MONITOR_COMMAND = (
     'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
 )
 BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
+INBOX_MARKER = "E2E_INBOX"
+INBOX_EVENT_LINE = "INBOX_EVENT build finished"
+# Prints its event at once, then outlasts the spec without lingering on the host.
+INBOX_MONITOR_COMMAND = f'echo "{INBOX_EVENT_LINE}"; sleep 90'
+INBOX_FOLLOW_UP = "Please also note the inbox follow-up."
+# The harness holds the run here until the spec has queued what the inbox should bring.
+INBOX_GATE_URL = f"{BASE_URL}/control/inbox-gate"
+_INBOX_GATE_SECONDS = 90.0
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -866,6 +875,71 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
+def _called(messages: list[BaseMessage], call_id: str) -> int | None:
+    """The index of the model reply that made ``call_id``, when one did."""
+    for index, message in enumerate(messages):
+        if isinstance(message, AIMessage) and any(c["id"] == call_id for c in message.tool_calls):
+            return index
+    return None
+
+
+def _wait_for_inbox_gate() -> None:
+    deadline = time.monotonic() + _INBOX_GATE_SECONDS
+    while time.monotonic() < deadline:
+        gate = httpx.get(INBOX_GATE_URL, params={"waiting": "true"}, timeout=10)
+        gate.raise_for_status()
+        if gate.json().get("released"):
+            return
+        time.sleep(0.25)
+
+
+def _inbox_step(messages: list[BaseMessage]) -> AIMessage:
+    """Start a monitor, hold a model call while the spec sends the thread work, then report
+    what reached the conversation: the inbox brings it in as new messages mid-run, so every
+    step routes on what the run has done rather than on the step count."""
+    started = _called(messages, "call-inbox-monitor")
+    if started is None:
+        return AIMessage(
+            content="Watching the build log.",
+            tool_calls=[
+                {
+                    "name": "monitor",
+                    "args": {
+                        "action": "start",
+                        "command": INBOX_MONITOR_COMMAND,
+                        "description": "the inbox build log",
+                        "timeout": 120,
+                    },
+                    "id": "call-inbox-monitor",
+                }
+            ],
+        )
+    if _called(messages, "call-inbox-list") is None:
+        _wait_for_inbox_gate()
+        return AIMessage(
+            content="Checking the monitors.",
+            tool_calls=[{"name": "monitor", "args": {"action": "list"}, "id": "call-inbox-list"}],
+        )
+    if _called(messages, "call-inbox-reply") is not None:
+        return AIMessage(content="Reported what the inbox brought.")
+    arrived = [_text(m.content) for m in messages[started:] if isinstance(m, HumanMessage)]
+    follow_up = "seen" if any(INBOX_FOLLOW_UP in text for text in arrived) else "missing"
+    events = sum(INBOX_EVENT_LINE in text for text in arrived)
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": f"Inbox check: follow-up {follow_up}, monitor events {events}.",
+                    "response_type": "final",
+                },
+                "id": "call-inbox-reply",
+            }
+        ],
+    )
+
+
 def _tool_payload(messages: list[BaseMessage], tool_name: str) -> dict[str, Any]:
     for message in reversed(messages):
         if not isinstance(message, ToolMessage) or message.name != tool_name:
@@ -900,9 +974,9 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
 
 def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
+    task_id = _tool_payload(messages, "snapshotctl").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("refresh_workspace_start did not return a task id")
+        raise ValueError("snapshotctl did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -1074,6 +1148,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-code-channel-followup",
         ),
     ),
+    "inbox": tuple(_dynamic_step(_inbox_step) for _ in range(6)),
     "background_work": (
         _tool_step(
             "Acknowledging the background work request.",
@@ -1521,8 +1596,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
             "Checking the setup script reproduces the image.",
-            "refresh_workspace_start",
-            {"name": WORKSPACE_NAME},
+            "snapshotctl",
+            {"action": "rebuild", "workspace": WORKSPACE_NAME},
             "call-env-refresh",
         ),
         _dynamic_step(_workspace_poll_step),
@@ -1571,6 +1646,7 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("inbox", lambda ctx: INBOX_MARKER in ctx.first_text),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
     ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),

@@ -30,6 +30,7 @@ mod crons;
 mod deployments;
 pub(crate) mod github_app_setup;
 pub(crate) mod github_channel;
+pub(crate) mod linear_app;
 pub(crate) mod login;
 mod logs;
 mod registries;
@@ -47,17 +48,21 @@ pub(crate) use agent_auth::OAuthAuthorizationSession;
 pub use agent_auth::{ConnectionOwnerPolicy, ConnectionSummary, CreateOAuthConnection};
 pub use context_hub::ContextHubClient;
 pub(crate) use context_hub::RepoOwnership;
-pub use logs::{LogEntry, LogLevel, LogOrder, LogPage, LogQuery, LogTimestamp};
-pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult, SandboxSummary};
-pub use snapshots::{SnapshotDelete, SnapshotSummary, DEFAULT_SNAPSHOT_READY_TIMEOUT};
+pub use logs::{LogEntry, LogLevel, LogOrder, LogQuery, LogTimestamp};
+pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult};
+pub use snapshots::{SnapshotDelete, DEFAULT_SNAPSHOT_READY_TIMEOUT};
+#[cfg(test)]
+pub(crate) use trigger_server::TransientSetupError;
 pub(crate) use trigger_server::{
-    ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
+    is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
+    ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
+    SlackCustomerApp, SlackManager, SlackTriggerMode,
 };
-pub use workspaces::{DeployTarget, WorkspaceSummary};
+pub(crate) use workspaces::AuthIdentity;
+pub use workspaces::DeployTarget;
 
 pub(crate) use login::{
-    is_cli_session_api_key, note_session_api_key, resolve_login_api_url, Credential, Login,
+    is_cli_session_api_key, note_session_api_key, resolve_login_api_url, ApiKey, Login,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -197,6 +202,19 @@ fn warn_shell_shadows_env_file(key: &str) {
     }
 }
 
+/// [`lookup_env`] with the real process environment as the fallback.
+pub(crate) fn lookup_env_or_process(
+    key: &str,
+    env_file: &BTreeMap<String, String>,
+) -> Option<String> {
+    lookup_env(key, env_file, &mut |key| std::env::var(key).ok())
+}
+
+/// [`lookup_env`] over `env_file` alone, ignoring the process environment.
+pub(crate) fn lookup_env_file(key: &str, env_file: &BTreeMap<String, String>) -> Option<String> {
+    lookup_env(key, env_file, &mut |_| None)
+}
+
 /// Per-request timeout. Source uploads use their own client/timeout.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -292,29 +310,26 @@ impl DeploymentAgent {
 
 /// Blocking JSON client for the LangSmith APIs.
 ///
-/// Sends the credential (and optional tenant) on every request and routes calls
+/// Sends the API key (and optional tenant) on every request and routes calls
 /// to either the host backend or the platform API depending on the endpoint
 /// group.
 #[derive(Clone)]
 pub struct Client {
     http: HttpClient,
-    credential: Credential,
+    api_key: ApiKey,
     tenant_id: Option<String>,
     /// Host backend base URL (`https://api.host.langchain.com`), trailing slash
     /// trimmed.
     host_backend_url: String,
     /// LangSmith platform API base URL (`https://api.smith.langchain.com`),
-    /// derived from the host backend URL. `None` for hosts whose platform API
-    /// location is unknown (localhost, custom/self-hosted backends).
-    platform_api_url: Option<String>,
+    /// trailing slash trimmed.
+    platform_api_url: String,
 }
 
 impl Client {
     /// LangSmith platform API root used by Fleet and sandbox registry APIs.
-    pub(crate) fn platform_base(&self) -> Result<&str> {
-        self.platform_api_url
-            .as_deref()
-            .context("the LangSmith platform API is not available for this host")
+    pub(crate) fn platform_base(&self) -> &str {
+        &self.platform_api_url
     }
 
     /// Whether this client reaches Deployments through a self-hosted frontend.
@@ -328,63 +343,25 @@ impl Client {
     /// direct local-development stack expose platform services at their API
     /// origin instead.
     pub(crate) fn public_platform_base(&self) -> Result<String> {
-        let platform = self.platform_base()?;
+        let platform = self.platform_base();
         if !self.is_self_hosted() {
             return Ok(platform.to_string());
         }
         self_hosted_public_api_base_url(platform).context("LangSmith platform API URL is invalid")
     }
 
-    /// Create a client for `host_backend_url` authenticated with a static API
-    /// key. Prefer [`Self::with_credential`] when the caller may have signed in
-    /// through the device authorization flow.
-    pub fn new(
-        host_backend_url: &str,
-        api_key: impl Into<String>,
-        tenant_id: Option<String>,
-    ) -> Result<Self> {
-        Self::with_credential(
-            host_backend_url,
-            Credential::ApiKey(api_key.into()),
-            tenant_id,
-        )
-    }
-
-    /// Like [`Self::new`], but with an explicit platform API base (Fleet,
-    /// workspace secrets, Slack apps).
+    /// Create a client for `host_backend_url` and `platform_api_url`, sending
+    /// `api_key` (and optional `tenant_id`) on every request.
     ///
     /// Local LangSmith splits these: host-backend (`:8300`, `/v2/deployments`)
-    /// vs nginx (`:1980`, `/v1/fleet/*`). SaaS maps `api.host.*` → `api.smith.*`
-    /// when `platform_api_url` is `None`.
-    pub fn new_with_platform(
+    /// vs nginx (`:1980`, `/v1/fleet/*`). A blank `platform_api_url` is derived
+    /// from the host (`api.host.*` → `api.smith.*`), else shares its base.
+    /// Commands build clients through
+    /// [`LangSmithContext`](crate::deploy::langsmith_context::LangSmithContext).
+    pub(crate) fn new(
         host_backend_url: &str,
-        platform_api_url: Option<&str>,
-        api_key: impl Into<String>,
-        tenant_id: Option<String>,
-    ) -> Result<Self> {
-        Self::with_credential_and_platform(
-            host_backend_url,
-            platform_api_url,
-            Credential::ApiKey(api_key.into()),
-            tenant_id,
-        )
-    }
-
-    /// Create a client for `host_backend_url`, deriving the matching LangSmith
-    /// platform API URL and sending `credential` (and optional `tenant_id`) on
-    /// every request.
-    pub(crate) fn with_credential(
-        host_backend_url: &str,
-        credential: Credential,
-        tenant_id: Option<String>,
-    ) -> Result<Self> {
-        Self::with_credential_and_platform(host_backend_url, None, credential, tenant_id)
-    }
-
-    pub(crate) fn with_credential_and_platform(
-        host_backend_url: &str,
-        platform_api_url: Option<&str>,
-        credential: Credential,
+        platform_api_url: &str,
+        api_key: ApiKey,
         tenant_id: Option<String>,
     ) -> Result<Self> {
         if host_backend_url.is_empty() {
@@ -395,20 +372,34 @@ impl Client {
             .build()
             .context("failed to build HTTP client")?;
         let host_backend_url = host_backend_url.trim_end_matches('/').to_string();
-        let platform_api_url = platform_api_url
-            .map(str::trim)
+        let platform_api_url = Some(platform_api_url.trim().trim_end_matches('/'))
             .filter(|value| !value.is_empty())
-            .map(|value| value.trim_end_matches('/').to_string())
+            .map(str::to_string)
             .or_else(|| langsmith_api_base_url(&host_backend_url))
             // Non-SaaS single-origin installs: Fleet often shares the host base.
-            .or_else(|| Some(host_backend_url.clone()));
+            .unwrap_or_else(|| host_backend_url.clone());
         Ok(Self {
             http,
-            credential,
+            api_key,
             tenant_id,
             platform_api_url,
             host_backend_url,
         })
+    }
+
+    /// Client for a stub platform API at `platform_api_url`.
+    ///
+    /// The host backend is unroutable, so a test that reaches it by mistake
+    /// fails instead of hitting the stub server.
+    #[cfg(test)]
+    pub(crate) fn for_test(platform_api_url: &str) -> Self {
+        Self::new(
+            "http://unused.invalid",
+            platform_api_url,
+            ApiKey::new("key"),
+            Some("tenant".into()),
+        )
+        .expect("test client builds")
     }
 
     /// Set the default request timeout for this owned client instance.
@@ -420,15 +411,39 @@ impl Client {
         Ok(self)
     }
 
-    /// Resolve the current `X-Api-Key` value.
-    fn api_key(&self) -> Result<String> {
-        self.credential.api_key(&self.http)
+    /// The `X-Api-Key` value.
+    fn api_key(&self) -> &str {
+        self.api_key.as_str()
     }
 
-    /// Whether a LangSmith platform API base is configured for this host — always
-    /// `true`, since `with_credential_and_platform` falls back to the host backend URL.
-    pub fn platform_api_available(&self) -> bool {
-        self.platform_api_url.is_some()
+    /// Whether the key would travel encrypted: an `https` platform API, or
+    /// plain `http` only to this machine (local LangSmith).
+    pub(crate) fn sends_key_securely(&self) -> bool {
+        let Ok(url) = reqwest::Url::parse(&self.platform_api_url) else {
+            return false;
+        };
+        match url.scheme() {
+            "https" => true,
+            "http" => url.host_str().is_some_and(|host| {
+                host == "localhost"
+                    || host
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            }),
+            _ => false,
+        }
+    }
+
+    /// The headers that authenticate a request as this client, for senders
+    /// with their own HTTP stack.
+    pub(crate) fn auth_headers(&self) -> Result<Vec<(&'static str, String)>> {
+        let mut headers = vec![("X-Api-Key", self.api_key().to_string())];
+        if let Some(tenant) = &self.tenant_id {
+            headers.push((TENANT_HEADER, tenant.clone()));
+        }
+        Ok(headers)
     }
 
     /// Perform a request against `base_url` and decode the JSON response (or
@@ -497,12 +512,11 @@ impl Client {
     ) -> Result<Option<Value>> {
         let url = format!("{base_url}{path}");
         let method_label = method.clone();
-        let api_key = self.api_key()?;
         let (status, text) = send_json_request(
             &self.http,
             method,
             &url,
-            &api_key,
+            self.api_key(),
             self.tenant_id.as_deref(),
             params,
             payload.as_ref(),
@@ -565,12 +579,11 @@ impl Client {
 
         let url = format!("{base_url}{path}");
         let method_label = method.clone();
-        let api_key = self.api_key()?;
         let (status, text) = send_json_request(
             http,
             method,
             &url,
-            &api_key,
+            self.api_key(),
             self.tenant_id.as_deref(),
             params,
             payload.as_ref(),
@@ -915,9 +928,13 @@ mod tests {
             ("200 OK", "not json", None, None),
         ] {
             let (base, handle) = server(status, body);
-            let client =
-                Client::new_with_platform(&base, Some(&base), "test-key", Some("workspace".into()))
-                    .unwrap();
+            let client = Client::new(
+                &base,
+                &base,
+                ApiKey::new("test-key"),
+                Some("workspace".into()),
+            )
+            .unwrap();
             let identity = client.auth_identity().unwrap_or_default();
             assert_eq!(identity.user_id.as_deref(), user);
             assert_eq!(identity.workspace_id.as_deref(), workspace);
@@ -938,9 +955,13 @@ mod tests {
                 "200 OK",
                 r#"{"resources":[{"name":"agent-preview","id":"preview","is_preview":true},{"name":"agent","id":"deployment"}]}"#,
             );
-            let client =
-                Client::new_with_platform(&base, Some(&base), "test-key", Some("workspace".into()))
-                    .unwrap();
+            let client = Client::new(
+                &base,
+                &base,
+                ApiKey::new("test-key"),
+                Some("workspace".into()),
+            )
+            .unwrap();
             let agent = agent_mode.then(|| DeploymentAgent {
                 agent_id: "agent".into(),
                 environment: AgentEnvironment::Staging,
@@ -959,7 +980,7 @@ mod tests {
             }));
         }
         let (base, handle) = server("200 OK", r#"{"resources":[]}"#);
-        let client = Client::new_with_platform(&base, Some(&base), "test-key", None).unwrap();
+        let client = Client::new(&base, &base, ApiKey::new("test-key"), None).unwrap();
         assert!(
             crate::deploy::find_target_deployment(&client, "deleted", None)
                 .unwrap()
@@ -976,7 +997,7 @@ mod tests {
             let (_stream, _) = listener.accept().unwrap();
             thread::sleep(Duration::from_secs(2));
         });
-        let client = Client::new_with_platform(&base, Some(&base), "test-key", None)
+        let client = Client::new(&base, &base, ApiKey::new("test-key"), None)
             .unwrap()
             .with_timeout(Duration::from_secs(1))
             .unwrap();
@@ -986,6 +1007,20 @@ mod tests {
         handle.join().unwrap();
     }
     use super::*;
+
+    #[test]
+    fn the_key_travels_in_cleartext_only_to_this_machine() {
+        let secure = |platform: &str| {
+            Client::new(platform, platform, ApiKey::new("key"), None)
+                .unwrap()
+                .sends_key_securely()
+        };
+        assert!(secure("https://api.smith.langchain.com"));
+        assert!(secure("http://localhost:1980"));
+        assert!(secure("http://127.0.0.1:1980"));
+        assert!(secure("http://[::1]:1980"));
+        assert!(!secure("http://langsmith.example.com"));
+    }
 
     #[test]
     fn resolve_preferred_env_prefers_cli_override() {
@@ -1281,30 +1316,20 @@ mod tests {
     }
 
     #[test]
-    fn platform_api_availability_follows_host() {
-        let prod = Client::new("https://api.host.langchain.com", "k", None).unwrap();
-        assert!(prod.platform_api_available());
-        assert_eq!(
-            prod.platform_api_url.as_deref(),
-            Some("https://api.smith.langchain.com")
-        );
-        let local = Client::new("http://localhost:1980", "k", None).unwrap();
-        assert!(local.platform_api_available());
-        assert_eq!(
-            local.platform_api_url.as_deref(),
-            Some("http://localhost:1980")
-        );
-        let split = Client::new_with_platform(
+    fn platform_api_url_falls_back_to_the_host() {
+        let prod =
+            Client::new("https://api.host.langchain.com", "", ApiKey::new("k"), None).unwrap();
+        assert_eq!(prod.platform_api_url, "https://api.smith.langchain.com");
+        let local = Client::new("http://localhost:1980", "", ApiKey::new("k"), None).unwrap();
+        assert_eq!(local.platform_api_url, "http://localhost:1980");
+        let split = Client::new(
             "http://localhost:8300",
-            Some("http://localhost:1980"),
-            "k",
+            "http://localhost:1980/",
+            ApiKey::new("k"),
             None,
         )
         .unwrap();
         assert_eq!(split.host_backend_url, "http://localhost:8300");
-        assert_eq!(
-            split.platform_api_url.as_deref(),
-            Some("http://localhost:1980")
-        );
+        assert_eq!(split.platform_api_url, "http://localhost:1980");
     }
 }

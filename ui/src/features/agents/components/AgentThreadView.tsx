@@ -5,6 +5,7 @@ import {
   ReviewExcerptChips,
 } from "@/features/reviews/components/ReviewChatActions"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   Profiler,
   useCallback,
@@ -32,7 +33,6 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { BackgroundWorkSidebar } from "@/features/agents/components/BackgroundWorkSidebar"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -64,10 +64,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   materializeImages,
+  pendingSenderName,
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
+  ComposerSubmission,
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
@@ -99,6 +101,10 @@ interface AgentThreadViewProps {
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
+function plainSubmission(text: string): ComposerSubmission {
+  return { text, images: [], replies: [] }
+}
+
 function editedPaths(messages: Array<Message>): Array<string> {
   const paths = new Set<string>()
   for (const message of messages) {
@@ -277,6 +283,7 @@ export function AgentThreadView({
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
   const login = session.data?.login
+  const displayName = session.data?.display_name || undefined
   // Only its sender may act on a queued follow-up; the server enforces it too.
   const isOwnQueued = useCallback(
     (entry: QueuedTurn) => login !== undefined && entry.senderLogin === login,
@@ -286,20 +293,25 @@ export function AgentThreadView({
   const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
     async (
-      content: string,
-      images: Array<ImageChunk>,
+      { text: content, images, replies }: ComposerSubmission,
       options?: SubmitOptions
     ) => {
-      scrollControlRef.current?.scrollToBottom()
       // While a run is live the message either waits for it as a queued run of
       // its own, or goes straight in and steers it. The preference sets the
       // default; ⌘↵ flips it for one message.
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
+      const enqueue = isStreaming && queue
+      const offload = content.trim() === "/offload"
       const messageId = crypto.randomUUID()
+      // A message that goes straight into the transcript sits at the top while
+      // the reply fills in below it. A queued one stays in the queue until its
+      // run starts, and an offload sends no message at all.
+      if (offload) scrollControlRef.current?.scrollToBottom()
+      else if (!enqueue) scrollControlRef.current?.pinMessage(messageId)
       const carriesAutoSelection = autoIntent.claim(
         messageId,
-        content.trim() !== "/offload" && (!isStreaming || queue)
+        !offload && (!isStreaming || queue)
       )
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
@@ -307,11 +319,12 @@ export function AgentThreadView({
         await sendMessage.mutateAsync({
           content,
           images,
+          replies,
           client_message_id: messageId,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
-          enqueue: isStreaming && queue,
+          enqueue,
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
             : {}),
@@ -333,15 +346,15 @@ export function AgentThreadView({
 
   // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
   const submitWithExcerpts = useCallback(
-    async (
-      content: string,
-      images: Array<ImageChunk>,
-      options?: SubmitOptions
-    ) => {
+    async (submission: ComposerSubmission, options?: SubmitOptions) => {
       const excerpts = reviewChat?.excerpts ?? []
       await submitMessage(
-        excerpts.length ? serializeExcerpts(content, excerpts) : content,
-        images,
+        excerpts.length
+          ? {
+              ...submission,
+              text: serializeExcerpts(submission.text, excerpts),
+            }
+          : submission,
         options
       )
       if (excerpts.length) reviewChat?.clearExcerpts?.()
@@ -350,7 +363,7 @@ export function AgentThreadView({
   )
 
   const submitText = useCallback(
-    (content: string) => submitMessage(content, []),
+    (content: string) => submitMessage(plainSubmission(content)),
     [submitMessage]
   )
 
@@ -385,7 +398,7 @@ export function AgentThreadView({
     if (!question || !canPost) return
     clearQuestion?.()
     // oxlint-disable-next-line react/set-state-in-effect
-    submitWithExcerpts(question, []).catch((error: unknown) => {
+    submitWithExcerpts(plainSubmission(question)).catch((error: unknown) => {
       console.error("Could not send the review question", error)
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
@@ -399,13 +412,25 @@ export function AgentThreadView({
     key: number
     files: Array<File>
   } | null>(null)
+  const [addedReply, setAddedReply] = useState<{
+    key: number
+    reply: PassageReply
+  } | null>(null)
+  const addReply = (reply: PassageReply) =>
+    setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
   const restoreQueuedToComposer = useCallback(
-    (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
-      if (texts.length === 0 && images.length === 0) return
+    (
+      texts: ReadonlyArray<string>,
+      images: Array<ImageChunk>,
+      replies: Array<PassageReply>
+    ) => {
+      if (!texts.some(Boolean) && images.length === 0 && replies.length === 0)
+        return
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: texts.filter(Boolean).join("\n\n"),
         images,
+        replies,
       }))
     },
     []
@@ -450,7 +475,11 @@ export function AgentThreadView({
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        restoreQueuedToComposer([queuedText(entry)], images)
+        restoreQueuedToComposer(
+          [queuedText(entry)],
+          images,
+          entry.message.replies ?? []
+        )
       })().catch((error: unknown) =>
         reportError({ title: "Couldn't cancel the queued message", error })
       )
@@ -502,7 +531,11 @@ export function AgentThreadView({
         ...pending.map(queuedText),
         ...unacknowledged.map((message) => message.content),
       ],
-      images
+      images,
+      [
+        ...pending.flatMap((entry) => entry.message.replies ?? []),
+        ...unacknowledged.flatMap((message) => message.replies ?? []),
+      ]
     )
     if (failed > 0) {
       toast.error(
@@ -529,7 +562,7 @@ export function AgentThreadView({
         pullRequest.number,
         scope
       )
-      await submitMessage(result.prompt, [])
+      await submitMessage(plainSubmission(result.prompt))
     },
     [submitMessage, thread.id]
   )
@@ -567,9 +600,10 @@ export function AgentThreadView({
     () =>
       visiblePendingMessages(
         thread.pendingMessages?.filter((message) => !message.queued),
-        [...baseMessages, ...queued.map((entry) => entry.message)]
+        [...baseMessages, ...queued.map((entry) => entry.message)],
+        pendingSenderName(baseMessages, login, displayName)
       ),
-    [baseMessages, queued, thread.pendingMessages]
+    [baseMessages, displayName, login, queued, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -892,6 +926,7 @@ export function AgentThreadView({
                     onRemoveQueuedMessage={
                       canPost ? removeQueuedMessage : undefined
                     }
+                    onReply={canPost ? addReply : undefined}
                     isStreaming={isStreaming}
                     streamIsLoading={source.isRunning}
                     scrollControlRef={scrollControlRef}
@@ -954,6 +989,7 @@ export function AgentThreadView({
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
+                addedReply={addedReply}
                 models={models}
                 routed={routed}
                 selection={activeSelection}
@@ -997,12 +1033,12 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      {!reviewChat && <BackgroundWorkSidebar threadId={thread.id} />}
       {/* The review page is already the diff; a second panel only squeezes the chat. */}
       {!reviewChat && (
         <AgentGitPanel
           thread={thread}
           onComment={canPost ? submitText : undefined}
+          onReply={canPost ? addReply : undefined}
           revealFilePath={revealFilePath}
           revealChangesKey={revealChangesKey}
           collapsed={panelCollapsed}

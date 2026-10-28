@@ -22,8 +22,11 @@ class CandidateValidation:
     def __init__(
         self, queue: MergeQueue, repo: RepoClient, policy: QueuePolicy, dispatcher: DispatchGateway
     ):
+        if queue.mode != "custom":
+            raise ValueError("Custom validation is disabled for native queues")
         self.queue, self.repo, self.policy = queue, repo, policy
         self.dispatcher = dispatcher
+        self.evidence = ValidationEvidence(repo)
 
     async def reconcile(self, lease: Lease) -> None:
         if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
@@ -44,21 +47,13 @@ class CandidateValidation:
             await self._dispatch(request, attempt.deadline, lease)
             return
         try:
-            run_id = await self._find_run(request, attempt.created_at, work.run_id)
+            run_id = await self.evidence.find_run(request, attempt.created_at, work.run_id)
             if run_id is None:
                 return
-            run = await self.repo.validation_run(run_id)
-            self._validate_run_identity(run, request, run_id)
             await self.queue.bind_validation_run(attempt.id, run_id, lease)
-            if run.status != "completed":
+            evidence = await self.evidence.result(request, run_id)
+            if evidence is None:
                 return
-            if run.conclusion != "success":
-                raise InvalidValidation("Validation workflow did not succeed")
-            evidence = await self._collect_evidence(request, run_id)
-            latest = await self.repo.validation_run(run_id)
-            self._validate_run_identity(latest, request, run_id)
-            if latest.status != "completed" or latest.conclusion != "success":
-                raise InvalidValidation("Workflow changed while collecting results")
             if await self._invalidate_if_candidate_changed(work.batch, candidate, lease):
                 return
         except InvalidValidation as exc:
@@ -97,7 +92,26 @@ class CandidateValidation:
                 succeeded=False,
             )
 
-    async def _find_run(
+
+class ValidationEvidence:
+    def __init__(self, repo: RepoClient):
+        self.repo = repo
+
+    async def result(self, request: ValidationRequest, run_id: int) -> dict[str, JsonValue] | None:
+        run = await self.repo.validation_run(run_id)
+        self._validate_run_identity(run, request, run_id)
+        if run.status != "completed":
+            return None
+        if run.conclusion != "success":
+            raise InvalidValidation("Validation workflow did not succeed")
+        evidence = await self._collect_evidence(request, run_id)
+        latest = await self.repo.validation_run(run_id)
+        self._validate_run_identity(latest, request, run_id)
+        if latest.status != "completed" or latest.conclusion != "success":
+            raise InvalidValidation("Workflow changed while collecting results")
+        return evidence
+
+    async def find_run(
         self, request: ValidationRequest, created_at: datetime, bound_run_id: int | None
     ) -> int | None:
         # Search even after binding: a second matching run makes the attempt ambiguous.

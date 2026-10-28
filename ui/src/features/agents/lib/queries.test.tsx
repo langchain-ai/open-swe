@@ -14,6 +14,7 @@ import {
   setAgentThreadStatus,
   setAgentThreadResolved,
   useAgentThread,
+  useAgentThreadBrowser,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -26,9 +27,15 @@ import {
   useThreadsPage,
   useUpdateAgentSchedule,
   useWorkflowApprovalDecision,
+  useWorkflowApprovals,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
-import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
+import type {
+  ThreadBrowser,
+  ThreadTurnDiff,
+  ThreadsPage,
+  ThreadsPageParams,
+} from "./api"
 import type {
   AgentSchedule,
   AgentThread,
@@ -64,6 +71,70 @@ function testClient() {
   clients.push(client)
   return client
 }
+
+describe("useAgentThreadBrowser", () => {
+  const hour = 60 * 60_000
+  function browser(
+    window: string,
+    token: string,
+    expiresIn: number,
+    title = "current"
+  ): ThreadBrowser {
+    return {
+      tabs: [{ id: "t1", title, url: "https://example.com" }],
+      act_url: `https://${window}.browsers.test/auth?token=${token}`,
+      expires_at: new Date(Date.now() + expiresIn).toISOString(),
+    }
+  }
+
+  async function refetchedLink(current: ThreadBrowser, fetched: ThreadBrowser) {
+    const client = testClient()
+    const getThreadBrowser = vi
+      .spyOn(agentsApi, "getThreadBrowser")
+      .mockResolvedValueOnce(current)
+      .mockResolvedValue(fetched)
+    const { result } = renderHook(
+      () => useAgentThreadBrowser("thread-1", true),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    await act(() =>
+      client.invalidateQueries({
+        queryKey: agentThreadKeys.browser("thread-1"),
+      })
+    )
+    await waitFor(() =>
+      expect(result.current.data?.tabs[0]?.title).toBe("next")
+    )
+    getThreadBrowser.mockRestore()
+    return result.current.data
+  }
+
+  it("keeps the framed link when an invalidation mints a new one", async () => {
+    const current = browser("b-window", "first", 24 * hour)
+    const data = await refetchedLink(
+      current,
+      browser("b-window", "second", 24 * hour, "next")
+    )
+    expect(data?.act_url).toBe(current.act_url)
+    expect(data?.expires_at).toBe(current.expires_at)
+  })
+
+  it("takes the new link for another window or near expiry", async () => {
+    const otherWindow = browser("b-other", "second", 24 * hour, "next")
+    expect(
+      await refetchedLink(browser("b-window", "first", 24 * hour), otherWindow)
+    ).toEqual(otherWindow)
+    const fresh = browser("b-window", "second", 24 * hour, "next")
+    expect(
+      await refetchedLink(browser("b-window", "first", 60_000), fresh)
+    ).toEqual(fresh)
+  })
+})
 
 describe("useAgentThreadWorkingTreeDiff", () => {
   const diff: ThreadTurnDiff = {
@@ -536,11 +607,16 @@ describe("sidebar queries", () => {
   })
 
   it("refreshes an active coordinator's workers from sidebar pages without opening them", () => {
-    const worker = { id: "worker-thread", status: "running" } as AgentThread
+    const worker = {
+      id: "worker-thread",
+      status: "running",
+      updatedAt: 1,
+    } as AgentThread
     const coordinator = {
       id: "coordinator-thread",
       title: "Onscreen coordinator",
       status: "finished",
+      updatedAt: 2,
       taskMembership: { role: "coordinator" },
       taskWorkers: [worker],
     } as AgentThread
@@ -565,7 +641,8 @@ describe("sidebar queries", () => {
       loaded: {
         ...coordinator,
         title: "Older sidebar title",
-        taskWorkers: [{ ...worker, status: "finished" }],
+        updatedAt: 1,
+        taskWorkers: [{ ...worker, status: "finished", updatedAt: 2 }],
       },
     })
 
@@ -599,7 +676,52 @@ describe("sidebar queries", () => {
       }
     )
 
-    expect(result.current).toBe(coordinator)
+    expect(result.current).toEqual(coordinator)
+  })
+
+  it("nests an open worker the sidebar page has not listed yet under its coordinator", () => {
+    const listedWorker = {
+      id: "listed-worker",
+      status: "finished",
+      updatedAt: 1,
+    } as AgentThread
+    const coordinator = {
+      id: "coordinator-thread",
+      status: "finished",
+      updatedAt: 1,
+      taskMembership: { role: "coordinator", taskId: "task" },
+      taskWorkers: [listedWorker],
+    } as AgentThread
+    const started = {
+      id: "started-worker",
+      status: "running",
+      updatedAt: 2,
+      taskMembership: {
+        role: "worker",
+        taskId: "task",
+        coordinatorThreadId: coordinator.id,
+      },
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(started.id), started)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: started.id,
+          loadedThreads: [coordinator],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current?.id).toBe(coordinator.id)
+    expect(result.current?.taskWorkers?.map((worker) => worker.id)).toEqual([
+      listedWorker.id,
+      started.id,
+    ])
   })
 
   it("keeps the deep-linked active thread available as cached pages catch up", async () => {
@@ -868,6 +990,36 @@ describe("useUpdateAgentSchedule", () => {
 
     act(() => request.reject(new Error("request failed")))
     await waitFor(() => expect(enabled()).toEqual([true, true]))
+  })
+})
+
+describe("useWorkflowApprovals", () => {
+  it("fetches approvals created after the last poll when the run stops", async () => {
+    const client = testClient()
+    const approval = {
+      fingerprint: "late-approval",
+      status: "pending",
+    } as WorkflowPushApproval
+    vi.spyOn(agentsApi, "listWorkflowApprovals")
+      .mockResolvedValueOnce({ threadId: "thread-1", approvals: [] })
+      .mockResolvedValue({ threadId: "thread-1", approvals: [approval] })
+    const { result, rerender } = renderHook(
+      ({ active }) =>
+        useWorkflowApprovals("thread-1", { pollWhileActive: active }),
+      {
+        initialProps: { active: true },
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.data?.approvals).toEqual([]))
+
+    rerender({ active: false })
+
+    await waitFor(() =>
+      expect(result.current.data?.approvals).toEqual([approval])
+    )
   })
 })
 

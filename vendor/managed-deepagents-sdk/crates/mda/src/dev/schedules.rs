@@ -37,6 +37,7 @@ use crate::compile::schedules::ScheduleCrons;
 use crate::deploy::helpers::MDA_HANDOFF_SECRET_ENV;
 use crate::deploy::{env_file, reconcile_schedules_at_url, schedules_summary, CronApi};
 use crate::langsmith::{decode_json_body, ApiError, REQUEST_TIMEOUT};
+use crate::telemetry::otel_logger;
 
 /// Principal the managed runtime lets provision schedules under `mda dev`.
 const LOCAL_DEV_USER: &str = "mda:local-dev";
@@ -122,11 +123,14 @@ impl ScheduleSync {
                     log::success(format!("{summary} on the local dev server"))?;
                 }
             }
-            Err(err) => log::warning(format!(
-                "Could not provision schedules on the local dev server: {err:#}\n\
+            Err(err) => {
+                otel_logger::warn("dev schedule provisioning failed", &err);
+                log::warning(format!(
+                    "Could not provision schedules on the local dev server: {err:#}\n\
                  Schedules will not run locally until the next change to schedules/ \
                  or a restart of `mda dev`."
-            ))?,
+                ))?;
+            }
         }
         Ok(())
     }

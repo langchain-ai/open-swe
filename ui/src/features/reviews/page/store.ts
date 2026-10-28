@@ -58,7 +58,7 @@ interface HeadState {
   collapsed: ReadonlySet<string>
 }
 
-/** Words the viewer started writing on this pull request, kept until they open another one. */
+/** What the viewer started or opened on this pull request, kept until they open another one. */
 interface PullRequestState {
   pr: PullRequestRef | null
   composer: CommentDraftTarget | null
@@ -70,6 +70,9 @@ interface PullRequestState {
   pendingEdits: ReadonlyMap<number, string>
   /** Code attached to the next chat message, shown as chips above the composer. */
   chatExcerpts: ReadonlyArray<CodeExcerpt>
+  expandedFinding: string | null
+  /** Threads on the diff the reader opened or folded, against their default. */
+  threadsOpen: ReadonlyMap<number, boolean>
 }
 
 /** One visit to the page: where the reader is and what's open. Leaving the page drops it. */
@@ -90,9 +93,6 @@ interface VisitState {
   atEnd: boolean
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
-  expandedFinding: string | null
-  /** Threads on the diff the reader opened or folded, against their default. */
-  threadsOpen: ReadonlyMap<number, boolean>
   chatDraft: { key: number; text: string } | undefined
   /** A question the chat sends as soon as it can, then clears. */
   chatQuestion: string | undefined
@@ -101,6 +101,11 @@ interface VisitState {
   entryOrder: ReadonlyArray<DiffEntry>
   /** Narrows the diff, the file tree and the walkthrough to matching paths. */
   fileFilter: string
+  /** Whether the find bar is up; its query stays for the visit, so reopening it picks up where it was. */
+  findOpen: boolean
+  findQuery: string
+  /** The hit the find bar is on, in reading order. */
+  findIndex: number
   /** Whether the status card is on screen; when it isn't, the header carries its sentence. */
   standingInView: boolean
   /** The finding or thread n/p last landed on, so they move on from it even after the list changes. */
@@ -112,7 +117,7 @@ type ReviewPageState = Preferences & HeadState & PullRequestState & VisitState
 interface ReviewPageActions {
   /** Shows a pull request at a head; drafts survive only on the same pull request, marks only on the same head. */
   open: (pr: PullRequestRef, headSha: string | null) => void
-  /** Drops what only this visit needs, keeping drafts and marks for coming back. */
+  /** Drops what only this visit needs, keeping drafts, marks and what was opened for coming back. */
   leave: () => void
   setRailTab: (tab: RailTab) => void
   setRailOpen: (open: boolean) => void
@@ -155,6 +160,9 @@ interface ReviewPageActions {
   toggleActiveCollapsed: () => void
   setEntryOrder: (entries: ReadonlyArray<DiffEntry>) => void
   setFileFilter: (filter: string) => void
+  setFindOpen: (open: boolean) => void
+  setFindQuery: (query: string) => void
+  setFindIndex: (index: number) => void
   setStandingInView: (inView: boolean) => void
   /** Marks an entry viewed (or not); from the file being read, moves on to the next unread one. */
   markViewed: (id: string) => void
@@ -272,6 +280,8 @@ function freshPullRequest(pr: PullRequestRef | null): PullRequestState {
     replyDrafts: new Map(),
     pendingEdits: new Map(),
     chatExcerpts: [],
+    expandedFinding: null,
+    threadsOpen: new Map(),
   }
 }
 
@@ -287,13 +297,14 @@ function freshVisit(): VisitState {
     visitedSteps: new Set(),
     atEnd: false,
     jump: null,
-    expandedFinding: null,
-    threadsOpen: new Map(),
     chatDraft: undefined,
     chatQuestion: undefined,
     events: new Set(),
     entryOrder: [],
     fileFilter: "",
+    findOpen: false,
+    findQuery: "",
+    findIndex: 0,
     standingInView: true,
     lastStop: null,
   }
@@ -513,6 +524,9 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     clearChatExcerpts: () => set({ chatExcerpts: [] }),
     setEntryOrder: (entryOrder) => set({ entryOrder }),
     setFileFilter: (fileFilter) => set({ fileFilter }),
+    setFindOpen: (findOpen) => set({ findOpen }),
+    setFindQuery: (findQuery) => set({ findQuery, findIndex: 0 }),
+    setFindIndex: (findIndex) => set({ findIndex }),
     setStandingInView: (standingInView) => {
       if (get().standingInView !== standingInView) set({ standingInView })
     },

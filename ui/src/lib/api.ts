@@ -232,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  /** How the server labels this user's messages; empty until they have a name. */
+  display_name?: string
   email: string | null
   avatar_url: string | null
   user_id?: string | null
@@ -311,7 +313,6 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -334,7 +335,6 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
   workspace_default_repos?: Record<string, string>
@@ -476,8 +476,12 @@ export interface ManagedToolsMissingCredential {
 }
 
 export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
   name: string
   tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
 }
 
 export interface ManagedToolsGatewayStatus {
@@ -845,10 +849,10 @@ export interface SlackChannelOption {
   num_members: number | null
 }
 
-/** The channel directory; partial when Slack rate limited the walk over public channels. */
+/** The stored channel directory; refreshing while a walk over Slack is due or running. */
 export interface SlackChannelDirectory {
   channels: Array<SlackChannelOption>
-  partial: boolean
+  refreshing: boolean
 }
 
 export interface WorkspaceOptionList {
@@ -1671,10 +1675,11 @@ export const api = {
       `/slack/users/${encodeURIComponent(userId)}/name`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: (refresh = false) =>
-    request<SlackChannelDirectory>(
-      `/slack/channels${refresh ? "?refresh=true" : ""}`
-    ),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  refreshSlackChannels: () =>
+    request<SlackChannelDirectory>("/slack/channels/refresh", {
+      method: "POST",
+    }),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   listAllowedSlackBotDirectory: () =>
     request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
@@ -1780,6 +1785,11 @@ export const api = {
           : ""
       }`,
       { method: "POST" }
+    ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),

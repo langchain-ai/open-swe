@@ -182,7 +182,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
         "openswe.server.PrepareAgentRunMiddleware._prepare",
         AsyncMock(return_value={"work_dir": "/workspace", "rendered_system_prompt": "System"}),
     ):
-        await in_graph_context(config, lambda runtime: session.model_call(state, runtime))
+        await in_graph_context(config, lambda runtime: session.loop.model_call(state, runtime))
     if requested_action:
         # The PR the run opened, as its tool result is recorded and cited.
         cited = await session.record_evidence(

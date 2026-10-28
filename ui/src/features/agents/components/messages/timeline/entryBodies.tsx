@@ -2,6 +2,7 @@ import { memo } from "react"
 
 import { ToolResultBody } from "./ToolResultBody"
 import type { ReactNode } from "react"
+import { formatShellCommand } from "@/features/agents/components/chat/toolExecutionDisplay"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 interface EntryBodyProps {
@@ -50,7 +51,7 @@ export const ShellEntryBody = memo(function ShellEntryBody(
 ) {
   const command =
     typeof props.chunk.input?.command === "string"
-      ? props.chunk.input.command
+      ? formatShellCommand(props.chunk.input.command)
       : ""
 
   return (

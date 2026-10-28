@@ -15,6 +15,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.slack import solo_threads
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
+from openswe.users.models import User, UserIdentity
 from tests.slack.test_slack_solo_threads import _Harness
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
@@ -133,6 +134,16 @@ class _FakeClient:
 def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient({}))
     monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_breakout_tool.User,
+        "for_login",
+        AsyncMock(
+            return_value=User(
+                display_name="Alice",
+                identities=[UserIdentity(provider="slack", external_id="U1")],
+            )
+        ),
+    )
     monkeypatch.setattr(
         slack_breakout_tool,
         "cached_workspace_settings",
@@ -344,9 +355,9 @@ async def test_slack_breakout_thread_success(
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
     source_line = AsyncMock(return_value="<https://p/src|(source)>")
-    react = AsyncMock()
+    notification = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "source_thread_line", source_line)
-    monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", react)
+    monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", notification)
 
     result = await slack_breakout_tool.slack_breakout_thread(
         "Investigate follow-up",
@@ -399,7 +410,7 @@ async def test_slack_breakout_thread_success(
         },
     ]
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
-    react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)
+    notification.assert_awaited_once_with("C1", "1700000000.000001", target, new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": target,
@@ -478,8 +489,10 @@ async def test_slack_breakout_thread_success(
         ("unknown", "user", "alice", False, False),
     ],
 )
+@pytest.mark.parametrize("linked_slack_id", ["U2", ""])
 async def test_breakout_preserves_requester_and_credential_scope(
     monkeypatch: pytest.MonkeyPatch,
+    linked_slack_id: str,
     visibility: str,
     owner_type: str,
     actor: str,
@@ -493,11 +506,17 @@ async def test_breakout_preserves_requester_and_credential_scope(
         background_task_completion=background,
     )
     saved_slack = dict(config["configurable"]["slack_thread"])
-    config["configurable"]["slack_thread"].update(
-        triggering_user_id="U2",
-        triggering_user_name=actor,
-        triggering_user_email=f"{actor}@example.com",
-        triggering_event_ts="1700000000.999999",
+    monkeypatch.setattr(
+        slack_breakout_tool.User,
+        "for_login",
+        AsyncMock(
+            return_value=User(
+                display_name=actor,
+                identities=[UserIdentity(provider="slack", external_id=linked_slack_id)],
+            )
+            if linked_slack_id
+            else None
+        ),
     )
     metadata = {
         "visibility": visibility,
@@ -533,9 +552,20 @@ async def test_breakout_preserves_requester_and_credential_scope(
     child_config = dispatch.call_args.args[2]
     child_config["thread_id"] = result["thread_id"]
     assert child_metadata["visibility"] == visibility
-    assert child_metadata["source_context"]["slack_thread"]["triggering_user_id"] == "U2"
-    assert child_metadata["source_context"]["slack_thread"]["triggering_user_name"] == actor
-    assert child_metadata["source_context"]["breakout_from"]["message_ts"] == "1700000000.999999"
+    direct = bool(actor and not background)
+    expected_requester = linked_slack_id if direct else "U1"
+    expected_name = actor if direct else "Alice"
+    assert (
+        child_metadata["source_context"]["slack_thread"]["triggering_user_id"] == expected_requester
+    )
+    assert child_metadata["source_context"]["slack_thread"]["triggering_user_name"] == expected_name
+    assert child_config["slack_thread"]["triggering_user_id"] == expected_requester
+    root_text = post.call_args_list[0].args[1]
+    assert ("<@U1>" in root_text) is (not direct)
+    assert ("<@U2>" in root_text) is bool(direct and linked_slack_id)
+    assert child_metadata["source_context"]["breakout_from"]["message_ts"] == (
+        "" if direct else "1700000000.000002"
+    )
     get_thread.return_value = {"metadata": child_metadata}
     monkeypatch.setattr("langgraph_sdk.get_client", lambda: client)
     monkeypatch.setattr("openswe.run_config.get_config", lambda: {"configurable": child_config})

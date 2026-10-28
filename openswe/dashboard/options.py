@@ -1,9 +1,6 @@
 """Supported models and reasoning efforts surfaced in the profile editor."""
 
-from collections.abc import Callable, Mapping, Sequence
-from functools import cache, lru_cache
-from importlib import import_module
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict
 
 from openswe.config import ENV
 
@@ -14,8 +11,8 @@ class ModelOption(TypedDict):
     efforts: list[str]
     default_effort: str
     supports_images: bool
+    context_window: int
     can_be_default: NotRequired[bool]
-    context_window: NotRequired[int | None]
 
 
 SUPPORTED_MODELS: list[ModelOption] = [
@@ -25,6 +22,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "context_window": 1_000_000,
     },
     {
         "id": "anthropic:claude-sonnet-5-5",
@@ -32,6 +30,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "context_window": 1_000_000,
     },
     {
         "id": "anthropic:claude-haiku-5-5",
@@ -39,6 +38,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "medium",
         "supports_images": True,
+        "context_window": 1_000_000,
     },
     {
         "id": "anthropic:claude-fable-5-1",
@@ -46,6 +46,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "context_window": 1_000_000,
         "can_be_default": False,
     },
     {
@@ -54,6 +55,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "low",
         "supports_images": True,
+        # Codex serves OpenAI models with a smaller window than the public API.
+        "context_window": 272_000,
     },
     {
         "id": "openai:gpt-6.1-sol",
@@ -61,6 +64,15 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "context_window": 272_000,
+    },
+    {
+        "id": "openai:gpt-6.1-terra",
+        "label": "GPT-6.1 Terra",
+        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+        "default_effort": "medium",
+        "supports_images": True,
+        "context_window": 272_000,
     },
     {
         "id": "openai:gpt-6-luna",
@@ -68,6 +80,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "context_window": 272_000,
     },
     {
         "id": "google_genai:gemini-4-argon",
@@ -75,6 +88,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
+        "context_window": 1_048_576,
     },
     {
         "id": "google_genai:gemini-3.8-flash",
@@ -82,6 +96,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
+        "context_window": 1_048_576,
     },
     {
         "id": "fireworks:accounts/fireworks/models/kimi-k3",
@@ -90,6 +105,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "context_window": 1_048_576,
     },
 ]
 
@@ -136,93 +152,6 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
 
 DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = dict.fromkeys(DEPRECATED_MODEL_IDS, "")
 
-ProfileLoader = Callable[[str], Mapping[str, object]]
-
-# LangChain partner packages expose ``_get_default_model_profile`` — the same
-# accessor that populates ``ChatModel.profile`` from bundled models.dev data.
-_PROFILE_LOADER_MODULES: dict[str, str] = {
-    "anthropic": "langchain_anthropic.chat_models",
-    "fireworks": "langchain_fireworks.chat_models",
-    "google_genai": "langchain_google_genai.chat_models",
-    "openai": "langchain_openai.chat_models.base",
-}
-CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
-    "openai:gpt-6-astra": 272_000,
-    "openai:gpt-6.1-sol": 272_000,
-    "openai:gpt-6-luna": 272_000,
-}
-_PROFILE_ALIASES = {"gpt-6.1-sol": "gpt-6-sol", "gpt-6-luna": "gpt-5.6-luna"}
-_PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
-    "anthropic:claude-sonnet-5-5": 1_000_000,
-    "anthropic:claude-haiku-5-5": 1_000_000,
-    "google_genai:gemini-4-argon": 1_048_576,
-    "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
-}
-
-
-@cache
-def _profile_loader(provider: str) -> ProfileLoader | None:
-    module_path = _PROFILE_LOADER_MODULES.get(provider)
-    if module_path is None:
-        return None
-    try:
-        module = import_module(module_path)
-    except ImportError:
-        return None
-    loader = getattr(module, "_get_default_model_profile", None)
-    if not callable(loader):
-        return None
-    return cast(ProfileLoader, loader)
-
-
-def model_profile_with_context_override(model_id: str) -> dict[str, object] | None:
-    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
-    if context_window is None:
-        return None
-    provider, _, model_name = model_id.partition(":")
-    loader = _profile_loader(provider)
-    profile = dict(loader(model_name)) if loader is not None else {}
-    if not profile and model_name in _PROFILE_ALIASES and loader is not None:
-        profile = dict(loader(_PROFILE_ALIASES[model_name]))
-    profile["max_input_tokens"] = context_window
-    return profile
-
-
-@lru_cache(maxsize=512)
-def model_profile_context_window(model_id: str) -> int | None:
-    context_window = CODEX_CONTEXT_WINDOW_OVERRIDES.get(model_id)
-    if context_window is not None:
-        return context_window
-    provider, _, model_name = model_id.partition(":")
-    if not provider or not model_name:
-        return None
-    loader = _profile_loader(provider)
-    if loader is not None:
-        profile = loader(model_name)
-        context_window = profile.get("max_input_tokens")
-        if isinstance(context_window, int) and context_window > 0:
-            return context_window
-    return _PROFILE_CONTEXT_WINDOW_FALLBACKS.get(model_id)
-
-
-def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[ModelOption]:
-    enriched: list[ModelOption] = []
-    for model in models:
-        option: ModelOption = {
-            "id": model["id"],
-            "label": model["label"],
-            "efforts": model["efforts"],
-            "default_effort": model["default_effort"],
-            "supports_images": model["supports_images"],
-        }
-        if "can_be_default" in model:
-            option["can_be_default"] = model["can_be_default"]
-        context_window = model_profile_context_window(model["id"])
-        if context_window is not None:
-            option["context_window"] = context_window
-        enriched.append(option)
-    return enriched
-
 
 def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
     """Newest supported non-Fable Anthropic model (keeps the Claude family),
@@ -266,6 +195,13 @@ def model_supports_images(model_id: str) -> bool:
         if m["id"] == model_id:
             return m["supports_images"]
     return False
+
+
+def model_context_window(model_id: str) -> int | None:
+    for m in SUPPORTED_MODELS:
+        if m["id"] == model_id:
+            return m["context_window"]
+    return None
 
 
 def _provider_of(model_id: str) -> str | None:

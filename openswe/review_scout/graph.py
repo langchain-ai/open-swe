@@ -10,9 +10,10 @@ none it finishes without a model call.
 import logging
 import re
 from collections.abc import Mapping
+from functools import partial
 from typing import Any, NotRequired, cast
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
@@ -21,8 +22,10 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -104,7 +107,7 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 
@@ -147,7 +150,6 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
             head_sha=cfg.head_sha,
         )
         try:
@@ -213,38 +215,43 @@ class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         self._config = config
 
     async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        cfg = RunConfig.from_config(self._config)
-        if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
-            return
-        extra = {
-            "pr_repo_full_name": cfg.repo.full_name,
-            "pr_number": cfg.pr_number,
-            "scout_head_sha": cfg.head_sha,
-        }
-        try:
-            workspace = await _workspace(get_cached_sandbox_backend(self._thread_id), cfg)
-            settled = await workspace.settle()
-        except PlanMovedError:
-            logger.info(
-                "Review scout head is stale; leaving the plan to the newer head", extra=extra
-            )
-            return
-        except CheckoutError, PlannerUnavailableError:
-            logger.exception("Review scout could not finish its plan", extra=extra)
-            return
-        if summary := state.get("human_input_summary", ""):
-            await Walkthrough.set_human_input(workspace.pull_request.id, summary)
-        await Topic.PULL_REQUESTS.invalidate(
-            key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
-        )
-        logger.info(
-            "Review scout finished its plan",
-            extra={
-                **extra,
-                "scout_chunks": len(workspace.plan.chunks),
-                "scout_settled_lines": settled,
-            },
-        )
+        await finish_scout_plan(self._thread_id, self._config, state.get("human_input_summary", ""))
+
+
+async def finish_scout_plan(
+    thread_id: str, config: RunnableConfig, human_input_summary: str
+) -> None:
+    """Send whatever the scout left unplanned to Other, and keep what people asked for."""
+    cfg = RunConfig.from_config(config)
+    if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
+        return
+    extra = {
+        "pr_repo_full_name": cfg.repo.full_name,
+        "pr_number": cfg.pr_number,
+        "scout_head_sha": cfg.head_sha,
+    }
+    try:
+        workspace = await _workspace(get_cached_sandbox_backend(thread_id), cfg)
+        settled = await workspace.settle()
+    except PlanMovedError:
+        logger.info("Review scout head is stale; leaving the plan to the newer head", extra=extra)
+        return
+    except CheckoutError, PlannerUnavailableError:
+        logger.exception("Review scout could not finish its plan", extra=extra)
+        return
+    if human_input_summary:
+        await Walkthrough.set_human_input(workspace.pull_request.id, human_input_summary)
+    await Topic.PULL_REQUESTS.invalidate(
+        key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+    )
+    logger.info(
+        "Review scout finished its plan",
+        extra={
+            **extra,
+            "scout_chunks": len(workspace.plan.chunks),
+            "scout_settled_lines": settled,
+        },
+    )
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -276,6 +283,26 @@ async def scout_models(cfg: RunConfig) -> SurfaceModels:
     )
 
 
+def scout_tools() -> list[BaseTool]:
+    """The scout's tools, wherever the graph that calls them runs."""
+    return apply_tool_descriptions(
+        [
+            walkthrough_plan_chunk,
+            walkthrough_split_hunks,
+            walkthrough_move_to_other,
+            walkthrough_describe_other,
+            record_human_input,
+        ]
+    )
+
+
+def scout_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The scout thread's box, connected again whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_ensure_scout_sandbox, thread_id, cfg)
+    )
+
+
 async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
     """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     config = config.copy()
@@ -287,11 +314,6 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
         raise ValueError("A scout run needs a thread")
 
     models = await scout_models(cfg)
-
-    async def reconnect_backend(
-        _thread_id: str = thread_id, _cfg: RunConfig = cfg
-    ) -> SandboxBackendProtocol:
-        return await _ensure_scout_sandbox(_thread_id, _cfg)
 
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
@@ -306,17 +328,17 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )
-    surface.base_tools = apply_tool_descriptions(
-        [
-            walkthrough_plan_chunk,
-            walkthrough_split_hunks,
-            walkthrough_move_to_other,
-            walkthrough_describe_other,
-            record_human_input,
-        ]
-    )
+    surface.base_tools = scout_tools()
     surface.middleware = middleware
-    surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    surface.loop = LoopRules(
+        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
+        # Without messages from the people who asked for the PR, the model would
+        # summarize its description instead.
+        hidden_unless={"has_human_input": [_HUMAN_INPUT_TOOL]},
+        stop_when=["scout_nothing_to_plan"],
+        at_end=["finish_scout_plan"],
+    )
+    surface.files = scout_box(thread_id, cfg)
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

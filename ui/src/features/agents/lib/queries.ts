@@ -1,4 +1,8 @@
-import { threadFamily, sidebarRefreshInterval } from "./sidebarThreads"
+import {
+  mergeTaskFamily,
+  sidebarRefreshInterval,
+  threadFamily,
+} from "./sidebarThreads"
 import {
   queryOptions,
   useInfiniteQuery,
@@ -14,6 +18,7 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  ThreadBrowser,
   ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
@@ -30,12 +35,12 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
-import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
 
@@ -57,6 +62,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  backgroundOutput: (threadId: string, taskId: string) =>
+    ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -699,6 +706,45 @@ export function useSidebarRepos({
   })
 }
 
+function useCachedAgentThread(threadId?: string): AgentThread | undefined {
+  const queryClient = useQueryClient()
+  return useQuery({
+    ...agentThreadDetailOptions(threadId ?? "", queryClient),
+    enabled: false,
+  }).data
+}
+
+function useFetchedSidebarThread(
+  threadId: string | undefined,
+  enabled: boolean
+): AgentThread | undefined {
+  return useQuery({
+    queryKey: agentThreadKeys.sidebarActive(threadId ?? ""),
+    queryFn: () => agentsApi.getThread(threadId!, { markViewed: false }),
+    enabled: enabled && Boolean(threadId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: (current) =>
+      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
+    retry: false,
+  }).data
+}
+
+/** The open thread itself, for commands that act on it. */
+export function useActiveAgentThread(
+  threadId: string | undefined,
+  { enabled = true } = {}
+): AgentThread | undefined {
+  const detail = useCachedAgentThread(threadId)
+  const fetched = useFetchedSidebarThread(threadId, enabled && !detail)
+  return detail ?? fetched
+}
+
+/**
+ * The open thread's sidebar row. An open worker's row is its coordinator's:
+ * listed on its own it would show unnested, as it does whenever the sidebar
+ * page has not picked up a just-started worker yet.
+ */
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
@@ -708,30 +754,31 @@ export function useSidebarActiveThread({
   loadedThreads: Array<AgentThread>
   enabled?: boolean
 }): AgentThread | undefined {
-  const queryClient = useQueryClient()
-  const detail = useQuery({
-    ...agentThreadDetailOptions(activeThreadId ?? "", queryClient),
-    enabled: false,
-  }).data
-  const loaded = loadedThreads.find((thread) =>
-    threadFamily(thread).some((member) => member.id === activeThreadId)
+  const active = useCachedAgentThread(activeThreadId)
+  const rootId =
+    (active?.taskMembership?.role === "worker"
+      ? active.taskMembership.coordinatorThreadId
+      : null) ?? activeThreadId
+  const rootDetail = useCachedAgentThread(rootId)
+  const listed = loadedThreads.find(
+    (thread) =>
+      thread.id === rootId ||
+      threadFamily(thread).some((member) => member.id === activeThreadId)
   )
-  const query = useQuery({
-    queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
-    queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
-    enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-    refetchInterval: (current) =>
-      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
-    retry: false,
-  })
-  // An open worker is already listed under its coordinator; listing it again on its own duplicates it.
-  if (loaded && loaded.id !== activeThreadId) return loaded
-  if (detail && loaded?.taskWorkers) {
-    return { ...detail, taskWorkers: loaded.taskWorkers }
-  }
-  return detail ?? loaded ?? query.data
+  const fetched = useFetchedSidebarThread(
+    rootId,
+    enabled && !listed && !rootDetail
+  )
+  const row = listed ?? rootDetail ?? fetched ?? active
+  return (
+    row &&
+    mergeTaskFamily(
+      row,
+      [rootDetail, fetched, active].flatMap((thread) =>
+        thread ? [thread] : []
+      )
+    )
+  )
 }
 
 function useSidebarThreadPages(
@@ -918,25 +965,50 @@ export function useAgentThreadQueuedMessages(threadId: string) {
   })
 }
 
-// Each read mints a new act link and reloads the framed page, so a link is kept
-// until shortly before it expires rather than refetched on every focus.
+// Each read mints a new act link, and a new link reloads the framed page. The
+// thread's runs invalidate the browser as they start and first browse, so a
+// read keeps the link it has for the same window until shortly before it
+// expires, and that is also when a stale link is refetched.
 const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
+function linkExpiresIn(browser: ThreadBrowser) {
+  return Date.parse(browser.expires_at) - Date.now()
+}
+
+function keepActLink(
+  current: ThreadBrowser | undefined,
+  fetched: ThreadBrowser
+): ThreadBrowser {
+  if (
+    !current ||
+    new URL(current.act_url).origin !== new URL(fetched.act_url).origin ||
+    linkExpiresIn(current) <= BROWSER_LINK_REFRESH_MARGIN_MS
+  )
+    return fetched
+  return {
+    ...fetched,
+    act_url: current.act_url,
+    expires_at: current.expires_at,
+  }
+}
 
 export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.browser(threadId),
-    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    queryFn: async ({ client, queryKey }) =>
+      keepActLink(
+        client.getQueryData<ThreadBrowser>(queryKey),
+        await agentsApi.getThreadBrowser(threadId)
+      ),
     enabled: enabled && Boolean(threadId),
     retry: false,
-    staleTime: (query) => {
-      const expiresAt = query.state.data?.expires_at
-      return expiresAt
+    staleTime: (query) =>
+      query.state.data
         ? Math.max(
-            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            linkExpiresIn(query.state.data) - BROWSER_LINK_REFRESH_MARGIN_MS,
             0
           )
-        : 0
-    },
+        : 0,
     meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
   })
 }
@@ -961,6 +1033,21 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
+  })
+}
+
+/** Output is not pushed, so it is polled while someone reads it. */
+export function useAgentThreadBackgroundOutput(
+  threadId: string,
+  taskId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundOutput(threadId, taskId),
+    queryFn: () => agentsApi.getThreadBackgroundOutput(threadId, taskId),
+    enabled,
+    refetchInterval: 5_000,
+    retry: false,
   })
 }
 
@@ -1009,21 +1096,30 @@ export function useAgentThreadWorkingTreeDiff(
 
 export function useWorkflowApprovals(
   threadId: string,
-  options: { pollWhileActive?: boolean } = {}
+  { pollWhileActive = false }: { pollWhileActive?: boolean } = {}
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
-    refetchInterval: (query) =>
-      options.pollWhileActive ||
-      query.state.data?.approvals.some(
+    refetchInterval: (current) =>
+      pollWhileActive ||
+      current.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
         ? 3000
         : false,
     retry: false,
   })
+  const previous = useRef({ threadId, pollWhileActive })
+  const refetch = query.refetch
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { threadId, pollWhileActive }
+    if (was.threadId === threadId && was.pollWhileActive && !pollWhileActive)
+      void refetch()
+  }, [threadId, pollWhileActive, refetch])
+  return query
 }
 
 export function useWorkflowApprovalDecision(threadId: string) {
@@ -1230,6 +1326,8 @@ export function optimisticThread(
 export interface SendAgentMessageVariables {
   content: string
   images?: Array<ImageChunk>
+  /** Passages the person replied to, each with its context and their comment. */
+  replies?: Array<PassageReply>
   model_id?: string | null
   effort?: string | null
   model_selection_changed?: boolean
@@ -1292,9 +1390,8 @@ export function useDeleteAgentThread() {
             })
           )
       const path = window.location.pathname
-      const chat = chatRoutes(path)
-      if (path === `${chat.home}/${threadId}`) {
-        navigate({ to: chat.home })
+      if (path === `/agents/${threadId}`) {
+        navigate({ to: "/agents" })
       }
     },
   })

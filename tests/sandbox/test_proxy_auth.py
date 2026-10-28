@@ -1,21 +1,28 @@
 """Tests for GitHub proxy auth configuration."""
 
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import pytest
+from pydantic import JsonValue
 
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
     configure_sandbox_proxy,
 )
+from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
-    """Wire an ``httpx2.AsyncClient`` mock class to yield ``inner`` from its
-    async context manager."""
+    """Yield a client whose sandbox has no federation rules."""
+    inner.get = AsyncMock(
+        return_value=httpx2.Response(
+            200, json={"proxy_config": {}}, request=httpx2.Request("GET", "https://sandbox.test")
+        )
+    )
     mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=inner)
     mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -41,11 +48,48 @@ class TestConfigureSandboxProxy:
             rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
             assert not {"github", "github-api"} & {rule["name"] for rule in rules}
 
-    async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
+    @pytest.mark.parametrize("existing_identity", ["absent", "different", "base-absent"])
+    async def test_preserves_custom_proxy_config_when_adding_github_auth(
+        self, existing_identity: str
+    ) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
+        cloud_rules: list[dict[str, JsonValue]] = [
+            {
+                "name": "aws",
+                "type": "aws",
+                "enabled": True,
+                "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly"},
+            },
+            {
+                "name": "gcp",
+                "type": "gcp",
+                "gcp": {
+                    "workload_identity_provider": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider"
+                },
+            },
+            {
+                "name": "azure",
+                "type": "azure",
+                "azure": {
+                    "tenant_id": "00000000-0000-0000-0000-000000000001",
+                    "client_id": "00000000-0000-0000-0000-000000000002",
+                },
+            },
+        ]
+        existing_rules = deepcopy(cloud_rules) if existing_identity != "absent" else []
+        for rule in existing_rules:
+            rule["name"] = f"existing-{rule['name']}"
+            settings = rule[str(rule["type"])]
+            assert isinstance(settings, dict)
+            settings["subject_scope"] = "tag:00000000-0000-0000-0000-000000000003"
+        static_cloud_rule = {"name": "static-aws", "type": "aws", "aws": {"region": "us-east-1"}}
+        tools_rule = {"name": "open-swe-thread-tools", "headers": [{"value": "fresh-tools"}]}
         with (
             patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+            patch(
+                "openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=tools_rule)
+            ),
         ):
             mock_client = MagicMock()
             mock_response = MagicMock()
@@ -53,15 +97,37 @@ class TestConfigureSandboxProxy:
             mock_client.patch = AsyncMock(return_value=mock_response)
             _mock_async_client(mock_client_cls, mock_client)
 
+            mock_client.get.return_value = httpx2.Response(
+                200,
+                json={"proxy_config": {"rules": existing_rules}},
+                request=httpx2.Request("GET", "https://sandbox.test"),
+            )
+            base_rules = [] if existing_identity == "base-absent" else cloud_rules
             await configure_sandbox_proxy(
                 "sandbox-abc123",
                 "token",
-                base_proxy_config={"rules": [custom_rule], "enabled": True},
+                thread_id="thread-123",
+                base_proxy_config={
+                    "rules": [
+                        custom_rule,
+                        static_cloud_rule,
+                        *base_rules,
+                        {"name": "github", "headers": [{"value": "stale"}]},
+                        {"name": "open-swe-thread-tools", "headers": [{"value": "stale"}]},
+                    ],
+                    "enabled": True,
+                },
             )
 
         proxy_config = mock_client.patch.call_args.kwargs["json"]["proxy_config"]
         assert proxy_config["enabled"] is True
-        assert custom_rule in proxy_config["rules"]
+        assert proxy_config["rules"][2:] == [
+            tools_rule,
+            custom_rule,
+            *([static_cloud_rule] if existing_identity == "absent" else []),
+            *existing_rules,
+        ]
+        assert proxy_config["rules"][0]["headers"][0]["value"] == "Bearer token"
         assert [rule["name"] for rule in proxy_config["rules"][:2]] == ["github-api", "github"]
 
     async def test_retries_transient_http_error(self) -> None:
@@ -87,11 +153,13 @@ class TestConfigureSandboxProxy:
             successful_response.raise_for_status = MagicMock()
             mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
             _mock_async_client(mock_client_cls, mock_client)
+            mock_client.get.side_effect = [response, mock_client.get.return_value]
 
             await configure_sandbox_proxy("sandbox-abc", "token")
 
+            assert mock_client.get.call_count == 2
             assert mock_client.patch.call_count == 2
-            mock_sleep.assert_awaited_once_with(7.0)
+            assert mock_sleep.await_args_list == [((7.0,),), ((7.0,),)]
 
     @pytest.mark.parametrize("suspend_seconds", [170.0, PROXY_CONFIG_RETRY_WINDOW_SECONDS + 30])
     async def test_outlasts_a_host_suspend_within_the_retry_window(
@@ -190,10 +258,6 @@ class TestRefreshProxyOnSandboxReuse:
                     response=response,
                 ),
             ),
-            patch(
-                "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-            ) as mock_create,
-            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from openswe.sandboxes.lifecycle import (
                 SandboxUnreachableError,
@@ -204,4 +268,41 @@ class TestRefreshProxyOnSandboxReuse:
                 await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
-            mock_create.assert_not_awaited()
+
+
+class TestRefreshThreadGithubProxy:
+    async def test_a_replica_that_never_connected_still_gives_the_box_a_fresh_token(self) -> None:
+        """Nothing is read from this process: the box and its rules come from the thread."""
+        proxy_config = {"rules": [{"name": "public-api"}]}
+        metadata = {"sandbox_id": "sandbox-abc", SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config}
+        with (
+            patch(
+                "openswe.sandboxes.lifecycle.get_sandbox_metadata",
+                new_callable=AsyncMock,
+                return_value=metadata,
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.workspace_token",
+                new_callable=AsyncMock,
+                return_value=SandboxGitHubAccess("ghs_fresh", "2026-10-27T20:00:00Z"),
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.thread_token_repositories",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock
+            ) as configure,
+        ):
+            from openswe.sandboxes.lifecycle import refresh_thread_github_proxy
+            from openswe.sandboxes.state import SANDBOX_BACKENDS
+
+            SANDBOX_BACKENDS.pop("thread-123", None)
+            expires_at = await refresh_thread_github_proxy("thread-123")
+
+        configure.assert_awaited_once_with(
+            "sandbox-abc", "ghs_fresh", base_proxy_config=proxy_config, thread_id="thread-123"
+        )
+        assert expires_at is not None
+        assert expires_at.isoformat() == "2026-10-27T20:00:00+00:00"

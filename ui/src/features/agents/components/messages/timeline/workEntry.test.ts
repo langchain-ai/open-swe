@@ -89,7 +89,7 @@ describe("describeWorkEntry", () => {
         title: "shell",
         toolKind: "execute",
         status: "error",
-        input: { command: "pnpm test" },
+        input: { command: "cd /workspace/open-swe && pnpm test" },
       }),
       repoPath
     )

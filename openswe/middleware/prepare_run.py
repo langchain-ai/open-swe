@@ -49,7 +49,17 @@ def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-class BasePrepareRunMiddleware(OpenSWEMiddleware):
+class RenderedSystemPromptMiddleware(OpenSWEMiddleware):
+    """Start each model call's system prompt with the one run preparation rendered."""
+
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        rendered = state.get("rendered_system_prompt")
+        return call.prepending(rendered) if isinstance(rendered, str) else call
+
+
+class BasePrepareRunMiddleware(RenderedSystemPromptMiddleware):
     """Checkpointed per-run setup.
 
     Subclasses must keep `_prepare` idempotent. LangGraph checkpoints the
@@ -124,9 +134,3 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:
         del state, runtime
-
-    async def ashape_model_call(
-        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
-    ) -> CallShape:
-        rendered = state.get("rendered_system_prompt")
-        return call.prepending(rendered) if isinstance(rendered, str) else call

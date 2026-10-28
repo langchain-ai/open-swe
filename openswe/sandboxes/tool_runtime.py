@@ -4,9 +4,6 @@ The model loop runs on Managed Deep Agents, which builds a tool for each of the
 planned tools and calls the backend to run it (``openswe.agent_api``).
 """
 
-import math
-import re
-from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -22,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck
+from runtime_api.catalog import FileCheck, InboxSpec, LoopRules
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -57,44 +54,6 @@ def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
         parameters=tool_parameters(tool),
         mcp_provenance=provenance,
     )
-
-
-_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
-
-
-def _tokens(text: str) -> list[str]:
-    return [word.casefold() for word in _WORD.findall(text)]
-
-
-def _tool_tokens(name: str, tool: BaseTool) -> list[str]:
-    properties = tool_parameters(tool).get("properties")
-    parameters = " ".join(properties) if isinstance(properties, dict) else ""
-    # A match on the name says more than one buried in a long description.
-    return [*_tokens(name) * 3, *_tokens(tool.description), *_tokens(parameters)]
-
-
-def bm25(
-    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
-) -> list[float]:
-    """Okapi BM25 score of each document for ``query``."""
-    if not documents:
-        return []
-    average = sum(map(len, documents)) / len(documents) or 1
-    counts = [Counter(document) for document in documents]
-    scores = [0.0] * len(documents)
-    for term in set(query):
-        having = sum(1 for count in counts if term in count)
-        if not having:
-            continue
-        idf = math.log(1 + (len(documents) - having + 0.5) / (having + 0.5))
-        for index, count in enumerate(counts):
-            frequency = count[term]
-            if frequency:
-                length = len(documents[index]) / average
-                scores[index] += (
-                    idf * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length))
-                )
-    return scores
 
 
 # The file and shell tools deepagents' FilesystemMiddleware gives every deep agent.
@@ -171,6 +130,10 @@ class ToolSurface:
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
+    # How the run reads what is sent to its thread while it runs, before each model call.
+    inbox: InboxSpec | None = None
+    # What the hooks around each model call are built from, without the rest of the plan.
+    loop: LoopRules | None = None
 
     async def prepare(self) -> None:
         planned = [
@@ -194,16 +157,6 @@ class ToolSurface:
 
     def catalog(self) -> list[ToolDescription]:
         return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
-
-    def search(self, query: str, limit: int) -> list[ToolDescription]:
-        """The tools whose name, description and parameters best match ``query``, by BM25."""
-        names = sorted(self.tools)
-        scores = bm25(_tokens(query), [_tool_tokens(name, self.tools[name]) for name in names])
-        ranked = sorted(
-            (item for item in zip(names, scores, strict=True) if item[1] > 0),
-            key=lambda item: -item[1],
-        )
-        return [describe_tool(name, self.tools[name]) for name, _ in ranked[:limit]]
 
 
 @dataclass(frozen=True)

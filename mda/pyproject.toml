@@ -2,21 +2,23 @@
 name = "open-swe-runtime"
 version = "0.0.0"
 description = "Open SWE's coding agent and pull request reviewer as one Managed Deep Agent; the Open SWE backend serves their tools."
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
-    "managed-deepagents",
-    "deepagents==0.7.30",
+    "managed-deepagents>=0.9.5",
+    "deepagents==0.7.32",
     "langchain[mcp]>=1.4.7",
     "langchain-anthropic>=1.7.6",
     # Fireworks models the dashboard offers, such as Kimi.
     "langchain-fireworks>=1.7.1,<2.0.0",
-    "langchain-openai>=1.7.2,<2.0.0",
-    "langchain-quickjs>=0.3.9,<0.4.0",
-    "langsmith>=0.14.12",
+    "langchain-openai>=1.7.3,<2.0.0",
+    "langchain-quickjs>=0.3.10,<0.4.0",
+    "langsmith>=0.14.13",
     "httpx2>=2.12.0",
     # The vendored SDK's browser installs its extension from this package, so this
     # matches managed_deepagents.browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
+    # The browser's tools; matches the pin `mda` injects into browser builds.
+    "stagehand-middleware==0.1.0",
     "mcp>=2.2.0",
     "pydantic>=2.11",
     "open-swe-runtime-api",
@@ -35,10 +37,6 @@ test = [
 managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
-
-[tool.mda]
-# bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.
-python-version = "3.13"
 
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.

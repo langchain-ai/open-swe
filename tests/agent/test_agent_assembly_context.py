@@ -11,10 +11,12 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 
+from openswe.agent_api.loop import ModelChoices
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import _registered_tool_name, plan_agent
+from openswe.threads.inbox import ThreadInbox
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -63,8 +65,10 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
+    from runtime_api.skills import RunSkills
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.agent import AGENT
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.skill_store.store import _record
 
     monkeypatch.setattr(
@@ -77,9 +81,11 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     )
     captured = await _plan_agent()
     surface = cast(ToolSurface, captured["surface"])
-    session = RunSession(surface, _base_config(), None, started_here=True)
+    configurable = dict(_base_config()["configurable"])
+    run = RemoteRun(thread_id="thread-ctx", assistant_id="agent", configurable=configurable)
 
-    listed = await session.skills(RunRequest())
+    # Listed from the run's token alone: no plan of the run is made for it.
+    listed = RunSkills.model_validate(await AGENT.api(run, "skills", RunRequest().model_dump()))
 
     personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
     assert "Do it." in personal.content
@@ -181,7 +187,6 @@ async def _plan_agent(
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
-    from openswe.middleware.model_selection import ModelSelectionMiddleware
 
     surface = ToolSurface()
     make_model_calls: list[tuple[str, dict[str, object]]] = []
@@ -240,7 +245,6 @@ async def _plan_agent(
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     middleware = list(surface.middleware)
-    selection = next(m for m in middleware if isinstance(m, ModelSelectionMiddleware))
     return {
         "surface": surface,
         "tools": list(surface.base_tools),
@@ -248,7 +252,6 @@ async def _plan_agent(
         "subagents": list(surface.subagents),
         "backend": surface.files,
         "skills": list(surface.skill_sources),
-        "model": selection._models["default"],
         "make_model_calls": make_model_calls,
     }
 
@@ -293,7 +296,6 @@ async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     route = await model_selection.select_route({"messages": []})
 
     assert route == "default"
-    assert model_selection._models[route] is agent["model"]
     assert agent["make_model_calls"][0][0] == "google_genai:gemini-3.8-flash"
 
 
@@ -660,13 +662,14 @@ async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
         },
     )
     session = RunSession(cast(ToolSurface, planned["surface"]), {}, None, started_here=True)
+    choices = ModelChoices(session.start_models())
 
-    routed = session.model_for({"model_route": route})
-    vision = session.vision_for(routed)
+    routed = choices.model_for({"model_route": route})
+    vision = choices.vision_for(routed)
 
     assert routed.model_id == model_id
     assert vision is not None and vision.model_id == "openai:gpt-6.1-sol"
-    assert session.vision_for(vision) is None
+    assert choices.vision_for(vision) is None
 
 
 @pytest.mark.asyncio
@@ -691,7 +694,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.server import PrepareAgentRunMiddleware
 
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "jev")
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     monkeypatch.setattr(
         "openswe.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
     )
@@ -717,7 +720,6 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         middleware = cast(list[object], agent["middleware"])
         selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
         assert await selection.select_route({"messages": []}) == "default"
-        assert selection._models["default"] is agent["model"]
         assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
         assert prepare._requested_models is None
@@ -765,10 +767,6 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 
     from openswe.agent_api.graph import RunSession
     from openswe.message_queue import QueuedMessage
-    from openswe.middleware.check_message_queue import (
-        LinearNotifyState,
-        check_message_queue_before_model,
-    )
 
     config = _base_config()
     planned = await _plan_agent(
@@ -778,21 +776,16 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
     await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
-    with (
-        patch("openswe.middleware.check_message_queue.get_config", return_value=config),
-        patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
-    ):
-        update = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-    assert update is not None
-    messages = convert_to_messages(update["messages"])
+    surface = cast(ToolSurface, planned["surface"])
+    assert surface.inbox is not None
+    with patch("openswe.threads.inbox.fetch_image_block", return_value=image):
+        taken = await ThreadInbox("thread-ctx").read("run-1", surface.inbox)
+    messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
-    session = RunSession(cast(ToolSurface, planned["surface"]), {}, None, started_here=True)
-    vision = session.vision_for(session.models.main)
-    assert vision is not None and vision.model_id != session.models.main.model_id
-    assert await QueuedMessage.for_thread("thread-ctx") == []
+    models = RunSession(surface, {}, None, started_here=True).start_models()
+    vision = ModelChoices(models).vision_for(models.model)
+    assert vision is not None and vision.model_id != models.model.model_id
 
 
 @pytest.mark.asyncio

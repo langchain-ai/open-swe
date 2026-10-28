@@ -97,6 +97,10 @@ class QueueAccess:
     repo: RepoClient
     operator: bool
 
+    def require_custom(self) -> None:
+        if self.queue.mode == "native":
+            raise HTTPException(409, "Use GitHub to change native queue membership and order")
+
     def require_operator(self) -> None:
         if not self.operator:
             raise HTTPException(403, "Queue operator access required")
@@ -121,6 +125,8 @@ async def queue_access(
     if queue is None:
         raise HTTPException(404, "Queue not found")
     await require_repo_access_for_user(user.github_login, running.config.repository)
+    if queue.mode == "native" and running.config.check_app_id is None:
+        raise HTTPException(409, "Native queue observation is read-only; use GitHub queue controls")
     async with GitHubClient.as_user(user.github_login) as github:
         repo = github.repo(*running.config.repository.split("/", 1))
         if (await repo.info()).get("id") != running.config.repository_id:
@@ -183,6 +189,7 @@ async def batch_status(batch_id: UUID, access: QueueAccess = ACCESS) -> BatchVie
 @router.post("/requests")
 @audit_endpoint
 async def request_merge(body: MergeIntent, access: QueueAccess = ACCESS) -> RequestView:
+    access.require_custom()
     await access.require_writer()
     pull = await access.repo.pull_request(body.number).queue_state()
     if (
@@ -212,6 +219,7 @@ async def request_merge(body: MergeIntent, access: QueueAccess = ACCESS) -> Requ
 @router.delete("/requests/{request_id}", status_code=204)
 @audit_endpoint
 async def withdraw_request(request_id: UUID, access: QueueAccess = ACCESS) -> None:
+    access.require_custom()
     await access.require_writer()
     try:
         await access.queue.withdraw(request_id, actor=access.user.id, operator=access.operator)
@@ -224,6 +232,7 @@ async def withdraw_request(request_id: UUID, access: QueueAccess = ACCESS) -> No
 async def set_priority(
     request_id: UUID, body: PriorityChange, access: QueueAccess = ACCESS
 ) -> None:
+    access.require_custom()
     access.require_operator()
     await access.require_writer()
     await access.queue.set_priority(request_id, body.priority, actor=access.user.id)

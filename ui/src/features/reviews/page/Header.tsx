@@ -27,8 +27,8 @@ import type { ReviewDetail } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
-import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { ReviewButton } from "@/features/reviews/components/ReviewButton"
+import { copyPageLink, copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
@@ -79,6 +79,7 @@ export function Header({
   const reviewOpen = useReviewPage((state) => state.reviewOpen)
   const reviewVerdict = useReviewPage((state) => state.reviewVerdict)
   const setReviewOpen = useReviewPage((state) => state.setReviewOpen)
+  const openReview = useReviewPage((state) => state.openReview)
   const toggleNavigator = useReviewPage((state) => state.toggleNavigator)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const jumpTo = useReviewPage((state) => state.jumpTo)
@@ -313,13 +314,14 @@ export function Header({
           </Button>
         )}
         {detail && isLive(detail) && (
-          <SubmitReviewPopover
+          <ReviewButton
             owner={pr.owner}
             repo={pr.repo}
             number={pr.number}
             open={reviewOpen}
             onOpenChange={setReviewOpen}
             defaultVerdict={reviewVerdict}
+            onOpenReview={openReview}
           />
         )}
         <DropdownMenu>
@@ -351,9 +353,7 @@ export function Header({
               <GithubLogoIcon aria-hidden size={16} weight="regular" />
               Open on GitHub
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => copyText(window.location.href, "Copied the link")}
-            >
+            <DropdownMenuItem onSelect={copyPageLink}>
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
             </DropdownMenuItem>

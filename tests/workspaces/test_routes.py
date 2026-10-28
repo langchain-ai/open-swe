@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from openswe.dashboard import deps, oauth, routes
 from openswe.slack.channels import SlackChannel
+from openswe.workspaces import refresh
 from openswe.workspaces import routes as workspace_routes
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -95,10 +96,8 @@ async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClie
         "admin",
     )
     with (
-        patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
-        patch.object(
-            workspace_routes, "start_refresh_run", AsyncMock(return_value="run-1")
-        ) as start,
+        patch.object(refresh, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
+        patch.object(refresh, "start_refresh_run", AsyncMock(return_value="run-1")) as start,
     ):
         response = await admin_client.put(
             "/dashboard/api/workspaces/oss", json={"repos": ["acme/oss", "acme/api"]}

@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use super::{
     decode_json_body, is_self_hosted_host_backend_url, require_str, send_json_request, ApiError,
-    Credential, REQUEST_TIMEOUT,
+    ApiKey, REQUEST_TIMEOUT,
 };
 
 /// Use `-` to resolve the current tenant/workspace owner.
@@ -45,7 +45,7 @@ pub(crate) enum RepoOwnership {
 pub struct ContextHubClient {
     base_url: String,
     platform_hub_prefix: &'static str,
-    credential: Credential,
+    api_key: ApiKey,
     tenant_id: Option<String>,
     http: HttpClient,
     /// Tags added alongside [`MANAGED_REPO_TAG`] when this client creates a
@@ -54,47 +54,15 @@ pub struct ContextHubClient {
 }
 
 impl ContextHubClient {
-    /// Create a new Context Hub client for `base_url` authenticated with a
-    /// static API key. Prefer [`Self::with_credential`] when the caller may
-    /// have signed in through the device authorization flow.
-    pub fn new(
-        base_url: &str,
-        api_key: impl Into<String>,
-        tenant_id: Option<String>,
-    ) -> Result<Self> {
-        Self::with_credential(base_url, Credential::ApiKey(api_key.into()), tenant_id)
-    }
-
-    /// Create a new Context Hub client for `base_url`.
-    pub(crate) fn with_credential(
-        base_url: &str,
-        credential: Credential,
-        tenant_id: Option<String>,
-    ) -> Result<Self> {
-        Self::with_credential_and_routing(base_url, credential, tenant_id, false)
-    }
-
-    /// Create a Context Hub client using the routing mode of `host_backend_url`.
-    pub(crate) fn with_credential_and_host(
+    /// Create a Context Hub client for `base_url`, using the routing mode of
+    /// `host_backend_url` and sending `api_key` (and optional `tenant_id`).
+    pub(crate) fn new(
         base_url: &str,
         host_backend_url: &str,
-        credential: Credential,
+        api_key: ApiKey,
         tenant_id: Option<String>,
     ) -> Result<Self> {
-        Self::with_credential_and_routing(
-            base_url,
-            credential,
-            tenant_id,
-            is_self_hosted_host_backend_url(host_backend_url),
-        )
-    }
-
-    fn with_credential_and_routing(
-        base_url: &str,
-        credential: Credential,
-        tenant_id: Option<String>,
-        self_hosted: bool,
-    ) -> Result<Self> {
+        let self_hosted = is_self_hosted_host_backend_url(host_backend_url);
         if base_url.is_empty() {
             bail!("Context Hub base URL is required");
         }
@@ -113,11 +81,17 @@ impl ContextHubClient {
             } else {
                 "/v1/platform/hub"
             },
-            credential,
+            api_key,
             tenant_id,
             http,
             extra_repo_tags: Vec::new(),
         })
+    }
+
+    /// Unscoped client for a stub Context Hub at `base_url`.
+    #[cfg(test)]
+    pub(crate) fn for_test(base_url: &str) -> Self {
+        Self::new(base_url, base_url, ApiKey::new("key"), None).expect("test client builds")
     }
 
     /// Tag repos this client creates with `tags` in addition to the ownership
@@ -356,12 +330,11 @@ impl ContextHubClient {
         payload: Option<Value>,
     ) -> Result<(StatusCode, String)> {
         let url = format!("{}{}", self.base_url, path);
-        let api_key = self.credential.api_key(&self.http)?;
         send_json_request(
             &self.http,
             method.clone(),
             &url,
-            &api_key,
+            self.api_key.as_str(),
             self.tenant_id.as_deref(),
             params,
             payload.as_ref(),
@@ -435,7 +408,7 @@ mod tests {
 
     #[test]
     fn repo_tags_always_lead_with_the_ownership_tag() {
-        let client = ContextHubClient::new("http://localhost:1980", "key", None).unwrap();
+        let client = ContextHubClient::for_test("http://localhost:1980");
         assert_eq!(client.repo_tags(), vec!["managed-deepagents"]);
 
         let client = client.with_extra_repo_tags([
@@ -537,10 +510,10 @@ mod tests {
     }
 
     fn client(base_url: &str) -> ContextHubClient {
-        ContextHubClient::with_credential_and_host(
+        ContextHubClient::new(
             base_url,
             &format!("{base_url}/api-host"),
-            Credential::ApiKey("key".into()),
+            ApiKey::new("key"),
             Some("tenant".into()),
         )
         .unwrap()
@@ -556,10 +529,10 @@ mod tests {
 
     #[test]
     fn self_hosted_context_hub_uses_platform_api_prefix() {
-        let client = ContextHubClient::with_credential_and_host(
+        let client = ContextHubClient::new(
             "https://langsmith.example.com",
             "https://langsmith.example.com/api-host",
-            Credential::ApiKey("key".into()),
+            ApiKey::new("key"),
             None,
         )
         .unwrap();
@@ -569,15 +542,14 @@ mod tests {
 
     #[test]
     fn cloud_context_hub_preserves_cloud_api_prefix() {
-        let client =
-            ContextHubClient::new("https://eu.api.smith.langchain.com", "key", None).unwrap();
+        let client = ContextHubClient::for_test("https://eu.api.smith.langchain.com");
 
         assert_eq!(client.platform_hub_prefix, "/v1/platform/hub");
     }
 
     #[test]
     fn local_dev_context_hub_preserves_local_api_prefix() {
-        let client = ContextHubClient::new("http://localhost:1980", "key", None).unwrap();
+        let client = ContextHubClient::for_test("http://localhost:1980");
 
         assert_eq!(client.platform_hub_prefix, "/v1/platform/hub");
     }

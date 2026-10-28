@@ -49,6 +49,15 @@ def is_loopback_url(value: str) -> bool:
     return is_loopback_host(parsed.hostname or "")
 
 
+def sends_key_securely(url: str) -> bool:
+    """Whether a credential sent to ``url`` would travel encrypted.
+
+    That is https, or plain http only to this machine.
+    """
+    scheme = urllib.parse.urlsplit(url).scheme
+    return scheme == "https" or (scheme == "http" and is_loopback_url(url))
+
+
 def is_loopback_host(host: str) -> bool:
     """Whether a ``Host``-style value (optional port, optional brackets) is loopback."""
     hostname = host.strip().lower()
@@ -67,4 +76,5 @@ __all__ = [
     "is_loopback_url",
     "resolve_loopback_api_key",
     "resolve_loopback_api_url",
+    "sends_key_securely",
 ]

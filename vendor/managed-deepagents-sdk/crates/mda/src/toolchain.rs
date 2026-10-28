@@ -8,83 +8,15 @@
 //! spawn sites stay OS-agnostic.
 
 use std::ffi::OsStr;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::thread;
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 
 /// `Command` that runs the host `npm` (or `npm.cmd` on Windows).
 pub(crate) fn npm() -> Command {
     Command::new(npm_program())
-}
-
-/// Run `command` and collect stdout/stderr, killing it if `timeout` elapses.
-///
-/// Used for registry-bound npm calls (lockfile materialization, install
-/// verification) so a hung registry cannot stall CI indefinitely.
-///
-/// The subprocess is started in its own process group (see [`crate::child`]) so
-/// a timeout kills the whole tree — including npm descendants that may still
-/// hold the stdout/stderr pipes. Killing only the leader would leave those
-/// pipes open and block the reader joins forever.
-pub(crate) fn output_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output> {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    crate::child::isolate(command);
-    let mut child = command.spawn().context("failed to spawn subprocess")?;
-    let registration = crate::child::GroupRegistration::new(&child);
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_thread = thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut reader) = stdout {
-            let _ = reader.read_to_end(&mut buf);
-        }
-        buf
-    });
-    let stderr_thread = thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut reader) = stderr {
-            let _ = reader.read_to_end(&mut buf);
-        }
-        buf
-    });
-
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .context("failed while waiting for subprocess")?
-        {
-            drop(registration);
-            break status;
-        }
-        if Instant::now() >= deadline {
-            // Take the whole group down before joining readers — descendants
-            // that keep the pipes open would otherwise hang `read_to_end`.
-            let _ = crate::child::stop_tree(&mut child);
-            drop(registration);
-            let _ = child.wait();
-            let _ = stdout_thread.join();
-            let _ = stderr_thread.join();
-            bail!("subprocess timed out after {}s", timeout.as_secs());
-        }
-        thread::sleep(Duration::from_millis(50));
-    };
-
-    let stdout = stdout_thread.join().unwrap_or_else(|_| Vec::new());
-    let stderr = stderr_thread.join().unwrap_or_else(|_| Vec::new());
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
-    })
 }
 
 /// `Command` that runs the host `npx` (or `npx.cmd` on Windows).
@@ -559,26 +491,5 @@ mod tests {
         assert!(probe_version(&python));
         let python_again = python_for_emit(root.path(), &out_dir).expect("reuse emit venv");
         assert_eq!(python, python_again);
-    }
-
-    /// A leader that ignores SIGINT and keeps a grandchild alive — the shape of
-    /// a hung `npm` wrapper. Killing only the leader would leave the grandchild
-    /// holding stdout/stderr and hang the pipe-reader joins.
-    #[cfg(unix)]
-    #[test]
-    fn output_with_timeout_kills_a_tree_that_holds_pipes() {
-        let mut command = Command::new("sh");
-        command.args(["-c", r#"trap "" INT; sleep 30 & wait"#]);
-        let started = Instant::now();
-        let err = output_with_timeout(&mut command, Duration::from_secs(1)).unwrap_err();
-        assert!(
-            err.to_string().contains("timed out"),
-            "unexpected error: {err:#}"
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "timeout path hung joining pipe readers ({:?})",
-            started.elapsed()
-        );
     }
 }

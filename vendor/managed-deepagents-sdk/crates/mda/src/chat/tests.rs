@@ -287,6 +287,7 @@ fn pending_approval_is_resumed_before_accepting_a_message() {
             reviewed.set(true);
             Ok(Some(json!("approved")))
         },
+        |message| panic!("unexpected run failure: {message}"),
     )
     .unwrap();
     assert_eq!(result, CommandCompletion::Succeeded);
@@ -315,6 +316,7 @@ fn cancelling_recovered_approval_does_not_start_a_run() {
         &Interrupt::pending(),
         || panic!("must not request new input"),
         |_| Ok(None),
+        |message| panic!("unexpected run failure: {message}"),
     )
     .unwrap();
     assert_eq!(result, CommandCompletion::Cancelled);
@@ -466,6 +468,7 @@ fn state_read_failure_does_not_accept_input_or_start_a_run() {
         &Interrupt::pending(),
         || panic!("state must be loaded before input"),
         |_| panic!("invalid state must not prompt for review"),
+        |message| panic!("unexpected run failure: {message}"),
     );
     assert!(result.is_err());
     handle.join().unwrap();
@@ -503,6 +506,7 @@ fn fresh_turn_can_interrupt_then_resume_on_the_same_thread() {
             reviewed.set(true);
             Ok(Some(json!("yes")))
         },
+        |message| panic!("unexpected run failure: {message}"),
     )
     .unwrap();
     assert_eq!(result, CommandCompletion::Succeeded);
@@ -550,6 +554,7 @@ fn concurrent_interrupts_send_answers_under_the_original_keys() {
                     .collect(),
             )?))
         },
+        |message| panic!("unexpected run failure: {message}"),
     )
     .unwrap();
     handle.join().unwrap();
@@ -574,5 +579,104 @@ fn failed_pre_run_snapshot_does_not_start_a_run() {
     assert_eq!(
         requests,
         [(format!("GET /threads/{THREAD}/state HTTP/1.1"), Value::Null)]
+    );
+}
+
+#[test]
+fn failed_run_is_reported_and_the_session_continues() {
+    let error = json!({
+        "error": "Error",
+        "message": "Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable."
+    });
+    let (server, requests, handle) = server(vec![
+        (200, json!({"values": null, "tasks": []}).to_string()),
+        (200, json!({"values": {"messages": []}}).to_string()),
+        (200, format!("event: error\ndata: {error}\n\n")),
+        (
+            200,
+            json!({"values": {"messages": []}, "tasks": []}).to_string(),
+        ),
+    ]);
+    let mut failures = Vec::new();
+    let mut messages = [Some("hello".to_string()), None].into_iter();
+
+    let result = chat_loop(
+        &server,
+        &mut THREAD.to_string(),
+        &Interrupt::pending(),
+        || Ok(messages.next().unwrap()),
+        |_| panic!("nothing to review"),
+        |message| {
+            failures.push(message.to_string());
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    handle.join().unwrap();
+    assert_eq!(result, CommandCompletion::Succeeded);
+    assert_eq!(
+        failures,
+        ["Missing credentials. Please pass an `apiKey`, or set the `OPENAI_API_KEY` environment variable."]
+    );
+    assert_eq!(requests.try_iter().count(), 4);
+}
+
+#[test]
+fn run_error_message_keeps_plain_text_errors() {
+    assert_eq!(run_error_message("boom\u{1b}[2J"), "boom[2J");
+}
+
+#[test]
+fn run_error_message_names_the_type_when_the_message_is_redacted() {
+    let raw =
+        json!({"error": "OpenAIAuthenticationError", "message": "An internal error occurred"});
+
+    assert_eq!(
+        run_error_message(&raw.to_string()),
+        "OpenAIAuthenticationError: An internal error occurred"
+    );
+}
+
+#[test]
+fn run_failure_hint_names_the_key_the_failure_mentions() {
+    let hint = run_failure_hint(
+        "set the `OPENAI_API_KEY` environment variable",
+        None,
+        Path::new("/work/my-agent/.env"),
+        "and `mda dev` reloads it on save.",
+    );
+
+    assert_eq!(
+        hint.as_deref(),
+        Some("Add `OPENAI_API_KEY=...` to /work/my-agent/.env, and `mda dev` reloads it on save.")
+    );
+}
+
+#[test]
+fn run_failure_hint_points_an_authentication_failure_at_the_model_key() {
+    let hint = run_failure_hint(
+        "OpenAIAuthenticationError: An internal error occurred",
+        Some("OPENAI_API_KEY"),
+        Path::new(".env"),
+        "then restart `mda chat`.",
+    );
+
+    assert_eq!(
+        hint.as_deref(),
+        Some("Set a valid `OPENAI_API_KEY` in .env, then restart `mda chat`.")
+    );
+}
+
+#[test]
+fn run_failure_hint_ignores_unrelated_failures() {
+    assert_eq!(
+        run_failure_hint(
+            "MY_OPENAI_API_KEY_FILE is unreadable",
+            Some("OPENAI_API_KEY"),
+            Path::new(".env"),
+            ""
+        ),
+        None
     );
 }

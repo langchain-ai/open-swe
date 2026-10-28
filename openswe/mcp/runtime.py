@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import weakref
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -31,6 +32,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
+_DISCOVERY_CONCURRENCY = 8
+_DISCOVERY_SLOTS: weakref.WeakValueDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakValueDictionary()
+)
 
 type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
@@ -137,9 +142,18 @@ def _discovery_error(error: Exception) -> str:
     return f"Could not discover MCP tools ({unknown[0]}); check the URL and authentication headers"
 
 
+def _discovery_slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _DISCOVERY_SLOTS.get(loop)
+    if slots is None:
+        slots = _DISCOVERY_SLOTS[loop] = asyncio.Semaphore(_DISCOVERY_CONCURRENCY)
+    return slots
+
+
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     try:
-        return await asyncio.wait_for(_discover_tools(record, namespace), timeout=_TIMEOUT_SECONDS)
+        async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
+            return await _discover_tools(record, namespace)
     except Exception as exc:
         # The shared cache logs refresh failures, so redact before handing errors to it.
         raise ValueError(_discovery_error(exc)) from None
@@ -148,6 +162,15 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
 def _tool_name(connection_name: str, tool_name: str) -> str:
     full_name = f"mcp_{connection_name}_{tool_name}"
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name)
+    # Without "_" in the connection name, the first "_" after "mcp_" splits the pair unambiguously;
+    # a plain name never ends like a hashed one, so it can't take another pair's hashed name.
+    if (
+        safe == full_name
+        and len(safe) <= 64
+        and "_" not in connection_name
+        and not re.search(r"_[0-9a-f]{10}$", safe)
+    ):
+        return safe
     suffix = hashlib.sha256(json.dumps((connection_name, tool_name)).encode()).hexdigest()[:10]
     return f"{safe[:53]}_{suffix}"
 

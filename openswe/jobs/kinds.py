@@ -12,6 +12,9 @@ from typing import Final
 from pydantic import JsonValue
 
 from openswe import event_claims
+from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
+from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
+from openswe.agent_api.report_receipts import purge_report_receipts
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
@@ -38,6 +41,8 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
+from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
@@ -170,6 +175,16 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return {"threads_settled": await reconcile_busy_threads()}
 
 
+@WORKER.register(SLACK_CHANNEL_DIRECTORY)
+async def _slack_channel_directory(_job: Job) -> None:
+    await sync_directory()
+
+
+@WORKER.register(REPORT_RECEIPT_PURGE)
+async def _report_receipt_purge(_job: Job) -> None:
+    logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -187,8 +202,12 @@ async def start_jobs() -> None:
         import_agent_server_crons,
         import_agent_server_threads,
         start_queue,
+        ensure_directory_sync,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
+        ),
+        lambda: queue.schedule(
+            REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
     ]
     for step in steps:

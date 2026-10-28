@@ -398,6 +398,7 @@ function PullRequestLink({
               repo: repo!,
               number: String(pullRequest.number),
             }}
+            data-thread-pull-request={pullRequest.url}
             aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
             data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
             data-pr-tone={tone}

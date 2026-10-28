@@ -65,6 +65,17 @@ function toolTextArguments(
   })
 }
 
+export function formatShellCommand(command: string): string {
+  let display = command.trim()
+  const leadingCd =
+    /^cd[\t ]+(?:--[\t ]+)?(?:'[^']*'|"(?:\\[^\r\n]|[^"\\$`])*"|\\[^\r\n]|[^\s'"\\;&|<>()$`])+[\t ]*(?:&&|;(?![;&])|\r?\n)\s*/
+  while (true) {
+    const rest = display.replace(leadingCd, "")
+    if (!rest || rest === display) return display
+    display = rest
+  }
+}
+
 function truncateMiddle(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
 }
@@ -159,7 +170,10 @@ function toolDisplayParts(
     }
     case "execute": {
       if (command)
-        return { heading: "Shell", preview: truncateMiddle(command, 60) }
+        return {
+          heading: "Shell",
+          preview: truncateMiddle(formatShellCommand(command), 60),
+        }
       return plain(humanizeToolTitle(title))
     }
     case "sql":

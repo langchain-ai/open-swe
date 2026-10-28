@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -365,6 +365,7 @@ describe("Messages", () => {
   })
 
   it("folds each stretch of work between the Slack replies around it", () => {
+    vi.useFakeTimers()
     render(
       <Messages
         isStreaming
@@ -403,6 +404,11 @@ describe("Messages", () => {
       />,
       { wrapper }
     )
+
+    // A run that ends right after a reply never flashes an activity row under it.
+    expect(screen.queryByRole("button", { name: "Thinking…" })).toBeNull()
+    act(() => vi.advanceTimersByTime(800))
+    vi.useRealTimers()
 
     const inOrder = [
       screen.getByText("On it!"),

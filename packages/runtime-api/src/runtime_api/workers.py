@@ -3,12 +3,13 @@
 The coordinator's run asks for a worker grant (``launch_worker``), launches the
 worker with it in place of its own run token, then registers the thread it
 launched (``worker_launched``). The worker's first run trades the grant for a run
-token of its own (``adopt``); a grant may also read its coordinator's catalog, and
-nothing else.
+token of its own (``adopt``), and the catalog planned for it; a grant may also read
+its coordinator's catalog, and nothing else.
 """
 
 from pydantic import BaseModel, JsonValue
 
+from runtime_api.catalog import Catalog
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 
 
@@ -46,6 +47,10 @@ class Adopt(BaseModel):
 
 class Adopted(BaseModel):
     run_token: str
+    # The worker's own catalog.
+    catalog: Catalog
+    # The worker run's invocation, which its usage counts its replies by.
+    invocation_id: str | None = None
 
 
 # Only authorizes a launch, or returns the worker it already made.

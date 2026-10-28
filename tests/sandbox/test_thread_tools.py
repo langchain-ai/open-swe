@@ -4,6 +4,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx2
 import jwt
 import pytest
 from fastapi import HTTPException
@@ -132,6 +133,16 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
+    proxy_client = MagicMock()
+    proxy_client.get = AsyncMock(
+        return_value=httpx2.Response(
+            200, json={"proxy_config": {}}, request=httpx2.Request("GET", "https://sandbox.test")
+        )
+    )
+    client_context = MagicMock()
+    client_context.__aenter__ = AsyncMock(return_value=proxy_client)
+    client_context.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(langsmith.httpx2, "AsyncClient", MagicMock(return_value=client_context))
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
     client = MagicMock()
@@ -229,33 +240,3 @@ def test_agent_factory_is_accepted_by_langgraph() -> None:
         classify_factory(traced_agent, graph_id)
     finally:
         FACTORY_KWARGS.pop(graph_id, None)
-
-
-async def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
-    from openswe.tools.search_tools import search_tools_tool
-
-    def make(name: str, description: str) -> StructuredTool:
-        async def run(query: str) -> str:
-            return query
-
-        return StructuredTool.from_function(coroutine=run, name=name, description=description)
-
-    surface = ToolSurface(
-        tools={
-            tool.name: tool
-            for tool in (
-                make("searchDatadogLogs", "Search raw Datadog log entries."),
-                make("get_datadog_metric", "Query metrics from Datadog."),
-                make("save_issue", "Create or update a Linear issue."),
-                make("slack_reply", "Reply in Slack."),
-            )
-        }
-    )
-    search = search_tools_tool(surface, lambda name: None if name == "slack_reply" else name)
-
-    results = await search.ainvoke({"query": "datadog logs", "limit": 2})
-
-    assert [result["name"] for result in results] == ["searchDatadogLogs", "get_datadog_metric"]
-    assert results[0]["parameters"]["properties"].keys() == {"query"}
-    assert results[0]["code_name"] == "searchDatadogLogs"
-    assert await search.ainvoke({"query": "kubernetes"}) == []

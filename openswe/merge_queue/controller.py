@@ -1,7 +1,7 @@
 """Compose the canary controller from trusted configuration and a backend dispatch gateway."""
 
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
 from pydantic import SecretStr
@@ -13,6 +13,7 @@ from openswe.jobs import queue as jobs
 from openswe.merge_queue import runtime
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import DispatchGateway
+from openswe.merge_queue.native import NativeQueueRuntime
 from openswe.merge_queue.store import MergeQueue
 from openswe.merge_queue.validation_contract import WORKFLOW
 
@@ -20,42 +21,52 @@ from openswe.merge_queue.validation_contract import WORKFLOW
 class QueueController:
     def __init__(self, config: QueueConfiguration):
         self.config = config
-        assert config.policy.validation is not None
-        self.dispatcher = DispatchGateway(
-            str(config.dispatch_url),
-            SecretStr(ENV.MERGE_QUEUE_DISPATCH_SECRET.require()),
+        self.dispatcher = (
+            DispatchGateway(
+                str(config.dispatch_url), SecretStr(ENV.MERGE_QUEUE_DISPATCH_SECRET.require())
+            )
+            if config.mode == "custom" or config.check_app_id is not None
+            else None
         )
 
     @asynccontextmanager
     async def open_repo(self, queue: MergeQueue) -> AsyncIterator[RepoClient]:
-        if queue.workspace_id != self.config.workspace_id or queue.target_branch != "main":
+        if (
+            queue.workspace_id != self.config.workspace_id
+            or queue.target_branch != "main"
+            or queue.mode != self.config.mode
+        ):
             raise ValueError("Queue does not belong to this controller")
         repository = await Repository.get(self.config.repository)
         if repository is None or repository.id != queue.repository_id:
             raise ValueError("Queue repository binding changed")
         owner, name = self.config.repository.split("/", 1)
-        async with GitHubClient.as_app(
-            owner,
-            name,
-            permissions={
+        permissions = (
+            {"contents": "read", "metadata": "read", "pull_requests": "read"}
+            if self.config.mode == "native"
+            else {
                 "actions": "read",
                 "checks": "read",
                 "contents": "write",
                 "metadata": "read",
                 "pull_requests": "read",
                 "statuses": "read",
-            },
-        ) as github:
+            }
+        )
+        if self.config.mode == "native" and self.dispatcher is not None:
+            permissions.update({"actions": "read", "checks": "read"})
+        async with GitHubClient.as_app(owner, name, permissions=permissions) as github:
             repo = github.repo(*self.config.repository.split("/", 1))
             if (await repo.info()).get("id") != self.config.repository_id:
                 raise ValueError("Queue GitHub repository identity changed")
-            revision = await repo.branch_sha("main")
-            workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", revision)
-            if (
-                workflow is None
-                or hashlib.sha256(workflow).hexdigest() != self.config.workflow_digest
-            ):
-                raise ValueError("Queue workflow changed")
+            if self.dispatcher is not None:
+                revision = await repo.branch_sha("main")
+                workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", revision)
+                if (
+                    workflow is None
+                    or hashlib.sha256(workflow).hexdigest() != self.config.workflow_digest
+                ):
+                    raise ValueError("Queue workflow changed")
             yield repo
 
     async def start(self) -> None:
@@ -64,12 +75,25 @@ class QueueController:
             raise ValueError("Onboard the queue repository into its workspace first")
         queue = await MergeQueue.register(self.config.workspace_id, repository.id, "main")
         self.queue = queue
-        controller = runtime.QueueRuntime(
-            {queue.id: self.config.policy},
-            self.open_repo,
-            self.dispatcher,
-            retention_days=self.config.retention_days,
-        )
+        if self.config.mode == "native":
+            await queue.enable_native_observation()
+            controller = NativeQueueRuntime(
+                queue.id,
+                self.config.repository_id,
+                self.open_repo,
+                config=self.config,
+                dispatcher=self.dispatcher,
+            )
+        else:
+            if queue.mode != "custom":
+                raise ValueError("Cannot restart a custom controller for a native queue")
+            assert self.dispatcher is not None
+            controller = runtime.QueueRuntime(
+                {queue.id: self.config.policy},
+                self.open_repo,
+                self.dispatcher,
+                retention_days=self.config.retention_days,
+            )
         await jobs.schedule(
             runtime.JOB_KIND,
             runtime.QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id).model_dump(
@@ -83,6 +107,33 @@ class QueueController:
 
 
 CONTROLLER: QueueController | None = None
+
+
+async def wake_native_queue(payload: Mapping[str, object]) -> bool:
+    controller = CONTROLLER
+    if controller is None or controller.config.mode != "native":
+        return False
+    repository = payload.get("repository")
+    if not isinstance(repository, dict):
+        return False
+    full_name = repository.get("full_name")
+    if (
+        repository.get("id") != controller.config.repository_id
+        or not isinstance(full_name, str)
+        or full_name.lower() != controller.config.repository.lower()
+    ):
+        return False
+    queue = controller.queue
+    # Events only wake a live read; old payloads never overwrite the observed queue.
+    await jobs.schedule(
+        runtime.JOB_KIND,
+        runtime.QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id).model_dump(
+            mode="json"
+        ),
+        key=f"merge-queue-native-wakeup:{queue.id}",
+        replace=False,
+    )
+    return True
 
 
 async def start_queue() -> None:

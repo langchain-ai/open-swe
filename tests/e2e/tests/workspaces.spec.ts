@@ -166,6 +166,95 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Workspaces", () => {
+  test("cloud identity form saves federation and governed tags", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    const slug = "cloud-profile-form";
+    const tag = "00000000-0000-0000-0000-000000000001";
+    await deleteWorkspace(page, slug);
+    try {
+      await createWorkspace(page, "Cloud Profile Form", "");
+      await page.goto(`/workspaces/${slug}`);
+      const proxy = page
+        .getByRole("heading", { name: "Sandbox Proxy", exact: true })
+        .locator("xpath=ancestor::section");
+      for (const cloud of ["AWS", "GCP", "Azure"]) {
+        await proxy
+          .getByRole("button", { name: `Add ${cloud} identity`, exact: true })
+          .click();
+        await expect(
+          proxy.getByRole("button", {
+            name: `Add ${cloud} identity`,
+            exact: true,
+          }),
+        ).toBeDisabled();
+      }
+      for (const [label, value] of [
+        ["AWS Role ARN", "arn:aws:iam::123456789012:role/ReadOnly"],
+        [
+          "GCP Workload Identity Provider",
+          "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider",
+        ],
+        [
+          "Service Account Email (Optional)",
+          "sandbox@project.iam.gserviceaccount.com",
+        ],
+        ["Azure Tenant ID", tag],
+        ["Azure Client ID", tag],
+        ["Azure Resources (Comma-Separated)", "https://storage.azure.com"],
+        ["Governed Tag Value IDs", tag],
+      ])
+        await proxy.getByLabel(label, { exact: true }).fill(value);
+      for (const scope of await proxy
+        .getByLabel("Subject Scope", { exact: true })
+        .all())
+        await scope.fill(`tag:${tag}`);
+      await proxy.getByRole("tab", { name: "JSON", exact: true }).click();
+      await expect
+        .poll(async () => {
+          const config: { rules: { aws?: { subject_scope: string } }[] } =
+            JSON.parse(
+              await proxy
+                .getByLabel("Proxy configuration (JSON)", { exact: true })
+                .inputValue(),
+            );
+          return config.rules[0].aws?.subject_scope;
+        })
+        .toBe(`tag:${tag}`);
+      const saved = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/workspaces/${slug}`) &&
+          response.request().method() === "PUT",
+      );
+      await proxy
+        .getByRole("button", { name: "Save proxy configuration" })
+        .click();
+      expect((await saved).status()).toBe(200);
+      await page.reload();
+      await expect(proxy.getByLabel("Governed Tag Value IDs")).toHaveValue(tag);
+      await expect(
+        proxy.getByLabel("Subject Scope", { exact: true }).first(),
+      ).toHaveValue(`tag:${tag}`);
+      await expect(
+        proxy.getByLabel("Azure Resources (Comma-Separated)"),
+      ).toHaveValue("https://storage.azure.com");
+      await proxy.getByLabel("Governed Tag Value IDs").fill("");
+      const refused = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/workspaces/${slug}`) &&
+          response.request().method() === "PUT",
+      );
+      await proxy
+        .getByRole("button", { name: "Save proxy configuration" })
+        .click();
+      expect((await refused).status()).toBe(422);
+      await expect(proxy.getByRole("alert")).toBeVisible();
+    } finally {
+      await deleteWorkspace(page, slug);
+    }
+  });
+
   test("creating a workspace with scripts builds its first image", async ({
     page,
   }) => {

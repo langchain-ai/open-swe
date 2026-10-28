@@ -111,24 +111,30 @@ pub(crate) fn clear_session_api_keys_for_test() {
     }
 }
 
-/// How the CLI authenticates to LangSmith host / platform / Context Hub APIs.
+/// The `LANGSMITH_API_KEY` the CLI sends to LangSmith host / platform /
+/// Context Hub APIs.
 ///
-/// Always an API key. Device login mints a short-lived PAT into the machine
-/// state directory (and the process environment for the current run) rather
-/// than sending OAuth access tokens to Fleet / deploy (those reject or
-/// under-authorize OAuth-as-API-key).
-#[derive(Debug, Clone)]
-pub(crate) enum Credential {
-    /// Personal or service key (`LANGSMITH_API_KEY`).
-    ApiKey(String),
+/// Either a personal or service key the developer provided, or a short-lived
+/// PAT minted after device login into the machine state directory (and the
+/// process environment for the current run). OAuth access tokens are never
+/// sent as API keys: Fleet / deploy reject or under-authorize them.
+#[derive(Clone)]
+pub(crate) struct ApiKey(String);
+
+impl ApiKey {
+    pub(crate) fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+
+    /// Value for the `X-Api-Key` header.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-impl Credential {
-    /// Value for the `X-Api-Key` header.
-    pub(crate) fn api_key(&self, _http: &HttpClient) -> Result<String> {
-        match self {
-            Self::ApiKey(key) => Ok(key.clone()),
-        }
+impl std::fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ApiKey(<redacted>)")
     }
 }
 
@@ -494,7 +500,7 @@ fn poll_for_token(http: &HttpClient, api_url: &str, device: &DeviceCode) -> Resu
     let deadline = Instant::now() + budget;
 
     loop {
-        std::thread::sleep(interval);
+        crate::interrupt::pause(interval)?;
         if Instant::now() >= deadline {
             bail!("timed out waiting for LangSmith sign-in; try again");
         }
@@ -570,6 +576,10 @@ fn oauth_error(response: Response) -> String {
 /// Send the developer to `url`, ignoring failure: the URL is printed either way,
 /// and a machine without a browser is not an error.
 pub(crate) fn open_browser(url: &str) {
+    let _ = try_open_browser(url);
+}
+
+pub(crate) fn try_open_browser(url: &str) -> bool {
     let (program, args): (&str, [&str; 2]) = if cfg!(target_os = "macos") {
         ("open", [url, ""])
     } else if cfg!(target_os = "windows") {
@@ -577,11 +587,12 @@ pub(crate) fn open_browser(url: &str) {
     } else {
         ("xdg-open", [url, ""])
     };
-    let _ = Command::new(program)
+    Command::new(program)
         .args(args.iter().filter(|arg| !arg.is_empty()))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn unix_now() -> u64 {
@@ -1015,9 +1026,9 @@ mod tests {
     }
 
     #[test]
-    fn credential_api_key_returns_the_static_key() {
-        let http = HttpClient::new();
-        let credential = Credential::ApiKey("lsv2_pt_test".into());
-        assert_eq!(credential.api_key(&http).unwrap(), "lsv2_pt_test");
+    fn api_key_debug_output_redacts_the_key() {
+        let key = ApiKey::new("lsv2_pt_test");
+        assert_eq!(key.as_str(), "lsv2_pt_test");
+        assert!(!format!("{key:?}").contains("lsv2_pt_test"));
     }
 }
