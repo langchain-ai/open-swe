@@ -126,13 +126,13 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-bg-separator-override: var(--bg-surface-level-1-hover);
   --diffs-bg-buffer-override: var(--diffs-surface);
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--diffs-surface) 80%, #22c55e);
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #22c55e);
+  --diffs-bg-addition-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 80%, #22c55e));
+  --diffs-bg-addition-number-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 75%, #22c55e));
   --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #22c55e);
   --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #22c55e);
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--diffs-surface) 80%, #ef4444);
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #ef4444);
+  --diffs-bg-deletion-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 80%, #ef4444));
+  --diffs-bg-deletion-number-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 75%, #ef4444));
   --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #ef4444);
   --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #ef4444);
 
@@ -142,6 +142,15 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, monospace;
 
   background-color: var(--diffs-surface) !important;
+}
+
+[data-line-type="change-addition"],
+[data-line-type="change-deletion"] {
+  --mix-light: 80%;
+}
+
+:is([data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) {
+  --mix-light: 75%;
 }
 
 [data-file-info] {
