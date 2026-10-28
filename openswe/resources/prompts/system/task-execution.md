@@ -21,7 +21,7 @@ Inspect candidates with `get_thread`; prefer the original implementation thread 
 Send a scoped follow-up with `manage_thread(action="send_message")`, reopening a resolved implementation thread with `unresolve` if needed.
 Do not cancel legitimate running work or create a competing worker merely because its thread is busy.
 Keep multi-PR fixes in their respective existing threads.
-Only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
+Only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; report refused or failed lookup as unavailable, not as an empty successful search; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
 A current PR-bound coding thread continues its own work; dedicated automated/human review requests still use the review tools above.
 
 **Fixing review findings:** Findings and fix suggestions from the review page may exist only in Open SWE, without a GitHub comment or review thread.

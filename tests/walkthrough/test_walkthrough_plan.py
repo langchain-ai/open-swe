@@ -13,7 +13,7 @@ from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
-from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, PinnedCheckout
+from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, CheckoutError, PinnedCheckout
 from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
@@ -487,6 +487,13 @@ async def test_a_plan_left_at_an_older_merge_base_is_replanned_without_base_bran
     assert [file.path for file in workspace.index.files] == ["feature.py"]
     stored = await Walkthrough.get(pull_request.id, with_index=True)
     assert stored is not None and stored.merge_base_sha == base
+
+
+async def test_a_missing_checkout_is_reported_unless_allowed(tmp_path: Path) -> None:
+    missing = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(tmp_path / "repo"))
+    with pytest.raises(CheckoutError, match="Repository not found"):
+        await missing.pinned()
+    assert await missing.pinned(allow_missing=True) is None
 
 
 async def test_a_head_change_during_planning_ends_the_scout(

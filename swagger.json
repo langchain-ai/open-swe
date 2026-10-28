@@ -5573,6 +5573,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_mismatch": {
+            "default": false,
+            "title": "Channel Mismatch",
+            "type": "boolean"
+          },
           "channel_name": {
             "default": "",
             "title": "Channel Name",
@@ -5596,6 +5601,11 @@
           "request_id": {
             "default": "",
             "title": "Request Id",
+            "type": "string"
+          },
+          "requested_channel": {
+            "default": "",
+            "title": "Requested Channel",
             "type": "string"
           },
           "reused": {

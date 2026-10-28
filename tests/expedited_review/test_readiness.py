@@ -42,12 +42,10 @@ def test_a_required_check_that_has_not_reported_blocks_even_when_the_rest_is_gre
     assert blockers == ["required checks have not reported yet: e2e"]
 
 
-def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -> None:
+def test_a_failing_check_github_does_not_require_does_not_block() -> None:
     advisory = _snapshot(
         check_state="failure",
         mergeable_state="unstable",
-        failing_checks=["flaky-e2e"],
-        failures_are_required=False,
     )
 
     assert readiness_blockers(advisory) == []
@@ -56,16 +54,14 @@ def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -
 
 def test_a_failing_required_check_blocks_and_names_itself() -> None:
     blockers = readiness_blockers(
-        _snapshot(check_state="failure", failing_checks=["unit tests", "lint"])
+        _snapshot(check_state="failure", failing_required_checks=["unit tests", "lint"])
     )
 
     assert blockers == ["failing checks: unit tests, lint"]
 
 
 def test_checks_still_running_block_even_when_nothing_is_required() -> None:
-    blockers = readiness_blockers(
-        _snapshot(check_state="pending", mergeable_state="unstable", failures_are_required=False)
-    )
+    blockers = readiness_blockers(_snapshot(check_state="pending", mergeable_state="unstable"))
 
     assert any("still running" in blocker for blocker in blockers)
 
@@ -85,6 +81,60 @@ def test_every_gate_reports_independently() -> None:
     assert any("still running" in b for b in blockers)
     assert any("2 unresolved review threads" in b for b in blockers)
     assert any("grace" in b for b in blockers)
+
+
+@pytest.mark.parametrize(
+    ("required", "blockers"),
+    [
+        ({RequiredCheck("unit")}, []),
+        ({RequiredCheck("advisory")}, ["failing check: advisory"]),
+    ],
+)
+async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
+    required: set[RequiredCheck], blockers: list[str]
+) -> None:
+    with (
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "newsha"},
+                    "base": {"ref": "main"},
+                    "user": {"login": "ada"},
+                    "mergeable": True,
+                    "mergeable_state": "blocked",
+                }
+            ),
+        ),
+        patch.object(
+            RepoClient,
+            "check_runs",
+            AsyncMock(
+                return_value=[
+                    {"name": "unit", "status": "completed", "conclusion": "success"},
+                    {
+                        "name": "advisory",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    },
+                ]
+            ),
+        ),
+        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
+        patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=required)),
+        patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
+        patch.object(PullRequestClient, "reviews", AsyncMock(return_value=[])),
+        patch.object(PullRequestClient, "mergeability", AsyncMock(return_value=None)),
+    ):
+        result = await Readiness.assess(
+            GitHubClient(MagicMock()).repo("lc", "repo").pull_request(7)
+        )
+
+    assert result is not None
+    assert result.blockers == blockers
+    assert result.ready == (not blockers)
 
 
 @pytest.mark.parametrize("live_approval_id", [None, 123])

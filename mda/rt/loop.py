@@ -55,6 +55,7 @@ from runtime_api.loop import (
     ModelCall,
     PhaseResult,
     ReplyOnBehalf,
+    Route,
     Routed,
     RunEnded,
     ScoutPlanEnd,
@@ -171,6 +172,19 @@ def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
     return None
 
 
+def _run_guidance(messages: Sequence[BaseMessage]) -> dict[str, str]:
+    """The latest run guidance for each block id in the conversation."""
+    latest: dict[str, str] = {}
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        for text in _texts(message.content):
+            root = _root(text, "dynamic-context")
+            if root is not None and root.get("kind") == "run" and (key := root.get("id")):
+                latest[key] = text
+    return latest
+
+
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     held = state.get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
@@ -269,7 +283,12 @@ class RunLoop:
         update = await self._github_proxy(held)
         context = await self._task_context()
         visible = _visible(state)
-        added: list[BaseMessage] = []
+        visible_guidance = _run_guidance(visible)
+        added: list[BaseMessage] = [
+            HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}")
+            for key, text in _run_guidance(_messages(state)).items()
+            if key != "task-role" and text != visible_guidance.get(key)
+        ]
         if context.instructions and context.instructions != _latest(visible, _ROLE):
             added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
         run_context = _latest(_messages(state), _RUN_CONTEXT)
@@ -281,7 +300,10 @@ class RunLoop:
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
         route = await self._route(held, [*_visible(state), *added])
         if route is not None:
-            update["model_route"] = route
+            if route.persist:
+                update["model_route"] = route.route
+            else:
+                update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
         model = await self._model_for(current)
         return BeforeModel(
@@ -340,12 +362,14 @@ class RunLoop:
 
     async def _route(
         self, held: Mapping[str, object], messages: Sequence[BaseMessage]
-    ) -> str | None:
+    ) -> Route | None:
+        """The route and whether it should be kept beyond this run."""
         rules = self.rules.routing
         if rules is None:
             return None
         requested = held.get("requested_model")
         stored = held.get("model_route")
+        persist = True
         if isinstance(requested, str) and requested:
             route = "default"
         elif rules.mode is None:
@@ -354,14 +378,17 @@ class RunLoop:
             route = _normalized(stored)
         elif rules.mode == "fast":
             route = "fast"
+        elif held.get("model_route_attempted_for") == run_id():
+            return None
         else:
             asked = Routed(run_id=run_id(), humans=human_messages(messages))
-            route = (await call(self._backend, ROUTE_MODEL, asked)).route
+            routed = await call(self._backend, ROUTE_MODEL, asked)
+            route, persist = routed.route, routed.persist
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
-        return route
+        return Route(route=route, persist=persist)
 
     async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
         key = (model_id, effort if isinstance(effort, str) else None)

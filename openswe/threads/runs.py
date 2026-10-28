@@ -892,6 +892,7 @@ async def _enrich_run_start_command(
     invocation_started_at = datetime.now(UTC).isoformat()
     overrides = with_invocation_id(None, invocation_id)
     overrides["invocation_started_at"] = invocation_started_at
+    overrides[RELAYED_FROM_KEY] = relayed_from
     run_model: str | None = None
     run_effort: str | None = None
 

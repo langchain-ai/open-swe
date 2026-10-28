@@ -200,18 +200,42 @@ async def test_a_run_context_summarized_away_is_sent_again(
         HumanMessage(content="Review this PR", id="human-1"),
         HumanMessage(content="# Run context\nhead_sha: old", id="run-context:1"),
         HumanMessage(content="# Run context\nhead_sha: new", id="run-context:2"),
+        HumanMessage(content='<dynamic-context kind="run" id="source">Slack</dynamic-context>'),
+        HumanMessage(content='<dynamic-context kind="run" id="source">Dashboard</dynamic-context>'),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="environment">Local</dynamic-context>'
+        ),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="review-guide">Active</dynamic-context>'
+        ),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="review-guide">Closed</dynamic-context>'
+        ),
+        HumanMessage(content='<dynamic-context kind="person" id="alice">Alice</dynamic-context>'),
         AIMessage(content="Reading the diff", id="ai-1"),
     ]
 
     seen = await loop.before_model({"messages": history, STATE_KEY: {}})
     summarized = await loop.before_model(
-        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 3}}
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
     )
 
     assert seen.messages == []
-    assert [message.content for message in messages_from_dict(summarized.messages)] == [
-        "# Run context\nhead_sha: new"
+    restored = messages_from_dict(summarized.messages)
+    assert [message.content for message in restored] == [
+        history[4].content,
+        history[5].content,
+        history[7].content,
+        "# Run context\nhead_sha: new",
     ]
+    again = await loop.before_model(
+        {
+            "messages": [*history, *restored],
+            STATE_KEY: {},
+            "_summarization_event": {"cutoff_index": 8},
+        }
+    )
+    assert again.messages == []
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
@@ -250,6 +274,37 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
             {"run_id": "run-1", "model_id": requested.model_id, "effort": "high"},
         )
     ]
+
+
+async def test_a_route_the_classifier_fell_back_to_is_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "route_model": Route(route="default", persist=False)
+    }
+    backend, calls = _backend(
+        monkeypatch,
+        answers,
+        LoopRules(routing=RoutingRules(mode="auto")),
+    )
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix the login", id="human-1")
+
+    first = await loop.before_model(_state(human))
+    second = await loop.before_model(_state(human, **first.update))
+
+    assert first.call is not None and first.call.model == _MAIN
+    assert "model_route" not in first.update
+    assert [name for name, _ in calls] == ["route_model"]
+    assert second.call is not None and second.call.model == _MAIN
+
+    monkeypatch.setattr("rt.loop.run_id", lambda: "run-2")
+    answers["route_model"] = Route(route="fast")
+    recovered = await loop.before_model(_state(human, **first.update))
+
+    assert recovered.call is not None and recovered.call.model == _FAST
+    assert recovered.update["model_route"] == "fast"
+    assert [name for name, _ in calls] == ["route_model", "route_model"]
 
 
 @pytest.mark.parametrize(
