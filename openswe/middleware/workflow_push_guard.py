@@ -473,13 +473,6 @@ async def _workflow_change_for_push(
     if not root:
         return parsed.inspection_failed()
 
-    branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
-    branch_name = _first_line(branch.output) if branch.ok else ""
-    if not branch_name or branch_name == "HEAD" or parsed.remote_branch != branch_name:
-        return parsed.inspection_failed()
-    if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
-        return parsed.inspection_failed()
-
     target_sha = await _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
     head = _first_line(target_sha.output) if target_sha.ok else ""
     if not head or not _GIT_OBJECT_ID.fullmatch(head):
@@ -517,6 +510,13 @@ async def _workflow_change_for_push(
     )
     if not files:
         return None
+
+    branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
+    branch_name = _first_line(branch.output) if branch.ok else ""
+    if not branch_name or branch_name == "HEAD" or parsed.remote_branch != branch_name:
+        return parsed.inspection_failed()
+    if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
+        return parsed.inspection_failed()
 
     diff = await _run_git(
         backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows"

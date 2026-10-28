@@ -81,7 +81,10 @@ class _Backend:
             return _Response("git@github.com:langchain-ai/open-swe.git\n")
         if "rev-parse --abbrev-ref HEAD" in command:
             return _Response("feature\n")
-        if any(f"rev-parse {ref}" in command for ref in ("HEAD", "feature", "refs/heads/feature")):
+        if any(
+            f"rev-parse {ref}" in command
+            for ref in ("HEAD", "feature", "refs/heads/feature", "evil")
+        ):
             return _Response(f"{self.head}\n")
         return _Response("")
 
@@ -396,13 +399,12 @@ async def test_approved_workflow_push_runs_fixed_command(
     assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
 
 
-@pytest.mark.parametrize(
-    "command",
-    ["git -C /repo push origin feature", "git -C /repo push --force-with-lease origin feature"],
-)
+@pytest.mark.parametrize("option", ["", "--force-with-lease", "--verbose"])
+@pytest.mark.parametrize("refspec", ["feature", "evil:feature", "feature:other"])
 async def test_non_workflow_push_runs_without_approval(
-    monkeypatch: pytest.MonkeyPatch, command: str
+    monkeypatch: pytest.MonkeyPatch, option: str, refspec: str
 ) -> None:
+    command = f"git -C /repo push {option} origin {refspec}"
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend(workflow_files="")), thread_id="thread-1"
     )
@@ -434,7 +436,7 @@ async def test_non_workflow_push_runs_without_approval(
 )
 async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bool) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
-        cast(SandboxBackendProtocol, _Backend(workflow_files="", inspectable=inspectable)),
+        cast(SandboxBackendProtocol, _Backend(inspectable=inspectable)),
         thread_id="thread-1",
     )
 
@@ -459,8 +461,9 @@ async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bo
         "git commit -qam 'Add CI'&&git push",
         "(cd /repo && git push)",
         "cd /repo; git push",
+        "git -C /repo push --verbose origin feature:other",
     ],
-    ids=["spaced", "unspaced", "subshell", "semicolon"],
+    ids=["spaced", "unspaced", "subshell", "semicolon", "unsupported-option"],
 )
 @pytest.mark.parametrize(
     ("backend", "refused"),
