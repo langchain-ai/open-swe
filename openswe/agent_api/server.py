@@ -155,16 +155,15 @@ class RunTokenMiddleware:
             )
             return
         refreshed: str | None = None
+        # A runtime that checks grants has every later call checked; a token signed
+        # before operations were granted carries none to check, so its plan bounds it.
         if (
             isinstance(principal, RemoteRun)
+            and principal.grant_id is not None
             and not principal.operation_grants
             and Request(scope).headers.get("x-open-swe-operation-grants") == "1"
         ):
-            principal = (
-                principal.model_copy(update={"operation_grants": True})
-                if principal.grant_id is not None
-                else principal.granting()
-            )
+            principal = principal.model_copy(update={"operation_grants": True})
             refreshed = sign_runtime_token(principal)
         scope.setdefault("state", {})[_RUN_STATE_KEY] = principal
 
