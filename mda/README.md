@@ -28,7 +28,8 @@ Every call is authenticated with the run token.
   Tools the graph hides from the model are dropped from each request.
 - **`search_tools`, `find_operation`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
   The backend keeps every operation the run started with in PostgreSQL by digest (`run_operations`), which the run token signs.
-  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `find_operation` which operation that is, with the run's grant of it (`FoundOperations` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`). A name that is none throws `TypeError` in code mode.
+  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `find_operation` which operation that is, with the run's grant of it (`FoundOperations` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
+  A name that is none throws `TypeError` in code mode.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   Where MDA owns the box they run in it.
   On the paths the backend serves (`files.backend_paths`: offloaded images), and on a thread whose box is not MDA's, such as a desktop thread, deepagents' own tools run against the backend's files through the typed files API (`rt/remote_files.py`).
