@@ -170,7 +170,11 @@ from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
-from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from openswe.thread_title import (
+    ANTHROPIC_TITLE_GENERATION_MAX_TOKENS,
+    TITLE_GENERATION_MAX_TOKENS,
+    schedule_thread_title_generation,
+)
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -1102,13 +1106,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     @cached_property
     def _title_model(self) -> BaseChatModel:
         turn = self._turn
-        return _make_model_or_defer(
+        anthropic = turn.title_model_id.startswith("anthropic:")
+        kwargs = provider_model_kwargs(
             turn.title_model_id,
-            use_gateway=turn.use_gateway,
-            **provider_model_kwargs(
-                turn.title_model_id, turn.title_effort, max_tokens=TITLE_GENERATION_MAX_TOKENS
+            turn.title_effort,
+            max_tokens=(
+                ANTHROPIC_TITLE_GENERATION_MAX_TOKENS if anthropic else TITLE_GENERATION_MAX_TOKENS
             ),
         )
+        if anthropic:
+            kwargs.pop("thinking", None)
+        return _make_model_or_defer(turn.title_model_id, use_gateway=turn.use_gateway, **kwargs)
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (

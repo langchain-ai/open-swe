@@ -200,18 +200,42 @@ async def test_a_run_context_summarized_away_is_sent_again(
         HumanMessage(content="Review this PR", id="human-1"),
         HumanMessage(content="# Run context\nhead_sha: old", id="run-context:1"),
         HumanMessage(content="# Run context\nhead_sha: new", id="run-context:2"),
+        HumanMessage(content='<dynamic-context kind="run" id="source">Slack</dynamic-context>'),
+        HumanMessage(content='<dynamic-context kind="run" id="source">Dashboard</dynamic-context>'),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="environment">Local</dynamic-context>'
+        ),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="review-guide">Active</dynamic-context>'
+        ),
+        HumanMessage(
+            content='<dynamic-context kind="run" id="review-guide">Closed</dynamic-context>'
+        ),
+        HumanMessage(content='<dynamic-context kind="person" id="alice">Alice</dynamic-context>'),
         AIMessage(content="Reading the diff", id="ai-1"),
     ]
 
     seen = await loop.before_model({"messages": history, STATE_KEY: {}})
     summarized = await loop.before_model(
-        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 3}}
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
     )
 
     assert seen.messages == []
-    assert [message.content for message in messages_from_dict(summarized.messages)] == [
-        "# Run context\nhead_sha: new"
+    restored = messages_from_dict(summarized.messages)
+    assert [message.content for message in restored] == [
+        history[4].content,
+        history[5].content,
+        history[7].content,
+        "# Run context\nhead_sha: new",
     ]
+    again = await loop.before_model(
+        {
+            "messages": [*history, *restored],
+            STATE_KEY: {},
+            "_summarization_event": {"cutoff_index": 8},
+        }
+    )
+    assert again.messages == []
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(

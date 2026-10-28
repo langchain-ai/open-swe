@@ -31,7 +31,7 @@ export function UserMessage({ message }: { message: Message }) {
 }
 
 /** A passage the sender replied to, shown as they selected it, then their comment. */
-function SentReply({ reply }: { reply: PassageReply }) {
+export function SentReply({ reply }: { reply: PassageReply }) {
   return (
     <div className="mb-space-2 flex flex-col gap-space-1 text-sm leading-[1.6]">
       {reply.file ? (

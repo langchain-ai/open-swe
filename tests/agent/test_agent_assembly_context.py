@@ -16,7 +16,7 @@ from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
-from openswe.server import _registered_tool_name, plan_agent
+from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, plan_agent
 from openswe.threads.inbox import ThreadInbox
 
 _MODEL_DEFAULTS = {
@@ -805,3 +805,35 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
     )
     assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
     assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"
+
+
+async def test_anthropic_title_model_omits_thinking_without_affecting_agent() -> None:
+    captured = await _plan_agent(
+        workspace_settings=WorkspaceSettings(
+            {
+                **_MODEL_DEFAULTS,
+                "default_agent_model": "anthropic:claude-opus-5-5",
+                "default_agent_reasoning_effort": "high",
+                "default_thread_title_model": "anthropic:claude-haiku-5-5",
+                "default_thread_title_reasoning_effort": "high",
+            }
+        )
+    )
+    calls = cast(list[tuple[str, dict[str, object]]], captured["make_model_calls"])
+    titled: list[tuple[str, dict[str, object]]] = []
+
+    def make_title_model(model_id: str, **kwargs: object) -> MagicMock:
+        titled.append((model_id, kwargs))
+        return MagicMock()
+
+    # The title model is built where it is used: as the run's turn is prepared.
+    turn = cast(AgentTurnSettings, captured["turn"])
+    with patch("openswe.server.make_model", side_effect=make_title_model):
+        PrepareAgentRunMiddleware(_base_config(), turn, repo_instructions=None)._title_model  # noqa: B018
+    [(title_model, title_kwargs)] = titled
+    assert title_model == "anthropic:claude-haiku-5-5"
+    assert "thinking" not in title_kwargs
+    assert title_kwargs["effort"] == "high"
+    assert title_kwargs["max_tokens"] == 1024
+    agent_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-opus-5-5")
+    assert agent_kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
