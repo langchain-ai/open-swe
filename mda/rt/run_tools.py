@@ -10,6 +10,7 @@ prompt and model, and the run's limit on model calls, are the run's too.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from functools import partial
 from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
@@ -22,6 +23,7 @@ from langchain_quickjs.middleware import PersistenceMode, REPLState
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from managed_deepagents.run_resources import on_run_exit
 from runtime_api.catalog import Catalog, SubagentSpec
 from runtime_api.loop import ModelCall
 
@@ -224,7 +226,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         super().__init__(ptc=[], subagents=subagents, mode=mode)
 
     def __del__(self) -> None:
-        """Slots are released asynchronously by invocation hooks, never by collecting middleware."""
+        """The invocation owns cleanup; transient middleware copies share the registry."""
 
     @property
     def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
@@ -237,16 +239,16 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
 
     def _slot_id(self, state: Mapping[str, object]) -> str:
         slot_id = super()._slot_id(state)
-        self._slots.setdefault(slot_id, asyncio.Lock())
+        if slot_id not in self._slots:
+            on_run_exit(partial(self._close_slot, slot_id))
+            self._slots[slot_id] = asyncio.Lock()
         return slot_id
 
-    async def _aevict(self, slot_id: str, *, keep_tools: bool = False) -> None:
-        lock = self._slots.get(slot_id)
-        if lock is None:
-            return
-        async with lock:
-            await self._registry.aevict(slot_id)
-            if not keep_tools:
+    async def _close_slot(self, slot_id: str) -> None:
+        async with self._slots[slot_id]:
+            try:
+                await self._registry.aevict(slot_id)
+            finally:
                 self._ptc_tools_by_slot.pop(slot_id, None)
                 self._ptc_prompt_by_slot.pop(slot_id, None)
                 self._slots.pop(slot_id, None)
@@ -273,22 +275,14 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         update = self._slot_update_for_runtime()
         prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
         self._slot_id(prepared)
-        try:
-            restored = await super().abefore_agent(prepared, runtime)
-        except BaseException:
-            await self._aevict(update["_quickjs_slot_id"])
-            raise
+        restored = await super().abefore_agent(prepared, runtime)
         return {**update, **(restored or {})} or None
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         if not self._runs_code():
             tools = [tool for tool in request.tools if getattr(tool, "name", None) != _EVAL_TOOL]
             return await handler(request.override(tools=tools))
-        try:
-            return await super().awrap_model_call(request, handler)
-        except BaseException:
-            await self._aevict(self._slot_id(request.state))
-            raise
+        return await super().awrap_model_call(request, handler)
 
     @staticmethod
     def _cancelled(error: BaseException) -> bool:
@@ -313,21 +307,21 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     ) -> ToolMessage | Command:
         if not self._runs_code():
             return await handler(request)
+        if request.tool_call["name"] != _EVAL_TOOL:
+            return await handler(request)
         slot_id = self._slot_id(request.state)
-        try:
-            if request.tool_call["name"] != _EVAL_TOOL:
+        async with self._slots[slot_id]:
+            try:
                 return await handler(request)
-            async with self._slots[slot_id]:
-                try:
-                    return await handler(request)
-                except ValueError as exc:
-                    if str(exc) != "already closed":
-                        raise
-                    task = asyncio.current_task()
-                    if (task is not None and task.cancelling()) or self._cancelled(exc):
-                        raise asyncio.CancelledError() from exc
-                    logger.warning("QuickJS slot closed during eval", exc_info=True)
-            await self._aevict(slot_id, keep_tools=True)
+            except ValueError as exc:
+                task = asyncio.current_task()
+                if (task is not None and task.cancelling()) or self._cancelled(exc):
+                    raise asyncio.CancelledError() from exc
+                repl = self._registry.get_if_exists(slot_id)
+                if repl is None or not repl.is_closed:
+                    raise
+                logger.warning("QuickJS slot closed during eval", exc_info=True)
+            await self._registry.aevict(slot_id)
             return ToolMessage(
                 content="Error: the code interpreter closed during eval. Its state has been "
                 "discarded. The code may have partially executed; host-tool calls are not retried.",
@@ -335,19 +329,13 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
                 name=_EVAL_TOOL,
                 status="error",
             )
-        except BaseException:
-            await self._aevict(slot_id)
-            raise
 
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
         if not self._runs_code():
             return None
         slot_id = self._slot_id(state)
-        try:
-            async with self._slots[slot_id]:
-                return await super().aafter_agent(state, runtime)
-        finally:
-            await self._aevict(slot_id)
+        async with self._slots[slot_id]:
+            return await super().aafter_agent(state, runtime)
 
 
 class RunModelCallLimit(ModelCallLimitMiddleware):

@@ -3,6 +3,7 @@ import gc
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -13,6 +14,8 @@ import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
+from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -42,7 +45,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
 from rt.backend import Run, RunContext, current_run
-from rt.run_tools import RunCodeInterpreter
+from rt.run_tools import ModelHandler, RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
     LoopRules,
@@ -846,7 +849,8 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
                     await asyncio.Event().wait()
                 except BaseException as exc:
                     raise ValueError("already closed") from exc
-            raise ValueError("already closed")
+            await repl.aclose()
+            raise ValueError("engine closed with different wording")
         return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
 
     async def generate(
@@ -898,3 +902,124 @@ async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_termi
     )
     assert not interpreter._registry._slots
     assert not interpreter._slots
+
+
+@pytest.mark.parametrize("failure", ["before_agent", "before_model", "between_steps"])
+async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, failure: str
+) -> None:
+    from rt.browser import ReportedBrowserMiddleware
+    from rt.middleware import BackendRunMiddleware
+
+    interpreter = next(
+        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
+    )
+    original = interpreter.abefore_agent
+
+    async def prepare(*args: object, **kwargs: object) -> dict[str, object] | None:
+        update = await original(*args, **kwargs)
+        assert update is not None
+        interpreter._registry.get(str(update["_quickjs_slot_id"]))
+        return update
+
+    async def later_setup(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("later setup failed")
+
+    async def read_inbox(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("inbox failed")
+
+    monkeypatch.setattr(interpreter, "abefore_agent", prepare)
+    if failure == "before_agent":
+        monkeypatch.setattr(ReportedBrowserMiddleware, "abefore_agent", later_setup)
+    if failure == "before_model":
+        monkeypatch.setattr(BackendRunMiddleware, "_read_inbox", read_inbox)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    context = _context("agent", "cleanup", catalog)
+    if failure == "between_steps":
+        graph = await compile_managed_agent_async(
+            agent.agent,
+            _thread("cleanup"),
+            runtime=_ExecutionRuntime(
+                access_context="threads.create_run", store=InMemoryStore(), context=context
+            ),
+            report_telemetry=False,
+            async_subagent_graphs=_WORKERS,
+        )
+        stream = graph.astream(
+            {"messages": [("user", "hello")]},
+            _thread("cleanup"),
+            context=context,  # ty: ignore[invalid-argument-type]
+            stream_mode="updates",
+        )
+        async for _ in stream:
+            if interpreter._registry._slots:
+                break
+        assert interpreter._registry._slots
+        await stream.aclose()
+    else:
+        with pytest.raises(RuntimeError, match="later setup failed|inbox failed"):
+            await _run(InMemoryStore(), "cleanup", context)
+    assert not interpreter._registry._slots
+    assert not interpreter._slots
+    assert not interpreter._ptc_tools_by_slot
+    assert not interpreter._ptc_prompt_by_slot
+
+
+async def test_recovered_model_failure_preserves_interpreter_state(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    class RecoverModel(AgentMiddleware):
+        async def awrap_model_call(
+            self, request: ModelRequest, handler: ModelHandler
+        ) -> ModelResponse:
+            try:
+                return await handler(request)
+            except RuntimeError as exc:
+                if str(exc) != "recoverable model failure":
+                    raise
+                return await handler(request)
+
+    parts = agent._parts("agent")
+    patched = replace(parts, middleware=[RecoverModel(), *parts.middleware])
+    patched = replace(patched, worker_middleware=patched.middleware)
+    monkeypatch.setattr(agent, "_parts", lambda graph: patched)
+    attempts = 0
+    results: list[ToolMessage] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:
+            raise RuntimeError("recoverable model failure")
+        tools = [message for message in messages if isinstance(message, ToolMessage)]
+        if len(tools) == 2:
+            results.extend(tools)
+            reply = AIMessage(content="done")
+        else:
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="eval",
+                        args={"code": "var retained = 42" if not tools else "retained"},
+                        id=f"eval-{len(tools)}",
+                    )
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    await _run(
+        InMemoryStore(),
+        "recover",
+        _context(
+            "agent",
+            "recover",
+            _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]}),
+        ),
+    )
+    assert "42" in results[-1].text

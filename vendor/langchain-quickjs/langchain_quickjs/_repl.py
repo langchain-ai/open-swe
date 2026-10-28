@@ -409,6 +409,13 @@ class _ThreadREPL:
             self._task_calls = asyncio.Semaphore(self._max_subagent_concurrency)
             self._register_task_bridge()
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the REPL's context or its engine has been closed."""
+        return (
+            self._ctx is None or self._ctx._closed or self._ctx._engine_ctx.is_closed()
+        )
+
     def _require_ctx(self) -> Context:
         """Return the live QuickJS context or raise if this REPL is closed."""
         if self._ctx is None:
