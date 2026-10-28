@@ -15,6 +15,7 @@ from runtime_api.operations import RunOperation, ToolEvidence
 from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.mcp.instance import instance_mcp_source
+from openswe.mcp.runtime import _tool_name
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware.model_call_shape import CallShape
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -93,12 +94,12 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     )
     status_page_tools = [
         StructuredTool.from_function(
-            coroutine=update_incident, name=name, description="Update the public status page"
+            coroutine=update_incident,
+            name=_tool_name(connection, "status_page_update"),
+            description="Update the public status page",
+            metadata={"mcp_tool_name": "status_page_update"},
         )
-        for name in (
-            "mcp_incident_status_page_update",
-            "mcp_incident_status_page_update_2e7bd98424",
-        )
+        for connection in ("incident", "incident_io", "oncall", "incident-" * 10)
     ]
     with patch(
         "openswe.server.load_mcp_tools", AsyncMock(return_value=[remote, *status_page_tools])

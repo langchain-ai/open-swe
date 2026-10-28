@@ -1777,7 +1777,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         mcp_tools = [
             tool
             for tool in mcp_tools
-            if not tool.name.startswith("mcp_incident_status_page_update")
+            if (tool.metadata or {}).get("mcp_tool_name") != "status_page_update"
         ]
 
     slack_tools = [
