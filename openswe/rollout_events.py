@@ -24,7 +24,6 @@ from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -165,8 +164,7 @@ def merged_pull_request(metadata: dict[str, object]) -> tuple[str, str, int, str
 
 def _requested_slack_thread(metadata: dict[str, object]) -> SlackThreadRef | None:
     """The Slack thread the rollout check was requested from, which keeps its results."""
-    requested = RunConfig.parse(metadata.get(ROLLOUT_CHECK_CONTEXT))
-    thread = requested.slack_thread if requested.source == "slack" else None
+    thread = SourceContext.parse(metadata.get(ROLLOUT_CHECK_CONTEXT)).slack_thread
     return thread if thread and thread.location else None
 
 

@@ -19,13 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 def _flag(cfg: RunConfig) -> dict[str, JsonValue]:
-    """The request, with the surface it came from: a later Web handoff must not lose Slack."""
+    """Keep the requested Slack destination through a later Web handoff."""
     slack_thread = cfg.slack_thread.dump() if cfg.source == "slack" and cfg.slack_thread else None
     return {
         ROLLOUT_CHECK_REQUESTED: True,
         ROLLOUT_CHECK_CONTEXT: {
-            "source": cfg.source,
-            "sender_id": cfg.sender_id,
             "slack_thread": slack_thread,
         },
     }

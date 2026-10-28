@@ -8,11 +8,9 @@ from uuid import uuid4
 import pytest
 
 from openswe.github.http import GitHubAppUnavailable
-from openswe.prompts import prompt
 from openswe.rollout_events import ask_to_monitor_rollout, subscribe_merged_thread
 from openswe.run_config import RunConfig
 from openswe.tools.request_rollout_check import request_rollout_check
-from openswe.webhooks.event_subscriptions import EventSummary
 
 _SHA = "ab" * 20
 
@@ -134,24 +132,15 @@ async def test_rollout_request_destination_survives_web_follow_up(
     ):
         await request_rollout_check()
     metadata["source"] = "dashboard"
+    latest_destination = {"channel_id": "C2", "thread_ts": "3.4"}
+    metadata["source_context"] = {"slack_thread": latest_destination}
     await subscribe_merged_thread(
         "thread-1", owner="lc", repo="repo", number=7, sha=_SHA, metadata=metadata
     )
     subscription = created[0]
-    event_turn = prompt(
-        "runs/event-subscription",
-        summary=EventSummary(source="deployment", event_type="deployed"),
-        details="Target: production",
-        instructions=subscription.instructions,
-        subscription_id="subscription-1",
-        one_shot=False,
+    assert subscription.run_config["slack_thread"] == (
+        destination if reports_to_slack else latest_destination
     )
-    assert ("slack_reply" in event_turn) is reports_to_slack
-    if reports_to_slack:
-        assert "C1" in event_turn and "1.2" in event_turn and "dashboard" in event_turn
-        assert subscription.run_config["slack_thread"] == destination
-    else:
-        assert "slack_thread" not in subscription.run_config
 
 
 def _skill_file(

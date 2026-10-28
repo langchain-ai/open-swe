@@ -53,8 +53,6 @@ async def test_request_rollout_check_marks_the_current_thread(source: str | None
     flag = {
         "rollout_check": True,
         "rollout_check_context": {
-            "source": source,
-            "sender_id": "github:octo",
             "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"} if source == "slack" else None,
         },
     }
