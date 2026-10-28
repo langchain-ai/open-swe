@@ -702,7 +702,7 @@ test.describe("Human review in Slack", () => {
       .getByRole("listitem")
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) });
     await row.getByRole("button", { name: "Request review in Slack" }).click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -861,7 +861,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -959,7 +959,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);

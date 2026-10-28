@@ -232,11 +232,11 @@ class RecentContextSelector:
         )[:RECENT_CONTEXT_THREAD_COUNT]
 
 
-def _format_ts(updated_at_ms: int | None) -> str:
+def _format_day(updated_at_ms: int | None) -> str:
+    # A day, not a minute: the block is re-sent whenever its text changes.
     if not updated_at_ms:
         return "unknown"
-    moment = datetime.fromtimestamp(updated_at_ms / 1000, tz=UTC)
-    return moment.strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.fromtimestamp(updated_at_ms / 1000, tz=UTC).strftime("%Y-%m-%d")
 
 
 def _render_entries(entries: list[RecentThreadContext]) -> str:
@@ -247,7 +247,7 @@ def _render_entries(entries: list[RecentThreadContext]) -> str:
             [
                 f"{index}. Topic: {entry.title}",
                 f"   Repo: {entry.repo or 'unknown'} · Source: {entry.source}",
-                f"   State: {state} · Last activity: {_format_ts(entry.updated_at_ms)}",
+                f"   State: {state} · Last active: {_format_day(entry.updated_at_ms)}",
                 f"   Thread: {entry.thread_id}",
             ]
         )

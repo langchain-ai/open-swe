@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
+from time import time
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import httpx2
@@ -25,6 +26,7 @@ from openswe.analytics.posthog import record_mcp_tool
 from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
+from openswe.prompts import prompt
 from openswe.utils.startup_trace import asubphase
 
 if TYPE_CHECKING:
@@ -41,6 +43,32 @@ type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
 _CATALOG_TTL = timedelta(minutes=10)
 _CATALOG_MAX_AGE = timedelta(hours=24)
+_MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
+
+
+class MCPTools(list[BaseTool]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures: list[str] = []
+
+    @property
+    def catalog_note(self) -> str:
+        return (
+            "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(self.failures)))
+            if self.failures
+            else ""
+        )
+
+
+def _backoff_failure(error: BaseException) -> bool:
+    if isinstance(error, BaseExceptionGroup):
+        return any(_backoff_failure(child) for child in error.exceptions)
+    return (
+        isinstance(error, MCPError)
+        and error.code == -32601
+        or isinstance(error, httpx2.HTTPStatusError)
+        and error.response.status_code == 404
+    )
 
 
 @dataclass(frozen=True)
@@ -151,12 +179,38 @@ def _discovery_slots() -> asyncio.Semaphore:
 
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+    from langgraph_api.cache import cache_get, cache_set
+
+    key: str | None = None
+    if namespace[0:1] == ("managed_tools",):
+        key = (
+            "mcp-failure:"
+            + hashlib.sha256(
+                json.dumps((namespace, record.name, record.revision)).encode()
+            ).hexdigest()
+        )
+        failure: object = await cache_get(key)
+        if (
+            isinstance(failure, list)
+            and len(failure) == 2
+            and isinstance(failure[0], str)
+            and isinstance(failure[1], (int, float))
+            and time() < failure[1]
+        ):
+            raise MCPDiscoveryError(failure[0])
     try:
         async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
-            return await _discover_tools(record, namespace)
+            tools = await _discover_tools(record, namespace)
     except Exception as exc:
-        # The shared cache logs refresh failures, so redact before handing errors to it.
-        raise ValueError(_discovery_error(exc)) from None
+        reason = _discovery_error(exc)
+        if key is not None and _backoff_failure(exc):
+            await cache_set(
+                key,
+                [reason, time() + _MANAGED_FAILURE_BACKOFF.total_seconds()],
+                ttl=_MANAGED_FAILURE_BACKOFF,
+            )
+        raise MCPDiscoveryError(reason) from None
+    return tools
 
 
 def _tool_name(connection_name: str, tool_name: str) -> str:
@@ -275,6 +329,7 @@ async def _load_tools(
     record: MCPConnection,
     sources: tuple[MCPSource, ...],
     overridden_scopes: list[MCPScope],
+    failures: list[str],
 ) -> tuple[list[BaseTool], CatalogOutcome]:
     try:
         definitions, outcome = await _cached_definitions(source, record)
@@ -296,13 +351,16 @@ async def _load_tools(
             if record.allows_tool(definition.name)
         ]
         return tools, outcome
-    except Exception:
+    except Exception as exc:
+        if source.scope == "managed":
+            failures.append(_discovery_error(exc))
         logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
         return [], "failed"
 
 
-async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
+async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> MCPTools:
     """Combine sources in precedence order; later connections replace earlier names entirely."""
+    result = MCPTools()
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
         resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
@@ -314,7 +372,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
     except Exception:
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
-        return []
+        return result
     connections = [
         (source, record)
         for _, (source, record) in sorted(resolved.items())
@@ -329,6 +387,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
                 record,
                 sources,
                 scopes[record.name][:-1],
+                result.failures,
             )
             for source, record in connections
         )
@@ -341,4 +400,5 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
             for outcome in get_args(CatalogOutcome.__value__)
         },
     )
-    return [tool for tools, _ in groups for tool in tools]
+    result.extend(tool for tools, _ in groups for tool in tools)
+    return result

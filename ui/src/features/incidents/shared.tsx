@@ -1,7 +1,10 @@
+import { Badge } from "@langchain/macaw-components/Badge"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
@@ -36,32 +39,24 @@ export function formatTime(value: Timestamp | null) {
 
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span
+    <Badge
+      size="xxs"
+      color={
+        status === "needs_attention"
+          ? "warning"
+          : ["pending", "watching", "investigating"].includes(status)
+            ? "primary"
+            : "secondary"
+      }
+      leftDecorator={CircleIcon}
+      iconWeight="fill"
       className={cn(
-        "inline-flex shrink-0 items-center gap-space-2 rounded-full border px-space-2 py-0.5 text-xxs font-medium",
-        {
-          "border-brand bg-brand-subtle text-brand-primary": [
-            "pending",
-            "watching",
-            "investigating",
-          ].includes(status),
-          "border-warning bg-warning text-warning-secondary":
-            status === "needs_attention",
-          "border-default bg-surface-level-2 text-secondary": [
-            "paused",
-            "completed",
-          ].includes(status),
-        }
+        "shrink-0",
+        status === "investigating" && "[&_svg]:animate-pulse"
       )}
     >
-      <span
-        className={cn(
-          "size-1.5 rounded-full bg-current",
-          status === "investigating" && "animate-pulse"
-        )}
-      />
       {humanize(status)}
-    </span>
+    </Badge>
   )
 }
 
@@ -113,18 +108,17 @@ export function ExternalLink({
   if (!href || !/^https?:\/\//i.test(href))
     return <span className={className}>{children}</span>
   return (
-    <a
+    <MacawLink
+      variant="xs"
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={cn(
-        "inline-flex items-center gap-space-2 hover:underline",
-        className
-      )}
+      rightDecorator={ArrowUpRightIcon}
+      iconWeight="regular"
+      className={className}
     >
       {children}
-      <ArrowUpRightIcon size={14} weight="regular" className="shrink-0" />
-    </a>
+    </MacawLink>
   )
 }
 

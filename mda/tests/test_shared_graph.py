@@ -11,10 +11,13 @@ import httpx2
 import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
+from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
@@ -23,11 +26,17 @@ from langsmith.sandbox import (
     SandboxAuthenticationError,
     SandboxClientError,
 )
+from managed_deepagents import (
+    DeepAgentDefinition,
+    ManagedServerRuntime,
+    define_deep_agent,
+    shared_factory,
+)
 from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from managed_deepagents.sandbox import SandboxDefinition
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 from rt.backend import Run, current_run
 from rt.run_tools import RunCodeInterpreter
 from runtime_api.catalog import (
@@ -114,6 +123,7 @@ def backend_calls(
     """Every call the runs make on the backend: its endpoint, its bearer and, for an
     operation, the name and grant it was called with."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr(mda_runtime._SharedDefinitions, "_built", OrderedDict())
     monkeypatch.setattr(mda_runtime._SharedGraphs, "_built", OrderedDict())
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     request = httpx2.Request("POST", "https://backend.invalid")
@@ -143,7 +153,10 @@ def backend_calls(
 
 
 async def _run(
-    store: InMemoryStore, thread_id: str, context: dict[str, object]
+    store: InMemoryStore,
+    thread_id: str,
+    context: dict[str, object],
+    messages: list[tuple[str, str]] | None = None,
 ) -> CompiledStateGraph:
     graph = await compile_managed_agent_async(
         agent.agent,
@@ -155,7 +168,7 @@ async def _run(
         async_subagent_graphs=_WORKERS,
     )
     await graph.ainvoke(
-        {"messages": [("user", "Review it")]},
+        {"messages": messages or [("user", "Review it")]},
         _thread(thread_id),
         # The run context as the Agent Server hands it over, which LangGraph reads into the schema.
         context=context,  # ty: ignore[invalid-argument-type]
@@ -194,6 +207,7 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
     assert {bearer for _, bearer, _ in backend_calls} == {"Bearer token-1", "Bearer token-2"}
 
     # Another replica, which never built either graph, reads a thread's state.
+    monkeypatch.setattr(mda_runtime._SharedDefinitions, "_built", OrderedDict())
     monkeypatch.setattr(mda_runtime._SharedGraphs, "_built", OrderedDict())
     read = await compile_managed_agent_async(
         agent.agent,
@@ -331,7 +345,7 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     assert len([operation for _, _, operation in backend_calls if operation]) == 5
     interpreter = next(
         middleware
-        for middleware in agent._parts(agent.GraphInputs()).middleware
+        for middleware in agent._parts("agent").middleware
         if isinstance(middleware, RunCodeInterpreter)
     )
     assert not interpreter._registry._slots
@@ -411,7 +425,7 @@ async def test_failed_code_run_releases_its_interpreter(
 
     interpreter = next(
         middleware
-        for middleware in agent._parts(agent.GraphInputs()).middleware
+        for middleware in agent._parts("agent").middleware
         if isinstance(middleware, RunCodeInterpreter)
     )
     assert any(operation == "lookup:grant" for _, _, operation in backend_calls)
@@ -508,6 +522,7 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
 
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "build_model", build)
     monkeypatch.setattr("rt.middleware.build_model", build)
     monkeypatch.setattr("rt.run_tools.build_model", build)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
@@ -542,6 +557,119 @@ async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
         ("Bearer token-0", "operation_0:grant-0"),
         ("Bearer token-1", "operation_1:grant-1"),
     ]
+
+
+async def test_each_run_compacts_a_long_conversation_with_its_own_model(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """deepagents summarizes with the model its graph is built with, so a graph built with
+    a placeholder summarized every run's conversation with that placeholder."""
+    summarized_by: list[str | None] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        if messages[0].text.startswith(DEEPAGENTS_DEFAULT_SUMMARY_PROMPT[:40]):
+            summarized_by.append(model.name)
+            reply = AIMessage(content="summary")
+        else:
+            reply = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    def build(spec: ModelSpec, **kwargs: object) -> GenericFakeChatModel:
+        return GenericFakeChatModel(
+            messages=iter([]), name=spec.model_id, profile={"max_input_tokens": 40_000}
+        )
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "build_model", build)
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.run_tools.build_model", build)
+    monkeypatch.setattr(
+        agent,
+        "_DEFAULT_MODEL",
+        GenericFakeChatModel(
+            messages=iter([]), name="placeholder", profile={"max_input_tokens": 40_000}
+        ),
+    )
+    store = InMemoryStore()
+    history: list[tuple[str, str]] = [("user", "history " * 600) for _ in range(40)]
+
+    def catalog(model_id: str) -> Catalog:
+        return _catalog("web_search", "grant").model_copy(
+            update={
+                "models": RunModels(
+                    model=ModelSpec(model_id=model_id, kwargs={}),
+                    subagent_model=ModelSpec(model_id=f"{model_id}-child", kwargs={}),
+                    use_gateway=False,
+                )
+            }
+        )
+
+    first = await _run(
+        store, "openai", _context("agent", "token-0", catalog("openai:gpt-test")), history
+    )
+    second = await _run(
+        store, "anthropic", _context("agent", "token-1", catalog("anthropic:test")), history
+    )
+    again = await _run(
+        store, "openai-again", _context("agent", "token-2", catalog("openai:gpt-test")), history
+    )
+
+    assert summarized_by == ["openai:gpt-test", "anthropic:test", "openai:gpt-test"]
+    # One graph per model, shared by every run on it.
+    assert again.nodes["model"] is first.nodes["model"]
+    assert second.nodes["model"] is not first.nodes["model"]
+
+
+async def test_a_shared_factory_builds_once_per_inputs_and_never_sees_the_run(
+    backend_calls: BackendCalls,
+) -> None:
+    """The first run on some inputs builds the graph every later run on them shares, so
+    nothing of that run may reach the build: only the inputs do."""
+    builds: list[tuple[str, bool]] = []
+
+    class Inputs(BaseModel):
+        graph: str
+
+    async def inputs(runtime: ManagedServerRuntime) -> Inputs:
+        execution = runtime.execution_runtime
+        context = execution.context if execution is not None else None
+        return Inputs(graph=str((context or {}).get("graph")))
+
+    @shared_factory(inputs)
+    def probe(built_from: Inputs) -> DeepAgentDefinition:
+        try:
+            get_config()
+            sees_run = True
+        except RuntimeError:
+            sees_run = False
+        builds.append((built_from.graph, sees_run))
+        return define_deep_agent(name="probe", model=GenericFakeChatModel(messages=iter([])))
+
+    async def compile_for(graph: str, thread_id: str) -> CompiledStateGraph:
+        context: dict[str, object] = {"graph": graph}
+        # As a run's own config is in progress around the factory.
+        token = var_child_runnable_config.set(_thread(thread_id))
+        try:
+            return await compile_managed_agent_async(
+                probe,
+                _thread(thread_id),
+                runtime=_ExecutionRuntime(
+                    access_context="threads.create_run", store=InMemoryStore(), context=context
+                ),
+                report_telemetry=False,
+            )
+        finally:
+            var_child_runnable_config.reset(token)
+
+    first = await compile_for("agent", "thread-1")
+    second = await compile_for("agent", "thread-2")
+    other = await compile_for("reviewer", "thread-3")
+
+    assert builds == [("agent", False), ("reviewer", False)]
+    assert second.nodes["model"] is first.nodes["model"]
+    assert other.nodes["model"] is not first.nodes["model"]
 
 
 async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(

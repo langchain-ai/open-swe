@@ -67,9 +67,10 @@ Every call is authenticated with the run token.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
-- **One graph for every run:** the factory builds each graph once per process from what is the same for every run that plays it (`GraphInputs`: the graph, and where its workers report) and declares that to MDA (`_openswe_graph_inputs`, `vendor/mda-changes/2026-10-26-openswe-graph-inputs.md`), which compiles it once and shares it between every run, thread and person, and every read of a thread's state.
+- **One graph per graph and models:** `agent` is a `shared_factory` (`vendor/mda-changes/2026-10-27-shared-factory.md`).
+  MDA builds it only from what is the same for every run that plays the graph on the same models (`GraphInputs`: the graph, the run's models, and where its workers report), once per process for each distinct inputs, and shares its compiled graph between every such run, thread and person, and every read of a thread's state.
   Every graph has the same middleware, so a thread reads alike through any of them.
-  Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the models, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
+  Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the model a call is routed to, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
 
 The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model).
 The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them.
@@ -104,7 +105,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 |---|---|
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 
 The backend:

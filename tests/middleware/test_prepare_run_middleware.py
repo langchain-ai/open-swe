@@ -76,14 +76,16 @@ def test_only_the_changed_participant_is_resent():
     assert "standing_instructions: Never use ripgrep." in (block.text or "")
 
 
-def test_participant_blocks_are_restored_after_compaction():
+@pytest.mark.parametrize(
+    "cut",
+    # In process, and as the runtime forwards it.
+    [{"_summarization_event": {"cutoff_index": 1}}, {"visible_from": 1}],
+)
+def test_participant_blocks_are_restored_after_compaction(cut: dict[str, object]):
     alice = _participant("alice")
     state = cast(
         PrepareRunState,
-        {
-            "messages": [_participant_block(alice), _sender_message("user:alice")],
-            "_summarization_event": {"cutoff_index": 1},
-        },
+        {"messages": [_participant_block(alice), _sender_message("user:alice")], **cut},
     )
 
     assert len(PrepareAgentRunMiddleware._participants_messages(state, [alice])) == 1
