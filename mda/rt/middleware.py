@@ -47,6 +47,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -102,6 +103,7 @@ from rt.box_setup import box_setup
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
+from rt.model_calls import PROMPT_CACHE_TTL
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles
@@ -304,6 +306,31 @@ _TRACES: Final = RunLocal(TurnTrace)
 def turn_trace(run: Run) -> TurnTrace:
     """The trace of the turn ``run`` is playing."""
     return _TRACES.get(run)
+
+
+def _with_run_prompt(
+    static: SystemMessage | None, prompt: str, model: BaseChatModel | str
+) -> SystemMessage:
+    """The graph's own system prompt, then the run's.
+
+    What the graph adds is the same for every run, so it leads and, for Anthropic,
+    ends in a cache breakpoint of its own: a later run with the same tools reuses it
+    whatever its prompt.
+    """
+    if static is None or not static.content:
+        return SystemMessage(content=prompt)
+    blocks: list[str | dict] = (
+        [{"type": "text", "text": static.content}]
+        if isinstance(static.content, str)
+        else list(static.content)
+    )
+    if isinstance(model, ChatAnthropic):
+        last = blocks[-1]
+        blocks[-1] = {
+            **({"type": "text", "text": last} if isinstance(last, str) else last),
+            "cache_control": {"type": "ephemeral", "ttl": PROMPT_CACHE_TTL},
+        }
+    return static.model_copy(update={"content": [*blocks, {"type": "text", "text": prompt}]})
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):
@@ -560,24 +587,28 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if not isinstance(raw, Mapping):
             return await handler(request)
         planned = ModelCall.model_validate(raw)
-        existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
-        request = request.override(system_message=SystemMessage(content=prompt))
+        static = request.system_message
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
         try:
-            return await handler(request)
+            return await handler(
+                request.override(
+                    system_message=_with_run_prompt(static, planned.system_prompt, request.model)
+                )
+            )
         except Exception as exc:
             if planned.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
+            fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
             return await handler(
                 request.override(
-                    model=build_model(planned.fallback, use_gateway=planned.use_gateway)
+                    model=fallback,
+                    system_message=_with_run_prompt(static, planned.system_prompt, fallback),
                 )
             )
 

@@ -511,6 +511,67 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
     assert "queued-1" not in [message.id for message in result["messages"]]
 
 
+async def test_a_moved_scout_stops_before_another_model_or_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    backend = _run_backend(invocation_id="turn")
+    operations: list[str] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "prepare":
+            return PhaseResult(update={"scout_nothing_to_plan": False})
+        if name == "operation":
+            operations.append(str(body["name"]))
+            assert operations == ["walkthrough_describe_other"]
+            return OperationResult(
+                content='{"success": false, "error": "The pull request moved on. Stop."}',
+                state={"scout_nothing_to_plan": True},
+            )
+        if name == "before_model":
+            state = RunCall.model_validate(body).state
+            return BeforeModel(jump_to="end" if state.get("scout_nothing_to_plan") else None)
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    tools = [
+        operation_tool(
+            OperationSpec(name=name, description=name, parameters={"type": "object"}), backend
+        )
+        for name in (
+            "walkthrough_describe_other",
+            "walkthrough_plan_chunk",
+            "check_async_task",
+            "start_async_task",
+        )
+    ]
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            ToolCall(name="walkthrough_describe_other", args={}, id="call-1")
+                        ],
+                    )
+                ]
+            )
+        ),
+        tools=tools,
+        middleware=[BackendRunMiddleware(backend)],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "Plan the walkthrough")]})
+
+    assert operations == ["walkthrough_describe_other"]
+    assert isinstance(result["messages"][-1], ToolMessage)
+    assert result["messages"][-1].tool_call_id == "call-1"
+
+
 async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -797,7 +858,7 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
         list[AgentMiddleware],
         [
             BackendRunMiddleware(backend),
-            *model_call_guards(timeout_seconds=0.05),
+            *model_call_guards(timeout_seconds=1.0),
         ],
     )
     graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
@@ -1218,6 +1279,47 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     started.assert_called_once()
     [[_body, recorded]] = [call.args for call in finished.call_args_list]
     assert recorded.content == "pr_creation_fallback_blocked"
+
+
+@pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
+async def test_execute_searches_through_the_shell_where_grep_and_glob_are_excluded(
+    monkeypatch: pytest.MonkeyPatch, excluded: list[str]
+) -> None:
+    """The model and code mode see an ``execute`` that sends searches to the shell, not
+    to the ``grep`` and ``glob`` tools the run's catalog keeps from them."""
+    from langchain.agents.middleware.types import ModelRequest
+    from rt.remote_files import RemoteFiles, remote_file_tools
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend(catalog=Catalog(excluded=excluded))
+    remote = RemoteFiles(backend, lambda: "run-1")
+    tools = remote_file_tools(remote, "/")
+    original = tools["execute"].description
+    assert "Instead use the grep, glob tools" in original
+    files = FileToolsMiddleware(backend, 300, remote_files=remote)
+    request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[],
+        tools=list(tools.values()),
+        state={"messages": []},
+    )
+    received = AsyncMock()
+
+    await files.awrap_model_call(request, received)
+
+    [offered] = received.call_args.args
+    descriptions = [tool.description for tool in offered.tools if tool.name == "execute"]
+    descriptions.extend(tool.description for tool in files.code_tools(["execute"]))
+    assert len(descriptions) == 2
+    for description in descriptions:
+        if excluded:
+            assert "`git grep -n` or `grep -rn`" in description
+            assert "no separate grep/glob tools" in description
+            assert "Instead use the grep, glob tools" not in description
+            assert "Use glob tool instead" not in description
+            assert "Use grep tool instead" not in description
+        else:
+            assert description == original
 
 
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
