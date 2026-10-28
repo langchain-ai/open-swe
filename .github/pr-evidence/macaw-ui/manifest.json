@@ -1,16 +1,49 @@
 {
-  "source_commit": "28d67ec9a33faba2d658126d660f16a1a1c49412",
-  "product_screenshots": "Local production build with disposable API fixtures; no authenticated backend or Monaco editor QA.",
-  "component_screenshots": "Local fixtures rendering actual dashboard components.",
-  "contrast": "Sampled enabled visible text including finding status >=4.5:1; sampled field borders >=3:1 in light and dark themes. Product field values and placeholders >=4.5:1. Disabled controls, SVGs and gradient avatar initials excluded.",
-  "files": [
-    "automation-light-desktop.png",
-    "automation-dark-mobile.png",
-    "pull-request-card-dark-desktop.png",
-    "review-light-desktop.png",
-    "review-dark-mobile.png",
-    "controls-light-desktop.png",
-    "controls-dark-desktop.png",
-    "repositories-dark-desktop.png"
-  ]
+  "source_commit": "fb4751594375a86a472d1527e6d9f1ef03de37d9",
+  "product_screenshots": "Local production build with disposable API fixtures.",
+  "component_screenshots": "Actual dashboard components mounted in local fixtures.",
+  "limits": [
+    "No authenticated backend or deployment verification.",
+    "Sandboxed artifact iframe content is not part of the focused fixtures.",
+    "Contrast is sampled; disabled controls, SVGs and gradient avatar initials excluded."
+  ],
+  "contrast": "Sampled enabled visible text >=4.5:1 and sampled field borders >=3:1 in light and dark themes; populated and placeholder automation field text >=4.5:1.",
+  "files": {
+    "automation-light-desktop.png": {
+      "sha256": "57e9f92e77b392b7d6d9e3388b03d24712a7e1055050b03385a581995ea255c6"
+    },
+    "automation-dark-mobile.png": {
+      "sha256": "b4cb7bb652b837cab942010fea57e57bf92d9047a216e3d579f6319a7080233f"
+    },
+    "pull-request-card-dark-desktop.png": {
+      "sha256": "281da63dd41093f436655be3fbe4dc4022e1da0565f24c64d0f4e9105db2e5e6"
+    },
+    "review-light-desktop.png": {
+      "sha256": "69ae12f38b315d4d39f27ffdf6c43642d1d45366b910e65f6358c8b534e0766b"
+    },
+    "review-dark-mobile.png": {
+      "sha256": "2138970de84e81346d46b1032779fbcda49fc33776dd8668d8be59fb0e9503c6"
+    },
+    "controls-light-desktop.png": {
+      "sha256": "a833058187cec848c9190d3df6de2941f45b8c68866d97a1de2a6a2f17dc9154"
+    },
+    "controls-dark-desktop.png": {
+      "sha256": "f2c7b28065adb54602bd7e1b1416a45c67736a0254778140eb30a5841e032ce3"
+    },
+    "repositories-dark-desktop.png": {
+      "sha256": "c989a751fc2e8013c6a1e892ff3a3c842d59ccfc033cfae923c58da617da83b9"
+    },
+    "audit-light-desktop.png": {
+      "sha256": "53e2e542b9a514e85c8c3443d9fce275ba76052eb5c1b64a6863888d3f41a0eb"
+    },
+    "audit-dark-desktop.png": {
+      "sha256": "afdb48af45c0c5f6b2c76c640978475cbb4a71fb08c1b09cf1e44cb1a456f395"
+    },
+    "audit-light-mobile.png": {
+      "sha256": "84efacc5a26900327d37f6f9058ed08db114f33491e2d8ee3ec2194b6f0f379f"
+    },
+    "audit-dark-mobile.png": {
+      "sha256": "b4fefbb7e33fecd68e681e50e361c55e21ec68afb0f05d04e451bbf6a4c9e18c"
+    }
+  }
 }
