@@ -1,4 +1,6 @@
 Break out a separate task using the same feature as `/breakout`, with a headline root and self-contained instructions as the first reply.
+The breakout has a separate sandbox: parent `/workspace` paths are available only when their files are transferred.
+Source-thread non-image Slack attachments are staged best-effort and listed under `Slack File Attachments` on success.
 Pass a requested model ID through `model` and reasoning effort through `effort`, not only in `instructions`.
 A model without effort uses its default; effort alone applies to the parent's current model; omitting both preserves inheritance.
 Invalid selections return `available_models` with valid IDs and efforts without creating a thread.
@@ -17,7 +19,7 @@ This selects the new thread's model; it does not switch the current conversation
 
 Set `web_only=true` only when the user explicitly asks for a web breakout (the equivalent of `/breakout:web`).
 Never choose a web breakout proactively or merely because a question seems quick.
-It creates a private, web-only conversation seeded with the full Slack transcript, with no Slack attachment or destination; omit `channel_id`.
+It creates a private, web-only conversation seeded with the full Slack transcript, with no Slack thread binding or destination; omit `channel_id`.
 Share the returned `dashboard_url` with the requester.
 The Slack completion instructions below apply only when `web_only=false`.
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from collections.abc import Mapping
 from typing import Final
 
@@ -19,6 +20,26 @@ _SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
 
 
 MIDDLEWARE_TRACE_POLICY = TracePolicy(process_inputs=omit_payload)
+
+_ENVIRONMENTS: Final = {
+    "open-swe-mda-prod": "production",
+    "open-swe-mda-staging": "staging",
+    "open-swe-mda-preview": "preview",
+}
+
+
+def _deployment_provenance() -> dict[str, JsonValue]:
+    """The MDA code and deployment serving this turn.
+
+    Set on the root explicitly, since LangSmith only fills ``revision_id`` when the run's
+    metadata lacks one, and a queued run's metadata names the deployment that queued it.
+    """
+    provenance: dict[str, JsonValue] = {}
+    if revision := os.environ.get("LANGSMITH_REVISION_ID"):
+        provenance["revision_id"] = revision
+    if environment := _ENVIRONMENTS.get(os.environ.get("MDA_DEPLOYMENT_NAME", "")):
+        provenance["environment"] = environment
+    return provenance
 
 
 class TurnTrace:
@@ -60,10 +81,15 @@ class TurnTrace:
         try:
             self.root = self.current_root()
             if self.root is not None:
-                self.root.metadata.update(metadata)
+                self.root.metadata.update({**metadata, **_deployment_provenance()})
                 self.root.metadata["open_swe_git_evidence"] = {}
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
+
+    def record_model(self, model_id: str) -> None:
+        """Tag the turn with its most recently attempted model, without relabeling child calls."""
+        if self.root is not None:
+            self.root.metadata["model"] = model_id
 
     @staticmethod
     def current_headers() -> dict[str, str]:
@@ -81,7 +107,12 @@ class TurnTrace:
                 if not isinstance(tracer, LangChainTracer):
                     continue
                 span = tracer.run_map.get(str(callbacks.parent_run_id))
-                if span is None or span.extra.get("__disabled") or not span.trace_id:
+                if (
+                    span is None
+                    or span.end_time is not None
+                    or span.extra.get("__disabled")
+                    or not span.trace_id
+                ):
                     return {}
                 headers = span.to_headers()
                 headers["baggage"] = ",".join(

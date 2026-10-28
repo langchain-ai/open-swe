@@ -503,8 +503,33 @@ def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     return dashboard_workflow_approval_url(thread_id, fingerprint)
 
 
+async def _new_branch_base(backend: SandboxBackendProtocol, root: str, head: str) -> str:
+    upstream = await _run_git(backend, root, "rev-parse --symbolic-full-name '@{upstream}'")
+    if upstream.ok and upstream.output:
+        merge_base = await _run_git(
+            backend,
+            root,
+            f"merge-base {shlex.quote(head)} {shlex.quote(_first_line(upstream.output))}",
+        )
+        if merge_base.ok and merge_base.output:
+            return _first_line(merge_base.output)
+
+    git = _git_command(root, "")
+    candidates = await _run_git(
+        backend,
+        root,
+        "for-each-ref --format='%(refname)' refs/remotes/origin/ | "
+        "while IFS= read -r branch; do "
+        '[ "$branch" = refs/remotes/origin/HEAD ] && continue; '
+        f'base=$({git}merge-base {shlex.quote(head)} "$branch") || continue; '
+        f'{git}show -s --format="%ct %H" "$base" || continue; '
+        "done | sort -s -k1,1nr | awk 'NR == 1 {print $2}'",
+    )
+    return _first_line(candidates.output) if candidates.ok else ""
+
+
 async def _workflow_change_for_push(
-    backend: Any, parsed: ParsedGitPush
+    backend: SandboxBackendProtocol, parsed: ParsedGitPush
 ) -> WorkflowPushChange | None:
     root_result = await _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
     if not root_result.ok:
@@ -523,22 +548,17 @@ async def _workflow_change_for_push(
         backend, root, f"rev-parse --verify {shlex.quote(remote_branch)}"
     )
     if remote_branch_exists.ok and _first_line(remote_branch_exists.output):
-        base_ref = remote_branch
-        range_expr = f"{shlex.quote(base_ref)}..{shlex.quote(head)}"
-        base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}")
-        base_sha = _first_line(base_result.output)
+        base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(remote_branch)}")
+        base_sha = _first_line(base_result.output) if base_result.ok else ""
         lease_sha = base_sha
-        if parsed.forced and not _GIT_OBJECT_ID.fullmatch(base_sha):
+        if parsed.forced and not _GIT_OBJECT_ID.fullmatch(lease_sha):
             return parsed.inspection_failed()
     else:
-        origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
-        base_ref = _first_line(origin_head.output) if origin_head.ok else "origin/main"
-        range_expr = f"{shlex.quote(base_ref)}...{shlex.quote(head)}"
-        merge_base = await _run_git(
-            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
-        )
-        base_sha = _first_line(merge_base.output)
+        base_sha = await _new_branch_base(backend, root, head)
         lease_sha = ""
+    if not base_sha:
+        return parsed.inspection_failed()
+    range_expr = f"{shlex.quote(base_sha)}..{shlex.quote(head)}"
 
     names = await _run_git(
         backend,
@@ -574,21 +594,24 @@ async def _workflow_change_for_push(
 
     remote = await _run_git(backend, root, "config --get remote.origin.url")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
-    fixed_refspec = f"{head}:refs/heads/{parsed.remote_branch}"
     fixed_command = parsed.command_for_head(root, head, lease_sha)
     payload: dict[str, object] = {
         "repo": repo,
-        "branch": branch_name,
-        "base_sha": base_sha,
-        "head_sha": head,
         "files": files,
         "diff": diff.output,
         "remote": parsed.remote,
-        "local_ref": parsed.local_ref,
-        "remote_ref": parsed.remote_ref,
-        "fixed_refspec": fixed_refspec,
         "force_with_lease": parsed.force_with_lease,
     }
+    if not repo.startswith(("https://", "http://", "ssh://", "git://", "git@")):
+        payload["repo_dir"] = root
+    if not repo or parsed.forced:
+        payload.update(
+            branch=branch_name,
+            base_sha=base_sha,
+            head_sha=head,
+            local_ref=parsed.local_ref,
+            remote_ref=parsed.remote_ref,
+        )
     if parsed.force_flags:
         payload["force_flags"] = parsed.force_flags
     return WorkflowPushChange(
@@ -676,8 +699,8 @@ def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None
         f"*Diff stat:* {stats.get('files', len(change.files))} files, "
         f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}\n"
         f"*Approval ID:* `{change.fingerprint}`{web_review}\n\n"
-        "Approval resumes this exact push only. If the workflow files change, Open SWE will "
-        "ask again."
+        "Approval covers this workflow diff on branches in this thread and repository. "
+        "Different workflow diffs and lease-protected pushes require separate approval."
     )
 
 

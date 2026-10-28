@@ -1,3 +1,4 @@
+import asyncio
 import json
 import shlex
 import time
@@ -59,6 +60,8 @@ class _Backend:
         if "rev-parse --verify refs/remotes/origin/feature" in command:
             return _Response("", 1)
         if "symbolic-ref --short refs/remotes/origin/HEAD" in command:
+            return _Response("origin/main\n")
+        if "rev-parse --symbolic-full-name" in command:
             return _Response("origin/main\n")
         if "rev-list --parents -n 1" in command:
             if self.inherited_from_main:
@@ -191,6 +194,82 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     )
     assert lease_change is not None
     assert lease_change.fingerprint != change.fingerprint
+    backend.head = "b" * 40
+    same_diff = await guard._workflow_change_for_push(
+        backend, guard.ParsedGitPush("/repo", "origin", "feature", "feature")
+    )
+    assert same_diff is not None
+    assert same_diff.fingerprint == change.fingerprint
+    assert backend.head in same_diff.fixed_command
+    backend.workflow_files = ".github/workflows/other.yml"
+    different_diff = await guard._workflow_change_for_push(
+        backend, guard.ParsedGitPush("/repo", "origin", "feature", "feature")
+    )
+    assert different_diff is not None
+    assert different_diff.fingerprint != change.fingerprint
+
+
+class _GitBackend:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> _Response:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            cwd=self.root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return _Response(output.decode(), process.returncode or 0)
+
+    async def git(self, args: str) -> str:
+        result = await self.aexecute(f"git {args}")
+        assert result.exit_code == 0, result.output
+        return result.output.strip()
+
+
+@pytest.mark.parametrize("upstream", [False, True])
+async def test_release_branch_push_excludes_inherited_workflows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: bool
+) -> None:
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b main")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    workflow = tmp_path / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("main workflow\n")
+    await backend.git("add .")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
+    await backend.git("commit -qm main")
+    await backend.git("update-ref refs/remotes/origin/main HEAD")
+    await backend.git("checkout -b v15-stable")
+    workflow.write_text("release workflow\n")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-02T00:00:00+00:00")
+    await backend.git("commit -qam release")
+    release_sha = await backend.git("rev-parse HEAD")
+    await backend.git("update-ref refs/remotes/origin/v15-stable HEAD")
+    await backend.git("checkout -b feature")
+    (tmp_path / "uv.lock").write_text("dependency update\n")
+    await backend.git("add uv.lock")
+    await backend.git("commit -qm dependency")
+    if upstream:
+        await backend.git("config remote.origin.url https://github.com/example/repo.git")
+        await backend.git("config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'")
+        await backend.git("branch --set-upstream-to=origin/v15-stable")
+    monkeypatch.setattr(guard, "_backend", AsyncMock(return_value=backend))
+    request = _Request(f"git -C {shlex.quote(str(tmp_path))} push origin feature")
+    middleware = guard.WorkflowPushGuardMiddleware()
+    assert await middleware._change_for_request(request) is None
+
+    workflow.write_text("new workflow\n")
+    await backend.git("commit -qam workflow")
+    change = await middleware._change_for_request(request)
+    assert change is not None
+    assert change.base_sha == release_sha
+    assert "-release workflow" in change.diff_preview
+    assert "+new workflow" in change.diff_preview
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:

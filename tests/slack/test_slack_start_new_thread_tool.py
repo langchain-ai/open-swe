@@ -12,7 +12,7 @@ from openswe.credential_scope import (
     private_credential_login,
 )
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.slack import solo_threads
+from openswe.slack import solo_threads, staged_files
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
 from openswe.users.models import User, UserIdentity
@@ -145,10 +145,96 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
     monkeypatch.setattr(
+        slack_breakout_tool, "fetch_slack_thread_messages", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
         slack_breakout_tool,
         "cached_workspace_settings",
         AsyncMock(return_value=WorkspaceSettings({"fable_enabled": False})),
     )
+
+
+@pytest.mark.parametrize("failure", [None, "fetch"])
+async def test_breakout_queues_source_thread_files_best_effort(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
+    sandbox_path = "/workspace/.open-swe/slack-files/recording.mov"
+    source_thread = {"channel_id": "C_MOVED", "thread_ts": "1700000001.000001"}
+    fetch = AsyncMock(
+        return_value=[
+            {
+                "files": [
+                    {
+                        "name": "recording.mov",
+                        "mimetype": "video/quicktime",
+                        "url_private": "https://files.slack.com/recording.mov",
+                    },
+                    {
+                        "name": "screenshot.png",
+                        "mimetype": "image/png",
+                        "url_private": "https://files.slack.com/screenshot.png",
+                    },
+                ]
+            }
+        ]
+    )
+    if failure == "fetch":
+        fetch.side_effect = RuntimeError("Slack unavailable")
+    pending: dict[str, dict[str, object]] = {}
+
+    async def read_metadata(thread_id: str) -> dict[str, object]:
+        assert thread_id != "parent-thread"
+        return {}
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        pending[thread_id] = metadata
+
+    dispatch = AsyncMock(return_value={"run_id": "run-123"})
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    monkeypatch.setattr(
+        slack_breakout_tool, "get_active_slack_thread", AsyncMock(return_value=source_thread)
+    )
+    monkeypatch.setattr(slack_breakout_tool, "fetch_slack_thread_messages", fetch)
+    monkeypatch.setattr("openswe.sandboxes.state.get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr(
+        staged_files,
+        "get_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(update=write_metadata)),
+    )
+    monkeypatch.setattr(
+        slack_breakout_tool,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value="1700000002.0"),
+    )
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "allow_solo_thread_followup", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
+    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
+
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Investigate recording", "Investigate the attached recording.", channel_id="C2"
+    )
+
+    assert result["success"] is True
+    content = dispatch.call_args.args[1]
+    fetch.assert_awaited_once_with("C_MOVED", "1700000001.000001")
+    if failure is None:
+        assert "## Slack File Attachments" in content
+        assert sandbox_path in content
+        assert pending == {
+            result["thread_id"]: {
+                staged_files.PENDING_SLACK_FILES_KEY: [
+                    {"url": "https://files.slack.com/recording.mov", "path": sandbox_path}
+                ]
+            }
+        }
+    else:
+        assert "## Slack File Attachments" not in content
+        assert sandbox_path not in content
+        assert pending == {}
 
 
 @pytest.mark.parametrize(

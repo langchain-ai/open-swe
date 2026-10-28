@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -27,6 +28,13 @@ RUN = RemoteRun(
     configurable={"repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7},
     expires_at=int(time.time()) + 3600,
 )
+
+
+def _asgi_receive(body: bytes) -> Receive:
+    """Like an ASGI server: the body once, then nothing until the client disconnects."""
+    messages: asyncio.Queue[Message] = asyncio.Queue()
+    messages.put_nowait({"type": "http.request", "body": body, "more_body": False})
+    return messages.get
 
 
 @pytest.fixture(autouse=True)
@@ -115,6 +123,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     from openswe.agent_api import agent
     from openswe.agent_api import graph as graph_module
     from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware.model_selection import RouteSelection
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.utils.model import provider_model_kwargs
@@ -122,7 +131,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     async def never_planned(config: object, surface: ToolSurface) -> None:
         raise AssertionError("A call around a model call never plans the run")
 
-    classify = AsyncMock(return_value="fast")
+    classify = AsyncMock(return_value=RouteSelection("fast"))
     refresh = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
@@ -140,7 +149,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     context = await graph.api(run, "task_context", {"run_id": "run-1"})
     refreshed = await graph.api(run, "refresh_github_proxy", {"run_id": "run-1"})
 
-    assert route == {"route": "fast"}
+    assert route == {"route": "fast", "persist": True}
     classify.assert_awaited_once_with("Fix the login")
     assert isinstance(chosen, dict)
     assert chosen["model_id"] == "anthropic:claude-opus-5-5"
@@ -607,8 +616,7 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
         "state": {"remote_run": RUN},
     }
 
-    async def receive() -> Message:
-        return {"type": "http.request", "body": json.dumps({"run_id": "mda-run-1"}).encode()}
+    receive = _asgi_receive(json.dumps({"run_id": "mda-run-1"}).encode())
 
     async def send(message: Message) -> None:
         pass
@@ -638,6 +646,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     # A thread with no box of MDA's, so the catalog reads no thread metadata.
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.runnables import RunnableConfig
@@ -703,6 +712,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
+    metadata = catalog["trace_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
@@ -983,11 +995,9 @@ async def _call_status(
     }
     sent: list[Message] = []
 
-    async def receive() -> Message:
-        body = (
-            b'{"thread_id": "worker", "instructions": "Fix it"}' if endpoint == "adopt" else b"{}"
-        )
-        return {"type": "http.request", "body": body}
+    receive = _asgi_receive(
+        b'{"thread_id": "worker", "instructions": "Fix it"}' if endpoint == "adopt" else b"{}"
+    )
 
     async def send(message: Message) -> None:
         sent.append(message)
@@ -1035,13 +1045,10 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     }
     sent: list[Message] = []
 
-    async def receive() -> Message:
-        return {"type": "http.request", "body": b"{}"}
-
     async def send(message: Message) -> None:
         sent.append(message)
 
-    await server.API(scope, receive, send)
+    await server.API(scope, _asgi_receive(b"{}"), send)
 
     wait_for_all_tracers()
     assert sent[0]["status"] == 200
@@ -1117,8 +1124,7 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
         }
         sent: list[Message] = []
 
-        async def receive() -> Message:
-            return {"type": "http.request", "body": body}
+        receive = _asgi_receive(body)
 
         async def send(message: Message) -> None:
             sent.append(message)
@@ -1276,6 +1282,106 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
             "error": "boom",
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "outcome"),
+    [
+        ("prepare", outcome)
+        for outcome in (
+            "disconnect",
+            "disconnect_cancel",
+            "cancel",
+            "success",
+            "unknown",
+            "failure",
+        )
+    ]
+    + [("operation", "finish"), ("run_ended", "finish")],
+)
+async def test_only_preparation_is_cancelled_on_disconnect(
+    monkeypatch: pytest.MonkeyPatch, endpoint: str, outcome: str
+) -> None:
+    from runtime_api.endpoint import UnknownEndpointError
+
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    cleaning_up = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+    cleaned_up = asyncio.Event()
+    messages: asyncio.Queue[Message] = asyncio.Queue()
+    messages.put_nowait({"type": "http.request", "body": b"{}", "more_body": False})
+    sent: list[Message] = []
+
+    async def graph(run: RemoteRun, name: str, body: JsonValue) -> JsonValue:
+        try:
+            started.set()
+            if outcome == "finish":
+                await finish.wait()
+            if outcome in ("disconnect", "disconnect_cancel", "cancel"):
+                await asyncio.Event().wait()
+            if outcome == "unknown":
+                raise UnknownEndpointError(name)
+            if outcome == "failure":
+                raise RuntimeError("checkout failed")
+            return {"prepared": True}
+        finally:
+            cleaning_up.set()
+            if outcome == "disconnect_cancel":
+                await allow_cleanup.wait()
+            await asyncio.sleep(0)
+            cleaned_up.set()
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    monkeypatch.setattr(server, "_graphs", lambda: {RUN.assistant_id: graph})
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": f"/agent-api/{endpoint}",
+        "headers": [],
+        "path_params": {"endpoint": endpoint},
+        "state": {"remote_run": RUN},
+    }
+    task = asyncio.create_task(server.api_endpoint(scope, messages.get, send))
+    await asyncio.wait_for(started.wait(), 5)
+    if outcome in ("disconnect", "disconnect_cancel", "finish"):
+        messages.put_nowait({"type": "http.disconnect"})
+    if outcome == "finish":
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        finish.set()
+    if outcome == "disconnect_cancel":
+        await asyncio.wait_for(cleaning_up.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not task.done()
+        allow_cleanup.set()
+    if outcome in ("cancel", "disconnect_cancel"):
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+    else:
+        await asyncio.wait_for(task, 5)
+    assert cleaned_up.is_set()
+    if outcome in ("disconnect", "disconnect_cancel", "cancel"):
+        assert sent == []
+    else:
+        assert (
+            sent[0]["status"]
+            == {"success": 200, "finish": 200, "unknown": 404, "failure": 500}[outcome]
+        )
+        assert (
+            json.loads(sent[1]["body"])
+            == {
+                "success": {"prepared": True},
+                "finish": {"prepared": True},
+                "unknown": {"detail": "Unknown endpoint prepare"},
+                "failure": {"error": "RuntimeError", "message": "checkout failed"},
+            }[outcome]
+        )
 
 
 @pytest.mark.parametrize(

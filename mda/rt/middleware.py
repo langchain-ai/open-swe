@@ -523,6 +523,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if own is not None:
             # The run's own model, unless the loop names another for this call.
             request = request.override(model=own)
+            models = self._backend.run.catalog.models
+            if models is not None:
+                self._traces.get(self._backend.run).record_model(models.model.model_id)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
             return await handler(request)
@@ -533,6 +536,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
+            self._traces.get(self._backend.run).record_model(model.model_id)
         try:
             return await handler(
                 request.override(
@@ -545,6 +549,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
             fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            self._traces.get(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(
                 request.override(
                     model=fallback,

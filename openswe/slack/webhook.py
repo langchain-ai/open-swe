@@ -43,9 +43,9 @@ from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.slack.staged_files import (
-    SlackFileEntry,
-    StagedSlackFile,
     queue_slack_files,
+    slack_file_entries,
+    slack_files_section,
 )
 from openswe.slack.thinking import (
     clear_slack_thinking_status_if_idle,
@@ -202,49 +202,6 @@ async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[set[st
 
 
 _SLACK_CONTEXT_SENDER_ID = "system:slack-context"
-
-_MAX_SLACK_FILE_ATTACHMENTS = 10
-
-
-def _slack_file_entries(messages: list[dict[str, Any]]) -> list[SlackFileEntry]:
-    """Non-image files attached to the given messages, in first-seen order."""
-    entries: list[SlackFileEntry] = []
-    seen: set[str] = set()
-    for message in messages:
-        files = message.get("files")
-        if not isinstance(files, list):
-            continue
-        for file_info in files:
-            if not isinstance(file_info, dict) or file_info.get("url_private") in (None, ""):
-                continue
-            mimetype = file_info.get("mimetype")
-            if isinstance(mimetype, str) and mimetype.startswith("image/"):
-                continue
-            url = str(file_info["url_private"])
-            if url in seen:
-                continue
-            seen.add(url)
-            entries.append(
-                SlackFileEntry(
-                    name=file_info.get("name") if isinstance(file_info.get("name"), str) else "",
-                    url=url,
-                )
-            )
-            if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
-                return entries
-    return entries
-
-
-def _slack_files_section(staged: list[StagedSlackFile]) -> str:
-    lines = [
-        "## Slack File Attachments",
-        "These files from Slack were staged into this thread's sandbox:",
-        *[
-            f"- `{file.sandbox_path}` (originally uploaded to Slack as `{file.filename}`)"
-            for file in staged
-        ],
-    ]
-    return "\n".join(lines)
 
 
 async def _slack_accounts_by_user_id(
@@ -1280,9 +1237,9 @@ async def _process_slack_mention_impl(
         return False
 
     if persisted:
-        staged_files = await queue_slack_files(thread_id, _slack_file_entries(source_messages))
+        staged_files = await queue_slack_files(thread_id, slack_file_entries(source_messages))
         if staged_files:
-            files_section = _slack_files_section(staged_files)
+            files_section = slack_files_section(staged_files)
             turn_context = f"{turn_context}\n\n{files_section}" if turn_context else files_section
 
     # Anything said in a DM is said to Open SWE, and the person expects the next

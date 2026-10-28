@@ -240,6 +240,7 @@ from openswe.server import (
     direct_and_from_code,
 )
 from openswe.slack.tools.reply import send_slack_reply
+from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
 
 logger = logging.getLogger(__name__)
@@ -478,7 +479,10 @@ class RunSession:
         run = self.run
         return catalog.model_copy(
             update={
-                "trace_metadata": TurnGitMetadata(self.config).actor,
+                "trace_metadata": {
+                    **TurnGitMetadata(self.config).actor,
+                    **agent_version_metadata(),
+                },
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
@@ -882,7 +886,7 @@ class TokenRun:
         )
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
-            update={} if taken.reply_surface is None else {"reply_surface": taken.reply_surface},
+            update=taken.state_update(request.run_id),
             items=InboxItems(queued=taken.queued, events=taken.events),
         )
 
@@ -1045,7 +1049,8 @@ class TokenRun:
 
     async def route_model(self, request: Routed) -> Route:
         """The route the person's latest request takes."""
-        return Route(route=await classify_route(messages_from_dict(request.humans)))
+        selection = await classify_route(messages_from_dict(request.humans))
+        return Route(route=selection.route, persist=selection.persist)
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)
