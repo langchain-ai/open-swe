@@ -297,6 +297,55 @@ async def test_a_tool_call_the_backend_never_answered(
 
 
 @pytest.mark.parametrize(
+    ("arguments", "takes", "succeeds"),
+    [({}, 121.0, False), ({"timeout": 1200}, 1500.0, True)],
+)
+async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, JsonValue],
+    takes: float,
+    succeeds: bool,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    request = httpx2.Request("POST", "https://backend.invalid")
+
+    async def post(*args: object, timeout: float, **kwargs: object) -> httpx2.Response:
+        if takes > timeout:
+            raise httpx2.ReadTimeout("stalled backend")
+        return httpx2.Response(200, request=request, json={"content": "done"})
+
+    client = MagicMock(is_closed=False)
+    client.post = post
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    served = operation_tool(
+        OperationSpec(
+            name="get_thread",
+            description="Operation",
+            parameters={"type": "object"},
+            seconds=120.0,
+        ),
+        _run_backend(),
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    assert served.coroutine is not None
+    result = await served.coroutine(runtime=runtime, **arguments)
+    assert isinstance(result, ToolMessage)
+    if succeeds:
+        assert result.content == "done"
+    else:
+        assert result.status == "error"
+        assert "did not answer" in result.content
+
+
+@pytest.mark.parametrize(
     ("endpoint", "status"),
     [
         (PREPARE, 504),
