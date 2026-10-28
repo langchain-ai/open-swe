@@ -44,6 +44,29 @@ class TestConfigureSandboxProxy:
 
     async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
+        cloud_rules = [
+            {
+                "name": "aws",
+                "type": "aws",
+                "enabled": True,
+                "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly"},
+            },
+            {
+                "name": "gcp",
+                "type": "gcp",
+                "gcp": {
+                    "workload_identity_provider": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider"
+                },
+            },
+            {
+                "name": "azure",
+                "type": "azure",
+                "azure": {
+                    "tenant_id": "00000000-0000-0000-0000-000000000001",
+                    "client_id": "00000000-0000-0000-0000-000000000002",
+                },
+            },
+        ]
         with (
             patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
@@ -57,12 +80,12 @@ class TestConfigureSandboxProxy:
             await configure_sandbox_proxy(
                 "sandbox-abc123",
                 "token",
-                base_proxy_config={"rules": [custom_rule], "enabled": True},
+                base_proxy_config={"rules": [custom_rule, *cloud_rules], "enabled": True},
             )
 
         proxy_config = mock_client.patch.call_args.kwargs["json"]["proxy_config"]
         assert proxy_config["enabled"] is True
-        assert custom_rule in proxy_config["rules"]
+        assert proxy_config["rules"][2:] == [custom_rule, *cloud_rules]
         assert [rule["name"] for rule in proxy_config["rules"][:2]] == ["github-api", "github"]
 
     async def test_retries_transient_http_error(self) -> None:
@@ -191,10 +214,6 @@ class TestRefreshProxyOnSandboxReuse:
                     response=response,
                 ),
             ),
-            patch(
-                "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-            ) as mock_create,
-            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from openswe.sandboxes.lifecycle import (
                 SandboxUnreachableError,
@@ -205,7 +224,6 @@ class TestRefreshProxyOnSandboxReuse:
                 await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
-            mock_create.assert_not_awaited()
 
 
 class TestRefreshThreadGithubProxy:
@@ -232,7 +250,6 @@ class TestRefreshThreadGithubProxy:
             patch(
                 "openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock
             ) as configure,
-            patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
             from openswe.sandboxes.lifecycle import refresh_thread_github_proxy
             from openswe.sandboxes.state import SANDBOX_BACKENDS

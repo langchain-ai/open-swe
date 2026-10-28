@@ -39,6 +39,8 @@ class RunCall(RunRequest):
 class Prepare(RunCall):
     # The thread's box, which the runtime opened before preparing; None when it could not.
     sandbox_id: str | None = None
+    # Why the runtime could not open it, secrets removed.
+    sandbox_error: str | None = None
 
 
 class PhaseResult(BaseModel):

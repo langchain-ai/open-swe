@@ -17,11 +17,10 @@ its own.
 import asyncio
 import logging
 import os
-from collections import OrderedDict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import ClassVar, Final, Literal, cast
+from typing import Final, Literal, cast
 from weakref import WeakKeyDictionary
 
 import httpx2
@@ -41,10 +40,9 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from runtime_api.catalog import CATALOG, Catalog, OperationSpec
+from runtime_api.catalog import Catalog, OperationSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import RunCall
-from runtime_api.operations import RunRequest
 from runtime_api.workers import ADOPT, Adopt
 
 from rt.outbox import Outbox
@@ -218,8 +216,6 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
 
 
 Graph = Literal["agent", "reviewer", "review-scout"]
-# Catalogs a process fetched building a run's graph, kept until the run itself asks.
-_FETCHED_KEPT: Final = 32
 
 
 class Run:
@@ -231,12 +227,8 @@ class Run:
     (``current_run``) and read what they need from it.
     """
 
-    # Catalogs fetched while building a run's graph, by the token or grant it started
-    # with, so the run need not fetch its own again.
-    _fetched: ClassVar[OrderedDict[str, Catalog]] = OrderedDict()
-
     def __init__(self, context: RunContext) -> None:
-        self._started_with = context.run_token or context.worker_grant
+        # Dispatch sends the catalog it planned the run with in every run's context.
         self._carried = context.catalog
         self._token = context.run_token
         self._worker_grant = context.worker_grant if context.run_token is None else None
@@ -270,43 +262,17 @@ class Run:
         """A launched worker that has not yet traded its grant for a run token of its own."""
         return self._token is None and self._worker_grant is not None
 
-    async def plan(self) -> Catalog:
-        """What the backend planned for the run as it started it.
-
-        A run started without it asks for it, and every later call carries the token
-        the backend signed with it.
-        """
-        if self._planned is not None or self._carried is not None:
-            return self.planned
-        fetched = (
-            self._fetched.pop(self._started_with, None) if self._started_with is not None else None
-        )
-        if fetched is not None:
-            planned = fetched
-        elif self.has_run:
-            planned = await self.backend.catalog(None)
-            if self._started_with is not None:
-                self._fetched[self._started_with] = planned
-                while len(self._fetched) > _FETCHED_KEPT:
-                    self._fetched.popitem(last=False)
-        else:
-            # Runs without a context (state reads, assistant reads) never call a model or a tool.
-            planned = Catalog()
-        self._planned_with(planned)
-        return planned
-
-    def _planned_with(self, planned: Catalog) -> None:
-        if planned.run_token is not None and self._token is not None:
-            self._token = planned.run_token
-        self._planned = planned
-
     @property
     def planned(self) -> Catalog:
         """The catalog the run started with: its coordinator's, for a launched worker."""
-        if self._planned is None and self._carried is not None:
-            self._planned_with(Catalog.model_validate(self._carried))
         if self._planned is None:
-            raise BackendCallError("The run's catalog is read only once the run starts")
+            if self._carried is not None:
+                self._planned = Catalog.model_validate(self._carried)
+            elif self.has_run:
+                raise BackendCallError("The run started without its catalog")
+            else:
+                # Runs without a context (state reads, assistant reads) never call a model or a tool.
+                self._planned = Catalog()
         return self._planned
 
     @property
@@ -323,9 +289,7 @@ class Run:
         )
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
-        self.adopted = adopted.catalog or await self.backend.catalog(run_id)
-        if self.adopted.run_token is not None:
-            self._token = self.adopted.run_token
+        self.adopted = adopted.catalog
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
@@ -492,10 +456,6 @@ class OpenSweBackend:
                 )
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
-
-    async def catalog(self, run_id: str | None) -> Catalog:
-        """The run's catalog, for a run started without it."""
-        return await call(self, CATALOG, RunRequest(run_id=run_id))
 
     def grant(self, spec: OperationSpec) -> str | None:
         return self.run.grant(spec.name)

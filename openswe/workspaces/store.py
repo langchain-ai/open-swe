@@ -61,6 +61,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
+from openswe.workspaces.cloud_identity import validate_access_delegation, validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -248,9 +249,8 @@ def script_root() -> str:
     """Where a workspace's scripts and their logs live inside a sandbox.
 
     ``/open-swe/environment`` in a real sandbox, where the agent runs as root.
-    Configurable
-    because ``SANDBOX_TYPE=local`` executes on a developer's own machine, whose
-    filesystem root is not writable.
+    Configurable because the E2E's stand-in sandboxes run on a developer's own
+    machine, whose filesystem root is not writable.
     """
     return ENV.OPENSWE_SCRIPT_ROOT.get().strip().rstrip("/") or DEFAULT_SCRIPT_ROOT
 
@@ -405,6 +405,8 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
         raise ValueError(f"create_params must be at most {CREATE_PARAMS_MAX_CHARS} JSON characters")
     if _has_sensitive_create_param(params):
         raise ValueError("create_params must not contain secrets or authentication credentials")
+    validate_cloud_identity(params)
+    validate_access_delegation(params)
     return params
 
 
@@ -698,11 +700,7 @@ class Workspace(BaseModel):
         secrets) can tighten after a record was stored, and shipping a stale
         record's params to the platform would bypass the newer rule.
         """
-        try:
-            return _validate_create_params(self.create_params)
-        except ValueError:
-            logger.warning("Ignoring invalid sandbox create params", extra={"workspace": self.slug})
-            return {}
+        return _validate_create_params(self.create_params)
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
         """Name/slug/refresh-state for the workspace picker and the settings page.
@@ -1661,15 +1659,6 @@ async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str
     return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
 
 
-def require_capture_support() -> None:
-    """Only the langsmith provider has a snapshot API to capture into."""
-    sandbox_type = ENV.SANDBOX_TYPE.get()
-    if sandbox_type != "langsmith":
-        raise RuntimeError(
-            f"capturing a workspace snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
-        )
-
-
 async def _delete_snapshot(snapshot_id: object) -> None:
     """Best-effort delete of a superseded snapshot."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
@@ -1702,12 +1691,7 @@ async def capture_workspace_snapshot(
     The previous snapshot survives a failed capture, in both senses: it is deleted
     only once the new one is ready, and the record stays ``ready`` so runs keep
     booting from it instead of dropping to the base image.
-
-    Only the langsmith provider can capture; other providers have no snapshot API
-    to capture into, so this raises rather than failing deep in the SDK.
     """
-    require_capture_support()
-
     record = await WORKSPACES.get(slug)
     if record is None:
         raise ValueError(f"no workspace named {slug!r}")
@@ -1750,7 +1734,6 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
         get_async_sandbox_client,
     )
 
-    require_capture_support()
     async with get_async_sandbox_client() as client:
         snapshot = await capture_snapshot_with_tag(
             client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout

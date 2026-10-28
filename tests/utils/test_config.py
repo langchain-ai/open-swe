@@ -56,4 +56,4 @@ def test_undeclared_variables_are_errors() -> None:
         _ = ENV.NOT_A_DECLARED_VARIABLE
     with pytest.raises(KeyError):
         _ = ENV["NOT_A_DECLARED_VARIABLE"]
-    assert "SANDBOX_TYPE" in ENV
+    assert "LANGSMITH_API_KEY" in ENV

@@ -119,13 +119,13 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-bg-separator-override: var(--bg-surface-level-1-hover);
   --diffs-bg-buffer-override: var(--diffs-surface);
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-success-strong));
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-success-strong));
+  --diffs-bg-addition-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-success-strong)));
+  --diffs-bg-addition-number-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-success-strong)));
   --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-success-strong));
   --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-success-strong));
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-error-strong));
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-error-strong));
+  --diffs-bg-deletion-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-error-strong)));
+  --diffs-bg-deletion-number-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-error-strong)));
   --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-error-strong));
   --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-error-strong));
 
@@ -135,6 +135,15 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, monospace;
 
   background-color: var(--diffs-surface) !important;
+}
+
+[data-line-type="change-addition"],
+[data-line-type="change-deletion"] {
+  --mix-light: 80%;
+}
+
+:is([data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) {
+  --mix-light: 75%;
 }
 
 [data-file-info] {

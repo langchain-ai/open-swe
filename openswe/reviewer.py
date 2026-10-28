@@ -82,7 +82,7 @@ from openswe.runtime import (
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.state import SandboxHandedOverError, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools import (
@@ -531,9 +531,9 @@ async def ensure_reviewer_sandbox_for_thread(
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
-        # thread per PR, re-triggered on every push. Refusing to replace an
+        # thread per PR, re-triggered on every push. Staying bound to an
         # unreachable one would brick reviews on that PR for good.
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 
@@ -626,10 +626,12 @@ async def prepare_reviewer_run(
             try:
                 sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
             except SandboxUnreachableError as exc:
-                # Replacement was allowed and still failed, so this run dies without a
-                # sandbox. Say so on the PR instead of leaving it looking unreviewed.
+                # This run dies without a sandbox. Say so on the PR instead of leaving
+                # it looking unreviewed.
                 await post_sandbox_unreachable_notification(
-                    config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+                    config or {},
+                    sandbox_id=exc.sandbox_id,
+                    handed_to_mda=isinstance(exc, SandboxHandedOverError),
                 )
                 raise
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)

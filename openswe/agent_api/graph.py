@@ -65,7 +65,6 @@ from langgraph.types import Command
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
 from runtime_api.catalog import (
-    CATALOG,
     SEARCH_TOOLS,
     Catalog,
     FilesSpec,
@@ -186,7 +185,7 @@ from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipt
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
-from openswe.agent_api.tokens import RemoteRun, RunSettings, sign_runtime_token
+from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
@@ -209,6 +208,7 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
+from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -437,12 +437,12 @@ class RunSession:
             ),
         )
 
-    async def plan(self, run: RemoteRun | None = None) -> Catalog:
+    async def plan(self) -> Catalog:
         """The catalog, with who the run acts for, the box MDA creates for it, and the grant
-        of each operation to the run (``run``, or the one this session serves)."""
+        of each operation to the run this session serves."""
         sandbox = await self.sandbox()
         catalog = self.catalog()
-        run = run or self.run
+        run = self.run
         return catalog.model_copy(
             update={
                 "trace_metadata": TurnGitMetadata(self.config).actor,
@@ -475,11 +475,24 @@ class RunSession:
             return None
         return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
 
-    async def bind_sandbox(self, sandbox_id: str | None) -> None:
-        """Bind the thread to the box MDA opened before preparing, if MDA owns it."""
+    async def bind_sandbox(self, request: Prepare) -> None:
+        """Bind the thread to the box MDA opened before preparing, if MDA owns it.
+
+        A thread with no box to work in ends the run once the person knows why.
+        """
         cfg = RunConfig.from_config(self.config)
-        if cfg.thread_id is not None and await self.sandbox() is not None:
-            await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
+        if cfg.thread_id is None or await self.sandbox() is None:
+            return
+        try:
+            await bind_mda_sandbox(
+                cfg.thread_id,
+                request.sandbox_id,
+                open_error=request.sandbox_error,
+                workspace_slug=cfg.workspace_slug,
+            )
+        except SandboxUnreachableError as exc:
+            await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
+            raise
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
@@ -595,7 +608,7 @@ class RunSession:
 
     async def prepare(self, request: Prepare) -> PhaseResult:
         # MDA opened the box before preparing; preparation connects to it as to any other.
-        await self.bind_sandbox(request.sandbox_id)
+        await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
         if self.surface.inbox is not None and cfg.thread_id is not None:
             # The events this run was started to carry are its input: it holds them now.
@@ -1215,17 +1228,6 @@ def _message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
     return [block for block in content if isinstance(block, str | dict)]
 
 
-async def _catalog(session: RunSession, _request: RunRequest) -> Catalog:
-    """The catalog of a run started without it, and a token that carries what was decided."""
-    if session.run is None:
-        return await session.plan()
-    run = session.run.model_copy(update={"settings": session.settings()})
-    if run.grant_id is None:
-        run = run.granting()
-    catalog = await session.plan(run)
-    return catalog.model_copy(update={"run_token": sign_runtime_token(run)})
-
-
 def _b64(data: bytes | None) -> str | None:
     return None if data is None else base64.b64encode(data).decode()
 
@@ -1355,8 +1357,6 @@ TOOL_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
 # The calls answered from the run's plan: its preparation, and every phase and tool
 # call of a run still served from it.
 API: Final = Handlers[RunSession]()
-# Only for runs started without their catalog in the context.
-API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(AFTER_MODEL, RunSession.after_model)
