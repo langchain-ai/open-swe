@@ -274,7 +274,7 @@ def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     return set(latest.values())
 
 
-def _visible_messages(state: Mapping[str, Any]) -> Sequence[object]:
+def _visible_messages(state: Mapping[str, object]) -> Sequence[object]:
     messages = state.get("messages")
     if not isinstance(messages, (list, tuple)):
         return []
@@ -296,7 +296,7 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     return dynamic_context_hashes_from_messages(_visible_messages(state))
 
 
-def latest_visible_dynamic_context_hash(state: Mapping[str, Any], kind: str) -> str | None:
+def latest_visible_dynamic_context_hash(state: Mapping[str, object], kind: str) -> str | None:
     """Hash of the newest visible context block of ``kind``, which supersedes older ones."""
     opening = f'<dynamic-context kind="{kind}"'
     for message in reversed(_visible_messages(state)):
