@@ -1114,11 +1114,10 @@ def recent_turns(messages: list[dict[str, Any]], limit: int) -> list[dict[str, A
 
 async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[dict[str, Any]]:
     """The channel conversation a PR thread continues, for the PR thread's first run."""
-    client = common.get_client(url=common.LANGGRAPH_URL)
     try:
-        if _state_messages(await client.threads.get_state(pr_thread_id)):
+        if _state_messages(await THREADS.state(pr_thread_id)):
             return []
-        messages = _state_messages(await client.threads.get_state(channel_thread_id))
+        messages = _state_messages(await THREADS.state(channel_thread_id))
     except Exception:  # noqa: BLE001 - the review still runs, without the conversation
         common.logger.warning(
             "Could not read the channel conversation a PR thread continues",
@@ -1211,11 +1210,9 @@ async def process_github_pr_comment(
         thread_id = pr_comment_thread_id(
             repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
         )
-        await create_thread(
-            common.get_client(url=common.LANGGRAPH_URL),
+        await THREADS.create(
             thread_id,
             title=f"PR #{pr_number}",
-            if_exists="do_nothing",
             metadata={"branch_name": branch_name, CONTINUES_THREAD_KEY: continues_thread},
         )
 
