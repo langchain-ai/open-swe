@@ -244,6 +244,9 @@ class Run:
         self._planned: Catalog | None = None
         # The worker's own catalog, once it adopted a run token.
         self.adopted: Catalog | None = None
+        # Operations its catalog leaves out that code mode called, as the backend named
+        # each with the run's grant, by the name code mode called it by; None for none.
+        self.found: dict[str, OperationSpec | None] = {}
         self.backend = OpenSweBackend(self)
         # What the run tells the backend happened, until the backend takes it.
         self.outbox = Outbox(self.backend)
@@ -296,10 +299,13 @@ class Run:
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
         self.adopted = adopted.catalog
+        # Found under the coordinator's grants.
+        self.found.clear()
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
-        own = next((op for op in self.catalog.operations if op.name == name), None)
+        found = (op for op in self.found.values() if op is not None)
+        own = next((op for op in (*self.catalog.operations, *found) if op.name == name), None)
         return None if own is None else own.grant
 
 

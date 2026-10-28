@@ -50,6 +50,7 @@ from runtime_api.catalog import (
     SubagentSpec,
 )
 from runtime_api.reports import Reports
+from runtime_api.tool_search import FoundOperation
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
@@ -141,6 +142,20 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
+        if hook == "find_operation":
+            calls[-1] = (hook, headers["Authorization"], str(json["code_name"]))
+            found = FoundOperation(
+                operation=OperationSpec(
+                    name="withheld_lookup",
+                    description="An operation the catalog leaves out.",
+                    parameters={},
+                    code_name="withheldLookup",
+                    grant="found-grant",
+                )
+                if json["code_name"] == "withheldLookup"
+                else None
+            )
+            return httpx2.Response(200, request=request, json=found.model_dump(mode="json"))
         if hook == "reports":
             taken = {"replies": [{} for _ in Reports.model_validate(json).items]}
             return httpx2.Response(200, request=request, json=taken)
@@ -350,6 +365,28 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     )
     assert not interpreter._registry._slots
     assert not interpreter._ptc_tools_by_slot
+
+
+async def test_code_mode_calls_operations_its_catalog_leaves_out(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """The backend names what ``tools.<name>`` is, with the run's grant; a name it has none for runs nothing."""
+    code = "await tools.withheldLookup({}); await tools.withheldLookup({}); await tools.notOne({})"
+    monkeypatch.setattr(
+        agent, "_DEFAULT_MODEL", _calling(ToolCall(name="eval", args={"code": code}, id="eval"))
+    )
+    catalog = _catalog("lookup", "grant").model_copy(update={"search_tools": True})
+
+    await _run(InMemoryStore(), "withheld", _context("agent", "token", catalog))
+
+    called = [(hook, detail) for hook, _, detail in backend_calls if detail]
+    # Found once for the run, then called with the grant the backend gave.
+    assert called == [
+        ("find_operation", "withheldLookup"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("find_operation", "notOne"),
+    ]
 
 
 async def test_concurrent_runs_offer_and_call_only_their_own_operations(

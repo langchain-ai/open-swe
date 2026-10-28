@@ -9,7 +9,7 @@ own (``rt.file_tools``).
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 from uuid import uuid4
 
@@ -257,4 +257,40 @@ def operation_tool(
         name=spec.name,
         description=spec.description,
         args_schema=spec.parameters,
+    )
+
+
+# Any arguments: what the operation accepts is the backend's to check.
+_ANY_ARGUMENTS: Final[dict[str, JsonValue]] = {"type": "object", "additionalProperties": True}
+
+
+def found_operation_tool(
+    code_name: str,
+    backend: OpenSweBackend,
+    find: Callable[[str], Awaitable[OperationSpec | None]],
+) -> StructuredTool:
+    """``tools.<code_name>`` for an operation the run's catalog leaves out.
+
+    Code mode calls it by the name ``search_tools`` gave; ``find`` asks the backend
+    which operation that is, with the run's grant of it. Made for no run in
+    particular: the call finds its run.
+    """
+
+    async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+        spec = await find(code_name)
+        if spec is None:
+            return ToolMessage(
+                content=f"Error: tools.{code_name} is not one of this run's tools; "
+                "find the tool you want with search_tools.",
+                tool_call_id=runtime.tool_call_id or "",
+                status="error",
+            )
+        cites_evidence = backend.run.catalog.incident_evidence
+        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
+
+    return StructuredTool.from_function(
+        coroutine=operate,
+        name=code_name,
+        description=f"The run's operation code mode calls as tools.{code_name}.",
+        args_schema=_ANY_ARGUMENTS,
     )

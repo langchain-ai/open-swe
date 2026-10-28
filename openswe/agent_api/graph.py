@@ -8,7 +8,9 @@ import (``runtime_api``):
   subagents, models and sandbox, the checks around its file and shell tools, and
   the rules of its middleware around each model call. It is worked out once as the
   run starts and rides in the run's context (``RemoteGraph.start_run``); the
-  settings later calls read are signed into the run's token (``RunSettings``)
+  settings later calls read are signed into the run's token (``RunSettings``). It
+  lists only the operations the model or a subagent is offered: every operation is
+  kept by digest (``run_operations``), which ``search_tools`` and ``find_operation`` read
 - ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
   prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
   plans the run again
@@ -157,6 +159,15 @@ from runtime_api.operations import (
 )
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.skills import SKILLS, RunSkills
+from runtime_api.tool_search import (
+    FIND,
+    SEARCH,
+    FoundOperation,
+    OperationLookup,
+    ToolMatch,
+    ToolMatches,
+    ToolSearch,
+)
 
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.failures import OperationFailure
@@ -182,6 +193,7 @@ from openswe.agent_api.loop import (
 )
 from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
+from openswe.agent_api.run_operations import OperationsNotKeptError, RunOperations
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
@@ -213,6 +225,7 @@ from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
     SurfaceModels,
+    SurfaceSubagent,
     ToolSurface,
     tool_parameters,
 )
@@ -362,32 +375,63 @@ class RunSession:
     def state(self, call: RunCall) -> dict[str, object]:
         return call_state(call, self._restore)
 
-    def catalog(self) -> Catalog:
-        operations = {
-            name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS
-        }
-        # Code mode finds the run's tools with the runtime's own search.
-        searched = {SEARCH_TOOLS} if self.surface.code_mode else set()
-        offered = operations.keys() | _FILE_TOOLS | searched
-        excluded = ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS) | (
-            self._unoffered_delegation_tools()
+    def _operation_tools(self) -> dict[str, BaseTool]:
+        return {name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS}
+
+    def _excluded(self) -> frozenset[str]:
+        return frozenset(
+            ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
+            | self._unoffered_delegation_tools()
         )
+
+    def _specs(self) -> list[OperationSpec]:
+        operations = self._operation_tools()
+        return [
+            OperationSpec(
+                name=described.name,
+                description=described.description,
+                parameters=described.parameters,
+                reads=(injections := Injections.of(operations[described.name])).reads,
+                reads_all=injections.reads_all,
+                code_name=code_name(described.name),
+                seconds=call_seconds(described.name),
+            )
+            for described in self.surface.catalog()
+            if described.name in operations
+        ]
+
+    def _subagents(self) -> Sequence[SurfaceSubagent]:
+        return () if self._delegates else self.surface.subagents
+
+    def operations(self) -> RunOperations:
+        """Every operation the run may call, which the backend keeps for ``search_tools``.
+
+        What the graph excludes stays out: code mode never calls it either.
+        """
+        excluded = self._excluded()
+        return RunOperations([spec for spec in self._specs() if spec.name not in excluded])
+
+    def catalog(self) -> Catalog:
+        operations = self._operation_tools()
+        excluded = self._excluded()
+        # Called from MDA's code mode, never offered to the model as schemas.
+        from_code_only = {
+            name
+            for name in operations.keys() - excluded
+            if code_only(name)
+            and (self.surface.code_mode or name in self.surface.integration_names)
+        }
+        # Those no subagent is offered either stay on the backend, which finds them for
+        # the run's search and its code mode: listing them all, integrations included,
+        # would put about a megabyte in every run's context.
+        named = {name for subagent in self._subagents() for name in subagent.tools or ()}
+        withheld = {name for name in from_code_only if name not in named}
+        searches = self.surface.code_mode or bool(withheld)
+        offered = operations.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
         # Code mode calls tools past the model's list, so what the graph excludes stays out.
         from_code = offered - excluded if self.surface.code_mode else frozenset()
         return Catalog(
-            operations=[
-                OperationSpec(
-                    name=described.name,
-                    description=described.description,
-                    parameters=described.parameters,
-                    reads=(injections := Injections.of(operations[described.name])).reads,
-                    reads_all=injections.reads_all,
-                    code_name=code_name(described.name),
-                    seconds=call_seconds(described.name),
-                )
-                for described in self.surface.catalog()
-                if described.name in operations
-            ],
+            operations=[spec for spec in self._specs() if spec.name not in withheld],
             subagents=[
                 SubagentSpec(
                     name=subagent.name,
@@ -397,18 +441,12 @@ class RunSession:
                     if subagent.tools is None
                     else [name for name in subagent.tools if name in offered],
                 )
-                for subagent in (() if self._delegates else self.surface.subagents)
+                for subagent in self._subagents()
             ],
             models=self.start_models(),
             # Hidden from the model, as the in-process graph hides them.
             excluded=sorted(excluded),
-            # Called from MDA's code mode, never offered to the model as schemas.
-            code_only=sorted(
-                name
-                for name in operations.keys() - excluded
-                if code_only(name)
-                and (self.surface.code_mode or name in self.surface.integration_names)
-            ),
+            code_only=sorted(from_code_only - withheld),
             # Offered to the model, and callable from MDA's code mode too.
             also_from_code=sorted(name for name in from_code if direct_and_from_code(name)),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
@@ -425,10 +463,8 @@ class RunSession:
             loop=None
             if self.surface.loop is None
             else self.surface.loop.model_copy(update={"deployment_prompt": common_prompt()}),
-            search_tools=self.surface.code_mode,
-            search_tools_description=prompt(f"tools/{SEARCH_TOOLS}")
-            if self.surface.code_mode
-            else None,
+            search_tools=searches,
+            search_tools_description=prompt(f"tools/{SEARCH_TOOLS}") if searches else None,
             model_call_limit=next(
                 (
                     m.run_limit
@@ -964,6 +1000,35 @@ class TokenRun:
             ready=self._ready,
         )
 
+    async def _operations(self) -> RunOperations:
+        if self.run.settings.operations is None:
+            raise OperationsNotKeptError("This run started before the backend kept its operations")
+        return await RunOperations.kept(self.run.settings.operations)
+
+    async def search_tools(self, request: ToolSearch) -> ToolMatches:
+        """The run's operations that best match what the model looks for."""
+        found = (await self._operations()).search(request.query, request.limit)
+        return ToolMatches(
+            matches=[
+                ToolMatch(
+                    name=operation.name,
+                    description=operation.description,
+                    parameters=operation.parameters,
+                    code_name=operation.code_name,
+                )
+                for operation in found
+            ]
+        )
+
+    async def find_operation(self, request: OperationLookup) -> FoundOperation:
+        """The operation code mode calls as ``tools.<code_name>``, with the run's grant of it."""
+        operation = (await self._operations()).called_from_code_as(request.code_name)
+        if operation is None:
+            return FoundOperation()
+        return FoundOperation(
+            operation=operation.model_copy(update={"grant": self.run.grant(operation.name)})
+        )
+
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
         """Whether the push and pull request guards let ``request``'s command run as it is."""
         guards = ShellGuards(self.parts.shell_guards)
@@ -1137,7 +1202,9 @@ class RemoteGraph:
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        return RunStart(catalog=await session.plan(), settings=session.settings())
+        operations = await session.operations().keep()
+        settings = session.settings().model_copy(update={"operations": operations})
+        return RunStart(catalog=await session.plan(), settings=settings)
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
@@ -1343,6 +1410,8 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
 RUN_CALLS: Final = Handlers[TokenRun]()
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
 RUN_CALLS.serve(SKILLS, TokenRun.skills)
+RUN_CALLS.serve(SEARCH, TokenRun.search_tools)
+RUN_CALLS.serve(FIND, TokenRun.find_operation)
 RUN_CALLS.serve(INBOX, TokenRun.inbox)
 RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)

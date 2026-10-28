@@ -22,6 +22,7 @@ The host-function bridge that actually invokes each tool lives in
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from langchain_core.tools import BaseTool
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
 
 
 PTCOption = list[str | BaseTool]
+
+# Finds the tool a `tools.<camelCaseName>` call names when no installed tool has
+# that name; `None` when there is none, which the call raises as a `TypeError`.
+ToolResolver = Callable[[str], BaseTool | None]
 
 _RESERVED_SUBAGENT_TASK_NAME = "task"
 

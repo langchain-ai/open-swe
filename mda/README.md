@@ -26,6 +26,9 @@ Every call is authenticated with the run token.
   The backend runs no tools node and no tool-call middleware.
   An operation whose box stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
+- **`search_tools`, `find_operation`:** the catalog lists only the operations the model or a subagent is offered; the rest, such as every connected integration's, would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
+  The backend keeps every operation the run started with in PostgreSQL by digest (`run_operations`), which the run token signs.
+  `search_tools` searches them there, and code mode calls one by the name a search gave it: `tools.<name>` for a tool it has none for asks `find_operation` which operation that is, with the run's grant of it (`FoundOperations` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   Where MDA owns the box they run in it.
   On the paths the backend serves (`files.backend_paths`: offloaded images), and on a thread whose box is not MDA's, such as a desktop thread, deepagents' own tools run against the backend's files through the typed files API (`rt/remote_files.py`).
@@ -72,7 +75,7 @@ Every call is authenticated with the run token.
   Every graph has the same middleware, so a thread reads alike through any of them.
   Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the model a call is routed to, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
 
-The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model).
+The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model, and the digest of its operations).
 The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them.
 The backend reads the thread and run configuration from the token, never from the request body.
 This deployment holds no GitHub, Slack or database credentials.

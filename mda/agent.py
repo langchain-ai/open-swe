@@ -64,6 +64,7 @@ from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
 from rt.run_tools import (
+    FoundOperations,
     RunCodeInterpreter,
     RunModelCallLimit,
     RunSubagentMiddleware,
@@ -182,9 +183,10 @@ class _Parts:
 
 
 def _code_mode(
-    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware
+    graph: Graph, backend: OpenSweBackend, toolsets: RunToolsets, files: FileToolsMiddleware
 ) -> RunCodeInterpreter:
-    """The graph's code mode, with every tool the run's catalog offers from code callable from it."""
+    """The graph's code mode, with every tool the run offers from code callable from it:
+    those its catalog lists, and those ``search_tools`` finds on the backend."""
     if graph == "reviewer":
         return RunCodeInterpreter(
             toolsets,
@@ -196,7 +198,12 @@ def _code_mode(
     # As the in-process agent's code mode: state per turn, subagents through `task`,
     # for a run that offers tools from code.
     return RunCodeInterpreter(
-        toolsets, active=lambda tools: bool(tools.from_code), subagents=False, mode="turn"
+        toolsets,
+        # Also for a run whose catalog leaves operations out: code mode calls those.
+        active=lambda tools: bool(tools.from_code) or tools.catalog.search_tools,
+        subagents=False,
+        mode="turn",
+        found=FoundOperations(backend),
     )
 
 
@@ -256,7 +263,7 @@ def _parts(graph: Graph) -> _Parts:
             files,
             task_retry(),
             RunToolsMiddleware(toolsets),
-            _code_mode(graph, toolsets, files),
+            _code_mode(graph, backend, toolsets, files),
             DescribedToolsMiddleware(backend),
             # The coding agent's browser, a LangSmith browser per thread the dashboard
             # shows; the deployment's workspace needs the LangSmith browser beta.

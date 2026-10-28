@@ -177,13 +177,16 @@ class LoopRules(BaseModel):
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
+    # Those the model or a subagent is offered as tools. The run's other operations,
+    # such as its integrations', stay on the backend: found with ``search_tools`` and
+    # called from code mode (``runtime_api.tool_search``).
     operations: list[OperationSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
-    # Tools the model calls from code mode rather than directly.
+    # Listed operations the model calls from code mode rather than directly.
     code_only: list[str] = []
     # Tools the model calls both directly and from code mode.
     also_from_code: list[str] = []
@@ -206,6 +209,7 @@ class Catalog(BaseModel):
     # What the runtime's middleware does around each model call; None leaves it to the
     # backend's phase calls, for the runs still answered from their plan.
     loop: LoopRules | None = None
-    # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
+    # Whether the run offers ``search_tools`` over all its operations and calls those its
+    # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None

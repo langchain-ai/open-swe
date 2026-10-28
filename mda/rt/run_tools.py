@@ -21,14 +21,16 @@ from langchain_quickjs.middleware import PersistenceMode, REPLState
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from runtime_api.catalog import Catalog, SubagentSpec
+from runtime_api.catalog import Catalog, OperationSpec, SubagentSpec
+from runtime_api.endpoint import call
 from runtime_api.loop import ModelCall
+from runtime_api.tool_search import FIND, OperationLookup
 
 from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
 from rt.file_tools import FileToolsMiddleware
 from rt.models import build_model
 from rt.search_tools import search_tools_tool
-from rt.tools import operation_tool
+from rt.tools import found_operation_tool, operation_tool, run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 _TASK_TOOL: Final = "task"
@@ -60,7 +62,7 @@ class RunTools:
             for spec in catalog.operations
         ]
         searched = (
-            [search_tools_tool(catalog.operations, catalog.search_tools_description)]
+            [search_tools_tool(backend, catalog.search_tools_description)]
             if catalog.search_tools
             else []
         )
@@ -107,6 +109,34 @@ class RunToolsets:
         if not held or held[0].catalog is not run.catalog:
             held[:] = [RunTools(run.catalog, self._backend, self._files)]
         return held[0]
+
+
+class FoundOperations:
+    """The operations code mode calls that the run's catalog leaves out, as the backend names them.
+
+    Code mode resolves a name it has no tool for from the REPL's own thread, outside
+    any run, so the tool it gets is the same for every run and finds its run when called.
+    """
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+        self._tools: dict[str, BaseTool] = {}
+
+    def tool(self, code_name: str) -> BaseTool:
+        """``tools.<code_name>``, whichever run calls it."""
+        if code_name not in self._tools:
+            self._tools[code_name] = found_operation_tool(code_name, self._backend, self.find)
+        return self._tools[code_name]
+
+    async def find(self, code_name: str) -> OperationSpec | None:
+        """The operation the calling run's code mode calls as ``tools.<code_name>``, once per run."""
+        run = current_run()
+        if not run.catalog.search_tools:
+            return None
+        if code_name not in run.found:
+            lookup = OperationLookup(run_id=run_id(), code_name=code_name)
+            run.found[code_name] = (await call(self._backend, FIND, lookup)).operation
+        return run.found[code_name]
 
 
 class RunToolsMiddleware(AgentMiddleware):
@@ -212,13 +242,19 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         active: Callable[[RunTools], bool] = lambda _tools: True,
         subagents: bool = True,
         mode: PersistenceMode | None = None,
+        found: FoundOperations | None = None,
     ) -> None:
         self._toolsets = toolsets
         self._named = list(named)
         self._active = active
         self._prompts = RunLocal[list[tuple[frozenset[str], str] | None]](lambda: [None])
         self._slots = RunLocal[set[str]](set)
-        super().__init__(ptc=[], subagents=subagents, mode=mode)
+        super().__init__(
+            ptc=[],
+            subagents=subagents,
+            mode=mode,
+            resolve_tool=None if found is None else found.tool,
+        )
 
     @property
     def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
