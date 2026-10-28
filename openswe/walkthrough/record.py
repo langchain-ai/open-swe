@@ -259,12 +259,21 @@ class WalkthroughStepView(BaseModel):
     files: list[WalkthroughFileView]
 
 
+class WalkthroughSentenceView(BaseModel):
+    """A sentence of the PR's description, with the changed lines it refers to and their steps."""
+
+    sentence: str
+    files: list[WalkthroughFileView]
+    steps: list[int]
+
+
 class WalkthroughView(BaseModel):
     """A complete plan as the review page and the reviewer read it, Other last."""
 
     head_sha: str
     human_input: str
     steps: list[WalkthroughStepView]
+    description: list[WalkthroughSentenceView] = []
 
     @staticmethod
     def _files(lines: LineSet, textless: Sequence[str] = ()) -> list[WalkthroughFileView]:
@@ -298,10 +307,20 @@ class WalkthroughView(BaseModel):
                     files=cls._files(plan.other, plan.other_files),
                 )
             )
+        held = [chunk.lines for chunk in plan.chunks] + ([plan.other] if plan.other else [])
+        description = [
+            WalkthroughSentenceView(
+                sentence=note.sentence,
+                files=cls._files(note.lines),
+                steps=[index for index, lines in enumerate(held, start=1) if lines & note.lines],
+            )
+            for note in plan.description
+        ]
         return cls(
             head_sha=walkthrough.head_sha,
             human_input=walkthrough.human_input_summary,
             steps=steps,
+            description=description,
         )
 
     @classmethod

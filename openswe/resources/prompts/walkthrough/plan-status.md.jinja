@@ -4,6 +4,7 @@
 {% endfor %}
 - Other: {{ plan.other_lines }} lines
 - Unplanned: {{ plan.unplanned }}
+- Annotated description sentences: {{ plan.described_sentences }}
 
 ```
 {{ (plan.unplanned_hunks | join("\n")) or "nothing" }}

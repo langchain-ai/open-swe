@@ -37,6 +37,7 @@ const split: ReviewDiffFile = {
 const walkthrough: ReviewWalkthrough = {
   head_sha: split.headSha,
   human_input: "",
+  description: [],
   steps: [
     {
       index: 1,

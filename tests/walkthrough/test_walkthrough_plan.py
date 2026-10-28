@@ -17,6 +17,8 @@ from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, PinnedCheckou
 from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
+    DescribedSentence,
+    DescriptionNote,
     FileHunks,
     FileRanges,
     FileSplits,
@@ -226,6 +228,10 @@ async def test_a_push_keeps_planned_lines_git_kept_and_new_lines_join_their_hunk
     plan.add_other(claim([FileRanges(path="cli.py", added=[(1, 1)])], plan.unplanned(index)))
     _place(plan, index, "Print one", FileHunks(path="cli.py", hunks=["+1"]))
     _place(plan, index, "Return 10", FileHunks(path="core.py", hunks=["-4"]))
+    plan.description = [
+        DescriptionNote(sentence="Returns ten.", lines=plan.chunks[1].lines),
+        DescriptionNote(sentence="Drops the import.", lines=_deleted("core.py", (1, 1))),
+    ]
 
     new_head = _commit(
         repo,
@@ -241,6 +247,9 @@ async def test_a_push_keeps_planned_lines_git_kept_and_new_lines_join_their_hunk
     ]
     assert moved.other == _added("cli.py", (1, 1))
     assert not moved.unplanned(new_index)
+    assert [(n.sentence, n.lines) for n in moved.description] == [
+        ("Returns ten.", _deleted("core.py", (4, 4)) | _added("core.py", (4, 4)))
+    ]
 
 
 async def test_approved_lines_stay_approved_after_a_rebase(
@@ -383,6 +392,36 @@ async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
     with pytest.raises(RangeError, match="another planner changed"):
         await workspace.plan_chunk(title="Stale", show=hunks[:2], explanation="Old", replace=[1])
     assert plan.chunks[0].title == "Merged"
+
+
+async def test_description_sentences_must_be_quoted_and_may_name_any_hunk(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"a.py": "a = 1\n", "b.py": "b = 2\n"}, "add")
+    index = await _pin(checkout, base, head)
+    plan = Plan.start(head, index)
+    _place(plan, index, "First", FileHunks(path="a.py", hunks=["+1"]))
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, base, index, plan)
+    monkeypatch.setattr(workspace, "description", AsyncMock(return_value="Adds `a`\nand `b`. Why."))
+
+    async def edit(change: Callable[[Plan], object]) -> None:
+        change(plan)
+
+    monkeypatch.setattr(workspace, "_edit", edit)
+    both = [FileHunks(path="a.py", hunks=["+1"]), FileHunks(path="b.py", hunks=["+1"])]
+
+    with pytest.raises(RangeError, match="no sentence “Adds b”"):
+        await workspace.annotate_description([DescribedSentence(sentence="Adds b", hunks=both)])
+    assert (
+        await workspace.annotate_description(
+            [DescribedSentence(sentence="Adds `a` and  `b`.", hunks=both)]
+        )
+        == 1
+    )
+    assert [(n.sentence, n.lines) for n in plan.description] == [
+        ("Adds `a` and `b`.", _added("a.py", (1, 1)) | _added("b.py", (1, 1)))
+    ]
 
 
 async def test_planning_a_huge_pull_request_costs_its_hunks_not_its_lines(

@@ -26,9 +26,13 @@ from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
+    MAX_DESCRIBED_SENTENCES,
     MAX_EXPLANATION_CHARS,
     MAX_OTHER_SUMMARY_CHARS,
+    MAX_SENTENCE_CHARS,
     MAX_TITLE_CHARS,
+    DescribedSentence,
+    DescriptionNote,
     FileHunks,
     FileSplits,
     Hunks,
@@ -58,6 +62,20 @@ async def _current_head(pull_request: PullRequest) -> str:
             return await pull.head_sha()
     except GitHubAppUnavailable as exc:
         raise PlannerUnavailableError("GitHub is unavailable; try again next turn") from exc
+
+
+async def _current_description(pull_request: PullRequest) -> str:
+    try:
+        async with PullRequestClient.as_app(
+            pull_request.owner, pull_request.repo, pull_request.number
+        ) as pull:
+            return (await pull.pull()).get("body") or ""
+    except GitHubAppUnavailable as exc:
+        raise PlannerUnavailableError("GitHub is unavailable; try again next turn") from exc
+
+
+def _collapsed(text: str) -> str:
+    return " ".join(text.split())
 
 
 @dataclass
@@ -159,6 +177,7 @@ class PlanWorkspace:
             unplanned=hunks.summary(unplanned) if unplanned else "nothing",
             unplanned_hunks=spans[:_MAX_UNPLANNED_FILES],
             more_files_unplanned=max(0, len(spans) - _MAX_UNPLANNED_FILES),
+            described_sentences=len(self.plan.description),
         )
 
     async def _edit(self, change: Callable[[Plan], object]) -> None:
@@ -288,3 +307,35 @@ class PlanWorkspace:
             plan.other_summary = trimmed
 
         await self._edit(describe)
+
+    async def description(self) -> str:
+        """The pull request's description as its author has it on GitHub now."""
+        return await _current_description(self.pull_request)
+
+    async def annotate_description(self, sentences: list[DescribedSentence]) -> int:
+        """Replace the description's annotations with ``sentences``; how many there are."""
+        if len(sentences) > MAX_DESCRIBED_SENTENCES:
+            raise RangeError(f"annotate at most {MAX_DESCRIBED_SENTENCES} sentences")
+        body = _collapsed(await self.description())
+        errors: list[str] = []
+        notes: list[DescriptionNote] = []
+        for described in sentences:
+            sentence = _collapsed(described.sentence)[:MAX_SENTENCE_CHARS]
+            quoted = f"“{sentence[:80]}”"
+            if not sentence or sentence not in body:
+                errors.append(f"the description has no sentence {quoted}; quote it exactly")
+                continue
+            try:
+                lines = self.hunks.claim(described.hunks, self.index.lines)
+            except RangeError as exc:
+                errors.append(f"{quoted}: {exc}")
+                continue
+            notes.append(DescriptionNote(sentence=sentence, lines=lines))
+        if errors:
+            raise RangeError("\n".join(errors))
+
+        def annotate(plan: Plan) -> None:
+            plan.description = notes
+
+        await self._edit(annotate)
+        return len(notes)
