@@ -213,6 +213,7 @@ async def request_merge(body: MergeIntent, access: QueueAccess = ACCESS) -> Requ
         actor=access.user.id,
         dependencies=body.dependencies,
     )
+    await stored.note_activity(access.user.github_login, "merge-queued")
     return RequestView.model_validate(requested)
 
 

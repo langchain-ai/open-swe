@@ -14,7 +14,7 @@ from openswe.incidents.models import (
     IncidentReportRecord,
 )
 from openswe.incidents.report import CONTEXT_MARKER
-from openswe.message_queue import QueuedMessage
+from openswe.message_queue import QueuedMessage, ThreadQueue
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def platform(monkeypatch):
     client = SimpleNamespace(runs=runs)
     monkeypatch.setattr(turns, "get_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
-    monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
+    monkeypatch.setattr(ThreadQueue, "send", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "post_slack_thread_reply_with_ts", AsyncMock(return_value="9.0"))
     return client
 

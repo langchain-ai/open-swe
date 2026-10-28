@@ -69,6 +69,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Destructive or sensitive actions may stay human-only.
   Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
+- Every action a person takes in the app on something a thread works on reaches that thread: queue it, attributed to them, for the thread's next model call without starting a run (`ThreadQueue.record_action`; for a PR, `PullRequest.note_activity`).
+  It keeps the agent current, puts the action in the run's trace, and counts as their intervention just like a typed message.
 - Only the agent that owns a Slack channel thread posts in it.
   Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run.
   A DM sent for a thread passes `origin` to `send_dm`.

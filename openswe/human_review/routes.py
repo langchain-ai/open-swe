@@ -18,6 +18,7 @@ from openswe.github.pull_request_status import (
     OpenPullRequests,
     pull_request_identity,
 )
+from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
@@ -203,6 +204,9 @@ async def api_request_human_review(
     )
     if not result.success:
         raise HTTPException(409, result.error)
+    await PullRequest(owner=owner, repo=repo, number=number).note_activity(
+        login, "human-review-requested"
+    )
     return result
 
 
@@ -226,4 +230,9 @@ async def api_dismiss_human_review_request(
     by = mention(person) if person is not None else f"@{login}"
     if not await ReviewCard(request).dismiss_by(by, (body or HumanReviewDismissBody()).reason):
         raise HTTPException(409, "This review request is already closed")
+    await PullRequest(owner=owner, repo=repo, number=number).note_activity(
+        login,
+        "human-review-dismissed",
+        text=(body or HumanReviewDismissBody()).reason,
+    )
     return HumanReviewDismissResult(request_id=str(request.id))

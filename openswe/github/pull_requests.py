@@ -53,15 +53,44 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.github.comments import PrState, derive_pr_state
+from openswe.github.comments import PrState, derive_pr_state, mentions_open_swe
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
+from openswe.message_queue import ThreadQueue
+from openswe.prompts import prompt
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
 from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
+
+type PullRequestActivity = Literal[
+    "merge",
+    "close",
+    "mark-ready",
+    "update-branch",
+    "resolve-threads",
+    "thread-resolved",
+    "thread-unresolved",
+    "label-added",
+    "label-removed",
+    "comment",
+    "inline-comment",
+    "reply",
+    "review",
+    "re-review",
+    "human-review-requested",
+    "human-review-dismissed",
+    "merge-queued",
+]
+
+_MAX_ACTIVITY_TEXT = 4000
+# GitHub's webhook already delivers these to the agent: tagged ones to whichever thread
+# it routes them to, untagged comments and reviews to the thread that opened the PR.
+_GITHUB_DELIVERED_ACTIVITIES: frozenset[PullRequestActivity] = frozenset(
+    ["comment", "review", "inline-comment"]
+)
 
 ThreadRole = Literal["primary", "secondary"]
 AGENT_OPENED_LINK_SOURCE = "open_pull_request"
@@ -382,6 +411,55 @@ class PullRequest(Base):
             if all(link.thread_id != thread_id for link in self.threads):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
+
+    async def note_activity(
+        self, login: str, activity: PullRequestActivity, *, text: str = "", **details: object
+    ) -> None:
+        """Queue ``login``'s ``activity`` here for each linked thread's next run; never fails the action."""
+        try:
+            stored = await self.load(self.owner, self.repo, self.number)
+            text = text.strip()
+            note = prompt(
+                "runs/pull-request-activity",
+                activity=activity,
+                login=login,
+                pr_url=stored.url,
+                text=text[:_MAX_ACTIVITY_TEXT],
+                truncated=len(text) > _MAX_ACTIVITY_TEXT,
+                **details,
+            )
+            for thread_id in await stored.threads_to_tell(activity, text):
+                if not await ThreadQueue(thread_id).record_action(
+                    login, f"pull-request-{activity}", note
+                ):
+                    logger.warning(
+                        "Could not queue pull request activity for a linked thread",
+                        extra={
+                            "pr_repo_full_name": self.repo_full_name,
+                            "pr_number": self.number,
+                            "agent_thread_id": thread_id,
+                        },
+                    )
+        except Exception:
+            logger.exception(
+                "Could not note pull request activity for its threads",
+                extra={
+                    "pr_repo_full_name": self.repo_full_name,
+                    "pr_number": self.number,
+                    "pr_activity": activity,
+                },
+            )
+
+    async def threads_to_tell(self, activity: PullRequestActivity, text: str) -> list[str]:
+        """Linked threads that GitHub's own webhook will not already wake for this activity."""
+        threads = await self.linked_threads()
+        if activity not in _GITHUB_DELIVERED_ACTIVITIES:
+            return threads
+        if mentions_open_swe(text):
+            return []
+        if activity == "inline-comment":
+            return threads
+        return [thread_id for thread_id in threads if thread_id != self.agent_thread_id]
 
     async def discover_threads(self) -> Sequence[str] | None:
         """Agent threads whose metadata still points at this PR, oldest first.

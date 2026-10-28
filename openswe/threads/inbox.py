@@ -39,6 +39,7 @@ from openswe.middleware.require_user_reply import (
 from openswe.tasks.messages import TaskMessage
 from openswe.users import User
 from openswe.utils.dashboard_handoff import (
+    ACTION_KEY,
     DASHBOARD_HANDOFF_BODY,
     RELAYED_FROM_KEY,
     REPLIES_KEY,
@@ -288,12 +289,14 @@ class ThreadInbox:
                             cast(dict[str, str], person)[key] = value
                     person = await User.canonical_person(person)
                     relayed_from = content.get(RELAYED_FROM_KEY)
+                    action = content.get(ACTION_KEY)
                     structured = build_input_messages(
                         blocks,
                         dashboard_input_context(
                             person["id"],
                             relayed_from if isinstance(relayed_from, str) else None,
                             passage_replies(content.get(REPLIES_KEY)),
+                            action if isinstance(action, str) else None,
                         ),
                         injected_dynamic_context_hashes=injected,
                     )

@@ -60,6 +60,10 @@ class _PullRequestActionBase(BaseModel):
     invalid_response: ClassVar[str]
     unconfirmed: ClassVar[str]
 
+    def activity_details(self) -> dict[str, str]:
+        """What the note to the PR's threads says about this action beyond its name."""
+        return {}
+
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
         raise NotImplementedError
 
@@ -117,6 +121,9 @@ class MergeAction(_PullRequestActionBase):
     )
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
+    def activity_details(self) -> dict[str, str]:
+        return {"method": self.merge_method}
+
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
         payload: dict[str, object] = {"sha": self.sha, "merge_method": self.merge_method}
         if self.merge_method == "squash":
@@ -163,6 +170,9 @@ class CloseAction(_PullRequestActionBase):
         "GitHub returned an invalid close response. Refresh to check the PR."
     )
     unconfirmed: ClassVar[str] = "GitHub did not confirm the close."
+
+    def activity_details(self) -> dict[str, str]:
+        return {"text": self.reason}
 
     async def _latest_comment_body(
         self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
