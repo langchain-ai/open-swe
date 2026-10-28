@@ -573,7 +573,7 @@ async def test_the_account_gate_runs_without_a_thread(
         AsyncMock(return_value={"profile": {"email": "ada@example.com"}}),
     )
     monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value="ada"))
-    monkeypatch.setattr(slack_service, "_valid_access_token", AsyncMock(return_value=token))
+    monkeypatch.setattr(webhook_common, "get_valid_access_token", AsyncMock(return_value=token))
     monkeypatch.setattr(webhook_common, "has_access_token_record", AsyncMock(return_value=record))
 
     gate = await _ACCOUNT_LINK_NEEDED("U1")
