@@ -5,7 +5,7 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import httpx2
@@ -356,7 +356,9 @@ async def proxy_dashboard_thread_commands(
     return reply.status, reply.content, reply.media_type
 
 
-async def _sender_user_id(principal: Principal, login: str, metadata: dict[str, Any]) -> str | None:
+async def _sender_user_id(
+    principal: Principal, login: str, metadata: Mapping[str, object]
+) -> str | None:
     """The Open SWE user a person's own command on a channel's thread acts as there.
 
     The one ``_run_user_metadata`` attributes the person's dashboard runs to, so a

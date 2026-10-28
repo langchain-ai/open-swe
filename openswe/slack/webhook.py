@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
+from pydantic import JsonValue
 
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
@@ -759,7 +760,7 @@ class SlackChannelRun:
     """The run a Slack message starts, prepared for MDA's Slack channel to start it."""
 
     input: RunInput
-    configurable: dict[str, Any]
+    configurable: dict[str, JsonValue]
     trigger_ts: str
 
 

@@ -10,7 +10,7 @@ and the signed run token the run calls back with.
 """
 
 import logging
-from typing import Any, Final, Literal, cast, get_args
+from typing import Final, Literal, cast, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -58,20 +58,25 @@ class GitHubChannelCall(TypedDict):
     name of its own.
     """
 
-    event: EndpointEvent[str, dict[str, Any]]
+    event: EndpointEvent[str, dict[str, JsonValue]]
     thread: EndpointThread
 
 
-async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | None:
+def _fields(value: JsonValue | None) -> dict[str, JsonValue]:
+    """``value``'s fields when it is a JSON object; none otherwise."""
+    return value if isinstance(value, dict) else {}
+
+
+async def trigger_rejection(payload: dict[str, JsonValue], event_type: str) -> str | None:
     """Why an issue event starts no run, as ``/webhooks/github`` decides it; None when it does."""
     issue = payload.get("issue")
     if not isinstance(issue, dict):
         return "The event names no issue"
     if issue.get("pull_request"):
         return "Pull request comments stay on Open SWE's own intake"
-    repository = payload.get("repository") or {}
+    repository = _fields(payload.get("repository"))
     repo_config = {
-        "owner": str((repository.get("owner") or {}).get("login") or ""),
+        "owner": str(_fields(repository.get("owner")).get("login") or ""),
         "name": str(repository.get("name") or ""),
     }
     if not common.is_repo_allowed(repo_config):
@@ -81,17 +86,17 @@ async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | N
     if event_type == "issues":
         if payload.get("action") not in common.SUPPORTED_GH_ISSUE_ACTIONS:
             return "Unsupported GitHub issue action"
-        changes = payload.get("changes") or {}
+        changes = _fields(payload.get("changes"))
         if payload.get("action") == "edited" and not any(f in changes for f in ("body", "title")):
             return "Issue edit did not change title or body"
         text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
     else:
         if payload.get("action") not in common.SUPPORTED_GH_COMMENT_ACTIONS["issue_comment"]:
             return "Unsupported GitHub issue_comment action"
-        sender_login = str((payload.get("sender") or {}).get("login") or "")
+        sender_login = str(_fields(payload.get("sender")).get("login") or "")
         if not await service.is_accepted_commenter(sender_login):
             return "Sender is not a registered Open SWE user"
-        text = str((payload.get("comment") or {}).get("body") or "")
+        text = str(_fields(payload.get("comment")).get("body") or "")
     if not common.mentions_open_swe(text):
         return f"Does not mention {common.describe_open_swe_tags()}"
     gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
@@ -101,7 +106,7 @@ async def trigger_rejection(payload: dict[str, Any], event_type: str) -> str | N
 
 
 async def _prepare_run(
-    payload: dict[str, Any], delivery_id: str, thread_id: str, event_type: str
+    payload: dict[str, JsonValue], delivery_id: str, thread_id: str, event_type: str
 ) -> EndpointAnswer | None:
     prepared = await service.prepare_github_issue_run(
         payload, event_type, thread_id, adopt=lambda thread: adopt_channel_run(thread, CHANNEL)
