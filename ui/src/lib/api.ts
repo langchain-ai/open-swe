@@ -1200,12 +1200,22 @@ export interface ReviewWalkthroughStep {
   files: Array<ReviewWalkthroughFile>
 }
 
+/** A sentence of the PR's description and the changed lines it refers to. */
+export interface ReviewWalkthroughSentence {
+  /** As the author wrote it, markdown included, whitespace collapsed. */
+  sentence: string
+  files: Array<ReviewWalkthroughFile>
+  /** The steps holding those lines. */
+  steps: Array<number>
+}
+
 /** The review scout's reading order for the PR's current head. */
 export interface ReviewWalkthrough {
   head_sha: string
   /** The scout's summary of what people asked for; empty when it wrote none. */
   human_input: string
   steps: Array<ReviewWalkthroughStep>
+  description: Array<ReviewWalkthroughSentence>
 }
 
 /** `status: "none"` is a PR the reviewer graph has never run on. */

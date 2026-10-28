@@ -54,6 +54,7 @@ from openswe.sandboxes.repo_prep import prepare_review_repo
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
+    walkthrough_annotate_description,
     walkthrough_describe_other,
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
@@ -71,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 SCOUT_MODEL_CALL_LIMIT = 150
 _CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
+_CLOSING_DESCRIPTION_TAG_RE = re.compile(r"</\s*pr_description\s*>", re.IGNORECASE)
 _HUMAN_INPUT_TOOL = record_human_input.__name__
 
 
@@ -168,11 +170,20 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
                 "scout_nothing_to_plan": True,
                 "has_human_input": False,
             }
+        try:
+            description = await workspace.description()
+        except PlannerUnavailableError:
+            logger.warning(
+                "Review scout could not read the description; planning without it",
+                extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+            )
+            description = ""
         system_prompt = prompt(
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
+            pr_description=_CLOSING_DESCRIPTION_TAG_RE.sub("</pr_description_>", description),
             repo_dir=checkout.repo_dir,
             carried=bool(workspace.plan.chunks),
             plan=workspace.status().model_dump(),
@@ -291,6 +302,7 @@ def scout_tools() -> list[BaseTool]:
             walkthrough_split_hunks,
             walkthrough_move_to_other,
             walkthrough_describe_other,
+            walkthrough_annotate_description,
             record_human_input,
         ]
     )

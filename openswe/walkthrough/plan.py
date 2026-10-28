@@ -6,7 +6,8 @@ smaller hunks at changed lines it names. Every changed line is in one chunk, in 
 or not yet planned. Chunks and Other are line sets, carried to a new head by
 how git moved each line: they keep the lines that survive, a new line joins the
 chunk that holds the rest of its hunk, and the remaining new or edited lines
-come back unplanned for a planner to place.
+come back unplanned for a planner to place. Sentences of the PR's description
+refer to whole hunks by their lines too, and are carried the same way.
 """
 
 from bisect import bisect_right
@@ -24,6 +25,8 @@ from openswe.walkthrough.lines import SIGNS, LinePoint, LineRange, LineSet, Rang
 MAX_TITLE_CHARS = 120
 MAX_EXPLANATION_CHARS = 1_200
 MAX_OTHER_SUMMARY_CHARS = 1_200
+MAX_DESCRIBED_SENTENCES = 80
+MAX_SENTENCE_CHARS = 1_000
 _MAX_ERRORS = 20
 
 
@@ -51,6 +54,20 @@ class FileHunks(BaseModel):
 
     path: str
     hunks: list[str]
+
+
+class DescribedSentence(BaseModel):
+    """A sentence quoted from the pull request's description, with the hunks it talks about."""
+
+    sentence: str
+    hunks: list[FileHunks]
+
+
+class DescriptionNote(BaseModel):
+    """A sentence of the description, whitespace collapsed, and the changed lines it refers to."""
+
+    sentence: str
+    lines: LineSet
 
 
 def find_line(path: str, name: str, candidates: LineSet) -> LinePoint:
@@ -272,6 +289,7 @@ class PlanStatus(BaseModel):
     unplanned: str
     unplanned_hunks: list[str]
     more_files_unplanned: int = 0
+    described_sentences: int = 0
 
 
 class Plan(BaseModel):
@@ -285,6 +303,8 @@ class Plan(BaseModel):
     other_summary: str = ""
     # Changed lines a planner chose to start a new hunk at, splitting git's hunk in two.
     splits: list[LinePoint] = []
+    # Sentences of the PR's description, each with the changed lines it refers to.
+    description: list[DescriptionNote] = []
 
     @classmethod
     def start(cls, head_sha: str, index: DiffIndex) -> Self:
@@ -303,6 +323,11 @@ class Plan(BaseModel):
         moved.other = carry.lines(self.other)
         moved.other_summary = self.other_summary
         moved.splits = [point for s in self.splits if (point := carry.point(s)) is not None]
+        moved.description = [
+            note.model_copy(update={"lines": lines})
+            for note in self.description
+            if (lines := carry.lines(note.lines))
+        ]
         moved.gather_hunks(index)
         return moved
 
@@ -310,8 +335,14 @@ class Plan(BaseModel):
         return Hunks.of(index, self.splits)
 
     def gather_hunks(self, index: DiffIndex) -> None:
-        """Move each unplanned line into the chunk that holds the rest of its hunk."""
+        """Move each unplanned line into the chunk that holds the rest of its hunk.
+
+        Sentences of the description that refer to the hunk take the line too.
+        """
         for hunk, part in self.hunks(index).within(self.unplanned(index)):
+            for note in self.description:
+                if note.lines & hunk.lines:
+                    note.lines = note.lines | part
             owner = next((c for c in self.chunks if c.lines & hunk.lines), None)
             if owner is not None:
                 owner.lines = owner.lines | part

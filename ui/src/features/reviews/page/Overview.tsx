@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
-import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
+import {
+  reviewImageProxyUrl,
+  type ReviewUserRef,
+  type ReviewWalkthroughSentence,
+} from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -12,11 +16,18 @@ import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabe
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { ProfileLink } from "./notes/Byline"
 import { AgentMark } from "./AgentMark"
+import {
+  DescriptionNotes,
+  NOTE_COMPONENTS,
+  descriptionNotePlugins,
+} from "./DescriptionNotes"
+import { NOTE_ALLOWED_TAGS } from "./descriptionNotes"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { StandingPanel } from "./Standing"
 import { RelativeTimestamp } from "./RelativeTimestamp"
 
 const CLAMP_PX = 320
+const NO_SENTENCES: Array<ReviewWalkthroughSentence> = []
 
 /** `#123` and `owner/repo#123` in prose link to that pull request's review page here; code is left alone. */
 function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
@@ -89,6 +100,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       <Description
         pr={pr}
         body={detail.pr.body}
+        sentences={detail.walkthrough?.description ?? NO_SENTENCES}
         author={detail.pr.author}
         createdAt={detail.pr.created_at}
         labels={
@@ -107,12 +119,14 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
 function Description({
   pr,
   body,
+  sentences,
   author,
   createdAt,
   labels,
 }: {
   pr: PullRequestRef
   body: string
+  sentences: Array<ReviewWalkthroughSentence>
   author: ReviewUserRef | null
   createdAt: string | null
   labels: ReactNode
@@ -166,11 +180,16 @@ function Description({
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}
       >
         {body.trim() ? (
-          <Markdown
-            content={linkPullRequestRefs(body, pr)}
-            transformImageUrl={proxyImage}
-            enlargeImages
-          />
+          <DescriptionNotes pr={pr} sentences={sentences}>
+            <Markdown
+              content={linkPullRequestRefs(body, pr)}
+              transformImageUrl={proxyImage}
+              enlargeImages
+              remarkPlugins={descriptionNotePlugins(sentences)}
+              components={NOTE_COMPONENTS}
+              allowedTags={NOTE_ALLOWED_TAGS}
+            />
+          </DescriptionNotes>
         ) : (
           <p className="text-secondary italic">No description.</p>
         )}

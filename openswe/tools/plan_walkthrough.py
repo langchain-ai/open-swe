@@ -7,7 +7,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.ui_invalidations import Topic
 from openswe.walkthrough.checkout import CheckoutError
-from openswe.walkthrough.plan import FileHunks, FileSplits, RangeError
+from openswe.walkthrough.plan import DescribedSentence, FileHunks, FileSplits, RangeError
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
@@ -86,3 +86,13 @@ async def walkthrough_describe_other(summary: str) -> dict[str, Any]:
     except PLANNING_ERRORS as exc:
         return {"success": False, "error": str(exc)}
     return await _planned(workspace)
+
+
+async def walkthrough_annotate_description(sentences: list[DescribedSentence]) -> dict[str, Any]:
+    """Implement the `walkthrough_annotate_description` tool."""
+    try:
+        workspace = await _workspace()
+        count = await workspace.annotate_description(sentences)
+    except PLANNING_ERRORS as exc:
+        return {"success": False, "error": str(exc)}
+    return await _planned(workspace, annotated_sentences=count)

@@ -14,7 +14,7 @@ import {
 } from "streamdown"
 import type { ComponentProps, ReactNode } from "react"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import type { Components, ExtraProps } from "streamdown"
+import type { Components, ExtraProps, StreamdownProps } from "streamdown"
 import "streamdown/styles.css"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
@@ -37,6 +37,12 @@ interface MarkdownProps {
    */
   transformImageUrl?: (src: string) => string
   enlargeImages?: boolean
+  /** Run after the default remark plugins; pass a stable value. */
+  remarkPlugins?: StreamdownProps["remarkPlugins"]
+  /** Override renderers; pass a stable value. */
+  components?: Components
+  /** Attributes to keep per tag, beyond the defaults; pass a stable value. */
+  allowedTags?: Record<string, Array<string>>
 }
 
 const REMARK_PLUGINS = [
@@ -296,6 +302,9 @@ export const Markdown = memo(function Markdown({
   isLive = false,
   transformImageUrl,
   enlargeImages = false,
+  remarkPlugins,
+  components: extraComponents,
+  allowedTags,
 }: MarkdownProps) {
   const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
   const components = useMemo(
@@ -329,6 +338,20 @@ export const Markdown = memo(function Markdown({
         : COMPONENTS,
     [enlargeImages]
   )
+  const rendered = useMemo(
+    () =>
+      extraComponents ? { ...components, ...extraComponents } : components,
+    [components, extraComponents]
+  )
+  const plugins = useMemo(
+    () =>
+      remarkPlugins ? [...REMARK_PLUGINS, ...remarkPlugins] : REMARK_PLUGINS,
+    [remarkPlugins]
+  )
+  const tags = useMemo(
+    () => (allowedTags ? { ...ALLOWED_TAGS, ...allowedTags } : ALLOWED_TAGS),
+    [allowedTags]
+  )
   const urlTransform = useMemo(() => {
     if (!transformImageUrl) return undefined
     return (
@@ -350,9 +373,9 @@ export const Markdown = memo(function Markdown({
           isAnimating={isLive}
           shikiTheme={SHIKI_THEME}
           className="streamdown-agent max-w-full min-w-0 space-y-0"
-          components={components}
-          remarkPlugins={REMARK_PLUGINS}
-          allowedTags={ALLOWED_TAGS}
+          components={rendered}
+          remarkPlugins={plugins}
+          allowedTags={tags}
           urlTransform={urlTransform}
         >
           {content}

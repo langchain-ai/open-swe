@@ -137,11 +137,8 @@ export function walkthroughFileDiff(
   return cache.get(key) ?? null
 }
 
-function sliceFileDiff(
-  file: ReviewDiffFile,
-  patch: string,
-  lines: ReviewWalkthroughFile
-): FileDiffMetadata | null {
+/** The rows of `file`'s diff that hold `lines`, in runs with a little context, and how many it holds. */
+function cut(patch: string, lines: ReviewWalkthroughFile) {
   const full = getSingularPatch(patch)
   const mine = (row: Row) =>
     row.sign === "+"
@@ -151,15 +148,33 @@ function sliceFileDiff(
   const changed = hunks.flatMap(({ rows }) =>
     rows.filter((r) => r.sign !== " ")
   )
-  const held = changed.filter(mine).length
-  if (held === 0 || held === changed.length) return null
-  const slice =
-    patchHeader(file) +
-    hunks
-      .flatMap(({ hunk, rows }) =>
-        stepRuns(rows, mine).map((run) => runPatch(run, hunk.hunkContext))
-      )
-      .join("")
+  return {
+    held: changed.filter(mine).length,
+    changed: changed.length,
+    hunks: hunks.flatMap(({ hunk, rows }) =>
+      stepRuns(rows, mine).map((run) => runPatch(run, hunk.hunkContext))
+    ),
+  }
+}
+
+/** `file`'s patch cut down to `lines` and a little context; `null` when it holds none of them. */
+export function linesPatch(
+  file: ReviewDiffFile,
+  lines: ReviewWalkthroughFile
+): string | null {
+  if (!file.patch) return null
+  const { held, hunks } = cut(file.patch, lines)
+  return held === 0 ? null : patchHeader(file) + hunks.join("")
+}
+
+function sliceFileDiff(
+  file: ReviewDiffFile,
+  patch: string,
+  lines: ReviewWalkthroughFile
+): FileDiffMetadata | null {
+  const { held, changed, hunks } = cut(patch, lines)
+  if (held === 0 || held === changed) return null
+  const slice = patchHeader(file) + hunks.join("")
   const sliced = getSingularPatch(slice)
   // Hydration keys its highlight cache on this; without it a slice reuses the whole file's rows.
   sliced.cacheKey = `${file.path}:slice:${hashFileContents(slice)}`
