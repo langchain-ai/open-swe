@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.slack import mda_forwarding
+from openswe.slack.records import SlackThreadMappingError
 from openswe.slack.request import SlackRequest
 from openswe.threads import index, router
 from openswe.webhooks.common import ThreadRecord, visibility_is_settled
@@ -99,7 +100,8 @@ async def test_a_refused_new_conversation_goes_back_to_the_backend(
     processed = AsyncMock()
     monkeypatch.setattr(mda_forwarding, "process_slack_mention", processed)
     thread_id = await mda_forwarding.claim_conversation("A1", "T1", "C1", "1.0", owner_login="ada")
-    assert thread_id is not None
+    # No run on MDA wrote its metadata, so a refused forward hands it back.
+    assert not await mda_forwarding.channel_started(thread_id)
     await mda_forwarding.remember(
         SlackRequest(channel_id="C1", thread_ts="1.0", text="A", thread_id=thread_id), None, "1.1"
     )
@@ -168,4 +170,5 @@ async def test_a_claimed_conversation_is_private_until_its_run_says_otherwise(
     assert thread.metadata["channel"] == "slack"
     local.create.assert_awaited_once_with(thread_id, thread.metadata)
     # Another app's conversation can't take the Slack thread now.
-    assert await mda_forwarding.claim_conversation("A2", "T1", "C9", "9.1") is None
+    with pytest.raises(SlackThreadMappingError):
+        await mda_forwarding.claim_conversation("A2", "T1", "C9", "9.1")

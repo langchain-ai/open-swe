@@ -267,8 +267,9 @@ The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` 
 There is no setting: an environment whose Slack app isn't registered with Trigger Server gets a 401, and the backend handles the conversation as before.
 
 A handed-over message never ends in silence.
-When Trigger Server doesn't take the first message of a new conversation (it refuses, or the forward gives up), the backend releases the conversation and runs the message itself, as it did before MDA.
-When it doesn't take a later message in a conversation MDA holds, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
+When Trigger Server doesn't take a message in a conversation the channel hasn't started a run in yet (it refuses, or the forward gives up), the backend releases the conversation and runs the message itself, as it did before MDA.
+The backend claims a new conversation only once it has gated and remembered the message, so a failure before the hand-off leaves the conversation unclaimed.
+When Trigger Server doesn't take a message in a conversation the channel started, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
 Taking it back is atomic, so the person gets either the run or the error.
 Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
