@@ -3,13 +3,14 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.http import GitHubClient, GitHubError, or_none
@@ -36,9 +37,9 @@ async def api_review_assignments(
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> OpenPullRequests:
-    login = session["sub"]
+    login = session.login
     repositories = {name.lower() for name in repo.split(",")} if repo else set()
     if any(
         pull_request_identity({"repo_full_name": name, "number": 1}) is None
@@ -151,10 +152,10 @@ class HumanReviewAvailability(BaseModel):
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/human-review")
 async def api_human_review_availability(
-    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
+    owner: str, repo: str, number: int, session: DashboardSession = SESSION_DEP
 ) -> HumanReviewAvailability:
     _pr_ref(owner, repo, number)
-    await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     async with GitHubClient.as_app(owner, repo) as github:
         pull = github.repo(owner, repo).pull_request(number)
         sha = await or_none(pull.head_sha())
@@ -183,10 +184,10 @@ async def api_request_human_review(
     repo: str,
     number: int,
     body: HumanReviewRequestBody | None = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> RequestResult:
     pr_ref = _pr_ref(owner, repo, number)
-    login = str(session["sub"])
+    login = session.login
     requester = await User.for_login("github", login)
     if requester is None:
         raise HTTPException(403, "No Open SWE user record for this login")
@@ -213,11 +214,11 @@ async def api_dismiss_human_review_request(
     repo: str,
     number: int,
     body: HumanReviewDismissBody | None = None,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> HumanReviewDismissResult:
     """Take down a pull request's open review request, as its card's Dismiss button does."""
     pr_ref = _pr_ref(owner, repo, number)
-    login = str(session["sub"])
+    login = session.login
     await require_repo_access_for_user(login, f"{owner}/{repo}")
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None:

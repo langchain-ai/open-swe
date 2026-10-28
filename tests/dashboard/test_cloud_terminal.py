@@ -7,31 +7,32 @@ from fastapi import FastAPI, HTTPException, Response, WebSocket
 from fastapi.testclient import TestClient
 
 from openswe.dashboard import oauth
+from openswe.dashboard.oauth import DashboardSession
 from openswe.threads import terminal
+from tests.support.sessions import SessionUsers, signed_in
 
 
-def test_terminal_ticket_is_short_lived_and_thread_bound(monkeypatch) -> None:
+async def test_terminal_ticket_is_short_lived_and_thread_bound(
+    monkeypatch, session_users: SessionUsers
+) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
-    ticket = oauth.issue_terminal_ticket(
-        login="alice", email="alice@example.com", thread_id="thread-1"
-    )
+    session_users.add("alice")
+    alice = signed_in("alice", email="alice@example.com")
+    ticket = oauth.issue_terminal_ticket(alice, thread_id="thread-1")
 
-    assert oauth.decode_terminal_ticket(ticket, thread_id="thread-1") == {
-        "sub": "alice",
-        "email": "alice@example.com",
-    }
+    assert await oauth.redeem_terminal_ticket(ticket, thread_id="thread-1") == alice
     with pytest.raises(HTTPException) as exc_info:
-        oauth.decode_terminal_ticket(ticket, thread_id="thread-2")
+        await oauth.redeem_terminal_ticket(ticket, thread_id="thread-2")
     assert exc_info.value.status_code == 401
 
 
-def test_terminal_ticket_rejects_expired_tokens(monkeypatch) -> None:
+async def test_terminal_ticket_rejects_expired_tokens(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
     monkeypatch.setattr(oauth.time, "time", lambda: 0)
-    ticket = oauth.issue_terminal_ticket(login="alice", email=None, thread_id="thread-1")
+    ticket = oauth.issue_terminal_ticket(signed_in("alice"), thread_id="thread-1")
 
     with pytest.raises(HTTPException) as exc_info:
-        oauth.decode_terminal_ticket(ticket, thread_id="thread-1")
+        await oauth.redeem_terminal_ticket(ticket, thread_id="thread-1")
     assert exc_info.value.status_code == 401
 
 
@@ -43,7 +44,10 @@ def test_cloud_terminal_url_uses_direct_langgraph_origin(monkeypatch) -> None:
     )
 
 
-async def test_terminal_connection_requires_owner_before_issuing_ticket(monkeypatch) -> None:
+async def test_terminal_connection_requires_owner_before_issuing_ticket(
+    monkeypatch, session_users: SessionUsers
+) -> None:
+    session_users.add("alice")
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
     monkeypatch.setenv("LANGGRAPH_URL", "https://agent.example")
     get_sandbox = AsyncMock(return_value=("sandbox-1", "repo"))
@@ -53,7 +57,7 @@ async def test_terminal_connection_requires_owner_before_issuing_ticket(monkeypa
     connection = await terminal.api_thread_terminal_connection(
         "thread-1",
         response,
-        {"sub": "alice", "email": "alice@example.com"},
+        signed_in("alice", email="alice@example.com"),
     )
 
     get_sandbox.assert_awaited_once_with("thread-1", "alice", email="alice@example.com")
@@ -61,14 +65,16 @@ async def test_terminal_connection_requires_owner_before_issuing_ticket(monkeypa
     assert connection["url"] == ("wss://agent.example/dashboard/api/threads/thread-1/terminal")
     assert connection["protocol"] == "open-swe-terminal"
     assert connection["ticket"] not in connection["url"]
-    assert (
-        oauth.decode_terminal_ticket(connection["ticket"], thread_id="thread-1")["sub"] == "alice"
-    )
+    redeemed = await oauth.redeem_terminal_ticket(connection["ticket"], thread_id="thread-1")
+    assert redeemed.login == "alice"
 
 
-def test_cloud_terminal_session_reads_ticket_from_subprotocol(monkeypatch) -> None:
+async def test_cloud_terminal_session_reads_ticket_from_subprotocol(
+    monkeypatch, session_users: SessionUsers
+) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
-    ticket = oauth.issue_terminal_ticket(login="alice", email=None, thread_id="thread-1")
+    session_users.add("alice")
+    ticket = oauth.issue_terminal_ticket(signed_in("alice"), thread_id="thread-1")
     websocket = cast(
         WebSocket,
         SimpleNamespace(
@@ -78,29 +84,29 @@ def test_cloud_terminal_session_reads_ticket_from_subprotocol(monkeypatch) -> No
         ),
     )
 
-    assert terminal._cloud_terminal_session(websocket, "thread-1") == {
-        "sub": "alice",
-        "email": None,
-    }
+    assert await terminal._cloud_terminal_session(websocket, "thread-1") == signed_in("alice")
 
     invalid_websocket = cast(
         WebSocket,
         SimpleNamespace(headers={"sec-websocket-protocol": ticket}),
     )
     with pytest.raises(HTTPException) as exc_info:
-        terminal._cloud_terminal_session(invalid_websocket, "thread-1")
+        await terminal._cloud_terminal_session(invalid_websocket, "thread-1")
     assert exc_info.value.status_code == 401
 
 
-def test_cloud_terminal_route_accepts_ticket_without_dashboard_cookie(monkeypatch) -> None:
+def test_cloud_terminal_route_accepts_ticket_without_dashboard_cookie(
+    monkeypatch, session_users: SessionUsers
+) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
-    ticket = oauth.issue_terminal_ticket(login="alice", email=None, thread_id="thread-1")
+    session_users.add("alice")
+    ticket = oauth.issue_terminal_ticket(signed_in("alice"), thread_id="thread-1")
 
     async def fake_cloud_terminal(
-        websocket: WebSocket, thread_id: str, session: dict[str, object]
+        websocket: WebSocket, thread_id: str, session: DashboardSession
     ) -> None:
         assert thread_id == "thread-1"
-        assert session["sub"] == "alice"
+        assert session.login == "alice"
         await websocket.accept(subprotocol="open-swe-terminal")
         await websocket.send_json({"type": "ready"})
         await websocket.close()

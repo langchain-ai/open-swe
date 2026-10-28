@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from openswe.dashboard import oauth
+from tests.support.sessions import SessionUsers, user_id_of
 
 BACKEND = "https://backend.example"
 
@@ -40,13 +41,15 @@ def _dashboard(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _cookie(login: str = "test-user") -> str:
     token = oauth.issue_session(
-        login=login, email=f"{login}@example.com", avatar_url=None, user_id="u-1"
+        login=login, email=f"{login}@example.com", avatar_url=None, user_id=str(user_id_of(login))
     )
     return f"{oauth.COOKIE_NAME}={token}"
 
 
-async def test_the_session_cookie_names_the_caller() -> None:
-    assert (await oauth.require_session(_request(cookie=_cookie())))["sub"] == "test-user"
+async def test_the_session_cookie_names_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    SessionUsers(monkeypatch).add("test-user")
+
+    assert (await oauth.require_session(_request(cookie=_cookie()))).login == "test-user"
 
 
 def test_a_mutation_from_the_backends_own_origin_is_allowed() -> None:

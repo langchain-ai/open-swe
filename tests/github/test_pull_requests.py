@@ -11,6 +11,7 @@ from openswe.github.repositories import Repository
 from openswe.webhooks import common
 from scripts import sync_pull_request_descriptions
 from tests.conftest import post_signed_github_webhook
+from tests.support.sessions import signed_in
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -230,12 +231,12 @@ async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagina
         AsyncMock(return_value={"lc/repo"}),
     )
     page = await pull_request_dashboard_routes.api_search_pull_requests(
-        "widget", limit=1, offset=0, session={"sub": "ada"}
+        "widget", limit=1, offset=0, session=signed_in("ada")
     )
     assert [row.number for row in page.pull_requests] == [2]
     assert page.has_more
     next_page = await pull_request_dashboard_routes.api_search_pull_requests(
-        "widget", limit=1, offset=1, session={"sub": "ada"}
+        "widget", limit=1, offset=1, session=signed_in("ada")
     )
     assert [row.number for row in next_page.pull_requests] == [3]
     assert not next_page.has_more

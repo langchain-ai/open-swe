@@ -1,12 +1,13 @@
 """Dashboard API for pull requests and the coding threads that work on them."""
 
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.comments import PrState
 from openswe.github.http import GitHubClient
@@ -55,9 +56,9 @@ async def api_search_pull_requests(
     q: str = Query(min_length=1, max_length=1000),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PullRequestSearchResults:
-    accessible = await accessible_repo_full_names(session["sub"])
+    accessible = await accessible_repo_full_names(session.login)
     rows = await PullRequest.search(
         q, repositories=sorted(accessible), limit=limit + 1, offset=offset
     )
@@ -84,12 +85,12 @@ async def api_list_pull_requests(
     direction: Literal["asc", "desc"] = "desc",
     page: int = 1,
     scope: Literal["mine", "review-requested"] = "mine",
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> OpenPullRequests:
-    async with GitHubClient.as_user(session["sub"]) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return await list_open_pull_requests(
             github,
-            session["sub"],
+            session.login,
             repo,
             lightweight=lightweight,
             sort=sort,
@@ -101,11 +102,11 @@ async def api_list_pull_requests(
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}")
 async def api_pull_request_details(
-    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
+    owner: str, repo: str, number: int, session: DashboardSession = SESSION_DEP
 ) -> OpenPullRequest | None:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    async with GitHubClient.as_user(session["sub"]) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return await github.repo(owner, repo).pull_request(number).load()
 
 
@@ -116,19 +117,17 @@ async def api_act_on_pull_request(
     repo: str,
     number: int,
     body: PullRequestAction,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PullRequestActionResult:
-    async with GitHubClient.as_user(session["sub"]) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return await act_on_pull_request(github.repo(owner, repo).pull_request(number), body)
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/thread")
 async def api_pull_request_thread_status(
-    owner: str, repo: str, number: int, session: dict[str, str] = SESSION_DEP
+    owner: str, repo: str, number: int, session: DashboardSession = SESSION_DEP
 ) -> PullRequestThreadStatus:
-    return await pull_request_thread_running(
-        owner, repo, number, session["sub"], session.get("email")
-    )
+    return await pull_request_thread_running(owner, repo, number, session.login, session.email)
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/thread")
@@ -138,10 +137,10 @@ async def api_start_pull_request_thread(
     repo: str,
     number: int,
     body: PullRequestThreadIntent,
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> PullRequestThreadRun:
     return await start_pull_request_thread(
-        owner, repo, number, session["sub"], session.get("email"), intent=body
+        owner, repo, number, session.login, session.email, intent=body
     )
 
 
@@ -152,8 +151,8 @@ async def api_resolve_review_threads(
     repo: str,
     number: int,
     body: ResolveReviewThreads,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> ResolveReviewThreadsResult:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    async with GitHubClient.as_user(session["sub"]) as github:
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    async with GitHubClient.as_user(session.login) as github:
         return await resolve_review_threads(github.repo(owner, repo).pull_request(number), body)

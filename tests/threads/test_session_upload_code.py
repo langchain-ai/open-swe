@@ -10,6 +10,7 @@ from starlette.types import Message
 from openswe.dashboard.oauth import decode_upload_ticket, issue_upload_ticket
 from openswe.threads import session_upload
 from openswe.threads.summary import assert_thread_postable
+from tests.support.sessions import user_id_of
 
 _TRANSCRIPT = (
     json.dumps({"type": "user", "uuid": "u1", "parentUuid": None, "message": {"content": "hi"}})
@@ -32,6 +33,7 @@ def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     metadata: dict[str, object] = {
         "source": "dashboard",
         "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
         "repo_owner": "acme",
         "repo_name": "app",
         "branch_name": "feature",
@@ -60,7 +62,7 @@ async def _upload(code: str) -> dict[str, object] | None:
 
 
 def _code(login: str) -> str:
-    return issue_upload_ticket(login=login, email=None, user_id=None, thread_id="t1")
+    return issue_upload_ticket(user_id=user_id_of(login), email=None, thread_id="t1")
 
 
 async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, object]) -> None:

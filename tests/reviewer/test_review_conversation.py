@@ -19,9 +19,10 @@ from openswe.review.conversation import (
     api_get_review_conversation,
     api_post_review_conversation_comment,
 )
+from tests.support.sessions import signed_in
 
 Handler = Callable[[httpx2.Request], httpx2.Response]
-SESSION = {"sub": "octocat"}
+SESSION = signed_in("octocat")
 
 
 def _user(login: str) -> dict[str, str]:

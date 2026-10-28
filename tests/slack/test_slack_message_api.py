@@ -14,6 +14,7 @@ from openswe.slack import client as slack_utils
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.users import User, UserPreferences
 from openswe.utils import url_safety
+from tests.support.sessions import signed_in
 from tests.support.slack_api import SlackAPI
 
 
@@ -322,7 +323,7 @@ async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
         ProfileUpdate(
             default_model="openai:gpt-6.1-sol", reasoning_effort="high", pr_review_links=True
         ),
-        {"sub": "alice", "email": "alice@example.com"},
+        signed_in("alice", email="alice@example.com"),
     )
     assert saved["pr_review_links"] is True
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)

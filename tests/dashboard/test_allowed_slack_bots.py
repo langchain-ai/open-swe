@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from openswe.dashboard import oauth, profiles, routes
 from openswe.users.models import User
+from tests.support.sessions import signed_in
 
 
 @pytest.fixture
@@ -20,10 +21,9 @@ def directory() -> dict[str, Any]:
 def app() -> FastAPI:
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[oauth.require_session] = lambda: {
-        "sub": "alice",
-        "email": "alice@example.com",
-    }
+    app.dependency_overrides[oauth.require_session] = lambda: signed_in(
+        "alice", email="alice@example.com"
+    )
     return app
 
 
@@ -37,7 +37,10 @@ async def client(
 ) -> AsyncIterator[httpx.AsyncClient]:
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice,bob")
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
-    await User.sign_in("github", "1", login="alice")
+    alice = await User.sign_in("github", "1", login="alice")
+    app.dependency_overrides[oauth.require_session] = lambda: signed_in(
+        "alice", email="alice@example.com", user_id=alice.id
+    )
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="test-token"))
 
@@ -126,7 +129,7 @@ async def test_admin_can_add_list_and_remove_bot(
 async def test_non_admin_cannot_manage_bots(
     client: httpx.AsyncClient, app: FastAPI, method: str, path: str, body: Any
 ) -> None:
-    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
+    app.dependency_overrides[oauth.require_session] = lambda: signed_in("mallory")
     assert (await client.request(method, path, json=body)).status_code == 403
 
 
@@ -134,7 +137,7 @@ async def test_any_user_can_read_the_bot_directory(client: httpx.AsyncClient, ap
     assert (
         await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"})
     ).is_success
-    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
+    app.dependency_overrides[oauth.require_session] = lambda: signed_in("mallory")
     response = await client.get("/dashboard/api/slack/allowed-bots/directory")
     assert response.status_code == 200, response.text
     assert response.json() == [{"key": "T123:B123", "name": "Release bot", "image_url": ""}]
@@ -157,7 +160,7 @@ async def test_duplicate_add_does_not_transfer_ownership(
     assert (
         await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"})
     ).status_code == 200
-    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "bob"}
+    app.dependency_overrides[oauth.require_session] = lambda: signed_in("bob")
     response = await client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"})
     assert response.status_code == 409
     assert (await client.get("/dashboard/api/slack/allowed-bots")).json()[0][

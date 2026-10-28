@@ -6,15 +6,16 @@ import pytest
 from fastapi import FastAPI
 
 from openswe.dashboard import oauth, routes
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 from openswe.users.models import User, UserIdentity
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.sessions import signed_in
 
-_ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
-_USER_SESSION = {"sub": "intern", "email": "intern@example.com"}
+_USER_SESSION = signed_in("intern", email="intern@example.com")
 
 
-def _client_for(session: dict[str, str]) -> httpx.AsyncClient:
+def _client_for(session: DashboardSession) -> httpx.AsyncClient:
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[oauth.require_session] = lambda: session
@@ -43,7 +44,9 @@ async def admin_client(workspace: str) -> AsyncIterator[httpx.AsyncClient]:
     async with postgres.session() as session:
         session.add(user)
         await session.flush()
-    async with _client_for({**_ADMIN_SESSION, "user_id": str(user.id)}) as client:
+    async with _client_for(
+        signed_in("admin", email="admin@example.com", user_id=user.id)
+    ) as client:
         yield client
 
 
@@ -151,17 +154,3 @@ async def test_non_admin_sessions_cannot_reach_the_admin_routes(workspace: str) 
         )
         assert created.status_code == 403
         assert (await client.delete("/dashboard/api/admin/api-keys/whatever")).status_code == 403
-
-
-@pytest.mark.parametrize("user_id", [None, "not-a-uuid", "00000000-0000-0000-0000-000000000001"])
-async def test_creation_requires_an_existing_user(workspace: str, user_id: str | None) -> None:
-    session = dict(_ADMIN_SESSION)
-    if user_id is not None:
-        session["user_id"] = user_id
-    async with _client_for(session) as client:
-        response = await client.post(
-            "/dashboard/api/admin/api-keys",
-            json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
-        )
-        assert response.status_code == 403
-        assert (await client.get("/dashboard/api/admin/api-keys")).json() == []

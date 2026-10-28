@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk.schema import Run
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
+from openswe.dashboard.oauth import (
+    DashboardSession,
+    require_same_origin_for_mutations,
+    require_session,
+)
 from openswe.dispatch import dispatch_agent_run
 from openswe.source_context import SourceContext
 from openswe.threads.plan_api import fetch_thread_metadata
@@ -32,10 +36,10 @@ _SESSION_DEP = Depends(require_session)
 
 @workflow_approval_router.get("/{thread_id}")
 async def list_workflow_push_approvals(
-    thread_id: str, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata, session["sub"], session.get("email")):
+    if not thread_is_readable(metadata, session.login, session.email):
         raise HTTPException(404, "thread not found")
     approvals = await get_workflow_push_approvals(thread_id)
     return {
@@ -47,12 +51,12 @@ async def list_workflow_push_approvals(
 @workflow_approval_router.post("/{thread_id}/{fingerprint}/approve")
 @audit_endpoint
 async def approve_workflow_push(
-    thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, fingerprint: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(metadata, session.login)
     record = await decide_workflow_push_approval(
-        thread_id, fingerprint, approved=True, actor=session["sub"]
+        thread_id, fingerprint, approved=True, actor=session.login
     )
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
@@ -60,8 +64,8 @@ async def approve_workflow_push(
         thread_id,
         metadata,
         "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
-        github_login=session["sub"],
-        user_email=session.get("email"),
+        github_login=session.login,
+        user_email=session.email,
     )
     return {"status": "approved", "fingerprint": fingerprint}
 
@@ -69,12 +73,12 @@ async def approve_workflow_push(
 @workflow_approval_router.post("/{thread_id}/{fingerprint}/reject")
 @audit_endpoint
 async def reject_workflow_push(
-    thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
+    thread_id: str, fingerprint: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session["sub"])
+    _assert_thread_promptable(metadata, session.login)
     record = await decide_workflow_push_approval(
-        thread_id, fingerprint, approved=False, actor=session["sub"]
+        thread_id, fingerprint, approved=False, actor=session.login
     )
     if record is None:
         raise HTTPException(404, "workflow push approval not found")

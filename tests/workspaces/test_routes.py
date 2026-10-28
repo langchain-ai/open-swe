@@ -10,8 +10,9 @@ from openswe.dashboard import deps, oauth, routes
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces import routes as workspace_routes
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.sessions import signed_in
 
-_ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
+_ADMIN_SESSION = signed_in("admin", email="admin@example.com")
 
 
 @pytest.fixture

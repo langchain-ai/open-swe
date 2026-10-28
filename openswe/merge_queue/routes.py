@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_requests import PullRequest
@@ -111,15 +111,13 @@ class QueueAccess:
 
 
 async def queue_access(
-    workspace_id: UUID, session: dict[str, str] = SESSION_DEP
+    workspace_id: UUID, session: DashboardSession = SESSION_DEP
 ) -> AsyncIterator[QueueAccess]:
     running = controller.CONTROLLER
     if running is None or running.config.workspace_id != workspace_id:
         raise HTTPException(404, "Queue is not enabled for this workspace")
-    # A stable user ID must survive login renames; never use an API-key actor here.
-    user_id = session_user_id(session)
-    user = await User.for_session(user_id, session["sub"])
-    if user is None or user.id != user_id or not user.github_login:
+    user = await User.get(session.user_id)
+    if user is None:
         raise HTTPException(401, "Sign in again to use the queue")
     queue = await MergeQueue.load(running.queue.id, workspace_id)
     if queue is None:

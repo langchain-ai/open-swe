@@ -10,6 +10,7 @@ from openswe.dashboard.agent_instructions import (
     AgentInstructions,
     get_repo_agent_instructions,
 )
+from tests.support.sessions import signed_in
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -42,7 +43,7 @@ async def test_list_agent_instructions_filters_inaccessible_repos(monkeypatch) -
 
     monkeypatch.setattr(deps, "require_repo_access_for_user", fake_require_repo_access_for_user)
 
-    result = await instructions_api.api_list_agent_instructions(session={"sub": "octocat"})
+    result = await instructions_api.api_list_agent_instructions(session=signed_in("octocat"))
 
     assert result == [AgentInstructions(full_name="acme/visible", instructions="visible")]
 
@@ -63,7 +64,7 @@ async def test_delete_agent_instructions_requires_repo_access_before_delete(monk
 
     with pytest.raises(HTTPException) as exc:
         await instructions_api.api_delete_agent_instructions(
-            "acme/repo", session={"sub": "octocat"}
+            "acme/repo", session=signed_in("octocat")
         )
 
     assert exc.value.status_code == 403

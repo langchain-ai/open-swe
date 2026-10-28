@@ -1,12 +1,12 @@
 """Dashboard API for Slack account linking and the bot allowlist."""
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Path
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.slack.allowed_bots import (
     AllowedSlackBot,
     AllowedSlackBotEntry,
@@ -37,7 +37,7 @@ router.include_router(connect_router)
 @router.get("/slack/users/{user_id}/name")
 async def api_slack_user_name(
     user_id: Annotated[str, Path(pattern=r"^[UW][A-Z0-9]{2,}$", max_length=32)],
-    _session: dict[str, object] = SESSION_DEP,
+    _session: DashboardSession = SESSION_DEP,
 ) -> dict[str, str]:
     names = await get_slack_user_names([user_id])
     return {"name": names.get(user_id, user_id)}
@@ -45,29 +45,29 @@ async def api_slack_user_name(
 
 @router.get("/slack/concierge")
 async def api_concierge(
-    session: dict[str, str] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, str | None]:
-    user = await User.for_session(session_user_id(session), session["sub"])
+    user = await User.get(session.user_id)
     if user is None or not user.typed_preferences.concierge_mode or not user.slack_user_id:
         return {"thread_id": None, "channel_id": None}
     channel_id = await open_dm(user.slack_user_id)
     thread_id = await lookup_slack_thread_id(channel_id, CONCIERGE_TS) if channel_id else None
     if thread_id:
         thread = await langgraph_client().threads.get(thread_id)
-        assert_thread_readable(thread_metadata(thread), session["sub"], session.get("email"))
+        assert_thread_readable(thread_metadata(thread), session.login, session.email)
     return {"thread_id": thread_id, "channel_id": channel_id}
 
 
 @router.get("/slack/bots")
 async def api_list_slack_bots(
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> list[SlackBotOption]:
     return await list_slack_bots()
 
 
 @router.get("/slack/channels")
 async def api_list_slack_channels(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> SlackChannelDirectory:
     """Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.
 
@@ -78,17 +78,17 @@ async def api_list_slack_channels(
 
 @router.post("/slack/channels/refresh")
 async def api_refresh_slack_channels(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> SlackChannelDirectory:
     """Walk Slack's channels again now; the directory reloads when the walk ends."""
-    await refresh_directory(by=session_user_id(session))
+    await refresh_directory(by=session.user_id)
     return _visible_channels(await list_slack_channels(), session)
 
 
 def _visible_channels(
-    directory: SlackChannelDirectory, session: dict[str, Any]
+    directory: SlackChannelDirectory, session: DashboardSession
 ) -> SlackChannelDirectory:
-    if session_is_admin(session):
+    if session.admin:
         return directory
     return directory.model_copy(
         update={"channels": [channel for channel in directory.channels if not channel.is_private]}
@@ -97,14 +97,14 @@ def _visible_channels(
 
 @router.get("/slack/allowed-bots")
 async def api_list_allowed_slack_bots(
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> list[AllowedSlackBot]:
     return await AllowedSlackBot.all()
 
 
 @router.get("/slack/allowed-bots/directory")
 async def api_allowed_slack_bot_directory(
-    _session: dict[str, Any] = SESSION_DEP,
+    _session: DashboardSession = SESSION_DEP,
 ) -> list[AllowedSlackBotEntry]:
     """Names and avatars of allowed bots, for the Bots view every user can open."""
     return await allowed_slack_bot_directory()
@@ -114,7 +114,7 @@ async def api_allowed_slack_bot_directory(
 @audit_endpoint
 async def api_allow_slack_bot(
     body: AllowSlackBot,
-    admin: dict[str, Any] = ADMIN_DEP,
+    admin: DashboardSession = ADMIN_DEP,
 ) -> AllowedSlackBot:
     return await allow_slack_bot(body, admin)
 
@@ -124,7 +124,7 @@ async def api_allow_slack_bot(
 async def api_remove_allowed_slack_bot(
     team_id: str,
     bot_id: str,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> dict[str, bool]:
     await AllowedSlackBot.remove(team_id, bot_id)
     return {"ok": True}

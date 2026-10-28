@@ -22,6 +22,7 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -792,7 +793,7 @@ async def _existing_workspace(raw: str) -> str:
 @router.get("/settings")
 # The pre-workspaces path, kept for the dashboard until it moves; hidden from the schema.
 @router.get("/team-settings", include_in_schema=False)
-async def api_get_instance_settings(_session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
+async def api_get_instance_settings(_session: DashboardSession = SESSION_DEP) -> dict[str, Any]:
     """The instance record: what every workspace inherits."""
     return dict(await get_instance_settings())
 
@@ -801,7 +802,7 @@ async def api_get_instance_settings(_session: dict[str, Any] = SESSION_DEP) -> d
 @router.put("/team-settings", include_in_schema=False)
 @audit_endpoint
 async def api_put_instance_settings(
-    body: WorkspaceSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
+    body: WorkspaceSettingsUpdate, _admin: DashboardSession = ADMIN_DEP
 ) -> dict[str, Any]:
     try:
         await upsert_instance_settings(body)
@@ -812,7 +813,7 @@ async def api_put_instance_settings(
 
 @router.get("/workspaces/{workspace}/settings")
 async def api_get_workspace_settings(
-    workspace: str, _session: dict[str, Any] = SESSION_DEP
+    workspace: str, _session: DashboardSession = SESSION_DEP
 ) -> WorkspaceSettingsView:
     return await workspace_settings_view(await _existing_workspace(workspace))
 
@@ -823,7 +824,7 @@ async def api_put_workspace_settings(
     workspace: str,
     body: WorkspaceSettingsUpdate,
     request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
+    _admin: DashboardSession = ADMIN_DEP,
 ) -> WorkspaceSettingsView:
     try:
         slug = await _existing_workspace(workspace)

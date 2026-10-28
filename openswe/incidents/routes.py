@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import require_session
+from openswe.dashboard.oauth import DashboardSession, require_session
 from openswe.incidents.models import IncidentId
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -35,26 +34,26 @@ class IncidentSettingsBody(BaseModel):
 
 
 async def _responder(
-    session: Annotated[dict[str, Any], Depends(require_session)],
-) -> dict[str, Any]:
+    session: Annotated[DashboardSession, Depends(require_session)],
+) -> DashboardSession:
     """Any signed-in dashboard user may read incidents; settings stay admin-only."""
     return session
 
 
 async def _administrator(
-    session: Annotated[dict[str, Any], Depends(require_session)],
-) -> dict[str, Any]:
-    if not is_admin(session.get("email"), login=session.get("sub")):
+    session: Annotated[DashboardSession, Depends(require_session)],
+) -> DashboardSession:
+    if not session.admin:
         raise HTTPException(403, "admin only")
     return session
 
 
-def _actor(session: dict[str, Any]) -> dict[str, Any]:
+def _actor(session: DashboardSession) -> dict[str, Any]:
     return {
-        "id": f"github:{session['sub']}",
+        "id": f"github:{session.login}",
         "platform": "github",
-        "github_login": session["sub"],
-        "email": session.get("email"),
+        "github_login": session.login,
+        "email": session.email,
     }
 
 
@@ -64,7 +63,7 @@ actor = _actor
 
 @router.get("/settings")
 async def get_settings(
-    session: Annotated[dict[str, Any], Depends(_administrator)],
+    session: Annotated[DashboardSession, Depends(_administrator)],
 ) -> dict[str, Any]:
     from openswe.incidents import service
 
@@ -75,7 +74,7 @@ async def get_settings(
 @audit_endpoint
 async def update_settings(
     body: IncidentSettingsBody,
-    session: Annotated[dict[str, Any], Depends(_administrator)],
+    session: Annotated[DashboardSession, Depends(_administrator)],
 ) -> dict[str, Any]:
     from openswe.incidents import service
 
@@ -88,7 +87,7 @@ async def update_settings(
 
 @router.get("/records")
 async def list_incidents(
-    session: Annotated[dict[str, Any], Depends(_responder)],
+    session: Annotated[DashboardSession, Depends(_responder)],
     view: Literal["active", "inactive", "all"] | None = None,
     q: str | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
@@ -101,20 +100,18 @@ async def list_incidents(
         q=q,
         limit=limit,
         cursor=cursor,
-        include_setup=is_admin(session.get("email"), login=session.get("sub")),
+        include_setup=session.admin,
     )
 
 
 @router.get("/records/{incident_id}")
 async def get_incident(
     incident_id: IncidentId,
-    session: Annotated[dict[str, Any], Depends(_responder)],
+    session: Annotated[DashboardSession, Depends(_responder)],
 ) -> dict[str, Any]:
     from openswe.incidents import service
 
-    return await service.get_incident(
-        incident_id, include_setup=is_admin(session.get("email"), login=session.get("sub"))
-    )
+    return await service.get_incident(incident_id, include_setup=session.admin)
 
 
 @router.post("/records/{incident_id}/commands", status_code=202)
@@ -122,7 +119,7 @@ async def get_incident(
 async def submit_command(
     incident_id: IncidentId,
     body: IncidentCommandBody,
-    session: Annotated[dict[str, Any], Depends(_responder)],
+    session: Annotated[DashboardSession, Depends(_responder)],
 ) -> dict[str, Any]:
     from openswe.incidents import service
 

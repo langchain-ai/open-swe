@@ -302,12 +302,16 @@ async def control_reserve_session_upload(request: Request) -> JSONResponse:
     The E2E deployment mounts no remote MCP, so a spec reserves here and then
     posts to the returned ``upload_url`` with ``upload_token`` as the agent's curl does."""
     from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
+    from openswe.users import User
 
     body = await request.json()
     login = str(body.pop("login"))
     email = body.pop("email", None)
+    user = await User.for_login("github", login)
+    if user is None:
+        return JSONResponse({"error": f"no account for {login}"}, status_code=404)
     reservation = await reserve_session_upload(
-        SessionUploadHeader.model_validate(body), login, email=email
+        SessionUploadHeader.model_validate(body), login, user_id=user.id, email=email
     )
     return JSONResponse(reservation.model_dump())
 

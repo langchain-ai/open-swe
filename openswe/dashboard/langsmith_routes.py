@@ -18,6 +18,7 @@ from openswe.dashboard.langsmith_oauth import (
 )
 from openswe.dashboard.oauth import (
     STATE_TTL_SECONDS,
+    DashboardSession,
     DesktopConnectExchange,
     cookie_security,
     decode_state,
@@ -54,15 +55,15 @@ async def _complete(login: str, nonce_hash: str, code: str) -> None:
 
 
 @router.get("/my-credentials/langsmith")
-async def get_my_langsmith_status(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    return await langsmith_status(session["sub"])
+async def get_my_langsmith_status(session: DashboardSession = SESSION_DEP) -> dict[str, Any]:
+    return await langsmith_status(session.login)
 
 
 @router.delete("/my-credentials/langsmith")
 @audit_endpoint
-async def disconnect_my_langsmith(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    await disconnect_langsmith(session["sub"])
-    return await langsmith_status(session["sub"])
+async def disconnect_my_langsmith(session: DashboardSession = SESSION_DEP) -> dict[str, Any]:
+    await disconnect_langsmith(session.login)
+    return await langsmith_status(session.login)
 
 
 @router.get("/langsmith/login")
@@ -70,7 +71,7 @@ async def langsmith_login(
     redirect_to: str | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> RedirectResponse:
     nonce = new_state_nonce()
     nonce_hash = hash_state_nonce(nonce)
@@ -84,7 +85,7 @@ async def langsmith_login(
     )
     try:
         url = await start_langsmith_oauth(
-            session["sub"],
+            session.login,
             nonce_hash,
             redirect_uri=f"{dashboard_api_base_url()}{_COOKIE_PATH}/callback",
             state=state,
@@ -138,7 +139,7 @@ async def langsmith_callback(
     cookie_nonce = request.cookies.get(LANGSMITH_STATE_COOKIE_NAME)
     if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
         raise HTTPException(400, "oauth state mismatch — please retry")
-    await _complete(session["sub"], nonce_hash, code)
+    await _complete(session.login, nonce_hash, code)
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
     _clear_state_cookie(response)
@@ -148,7 +149,7 @@ async def langsmith_callback(
 @router.post("/langsmith/desktop/exchange")
 async def langsmith_desktop_exchange(
     body: DesktopConnectExchange,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, bool]:
     """Finish a desktop LangSmith connection with the app's own session."""
     claims = redeem_connect_handoff(provider="langsmith", code=body.code, verifier=body.verifier)
@@ -156,5 +157,5 @@ async def langsmith_desktop_exchange(
     code = claims.get("code")
     if not isinstance(nonce_hash, str) or not isinstance(code, str):
         raise HTTPException(400, "malformed handoff code")
-    await _complete(session["sub"], nonce_hash, code)
+    await _complete(session.login, nonce_hash, code)
     return {"connected": True}

@@ -11,7 +11,7 @@ from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, se
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.http import (
@@ -21,7 +21,7 @@ from openswe.slack.http import (
     slack_http_errors,
     slack_identity,
 )
-from openswe.users.records import github_login_of, user_id_for_login
+from openswe.users.records import github_login_of
 from openswe.utils import ttl_cache
 
 
@@ -169,8 +169,7 @@ async def resolve_allowed_slack_bot(
     return bot
 
 
-async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> AllowedSlackBot:
-    login = admin["sub"]
+async def allow_slack_bot(body: AllowSlackBot, admin: DashboardSession) -> AllowedSlackBot:
     async with slack_http_errors(), SlackClient.bot() as client:
         auth = await slack_identity(client)
         team_id = auth["team_id"]
@@ -209,10 +208,10 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
         image_url=image_url
         if isinstance(image_url, str) and image_url.startswith("https://")
         else "",
-        created_by=login,
+        created_by=admin.login,
         created_at=datetime.now(UTC),
     )
-    if not await record.add(session_user_id(admin) or user_id_for_login(login)):
+    if not await record.add(admin.user_id):
         raise HTTPException(409, "This bot is already allowed.")
     return await AllowedSlackBot.get(team_id, bot_id) or record
 

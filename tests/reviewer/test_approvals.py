@@ -16,6 +16,7 @@ from openswe.review.approvals import (
 from openswe.review.routes import api_delete_review_style, api_update_review_style_prompt
 from openswe.review.styles import REVIEW_STYLES, ReviewStylePromptUpdate
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
+from tests.support.sessions import signed_in
 
 
 def _github(status: int, text: str = "") -> AsyncMock:
@@ -85,20 +86,19 @@ async def test_failed_mode_lookup_never_approves() -> None:
 
 async def test_only_admins_change_or_discard_a_mode(registry_db: None) -> None:
     await REVIEW_STYLES.create("o/r", "reader")
-    reader = (
-        patch("openswe.review.routes.require_repo_access_for_user", AsyncMock(return_value="t")),
-        patch("openswe.dashboard.deps.session_is_admin", return_value=False),
+    reader = patch(
+        "openswe.review.routes.require_repo_access_for_user", AsyncMock(return_value="t")
     )
-    with reader[0], reader[1], pytest.raises(HTTPException) as error:
+    with reader, pytest.raises(HTTPException) as error:
         await api_update_review_style_prompt(
-            "o/r", ReviewStylePromptUpdate(approval_mode="off"), {"sub": "reader"}
+            "o/r", ReviewStylePromptUpdate(approval_mode="off"), signed_in("reader")
         )
     assert error.value.status_code == 403
     assert await approval_mode_for("o", "r") == "dry_run"
 
     await REVIEW_STYLES.update_prompts("o/r", ReviewStylePromptUpdate(approval_mode="approve"))
-    with reader[0], reader[1], pytest.raises(HTTPException) as error:
-        await api_delete_review_style("o/r", {"sub": "reader"})
+    with reader, pytest.raises(HTTPException) as error:
+        await api_delete_review_style("o/r", signed_in("reader"))
     assert error.value.status_code == 403
     assert await approval_mode_for("o", "r") == "approve"
 

@@ -10,9 +10,7 @@ it to, so the link can only ever land on the session the app itself holds.
 import base64
 import hashlib
 from typing import Any
-from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
-from uuid import uuid7
 
 import jwt
 import pytest
@@ -23,6 +21,7 @@ from openswe.dashboard import routes
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session
 from openswe.slack import connect
 from openswe.slack.oauth import SlackIdentity
+from tests.support.sessions import SessionUsers, user_id_of
 
 _VERIFIER = "desktop-connect-verifier"
 _CHALLENGE = (
@@ -32,7 +31,7 @@ _APP_ORIGIN = {"origin": "open-swe://app"}
 
 
 @pytest.fixture
-def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+def links(monkeypatch: pytest.MonkeyPatch, session_users: SessionUsers) -> list[dict[str, Any]]:
     """Stub the Slack legs and collect the account links they produce."""
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
@@ -51,14 +50,13 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         )
 
     collected: list[dict[str, Any]] = []
-    user = connect.User()
+    user = session_users.add("alice")
 
     async def fake_link(provider: str, external_id: str, **kwargs: Any) -> connect.User:
         collected.append({"provider": provider, "external_id": external_id, **kwargs})
         return user
 
     monkeypatch.setattr(user, "link", fake_link)
-    monkeypatch.setattr(connect.User, "for_session", AsyncMock(return_value=user))
     monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
         connect,
@@ -108,7 +106,9 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
     with _client() as client:
         client.cookies.set(
             COOKIE_NAME,
-            issue_session(login="alice", email=None, avatar_url=None, user_id=str(uuid7())),
+            issue_session(
+                login="alice", email=None, avatar_url=None, user_id=str(user_id_of("alice"))
+            ),
         )
         handoff = _start_desktop_slack_flow(client)
         assert links == [], "the callback alone must not link an account"

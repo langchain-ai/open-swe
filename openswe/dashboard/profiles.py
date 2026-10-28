@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
+    DashboardSession,
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
@@ -378,19 +379,19 @@ _SESSION_DEP = Depends(require_session)
 
 @router.get("/profile")
 async def get_my_profile(
-    session: dict[str, Any] = _SESSION_DEP,
+    session: DashboardSession = _SESSION_DEP,
 ) -> dict[str, Any]:
     profile, preferences = await asyncio.gather(
-        get_profile(session["sub"]), User.preferences_for_login(session["sub"])
+        get_profile(session.login), User.preferences_for_login(session.login)
     )
     return {**normalize_profile_for_response(profile or {}), **preferences.model_dump()}
 
 
 @router.post("/profile/slack-onboarding-dismissal")
 async def dismiss_slack_onboarding(
-    session: dict[str, str] = _SESSION_DEP,
+    session: DashboardSession = _SESSION_DEP,
 ) -> dict[str, object]:
-    login = session["sub"]
+    login = session.login
     profile = await get_profile(login) or {}
     await PROFILES.put(
         login, {**profile, "slack_onboarding_dismissed": True, "updated_at": now_iso()}
@@ -402,9 +403,9 @@ async def dismiss_slack_onboarding(
 @audit_endpoint
 async def put_my_profile(
     update: ProfileUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
+    session: DashboardSession = _SESSION_DEP,
 ) -> dict[str, Any]:
-    login = session["sub"]
+    login = session.login
     preferences = await User.update_preferences(
         login,
         UserPreferencesPatch(
@@ -425,7 +426,7 @@ async def put_my_profile(
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
-    profile = await upsert_profile(login, session.get("email") or "", update)
+    profile = await upsert_profile(login, session.email or "", update)
     return {
         **normalize_profile_for_response(profile),
         **(preferences or UserPreferences()).model_dump(),

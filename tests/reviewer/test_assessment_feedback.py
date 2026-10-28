@@ -7,6 +7,7 @@ from openswe.review.assessment_feedback import FeedbackSubmission, PublishedAsse
 from openswe.review.routes import get_assessment_feedback, submit_assessment_feedback
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from tests.conftest import FakeUserRecords
+from tests.support.sessions import signed_in
 
 
 async def test_feedback_is_per_person_and_published_assessment(
@@ -40,7 +41,7 @@ async def test_feedback_is_per_person_and_published_assessment(
             1,
             123,
             FeedbackSubmission(rating="helpful", comment="  Clear rationale  "),
-            {"sub": "alice"},
+            signed_in("alice"),
         )
         await submit_assessment_feedback(
             "o",
@@ -48,22 +49,22 @@ async def test_feedback_is_per_person_and_published_assessment(
             1,
             123,
             FeedbackSubmission(rating="unhelpful", comment="Missed a migration"),
-            {"sub": "bob"},
+            signed_in("bob"),
         )
-        saved = await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"})
+        saved = await get_assessment_feedback("o", "r", 1, 123, signed_in("alice"))
         assert saved == first
         assert saved.comment == "Clear rationale"
-        assert await get_assessment_feedback("o", "r", 1, 124, {"sub": "alice"}) is None
+        assert await get_assessment_feedback("o", "r", 1, 124, signed_in("alice")) is None
         edited = await submit_assessment_feedback(
             "o",
             "r",
             1,
             123,
             FeedbackSubmission(rating="unhelpful", comment="Changed my mind"),
-            {"sub": "alice"},
+            signed_in("alice"),
         )
         assert edited.comment == "Changed my mind"
-        bob = await get_assessment_feedback("o", "r", 1, 123, {"sub": "bob"})
+        bob = await get_assessment_feedback("o", "r", 1, 123, signed_in("bob"))
         assert bob and bob.comment == "Missed a migration"
         assert trace_feedback.await_count == 3
         assert trace_feedback.await_args_list[0].args == (
@@ -103,13 +104,13 @@ async def test_trace_failure_does_not_lose_saved_feedback(
         ),
     ):
         saved = await submit_assessment_feedback(
-            "o", "r", 1, 123, FeedbackSubmission(rating="unhelpful"), {"sub": "alice"}
+            "o", "r", 1, 123, FeedbackSubmission(rating="unhelpful"), signed_in("alice")
         )
     with patch(
         "openswe.review.assessment_feedback.require_repo_access_for_user",
         AsyncMock(return_value="t"),
     ):
-        assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"}) == saved
+        assert await get_assessment_feedback("o", "r", 1, 123, signed_in("alice")) == saved
 
 
 async def test_feedback_cannot_cross_repository_scope(
@@ -133,7 +134,7 @@ async def test_feedback_cannot_cross_repository_scope(
         pytest.raises(HTTPException) as error,
     ):
         await submit_assessment_feedback(
-            "public", "r", 1, 123, FeedbackSubmission(rating="helpful"), {"sub": "alice"}
+            "public", "r", 1, 123, FeedbackSubmission(rating="helpful"), signed_in("alice")
         )
     assert error.value.status_code == 404
     with (
@@ -143,7 +144,7 @@ async def test_feedback_cannot_cross_repository_scope(
         ),
         pytest.raises(HTTPException) as error,
     ):
-        await get_assessment_feedback("private", "r", 1, 123, {"sub": "alice"})
+        await get_assessment_feedback("private", "r", 1, 123, signed_in("alice"))
     assert error.value.status_code == 403
 
 
@@ -185,7 +186,7 @@ async def test_feedback_tool_uses_private_owner_and_repo_permission(
             "o", "r", 1, 123, FeedbackSubmission(rating="helpful", comment="Clear")
         )
         assert saved.login == "alice"
-        assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "ALICE"}) == saved
+        assert await get_assessment_feedback("o", "r", 1, 123, signed_in("ALICE")) == saved
     with (
         patch(
             "openswe.tools.submit_review_assessment_feedback.private_credential_login",

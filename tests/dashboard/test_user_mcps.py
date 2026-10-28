@@ -9,6 +9,7 @@ from openswe.mcp import user as mcps
 from openswe.mcp import workspace as workspace_mcps
 from openswe.users.models import User
 from openswe.users.records import UserRecords
+from tests.support.sessions import signed_in
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +58,7 @@ async def test_routes_serve_only_the_signed_in_users_connections(people, monkeyp
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
     app.include_router(routes.router)
-    session = {"sub": "alice", "email": "alice@example.com"}
+    session = signed_in("alice", email="alice@example.com")
     app.dependency_overrides[oauth.require_session] = lambda: session
     body = {
         "name": "linear",
@@ -77,7 +78,7 @@ async def test_routes_serve_only_the_signed_in_users_connections(people, monkeyp
         assert revealed.json() == {"Authorization": "test-secret"}
         assert revealed.headers["cache-control"] == "no-store"
 
-        session = {"sub": "bob", "email": "bob@example.com"}
+        session = signed_in("bob", email="bob@example.com")
         assert (await client.get("/dashboard/api/my-mcps")).json() == []
         denied = await client.post("/dashboard/api/my-mcps/linear/headers/reveal")
         assert denied.status_code == 404
@@ -85,6 +86,6 @@ async def test_routes_serve_only_the_signed_in_users_connections(people, monkeyp
         assert (await client.delete("/dashboard/api/my-mcps/linear")).status_code == 204
         assert await mcps.list_user_mcps("alice") != []
 
-        session = {"sub": "alice", "email": "alice@example.com"}
+        session = signed_in("alice", email="alice@example.com")
         assert (await client.delete("/dashboard/api/my-mcps/linear")).status_code == 204
         assert await mcps.list_user_mcps("alice") == []

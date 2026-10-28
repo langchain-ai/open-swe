@@ -36,7 +36,6 @@ from openswe.threads.summary import (
     _thread_summary,
 )
 from openswe.transcript.mirror import mirror_thread_metadata
-from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -273,7 +272,7 @@ class SessionReservation(BaseModel):
 
 
 async def reserve_session_upload(
-    header: SessionUploadHeader, login: str, *, email: str | None = None
+    header: SessionUploadHeader, login: str, *, user_id: uuid.UUID, email: str | None = None
 ) -> SessionReservation:
     """Create the thread an uploaded session continues in, before its transcript arrives."""
     target = await _target(header, login)
@@ -290,6 +289,7 @@ async def reserve_session_upload(
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
+        "owner_user_id": str(user_id),
         "visibility": "private" if header.visibility == "private" else "public",
         "thread_category": "interactive",
         "trigger_kind": "user",
@@ -322,10 +322,7 @@ async def reserve_session_upload(
     await create_thread(
         langgraph_client(), thread_id, title=title, metadata=metadata, if_exists="raise"
     )
-    user = await User.for_login("github", login)
-    code = issue_upload_ticket(
-        login=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
-    )
+    code = issue_upload_ticket(user_id=user_id, email=email, thread_id=thread_id)
     return SessionReservation(
         thread_id=thread_id,
         url=dashboard_thread_url(thread_id),
@@ -338,7 +335,7 @@ async def reserve_session_upload(
 class _ReservedThread(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    owner_login: str
+    owner_user_id: uuid.UUID | None = None
     repo_owner: str
     repo_name: str
     branch_name: str
@@ -371,7 +368,7 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
         reserved = _ReservedThread.model_validate(thread_metadata(thread))
     except ValidationError as exc:
         raise HTTPException(409, "this thread was not reserved for a session upload") from exc
-    if reserved.owner_login.lower() != ticket.sub.lower():
+    if reserved.owner_user_id != ticket.user_id:
         raise HTTPException(409, "this upload code is for another person's thread")
     if not reserved.session_upload_pending:
         return None
@@ -404,9 +401,7 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
     # Ties the upload to the session's mirror, so a later upload can build on what it holds.
     if session.session_id:
         update[SESSION_ID_KEY] = session.session_id
-        if ticket.user_id and (
-            mirror := await mirror_of(uuid.UUID(ticket.user_id), session.session_id)
-        ):
+        if mirror := await mirror_of(ticket.user_id, session.session_id):
             update[MIRROR_THREAD_KEY] = mirror
     await client.threads.update(thread_id=thread_id, metadata=update)
     await mirror_thread_metadata(thread_id, update)

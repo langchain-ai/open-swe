@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.users.records import UserRecords
 from openswe.utils.time import now_iso
 
@@ -71,9 +72,9 @@ router = APIRouter(tags=["user-instructions"])
 
 @router.get("/me/instructions")
 async def api_get_my_instructions(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    login = session["sub"]
+    login = session.login
     record = await get_user_instructions(login)
     return record or {"login": login, "instructions": ""}
 
@@ -82,16 +83,16 @@ async def api_get_my_instructions(
 @audit_endpoint
 async def api_put_my_instructions(
     body: UserInstructionsUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> dict[str, Any]:
-    login = session["sub"]
+    login = session.login
     return await set_user_instructions(login, body.instructions, updated_by=login)
 
 
 @router.delete("/me/instructions")
 @audit_endpoint
 async def api_delete_my_instructions(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    await delete_user_instructions(session["sub"])
+    await delete_user_instructions(session.login)
     return Response(status_code=204)

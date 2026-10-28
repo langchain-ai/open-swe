@@ -1,12 +1,12 @@
 """Record dashboard actions that failed in the browser under the ID the user sees."""
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class ClientErrorReport(BaseModel):
 @router.post("/client-errors", status_code=204)
 async def api_report_client_error(
     report: ClientErrorReport,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
     logger.warning(
         "Dashboard action failed",
@@ -38,7 +38,7 @@ async def api_report_client_error(
             "status_code": report.status,
             "mutation": report.mutation,
             "page_path": report.path,
-            "login": session["sub"],
+            "login": session.login,
         },
     )
     return Response(status_code=204)

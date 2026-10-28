@@ -1,7 +1,6 @@
 """Admin routes for DMing an announcement to everyone Open SWE can reach on Slack."""
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -10,7 +9,7 @@ from openswe.announcements.delivery import send_announcement_dm, start_announcem
 from openswe.announcements.models import TEXT_MAX_CHARS, Announcement, AnnouncementSummary
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.oauth import DashboardSession
 from openswe.slack.http import SlackRequestError
 from openswe.users.models import User
 
@@ -43,7 +42,7 @@ class AnnouncementSent(BaseModel):
 
 
 @router.get("")
-async def api_list_announcements(_admin: dict[str, Any] = ADMIN_DEP) -> AnnouncementsView:
+async def api_list_announcements(_admin: DashboardSession = ADMIN_DEP) -> AnnouncementsView:
     return AnnouncementsView(
         recipients=await Announcement.recipient_count(), items=await Announcement.recent()
     )
@@ -52,11 +51,11 @@ async def api_list_announcements(_admin: dict[str, Any] = ADMIN_DEP) -> Announce
 @router.post("", status_code=202)
 @audit_endpoint
 async def api_send_announcement(
-    body: AnnouncementCreate, admin: dict[str, Any] = ADMIN_DEP
+    body: AnnouncementCreate, admin: DashboardSession = ADMIN_DEP
 ) -> AnnouncementSent:
     """DM the announcement to everyone, or with ``test`` to the admin alone."""
-    author = await User.for_session(session_user_id(admin), admin["sub"])
     if body.test:
+        author = await User.get(admin.user_id)
         if author is None or not author.slack_user_id:
             raise HTTPException(400, "Link your Slack account to send yourself a test.")
         try:
@@ -65,7 +64,7 @@ async def api_send_announcement(
             raise HTTPException(502, f"Slack refused the test DM: {exc.code}") from exc
         return AnnouncementSent(test=True, recipients=1)
     try:
-        recipients = await start_announcement(body.text, author.id if author else None)
+        recipients = await start_announcement(body.text, admin.user_id)
     except Exception as exc:
         logger.exception("Announcement could not be started")
         raise HTTPException(502, "Could not start sending. Try again.") from exc

@@ -3,6 +3,7 @@ import hashlib
 from typing import Any
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 import jwt
 import pytest
@@ -18,6 +19,7 @@ from openswe.dashboard.oauth import (
     sanitize_redirect_to,
 )
 from openswe.users import User
+from tests.support.sessions import SessionUsers
 
 
 def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:
@@ -27,40 +29,29 @@ def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:
     return sign_in
 
 
-@pytest.mark.parametrize(
-    ("configured", "unavailable", "status"),
-    [(True, False, 401), (True, True, 200), (False, False, 200)],
-)
-def test_me_reauthenticates_only_a_confirmed_missing_account(
-    monkeypatch: pytest.MonkeyPatch, configured: bool, unavailable: bool, status: int
+@pytest.mark.parametrize("known", [True, False])
+def test_me_answers_with_the_login_the_sessions_user_holds_now(
+    monkeypatch: pytest.MonkeyPatch, session_users: SessionUsers, known: bool
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
-    monkeypatch.setattr(auth_routes.postgres, "configured", lambda: configured)
-    monkeypatch.setattr(
-        auth_routes.User,
-        "for_session",
-        AsyncMock(
-            return_value=None,
-            side_effect=RuntimeError("database unavailable") if unavailable else None,
-        ),
-    )
     monkeypatch.setattr(
         auth_routes,
         "get_user_preferences",
         AsyncMock(return_value={"follow_up_behavior": "queue"}),
     )
+    renamed = session_users.add("alice-renamed").id if known else uuid4()
     app = FastAPI()
     app.include_router(routes.router)
     with TestClient(app) as client:
         client.cookies.set(
             COOKIE_NAME,
-            issue_session(login="alice", email=None, avatar_url=None, user_id=str(User().id)),
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(renamed)),
         )
         response = client.get("/dashboard/api/me")
 
-    assert response.status_code == status
-    if status == 200:
-        assert response.json()["login"] == "alice"
+    assert response.status_code == (200 if known else 401)
+    if known:
+        assert response.json()["login"] == "alice-renamed"
 
 
 def test_sanitize_redirect_to_preserves_allowed_dashboard_target(monkeypatch) -> None:
@@ -283,9 +274,11 @@ def _desktop_login_env(monkeypatch) -> None:
     _stub_sign_in(monkeypatch, User())
 
 
-def test_auth_callback_session_carries_the_signed_in_user(monkeypatch) -> None:
+def test_auth_callback_session_carries_the_signed_in_user(
+    monkeypatch, session_users: SessionUsers
+) -> None:
     _desktop_login_env(monkeypatch)
-    user = User()
+    user = session_users.add("alice")
     sign_in = _stub_sign_in(monkeypatch, user)
 
     app = FastAPI()

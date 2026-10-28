@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.sandboxes.browsers import (
     AGENT_WINDOW,
     BrowserGoneError,
@@ -74,9 +75,9 @@ async def _view(
 
 @router.get("/threads/{thread_id}/browser")
 async def api_thread_browser(
-    thread_id: str, response: Response, session: dict[str, str] = SESSION_DEP
+    thread_id: str, response: Response, session: DashboardSession = SESSION_DEP
 ) -> ThreadBrowserView:
-    record = await _record(thread_id, session["sub"])
+    record = await _record(thread_id, session.login)
     if not record.opened:
         raise HTTPException(404, "this thread's browser isn't open")
     with _langsmith_errors():
@@ -85,10 +86,10 @@ async def api_thread_browser(
 
 @router.post("/threads/{thread_id}/browser")
 async def api_open_thread_browser(
-    thread_id: str, response: Response, session: dict[str, str] = SESSION_DEP
+    thread_id: str, response: Response, session: DashboardSession = SESSION_DEP
 ) -> ThreadBrowserView:
     """Open the thread's browser for a person, before or after the agent has."""
-    record = await _record(thread_id, session["sub"])
+    record = await _record(thread_id, session.login)
     with _langsmith_errors():
         window = await record.open(thread_id)
         view = await _view(record, window, response)

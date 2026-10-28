@@ -14,6 +14,7 @@ from openswe.mcp import MCPConnectionUpdate
 from openswe.mcp import workspace as mcps
 from openswe.mcp.records import MCPConnectionRow
 from openswe.utils.json_types import JsonObject
+from tests.support.sessions import signed_in
 
 
 @pytest.fixture(autouse=True)
@@ -212,7 +213,7 @@ async def test_workspace_mcp_routes_are_admin_only_and_same_origin(registry_db, 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     app = FastAPI()
     app.include_router(routes.router)
-    session = {"sub": "admin", "email": "admin@example.com"}
+    session = signed_in("admin", email="admin@example.com")
     app.dependency_overrides[oauth.require_session] = lambda: session
     body = {
         "name": "example",
@@ -228,7 +229,7 @@ async def test_workspace_mcp_routes_are_admin_only_and_same_origin(registry_db, 
         assert response.status_code == 200
         assert "test-secret" not in response.text
         assert len((await client.get("/dashboard/api/workspaces/default/mcps")).json()) == 1
-        session = {"sub": "member", "email": "member@example.com"}
+        session = signed_in("member", email="member@example.com")
         assert (await client.get("/dashboard/api/workspaces/default/mcps")).status_code == 403
         assert (
             await client.put("/dashboard/api/workspaces/default/mcps/example", json=body)
@@ -236,7 +237,7 @@ async def test_workspace_mcp_routes_are_admin_only_and_same_origin(registry_db, 
         assert (
             await client.delete("/dashboard/api/workspaces/default/mcps/example")
         ).status_code == 403
-        session = {"sub": "admin", "email": "admin@example.com"}
+        session = signed_in("admin", email="admin@example.com")
         assert (
             await client.delete(
                 "/dashboard/api/workspaces/default/mcps/example",
@@ -262,7 +263,7 @@ async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
     )
     app = FastAPI()
     app.include_router(routes.router)
-    session = {"sub": "admin", "email": "admin@example.com"}
+    session = signed_in("admin", email="admin@example.com")
     app.dependency_overrides[oauth.require_session] = lambda: session
     path = "/dashboard/api/workspaces/default/mcps/example/headers/reveal"
     async with httpx.AsyncClient(
@@ -275,11 +276,11 @@ async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
         assert response.json() == {"Authorization": "test-secret"}
         assert response.headers["cache-control"] == "no-store"
         assert await mcps.list_workspace_mcps("default") == [saved]
-        session = {"sub": "member", "email": "member@example.com"}
+        session = signed_in("member", email="member@example.com")
         denied = await client.post(path)
         assert denied.status_code == 403
         assert "test-secret" not in denied.text
-        session = {"sub": "admin", "email": "admin@example.com"}
+        session = signed_in("admin", email="admin@example.com")
         denied = await client.post(path, headers={"Origin": "http://attacker"})
         assert denied.status_code == 403
         assert "test-secret" not in denied.text
@@ -299,7 +300,7 @@ async def test_reveal_headers_requires_admin_and_same_origin_without_saving(
 async def test_validation_responses_never_echo_headers(monkeypatch, headers):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: signed_in("admin")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -339,7 +340,7 @@ async def test_query_credentials_are_rejected_without_saving_or_echoing(
 ):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
+    app.dependency_overrides[deps.admin_session] = lambda: signed_in("admin")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

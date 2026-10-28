@@ -2,7 +2,6 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid7
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -12,10 +11,11 @@ from openswe import incidents
 from openswe.dashboard import oauth, routes
 from openswe.threads import handlers, listing, proxy
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
+from tests.support.sessions import SessionUsers
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch, session_users: SessionUsers) -> TestClient:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "incidents-test-signing-secret-32-bytes")
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
@@ -24,11 +24,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
-def _login(client: TestClient, *, login: str = "sre", email: str = "sre@example.com") -> None:
-    client.cookies.set(
-        oauth.COOKIE_NAME,
-        oauth.issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid7())),
-    )
+def _login(
+    client: TestClient,
+    users: SessionUsers,
+    *,
+    login: str = "sre",
+    email: str = "sre@example.com",
+) -> None:
+    client.cookies.set(oauth.COOKIE_NAME, users.cookie(login, email=email))
 
 
 @pytest.fixture
@@ -66,8 +69,8 @@ def test_all_incidents_routes_require_a_session(client, method, path, body) -> N
 
 
 @pytest.mark.parametrize("method", ["GET", "PATCH"])
-def test_non_admins_cannot_change_settings(client, method) -> None:
-    _login(client)
+def test_non_admins_cannot_change_settings(client, session_users, method) -> None:
+    _login(client, session_users)
 
     response = client.request(
         method,
@@ -86,8 +89,8 @@ def test_non_admins_cannot_change_settings(client, method) -> None:
         ("/records/i1/commands", {"request_id": "r1", "action": "pause"}),
     ],
 )
-def test_incidents_mutations_keep_parent_router_csrf(client, path, body) -> None:
-    _login(client, login="admin")
+def test_incidents_mutations_keep_parent_router_csrf(client, session_users, path, body) -> None:
+    _login(client, session_users, login="admin")
 
     response = client.request(
         "PATCH" if path == "/settings" else "POST",
@@ -100,8 +103,10 @@ def test_incidents_mutations_keep_parent_router_csrf(client, path, body) -> None
     assert response.json() == {"detail": "CSRF check failed"}
 
 
-def test_question_acceptance_uses_only_server_session_identity(client, service) -> None:
-    _login(client)
+def test_question_acceptance_uses_only_server_session_identity(
+    client, session_users, service
+) -> None:
+    _login(client, session_users)
 
     response = client.post(
         "/dashboard/api/incidents/records/i1/commands",
@@ -148,9 +153,9 @@ def test_question_acceptance_uses_only_server_session_identity(client, service) 
     ],
 )
 def test_generic_thread_routes_reject_incidents_even_for_admin_owners(
-    client, monkeypatch, source, method, path, body
+    client, session_users, monkeypatch, source, method, path, body
 ) -> None:
-    _login(client, login="admin")
+    _login(client, session_users, login="admin")
     threads = SimpleNamespace(
         get=AsyncMock(
             return_value={

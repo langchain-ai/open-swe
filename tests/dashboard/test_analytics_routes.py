@@ -8,6 +8,7 @@ from openswe.analytics import posthog, queries
 from openswe.analytics import routes as analytics_routes
 from openswe.dashboard import oauth, routes
 from openswe.database import analytics as database
+from tests.support.sessions import signed_in
 
 
 @pytest.mark.asyncio
@@ -21,7 +22,7 @@ async def test_page_tracking_requires_session_and_rejects_raw_paths(monkeypatch)
     ) as client:
         response = await client.post("/dashboard/api/analytics/page", json={"page_name": "agents"})
         assert response.status_code == 401
-        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "alice"}
+        app.dependency_overrides[oauth.require_session] = lambda: signed_in("alice")
         response = await client.post(
             "/dashboard/api/analytics/page", json={"page_name": "/agents/private-thread"}
         )
@@ -66,11 +67,11 @@ async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
         anonymous = await client.get("/dashboard/api/analytics/readiness")
         assert anonymous.status_code == 401
 
-        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "user"}
+        app.dependency_overrides[oauth.require_session] = lambda: signed_in("user")
         non_admin = await client.get("/dashboard/api/analytics/readiness")
         assert non_admin.status_code == 403
 
-        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "admin"}
+        app.dependency_overrides[oauth.require_session] = lambda: signed_in("admin")
         admin = await client.get("/dashboard/api/analytics/readiness")
         assert admin.status_code == 200
         assert admin.json() == {"configured": True, "ready": True}
@@ -83,7 +84,7 @@ async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
 async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch, failure, report):
     app = FastAPI()
     app.include_router(routes.router)
-    app.dependency_overrides[oauth.require_session] = lambda: {"sub": "user"}
+    app.dependency_overrides[oauth.require_session] = lambda: signed_in("user")
     if failure == "disabled":
         monkeypatch.delenv("POSTGRES_URI", raising=False)
     else:

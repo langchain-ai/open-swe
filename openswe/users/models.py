@@ -122,22 +122,6 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
-    async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
-        """The person a dashboard session belongs to.
-
-        The session's ``user_id`` wins while that row still holds any GitHub
-        identity, so a renamed login never falls through to whoever took the old
-        handle; only a row whose GitHub identity moved away falls back to the login.
-        """
-        if not postgres.configured():
-            return None
-        if user_id is not None:
-            user = await cls.get(user_id)
-            if user is not None and any(i.provider == "github" for i in user.identities):
-                return user
-        return await cls.for_login("github", github_login)
-
-    @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
         if not postgres.configured():
@@ -381,7 +365,7 @@ class User(Base):
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
-        """The person behind a mutable handle; the most recently seen one wins."""
+        """The person holding a mutable handle now; for Slack, the most recently seen one."""
         if not postgres.configured():
             return None
         async with postgres.session() as session:

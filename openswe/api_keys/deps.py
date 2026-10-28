@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from typing import Any
 
 from fastapi import Depends, HTTPException, Request
 
@@ -10,6 +9,7 @@ from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
 from openswe.dashboard.deps import ADMIN_DEP
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ def _require_database() -> None:
         raise HTTPException(503, "API keys require PostgreSQL; set POSTGRES_URI")
 
 
-def require_admin_with_database(admin: dict[str, Any] = ADMIN_DEP) -> dict[str, Any]:
+def require_admin_with_database(admin: DashboardSession = ADMIN_DEP) -> DashboardSession:
     """The admin session, once the store the routes write to exists.
 
     Chained rather than declared beside the admin check so an anonymous caller

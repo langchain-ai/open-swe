@@ -12,6 +12,7 @@ from openswe.ui_invalidations import Topic, outbox
 from openswe.ui_invalidations.hub import HUB
 from openswe.ui_invalidations.routes import _stream
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+from tests.support.sessions import signed_in
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:
@@ -64,8 +65,8 @@ async def test_only_readers_of_a_private_thread_hear_its_queue(
     monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: client)
     topics = [Topic.THREAD_QUEUES.keyed(thread_id) for thread_id in threads]
 
-    assert await Topic.audible({"sub": "alice"}, topics) == set(topics)
-    assert await Topic.audible({"sub": "bob"}, topics) == {"thread-queues/t-shared"}
+    assert await Topic.audible(signed_in("alice"), topics) == set(topics)
+    assert await Topic.audible(signed_in("bob"), topics) == {"thread-queues/t-shared"}
 
 
 async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> None:

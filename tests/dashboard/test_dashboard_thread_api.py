@@ -34,6 +34,7 @@ from openswe.transcript.turns import OpenTurn
 from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
+from tests.support.sessions import signed_in
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -69,7 +70,7 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
     monkeypatch.setattr(thread_routes, "proxy_dashboard_thread_commands", dispatch)
     result = await thread_routes.api_create_session(
         thread_runs.SessionCreateBody(prompt="Fix login", start=start),
-        {"sub": "octocat", "email": "octocat@example.com"},
+        signed_in("octocat", email="octocat@example.com"),
     )
     assert result == {"thread_id": "new-thread"}
     if start:
@@ -1553,7 +1554,7 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
 
     with pytest.raises(HTTPException) as exc_info:
-        deps.require_admin({"sub": "not-admin", "email": "user@example.com"})
+        deps.require_admin(signed_in("not-admin", email="user@example.com"))
 
     assert exc_info.value.status_code == 403
 

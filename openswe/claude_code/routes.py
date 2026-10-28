@@ -6,7 +6,6 @@ body as a decision, and the mirror only ever watches.
 
 import logging
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,7 +17,7 @@ from openswe.audit_logs.models import AuditLogEnrichments
 from openswe.claude_code.hooks import HOOK_EVENT, MIRRORED_EVENTS, SessionMirror
 from openswe.claude_code.sync_tokens import NAME_MAX_CHARS, ClaudeCodeSyncToken
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.oauth import session_user_id
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.models import User
@@ -128,21 +127,13 @@ def hook_settings(secret: str) -> dict[str, JsonValue]:
     return {"hooks": {event: [{"hooks": [handler(event)]}] for event in sorted(MIRRORED_EVENTS)}}
 
 
-async def _session_user(session: dict[str, Any]) -> User:
-    _require_database()
-    user = await User.for_session(session_user_id(session), session["sub"])
-    if user is None:
-        raise HTTPException(403, "Claude Code sync requires a signed-in Open SWE user")
-    return user
-
-
 @router.get("/tokens")
 async def api_list_claude_code_tokens(
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> list[SyncTokenView]:
-    user = await _session_user(session)
     return [
-        SyncTokenView.model_validate(token) for token in await ClaudeCodeSyncToken.for_user(user.id)
+        SyncTokenView.model_validate(token)
+        for token in await ClaudeCodeSyncToken.for_user(session.user_id)
     ]
 
 
@@ -150,13 +141,12 @@ async def api_list_claude_code_tokens(
 @audit_endpoint
 async def api_create_claude_code_token(
     body: SyncTokenCreate,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> MintedSyncToken:
-    user = await _session_user(session)
-    token, secret = await ClaudeCodeSyncToken.create(user_id=user.id, name=body.name)
+    token, secret = await ClaudeCodeSyncToken.create(user_id=session.user_id, name=body.name)
     logger.info(
         "Minted a Claude Code sync token",
-        extra={"sync_token_id": str(token.id), "github_login": session["sub"]},
+        extra={"sync_token_id": str(token.id), "github_login": session.login},
     )
     return MintedSyncToken(
         **SyncTokenView.model_validate(token).model_dump(),
@@ -169,13 +159,12 @@ async def api_create_claude_code_token(
 @audit_endpoint
 async def api_revoke_claude_code_token(
     token_id: UUID,
-    session: dict[str, Any] = SESSION_DEP,
+    session: DashboardSession = SESSION_DEP,
 ) -> Response:
-    user = await _session_user(session)
-    if not await ClaudeCodeSyncToken.revoke(user_id=user.id, token_id=token_id):
+    if not await ClaudeCodeSyncToken.revoke(user_id=session.user_id, token_id=token_id):
         raise HTTPException(404, "token not found")
     logger.info(
         "Revoked a Claude Code sync token",
-        extra={"sync_token_id": str(token_id), "github_login": session["sub"]},
+        extra={"sync_token_id": str(token_id), "github_login": session.login},
     )
     return Response(status_code=204)
