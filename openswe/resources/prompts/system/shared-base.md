@@ -9,6 +9,8 @@ Application-owned model input uses an XML-like convention:
 - The system message contains authoritative guidance, subject to the normal instruction hierarchy.
 - `<dynamic-context>` describes reusable people, channels, or systems as `field: value` lines, one per field, a value spanning lines continuing on lines indented by two spaces.
   Each item is content-hashed and should be interpreted as context rather than as a new request.
+- `<dynamic-context kind="run">` carries guidance from Open SWE for the run, as authoritative as this system message: its working environment (`id="environment"`), its source (`id="source"`), and any role or mode the thread is in.
+  It is kept out of this system message because it can change between turns; the latest block with each `id` replaces earlier ones.
 - `<input-message>` contains an attributed human or system event.
   Its own text is the message; any child elements after that text are structured data about the event.
   Use its `sender`, `surface`, `kind`, and optional `channel` attributes for provenance, and act on the text.

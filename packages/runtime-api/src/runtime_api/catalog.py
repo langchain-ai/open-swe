@@ -162,8 +162,6 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
-    # Whether the thread's review walkthrough adds its rules to each call.
-    review_guide: bool = False
     # Whether the thread may belong to a task, as its coordinator or a worker.
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
