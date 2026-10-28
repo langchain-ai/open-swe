@@ -247,7 +247,25 @@ class ThreadInbox:
             # model of any follow-up queued behind it.
             resolved_model_id = spec.model_id or await _resolve_thread_model_id(self.thread_id)
 
-        for content in contents:
+        for queued in queued_messages:
+            content = queued.content
+            if queued.system_note is not None:
+                _flush_blocks(queued_updates, content_blocks, injected)
+                queued_updates.extend(
+                    cast(
+                        list[dict[str, Any]],
+                        build_input_messages(
+                            queued.system_note,
+                            {
+                                "sender_id": "system:slack-note",
+                                "surface": "automation",
+                                "kind": "system",
+                            },
+                            injected_dynamic_context_hashes=injected,
+                        ),
+                    )
+                )
+                continue
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on

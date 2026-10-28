@@ -25,6 +25,11 @@ def langgraph_client():
     return get_client(url=langgraph_url())
 
 
+async def queue_system_note_for_thread(thread_id: str, note: str) -> bool:
+    """Queue internal context without exposing it as a person's pending message."""
+    return await queue_message_for_thread(thread_id, {"system_note": note})
+
+
 async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:
     """Queue a follow-up message for a busy thread's next model call.
 

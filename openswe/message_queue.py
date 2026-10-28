@@ -101,6 +101,14 @@ class QueuedMessage(Base):
             await session.execute(delete(cls).where(cls.thread_id == thread_id))
             await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
+    @property
+    def system_note(self) -> str | None:
+        if isinstance(self.content, dict) and isinstance(
+            note := self.content.get("system_note"), str
+        ):
+            return note
+        return None
+
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
         from openswe.incidents.report import context_message
