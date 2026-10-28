@@ -8701,6 +8701,18 @@
       "WorkspaceSettingsUpdate": {
         "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
         "properties": {
+          "compact_code_tool_reference": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compact Code Tool Reference"
+          },
           "default_agent_model": {
             "anyOf": [
               {
