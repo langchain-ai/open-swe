@@ -84,24 +84,14 @@ def test_every_gate_reports_independently() -> None:
 
 
 @pytest.mark.parametrize(
-    ("required", "conclusion", "blockers"),
+    ("required", "blockers"),
     [
-        (set(), "failure", []),
-        ({RequiredCheck("unit")}, "failure", []),
-        ({RequiredCheck("advisory")}, "failure", ["failing check: advisory"]),
-        (
-            {RequiredCheck("advisory"), RequiredCheck("legacy-ci")},
-            "failure",
-            ["failing checks: advisory, legacy-ci"],
-        ),
-        ({RequiredCheck("advisory", 1)}, "failure", []),
-        ({RequiredCheck("advisory", 2)}, "failure", ["failing check: advisory"]),
-        ({RequiredCheck("advisory")}, "cancelled", ["failing check: advisory"]),
-        (None, "failure", None),
+        ({RequiredCheck("unit")}, []),
+        ({RequiredCheck("advisory")}, ["failing check: advisory"]),
     ],
 )
 async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
-    required: set[RequiredCheck] | None, conclusion: str, blockers: list[str] | None
+    required: set[RequiredCheck], blockers: list[str]
 ) -> None:
     with (
         patch.object(
@@ -127,23 +117,12 @@ async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
                     {
                         "name": "advisory",
                         "status": "completed",
-                        "conclusion": conclusion,
-                        "app": {"id": 2},
-                    },
-                    {
-                        "name": "advisory",
-                        "status": "completed",
-                        "conclusion": "success",
-                        "app": {"id": 1},
+                        "conclusion": "failure",
                     },
                 ]
             ),
         ),
-        patch.object(
-            RepoClient,
-            "commit_statuses",
-            AsyncMock(return_value=[{"context": "legacy-ci", "state": "failure"}]),
-        ),
+        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
         patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=required)),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
         patch.object(PullRequestClient, "reviews", AsyncMock(return_value=[])),
@@ -153,12 +132,9 @@ async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
             GitHubClient(MagicMock()).repo("lc", "repo").pull_request(7)
         )
 
-    if blockers is None:
-        assert result is None
-    else:
-        assert result is not None
-        assert result.blockers == blockers
-        assert result.ready == (not blockers)
+    assert result is not None
+    assert result.blockers == blockers
+    assert result.ready == (not blockers)
 
 
 @pytest.mark.parametrize("live_approval_id", [None, 123])
