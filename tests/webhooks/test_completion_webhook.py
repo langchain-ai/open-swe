@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -6,6 +8,7 @@ import pytest
 
 from openswe import completion
 from openswe.message_queue import QueuedMessage
+from openswe.review import run_failure
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
@@ -53,10 +56,10 @@ async def test_reviewer_error_preserves_pending_check_result(
     client = _FakeClient(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     monkeypatch.setattr(
-        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+        run_failure, "get_github_app_installation_token", AsyncMock(return_value="token")
     )
     settle = AsyncMock()
-    monkeypatch.setattr(completion, "settle_review_check_run", settle)
+    monkeypatch.setattr(run_failure, "settle_review_check_run", settle)
 
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": "error"}
@@ -85,10 +88,10 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
     client = _FakeClient(metadata)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     monkeypatch.setattr(
-        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+        run_failure, "get_github_app_installation_token", AsyncMock(return_value="token")
     )
     monkeypatch.setattr(
-        completion, "settle_review_check_run", AsyncMock(side_effect=RuntimeError("boom"))
+        run_failure, "settle_review_check_run", AsyncMock(side_effect=RuntimeError("boom"))
     )
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
@@ -99,6 +102,83 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 
     assert result["status"] == "ok"
     reply.assert_awaited_once()
+
+
+class _FakePull:
+    def __init__(self) -> None:
+        self.comments: list[str] = []
+        self.edits: list[tuple[int, str]] = []
+
+    @asynccontextmanager
+    async def as_app(self, owner: str, repo: str, number: int) -> AsyncIterator[_FakePull]:
+        yield self
+
+    async def comment(self, body: str) -> dict[str, int]:
+        self.comments.append(body)
+        return {"id": 900 + len(self.comments)}
+
+    async def edit_comment(self, comment_id: int, body: str) -> dict[str, int]:
+        self.edits.append((comment_id, body))
+        return {"id": comment_id}
+
+
+class _MergingThreads(_FakeThreads):
+    async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+        await super().update(thread_id=thread_id, metadata=metadata)
+        self._metadata.update(metadata)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_reviewer_leaves_one_status_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata: dict[str, Any] = {
+        "kind": "reviewer",
+        "review_check_run_id": 42,
+        "head_sha": "abc",
+        "pr": {"owner": "acme", "name": "widgets", "number": 7},
+    }
+    client = _FakeClient(metadata)
+    client.threads = _MergingThreads(metadata)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+
+    async def set_metadata(thread_id: str, *, extra: dict[str, Any]) -> None:
+        metadata.update(extra)
+
+    async def settle(**kwargs: object) -> None:
+        metadata["review_check_run_id"] = None
+
+    settled = AsyncMock(side_effect=settle)
+    monkeypatch.setattr(run_failure, "set_reviewer_thread_metadata", set_metadata)
+    monkeypatch.setattr(run_failure, "settle_review_check_run", settled)
+    monkeypatch.setattr(
+        run_failure, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    pull = _FakePull()
+    monkeypatch.setattr(run_failure.PullRequestClient, "as_app", pull.as_app)
+
+    def failed(run_id: str) -> dict[str, Any]:
+        return {
+            "thread_id": "t1",
+            "run_id": run_id,
+            "status": "error",
+            "error": {"error": "BackendTimeoutError", "message": "prepare failed (ReadTimeout)"},
+        }
+
+    first = await completion.handle_run_completion(failed("run-1"))
+    replay = await completion.handle_run_completion(failed("run-1"))
+    metadata["current_reviewer_run_id"] = "run-2"
+    await completion.handle_run_completion(failed("run-2"))
+
+    assert first["status"] == "ok"
+    assert replay["status"] == "ignored"
+    assert settled.await_args is not None
+    assert settled.await_args.kwargs["conclusion"] == "neutral"
+    assert len(pull.comments) == 1
+    assert "backend was interrupted" in pull.comments[0]
+    assert pull.edits == [(901, pull.comments[0])]
+    # publish_review deletes the tracked status comment once a later run succeeds.
+    assert metadata["status_comment_id"] == 901
 
 
 @pytest.mark.asyncio
