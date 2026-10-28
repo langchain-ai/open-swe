@@ -1,14 +1,15 @@
 """The thread's box as MDA's own sandbox: declared, opened before the run, replaced on request.
 
-The graph declares one box (``BOX``) for every run; each run's catalog says which
+The graph declares one box (``box``) for every run; each run's catalog says which
 box it uses and the options MDA creates it with (``SandboxSpec``), or that it has
-none. MDA keeps one box per thread whatever the backend's options become, which
-apply only when MDA creates it, and leaves its proxy config to the backend. Before the
-run prepares, the box is opened and its name reported, so the backend binds the
-thread to it; opening is retried while the sandbox service fails transiently, and
-otherwise the backend hears why it failed. ``recreate_sandbox`` on such a box comes
-back from the backend as what to replace it with; MDA replaces it, the backend
-reconnects, and the call answers as it does in-process.
+none, when what the graph keeps itself, such as large tool results, goes to the
+backend's files instead. MDA keeps one box per thread whatever the backend's options
+become, which apply only when MDA creates it, and leaves its proxy config to the
+backend. Before the run prepares, the box is opened and its name reported, so the
+backend binds the thread to it; opening is retried while the sandbox service fails
+transiently, and otherwise the backend hears why it failed. ``recreate_sandbox`` on
+such a box comes back from the backend as what to replace it with; MDA replaces it,
+the backend reconnects, and the call answers as it does in-process.
 """
 
 import asyncio
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from typing import Final
 
 import httpx2
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -96,12 +98,15 @@ def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinitio
     )
 
 
-BOX: Final = define_sandbox(
-    _openswe_per_thread=True,
-    _openswe_no_manage_proxy=True,
-    _openswe_select=_selected,
-    default_timeout=EXECUTE_TIMEOUT_SECONDS,
-)
+def box(without_box: SandboxBackendProtocol) -> SandboxDefinition:
+    """The box every run's catalog picks from, and ``without_box`` for a run it gives none."""
+    return define_sandbox(
+        _openswe_per_thread=True,
+        _openswe_no_manage_proxy=True,
+        _openswe_select=_selected,
+        _openswe_without_box=without_box,
+        default_timeout=EXECUTE_TIMEOUT_SECONDS,
+    )
 
 
 @dataclass(frozen=True)

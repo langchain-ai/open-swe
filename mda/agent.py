@@ -37,15 +37,16 @@ from managed_deepagents import (
     ManagedServerRuntime,
     define_deep_agent,
 )
+from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
 from rt.backend import Graph, OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
-    BOX,
     EXECUTE_TIMEOUT_SECONDS,
     ReplaceSandboxMiddleware,
+    box,
     opened_sandbox,
 )
 from rt.middleware import (
@@ -57,7 +58,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
 )
 from rt.model_calls import model_call_guards
-from rt.remote_files import FILE_TOOLS, RemoteFiles
+from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
 from rt.run_tools import (
     RunCodeInterpreter,
     RunModelCallLimit,
@@ -140,6 +141,7 @@ class _Parts:
     subagents: list[SubAgent]
     middleware: list[AgentMiddleware]
     worker_middleware: list[AgentMiddleware]
+    sandbox: SandboxDefinition
 
 
 def _code_mode(
@@ -233,6 +235,10 @@ def _parts(inputs: GraphInputs) -> _Parts:
         subagents=subagents,
         middleware=middleware,
         worker_middleware=[*middleware, AsyncWorkerLaunchMiddleware(backend)],
+        # A run without MDA's box keeps the graph's own files where its file tools are.
+        sandbox=box(
+            RunArtifacts(backend, run_id, lambda: backend.run.catalog.files.artifacts_root)
+        ),
     )
 
 
@@ -265,7 +271,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # of it, such as the browser's screenshots; the backend's operations work in the
         # same box. Which box, and whether a run has one, is the run's catalog's: a
         # worker's catalog is its coordinator's, so it shares the coordinator's box.
-        sandbox=BOX,
+        sandbox=parts.sandbox,
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
         middleware=parts.worker_middleware,
