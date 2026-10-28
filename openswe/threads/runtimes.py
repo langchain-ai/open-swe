@@ -167,7 +167,9 @@ class MdaRuntime:
             url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
         )
 
-    async def channel_write_headers(self, thread_id: str) -> dict[str, str]:
+    async def channel_write_headers(
+        self, thread_id: str, *, user_id: str | None = None
+    ) -> dict[str, str]:
         """What lets the backend start, answer and stop runs on a thread an MDA channel owns.
 
         MDA's trusted-backend ingress: its ingress secret, the ``MDA_INGRESS_SECRET``
@@ -176,6 +178,10 @@ class MdaRuntime:
         from MDA once. The thread keeps that owner, so the conversation's later
         messages still reach it. Raises ``ChannelThreadError`` without the secret or
         when MDA names no channel conversation as the thread's owner.
+
+        ``user_id`` is the Open SWE user the write is for, so a person's run here has
+        the principal their channel runs have (``mda/identity.py``); without one the
+        backend acts as itself.
         """
         secret = ENV.MDA_SERVICE_SECRET.optional()
         if not secret:
@@ -195,7 +201,7 @@ class MdaRuntime:
         provider, key = conversation
         return {
             "x-mda-ingress-secret": secret,
-            "x-mda-user-id": BACKEND_USER,
+            "x-mda-user-id": user_id or BACKEND_USER,
             "x-mda-source-provider": provider,
             "x-mda-source-thread-id": key,
         }
@@ -301,12 +307,13 @@ class MdaRuntime:
         thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
         channel: bool = False,
+        user_id: str | None = None,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        On a ``channel`` thread the run starts as the backend acting in its conversation
-        (:meth:`channel_write_headers`), which raises ``ChannelThreadError``.
+        On a ``channel`` thread the run starts in its conversation as ``user_id``, or as the
+        backend without one (:meth:`channel_write_headers`), which raises ``ChannelThreadError``.
         """
         starting_ms = now_ms()
         config = params.get("config")
@@ -336,8 +343,10 @@ class MdaRuntime:
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
-        # On a channel's thread the run starts in its conversation.
-        headers = await self.channel_write_headers(thread_id) if channel else {}
+        # On a channel's thread the run starts in its conversation, as ``user_id``.
+        headers = (
+            await self.channel_write_headers(thread_id, user_id=user_id) if channel else {}
+        )
         rewritten = await self.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
