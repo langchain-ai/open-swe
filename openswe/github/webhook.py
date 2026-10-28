@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
@@ -50,6 +51,7 @@ from openswe.thread_ids import (
 )
 from openswe.threads import index, succession
 from openswe.threads.creation import create_thread
+from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
 from openswe.webhooks import common
@@ -1575,6 +1577,21 @@ class GitHubIssueRun:
     configurable: dict[str, Any]
 
 
+async def _conversation_started(thread_id: str) -> bool:
+    """Whether a run on the issue's thread already took the issue in.
+
+    Not whether the thread is indexed: ``adopt`` indexes it before its first run
+    starts, so a retried delivery or a start that failed would read as a follow-up
+    and the first run would never see the issue.
+    """
+    try:
+        state = await THREADS.state(thread_id)
+    except NotFoundError:
+        # Indexed, but no run created it on MDA yet.
+        return False
+    return bool(_state_messages(state))
+
+
 async def prepare_github_issue_run(
     payload: dict[str, Any],
     event_type: str,
@@ -1620,7 +1637,7 @@ async def prepare_github_issue_run(
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return None
 
-    existing_thread = await common.thread_exists(thread_id)
+    existing_thread = await _conversation_started(thread_id)
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
     reaction_token = github_token or app_token
