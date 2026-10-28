@@ -148,7 +148,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         "anthropic:claude-opus-5-5", "high", max_tokens=64_000
     )
     # A thread in no task gets no task context.
-    assert context == {"instructions": "", "message": None}
+    assert context == {"instructions": None, "message": None}
     assert refreshed == {"expires_at": None}
     refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
 

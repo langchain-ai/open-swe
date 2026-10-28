@@ -128,38 +128,31 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
+    role = '<dynamic-context kind="run" id="task-role">You coordinate the task.</dynamic-context>'
     rules = LoopRules(
         deployment_prompt="This is a preview deployment.",
         hidden_tools=["grep"],
         hidden_unless={"has_human_input": ["record_human_input"]},
         routing=RoutingRules(mode="fast", route_model_ids={"fast": _FAST.model_id}),
-        review_guide=True,
         task_coordination=True,
         refresh_github_proxy=True,
     )
-    backend, calls = _backend(
-        monkeypatch,
-        {
-            "task_context": TaskContext(instructions="You coordinate the task.", message=context),
-            "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
-        },
-        rules,
-    )
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "task_context": TaskContext(instructions=role, message=context),
+        "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
+    }
+    backend, calls = _backend(monkeypatch, answers, rules)
     loop = RunLoop(backend)
     state = _state(
         HumanMessage(content="Fix the login", id="human-1"),
         rendered_system_prompt="You are Open SWE.",
-        review_guide_rules="Walk the reviewer through it.",
     )
 
     planned = await loop.before_model(state)
     await backend.outbox.drain()
 
     assert planned.call is not None
-    assert planned.call.system_prompt == (
-        "This is a preview deployment.\n\nYou are Open SWE.\n\n"
-        "Walk the reviewer through it.\n\nYou coordinate the task."
-    )
+    assert planned.call.system_prompt == "This is a preview deployment.\n\nYou are Open SWE."
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
     assert planned.update == {
         "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",
@@ -169,20 +162,56 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
     assert planned.call.fallback == _FALLBACK
     assert planned.call.use_gateway is True
-    assert [message.content for message in messages_from_dict(planned.messages)] == [context]
+    assert [message.content for message in messages_from_dict(planned.messages)] == [
+        role,
+        context,
+    ]
     assert sorted(name for name, _ in calls) == ["refresh_github_proxy", "task_context"]
 
-    # The task's context the model still sees is not added again, and a token with time
-    # left is not replaced.
-    again = await loop.before_model(
-        _state(
-            HumanMessage(content=context, id="task-context:1"),
-            model_route="fast",
-            github_proxy_refresh_at=planned.update["github_proxy_refresh_at"],
-        )
+    # The task's context and role the model still sees are not added again, and a token
+    # with time left is not replaced.
+    seen = _state(
+        HumanMessage(content=role, id="task-role:1"),
+        HumanMessage(content=context, id="task-context:1"),
+        rendered_system_prompt="You are Open SWE.",
+        model_route="fast",
+        github_proxy_refresh_at=planned.update["github_proxy_refresh_at"],
     )
+    again = await loop.before_model(seen)
     assert again.messages == []
     assert [name for name, _ in calls].count("refresh_github_proxy") == 1
+
+    # A new role joins the conversation and leaves the system prompt, and the cache with
+    # it, as it was.
+    worker = role.replace("You coordinate the task.", "You work on the task.")
+    answers["task_context"] = TaskContext(instructions=worker, message=context)
+    demoted = await loop.before_model(seen)
+    assert demoted.call is not None
+    assert demoted.call.system_prompt == planned.call.system_prompt
+    assert [message.content for message in messages_from_dict(demoted.messages)] == [worker]
+
+
+async def test_a_run_context_summarized_away_is_sent_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    history = [
+        HumanMessage(content="Review this PR", id="human-1"),
+        HumanMessage(content="# Run context\nhead_sha: old", id="run-context:1"),
+        HumanMessage(content="# Run context\nhead_sha: new", id="run-context:2"),
+        AIMessage(content="Reading the diff", id="ai-1"),
+    ]
+
+    seen = await loop.before_model({"messages": history, STATE_KEY: {}})
+    summarized = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 3}}
+    )
+
+    assert seen.messages == []
+    assert [message.content for message in messages_from_dict(summarized.messages)] == [
+        "# Run context\nhead_sha: new"
+    ]
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
