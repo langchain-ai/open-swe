@@ -11,6 +11,7 @@ result and its state updates. The file and shell tools are this runtime's own
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Final
 from uuid import uuid4
 
@@ -78,6 +79,14 @@ _json_content = TypeAdapter(str | list[JsonValue])
 
 class SandboxGoneError(RuntimeError):
     """The thread's box did not answer an operation; the person has been told, and the run ends."""
+
+
+class UnreadConnectionError(RuntimeError):
+    """A connection of the deployment's an operation needs could not be read, so it did not run."""
+
+    async def result(self, tool_call_id: str) -> ToolMessage | Command:
+        """The failed tool call, which tells the model why."""
+        return ToolMessage(content=str(self), tool_call_id=tool_call_id, status="error")
 
 
 def run_id() -> str | None:
@@ -176,9 +185,10 @@ async def cited(
     return result.model_copy(update={"content": _content(reply.content)})
 
 
-async def _credentials(spec: OperationSpec) -> dict[str, str] | str:
-    """What the run reads of each connection ``spec`` names, by slug, or what the call
-    fails with when it cannot read one of the deployment's.
+async def _credentials(spec: OperationSpec) -> dict[str, str]:
+    """What the run reads of each connection ``spec`` names, by slug.
+
+    One of the deployment's it cannot read raises ``UnreadConnectionError``.
 
     A person who has not granted a user connection is asked to, and the run pauses
     until they answer (``GraphBubbleUp``). A user connection the run cannot read
@@ -190,9 +200,9 @@ async def _credentials(spec: OperationSpec) -> dict[str, str] | str:
         extra = {"operation": spec.name, "connection": ref.slug}
         try:
             credentials[ref.slug] = await connections.get(ref.slug, {"type": ref.owner})
-        except ConnectionNotFoundError:
+        except ConnectionNotFoundError as exc:
             logger.warning("An operation's connection is not set up", extra=extra)
-            return _NO_CONNECTION.format(slug=ref.slug)
+            raise UnreadConnectionError(_NO_CONNECTION.format(slug=ref.slug)) from exc
         except (CredentialStoreError, CredentialAuthorizationRequiredError) as exc:
             if ref.owner == "agent":
                 # Its message quotes no more of Agent Auth's answer than the problem's
@@ -200,12 +210,12 @@ async def _credentials(spec: OperationSpec) -> dict[str, str] | str:
                 logger.warning(
                     "Could not read an operation's connection", extra=extra, exc_info=True
                 )
-                return _UNREAD_CONNECTION.format(reason=exc)
+                raise UnreadConnectionError(_UNREAD_CONNECTION.format(reason=exc)) from exc
             logger.info(
                 "The run reads no user connection for an operation",
                 extra={**extra, "reason": str(exc)},
             )
-        except OSError:
+        except OSError as exc:
             # The SDK raises ``urllib.error.URLError`` when Agent Auth does not answer.
             logger.warning(
                 "Could not reach Agent Auth for an operation's connection",
@@ -213,7 +223,9 @@ async def _credentials(spec: OperationSpec) -> dict[str, str] | str:
                 exc_info=True,
             )
             if ref.owner == "agent":
-                return _UNREAD_CONNECTION.format(reason="Agent Auth could not be reached.")
+                raise UnreadConnectionError(
+                    _UNREAD_CONNECTION.format(reason="Agent Auth could not be reached.")
+                ) from exc
     return credentials
 
 
@@ -309,13 +321,12 @@ def operation_tool(
     async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
         # Read before code mode reports the call: a pause for a grant runs the code again,
         # which reports the call under a new id, so a report made first would never finish.
-        credentials = await _credentials(spec)
-
-        async def make(tool_call_id: str) -> ToolMessage | Command:
-            if isinstance(credentials, str):
-                return ToolMessage(content=credentials, tool_call_id=tool_call_id, status="error")
-            return await _operate(backend, spec, arguments, runtime, tool_call_id, credentials)
-
+        try:
+            credentials = await _credentials(spec)
+        except UnreadConnectionError as exc:
+            make = exc.result
+        else:
+            make = partial(_operate, backend, spec, arguments, runtime, credentials=credentials)
         return await called(
             backend, spec.name, arguments, runtime, make, cites_evidence=cites_evidence
         )
