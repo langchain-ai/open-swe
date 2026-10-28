@@ -1,11 +1,9 @@
 """Everything a person types into a Slack message for Open SWE, parsed in one place.
 
 Routing decides whether a message is addressed to Open SWE first; a command never
-makes it so. An action (`/btw`, `/breakout`, `/breakout:web`) is one of the first
-unquoted words after this bot's mention, or of the message, and the rest of the
-message is its argument:
+makes it so. The `/btw` action is one of the first unquoted words after this
+bot's mention, or of the message, and the rest of the message is its argument:
 
-    @Open SWE /breakout #eng investigate this
     @Open SWE /btw how does thread routing work?
 
 Options (`/model:perf…`, e.g. `/model:performance`, and `/workspace:<name>`) count
@@ -29,8 +27,6 @@ from openswe.workspaces.store import slugify
 
 class SlackAction(StrEnum):
     BY_THE_WAY = "/btw"
-    BREAKOUT = "/breakout"
-    BREAKOUT_WEB = "/breakout:web"
 
 
 PERFORMANCE_MODEL = "/model:perf"

@@ -97,7 +97,7 @@ async def slack_move_thread(
     target_channel = destination.channel_id
     if not _CHANNEL_ID_RE.fullmatch(target_channel):
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
-    if error := await destination.channel_error(active_channel):
+    if error := await destination.channel_error(active_channel, check_audience=not channel_id):
         return {"success": False, "error": error}
 
     return await move_slack_thread(client, thread_id, active, target_channel, clean_message)
