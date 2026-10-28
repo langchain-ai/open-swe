@@ -101,7 +101,7 @@ export function Header({
       data-desktop-drag-region=""
       className={cn(
         // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
-        "flex shrink-0 items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2",
+        "flex shrink-0 items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2 max-sm:grid max-sm:grid-cols-[auto_1fr]",
         leftInset
       )}
     >
@@ -125,8 +125,8 @@ export function Header({
         variant="plain"
         onClick={toggleNavigator}
       />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-h-7 min-w-0 items-center gap-space-2">
+      <div className="min-w-0 flex-1 max-sm:col-span-2 max-sm:row-start-2">
+        <div className="flex min-h-7 min-w-0 items-center gap-space-2 max-sm:flex-wrap">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
           {live && status ? (
             <span className="flex shrink-0 items-center gap-space-1 max-sm:[&>*:not(:first-child)]:hidden">
@@ -152,7 +152,7 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <h1 className="min-w-0 truncate text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-sm max-sm:leading-5 max-sm:whitespace-normal">
+          <h1 className="min-w-0 truncate text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:w-full max-sm:text-sm max-sm:leading-5 max-sm:whitespace-normal">
             <a
               href={githubUrl}
               target="_blank"
@@ -279,7 +279,7 @@ export function Header({
           <Skeleton className="mt-space-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
-      <div className="flex h-7 shrink-0 items-center gap-space-3">
+      <div className="flex h-7 shrink-0 items-center gap-space-3 max-sm:col-start-2 max-sm:row-start-1 max-sm:justify-self-end">
         {carrying && current?.status && (
           <div className="max-lg:hidden">
             <NextStepAction

@@ -84,7 +84,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         : "Request review in Slack"
   return (
     <span
-      className="inline-flex items-center gap-space-2"
+      className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
       title={channelHint ?? undefined}
     >
@@ -95,6 +95,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
             onValueChange={setChannel}
             placeholder="Choose a review channel"
             aria-label="Review channel"
+            className="w-56 max-w-full min-w-0"
             eligible={(option) => option.is_member}
             disabled={requestReview.isPending}
           />
