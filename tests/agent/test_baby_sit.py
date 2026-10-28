@@ -126,7 +126,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
 
 
 @pytest.mark.parametrize("card_state", ["none", "ready", "draft", "other_thread"])
-async def test_green_webhook_stops_the_watch_without_waking_for_draft_card(
+async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, card_state: str
 ) -> None:
     await _start_watch()
@@ -190,7 +190,66 @@ async def test_green_webhook_stops_the_watch_without_waking_for_draft_card(
         expected = "merge_expedited_pr" if card_state == "ready" else "checks are green"
         assert expected in dispatch.await_args.args[1]
     notify.assert_not_awaited()
-    assert await baby_sit.WATCHES.list_active() == []
+    assert len(await baby_sit.WATCHES.list_active()) == 1
+    dispatch.reset_mock()
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "watching"
+    dispatch.assert_not_awaited()
+
+    if card_state == "draft":
+        assert approval is not None
+        approval.awaiting_ready = False
+        assert await baby_sit.evaluate_watch("acme/repo#7") == "watching"
+        dispatch.assert_awaited_once()
+        dispatch.reset_mock()
+
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(
+            return_value={
+                "state": "open",
+                "head": {"sha": "head-2", "ref": "feature"},
+                "base": {"ref": "main"},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        RepoClient,
+        "check_runs",
+        AsyncMock(
+            return_value=[
+                {"id": 2, "name": "tests", "status": "completed", "conclusion": "failure"}
+            ]
+        ),
+    )
+    payload["check_run"]["head_sha"] = "head-2"
+    payload["check_run"]["conclusion"] = "failure"
+    payload["check_run"]["check_suite"] = {"head_branch": "feature"}
+    assert await baby_sit.handle_ci_webhook(payload, "check_run") == {
+        "matched": 1,
+        "dispatched": 1,
+    }
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
+    assert "head-2" in dispatch.await_args.args[1]
+    dispatch.reset_mock()
+    monkeypatch.setattr(
+        RepoClient,
+        "check_runs",
+        AsyncMock(
+            return_value=[
+                {"id": 3, "name": "tests", "status": "completed", "conclusion": "success"}
+            ]
+        ),
+    )
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "watching"
+    dispatch.assert_awaited_once()
+    dispatch.reset_mock()
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "watching"
+    dispatch.assert_not_awaited()
+
+    monkeypatch.setattr(PullRequestClient, "pull", AsyncMock(return_value={"state": "closed"}))
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
     assert await baby_sit.WATCHES.get("acme/repo#7") is None
 
 

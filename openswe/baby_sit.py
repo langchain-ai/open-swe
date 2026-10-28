@@ -81,6 +81,7 @@ class BabySitState(BaseModel):
     active: bool = True
     head_sha: str = ""
     head_ref: str = ""
+    ready_head_sha: str = ""
     installation_id: int | None = None
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: SourceContext = Field(default_factory=SourceContext)
@@ -313,6 +314,7 @@ async def start_watch(
         installation_id=installation_id,
         run_config=run_config,
         source_context=source_context,
+        ready_head_sha=carried.ready_head_sha if carried else "",
         retry_count=carried.retry_count if carried else 0,
         dispatch_keys=list(carried.dispatch_keys) if carried else [],
         delivery_ids=list(carried.delivery_ids) if carried else [],
@@ -432,11 +434,11 @@ async def _review_card(watch: BabySitWatch) -> HumanReviewRequest | None:
 
 
 async def _finish_ready(watch: BabySitWatch) -> str:
-    """Hand a green PR back to its agent thread, which decides whether to merge or report."""
+    """Report each green head once while continuing to watch future commits."""
     approval = await _review_card(watch)
-    if approval is not None and approval.awaiting_ready:
-        await stop_watch(watch.key)
-        return "stopped"
+    if (approval is not None and approval.awaiting_ready) or watch.ready_head_sha == watch.head_sha:
+        await WATCHES.save(watch)
+        return "watching"
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
@@ -455,12 +457,10 @@ async def _finish_ready(watch: BabySitWatch) -> str:
         )
     except Exception:
         logger.warning("Failed to dispatch baby-sit ready wakeup for %s", watch.key, exc_info=True)
-        return await _finish_watch(
-            watch,
-            f"*`/baby-sit` complete:* {watch.pr_url} has no pending or failing checks.",
-        )
-    await stop_watch(watch.key)
-    return "stopped"
+        return "error"
+    watch.ready_head_sha = watch.head_sha
+    await WATCHES.save(watch)
+    return "watching"
 
 
 def _failure_signals(
@@ -574,6 +574,7 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         watch.head_ref = head_ref
     if head_sha != watch.head_sha:
         watch.head_sha = head_sha
+        watch.ready_head_sha = ""
         watch.retry_count = 0
         watch.dispatch_keys = []
         watch.alert_keys = []
