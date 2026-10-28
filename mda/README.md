@@ -271,6 +271,7 @@ When Trigger Server doesn't take a message in a conversation the channel hasn't 
 The backend claims a new conversation only once it has gated and remembered the message, so a failure before the hand-off leaves the conversation unclaimed.
 When Trigger Server doesn't take a message in a conversation the channel started, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
 Taking it back is atomic, so the person gets either the run or the error.
+When MDA retries a call to `/slack/channel/events` it got no answer to (same `webhook-id`), the backend builds the run again from the request that call took; any other call for the message gets no run.
 Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 

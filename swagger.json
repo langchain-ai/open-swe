@@ -23361,8 +23361,19 @@
     },
     "/slack/channel/events": {
       "post": {
-        "description": "The run a forwarded Slack message starts on the channel's thread, or ``None``.\n\n``None`` when the message wasn't one the backend handed over (the backend\ngates every message before it forwards one), when gating posted the reply\nitself, such as the prompt to connect an account, or when building the run\nfailed, which the Slack thread hears about.",
+        "description": "The run a forwarded Slack message starts on the channel's thread, or ``None``.\n\n``None`` when the message wasn't one the backend handed over (the backend\ngates every message before it forwards one), when gating posted the reply\nitself, such as the prompt to connect an account, or when building the run\nfailed, which the Slack thread hears about. MDA retrying a call it got no\nanswer to, under the same ``webhook_id``, gets the run built again.",
         "operationId": "slack_channel_event_slack_channel_events_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "webhook-id",
+            "required": true,
+            "schema": {
+              "title": "Webhook-Id",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
