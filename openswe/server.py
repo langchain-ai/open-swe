@@ -59,6 +59,7 @@ from langchain_core.tools import tool as as_tool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
 
+from openswe.agent_api.connections import acting_user
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
@@ -911,18 +912,21 @@ async def _mcp_tools_for(
 def _owned_mcp_servers(
     config: RunnableConfig, credential_login: str | None, servers: Sequence[McpServerSpec]
 ) -> list[McpServerSpec]:
-    """``servers`` without the personal ones, unless the MDA run acts for their owner.
+    """``servers`` without the personal ones, unless the MDA run acts as their owner.
 
-    MDA reads a personal server's connection as the person the run acts for there: the
-    user the run is attributed to (``dispatch._run_user_metadata``). A run attributed to
-    no one, such as a background task's completion, has no person's principal: on a
-    channel's thread it is MDA's channel service principal (``mda:channel``), which reads
-    no user connections, and on any other thread the principal of the backend's own key,
-    which every such run shares, so one person's grant would reach everyone's servers.
+    MDA reads a personal server's connection as the person the run acts as there
+    (``acting_user``), whom the run is also attributed to. A run that acts as no one, such
+    as a wakeup or a background task's completion, has no person's principal, whoever it
+    is attributed to: on a channel's thread it is MDA's channel service principal
+    (``mda:channel``), which reads no user connections, and on any other thread the
+    principal of the backend's own key, which every such run shares, so one person's
+    grant would reach everyone's servers.
     """
-    attributed = (config.get("metadata") or {}).get("ls_attribution_identifier")
+    metadata = config.get("metadata") or {}
+    attributed = metadata.get("ls_attribution_identifier")
     for_owner = (
-        isinstance(attributed, str)
+        acting_user(metadata) is not None
+        and isinstance(attributed, str)
         and credential_login is not None
         and attributed.lower() == credential_login.lower()
     )

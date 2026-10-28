@@ -36,6 +36,7 @@ from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 from pydantic import BaseModel, ConfigDict
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.config import ENV
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.input_messages import (
@@ -61,9 +62,11 @@ LangGraphRunConfig = dict[str, Any]
 
 
 _PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+# Who a run is for, which the backend works out for each run and never takes from its caller.
 TURN_ATTRIBUTION_FIELDS = frozenset(
     {
         "user_id",
+        ACTING_USER_KEY,
         "ls_repo_provider",
         "ls_attribution_identifier",
         "ls_git_repo",
@@ -370,13 +373,24 @@ async def prepare_durable_run(
     metadata: dict[str, Any] | None,
     *,
     source: str,
+    as_sender: bool = False,
 ) -> LangGraphRunConfig:
-    """The config and metadata a durable run starts with, wherever it is created."""
+    """The config and metadata a durable run starts with, wherever it is created.
+
+    The run is attributed to the person its config names (``user_id``), and acts as them
+    (``ACTING_USER_KEY``) only when they started it: ``as_sender`` for a message they
+    sent from the dashboard, and a channel's own run, which MDA starts as its verified
+    sender. Any other run, such as a wakeup, an event match or a task message, acts as
+    no one, whoever it is attributed to.
+    """
     recorded = RunMetadata.of_run(assistant_id, config)
     run_metadata = {
         key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
     } | recorded.model_dump(exclude_none=True)
     run_metadata.update(await _run_user_metadata(config, source=source))
+    user_id = run_metadata.get("user_id")
+    if user_id is not None and (as_sender or channel_of(run_metadata) is not None):
+        run_metadata[ACTING_USER_KEY] = user_id
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
@@ -403,18 +417,22 @@ async def create_durable_run(
     if_not_exists: str = "create",
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    as_sender: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
     means the caller already created and titled the thread. Agent and reviewer
     threads run on Managed Deep Agents; the request goes here regardless and
-    ``openswe.threads.router`` routes it.
+    ``openswe.threads.router`` routes it. ``as_sender`` is for a run the person it is
+    attributed to started themselves (``prepare_durable_run``).
     """
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
-    run_config = await prepare_durable_run(assistant_id, config, metadata, source=source)
+    run_config = await prepare_durable_run(
+        assistant_id, config, metadata, source=source, as_sender=as_sender
+    )
     recorded = RunMetadata.of_run(assistant_id, config)
     create_kwargs: dict[str, Any] = {
         "input": input,

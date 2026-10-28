@@ -15,6 +15,8 @@ import asyncio
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final
 
 import httpx
@@ -38,6 +40,7 @@ from openswe.agent_api.client import (
     mda_runtime_url,
     remote_run_context,
 )
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
@@ -54,8 +57,8 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 # The run metadata the backend reads back from the run token, which travels in a
 # header on every hook call: what the graph's hooks read, and the person the run acts
-# for, which decides whether its catalog names that person's connections.
-_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", "user_id")
+# as, which decides whether its catalog names that person's connections.
+_TOKEN_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier", ACTING_USER_KEY)
 
 # MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
@@ -90,6 +93,31 @@ class _ErroredThread(BaseModel):
 
 class ChannelThreadError(RuntimeError):
     """A thread an MDA channel owns that the backend can't act on: no owner, or no secret."""
+
+
+@dataclass(frozen=True)
+class ChannelWrite:
+    """Who a backend write on a thread is from, as MDA is told and as its run token says.
+
+    On a channel's thread, ``headers`` are MDA's trusted-backend ingress for its
+    conversation (:meth:`MdaRuntime.channel_write`); on the backend's own threads there
+    are none, and the write is the backend key's. ``user_id`` is the Open SWE user whose
+    principal the headers name, only when they name one.
+    """
+
+    headers: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    user_id: str | None = None
+
+    def acting(self, metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        """Run ``metadata`` acting as this write's person or no one, never as it asked.
+
+        So the run's token, whose catalog names a person's connections only for a run
+        that acts as them, always agrees with the principal MDA starts it as.
+        """
+        stamped = {key: value for key, value in metadata.items() if key != ACTING_USER_KEY}
+        if self.user_id is not None:
+            stamped[ACTING_USER_KEY] = self.user_id
+        return stamped
 
 
 class _SdkThreads:
@@ -181,9 +209,7 @@ class MdaRuntime:
             url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
         )
 
-    async def channel_write_headers(
-        self, thread_id: str, *, user_id: str | None = None
-    ) -> dict[str, str]:
+    async def channel_write(self, thread_id: str, *, user_id: str | None = None) -> ChannelWrite:
         """What lets the backend start, answer and stop runs on a thread an MDA channel owns.
 
         MDA's trusted-backend ingress: its ingress secret, the ``MDA_INGRESS_SECRET``
@@ -195,7 +221,8 @@ class MdaRuntime:
 
         ``user_id`` is the Open SWE user the write is for, so a person's run here has
         the principal their channel runs have (:meth:`user_principal`); without one, or
-        when Agent Auth can't name it, the write is the channel's own, for no person.
+        when Agent Auth can't name it, the write is the channel's own, for no person, and
+        acts as no one (:attr:`ChannelWrite.user_id`).
         """
         secret = ENV.MDA_SERVICE_SECRET.optional()
         if not secret:
@@ -214,13 +241,14 @@ class MdaRuntime:
             conversation = self._channel_conversations[thread_id] = (provider, key)
         provider, key = conversation
         principal = await self.user_principal(user_id) if user_id else None
-        return {
+        headers = {
             "x-mda-ingress-secret": secret,
             "x-mda-user-id": principal or CHANNEL_SERVICE_USER,
             **({_PRINCIPAL_HEADER: principal} if principal else {}),
             "x-mda-source-provider": provider,
             "x-mda-source-thread-id": key,
         }
+        return ChannelWrite(MappingProxyType(headers), user_id if principal else None)
 
     async def user_principal(self, user_id: str) -> str | None:
         """The Agent Auth principal an Open SWE user's channel runs have, or ``None``.
@@ -274,15 +302,15 @@ class MdaRuntime:
         logger.info("Interrupting a run its thread was stopped while it started", extra=extra)
         try:
             # A channel's thread is stopped as the backend acting in its conversation.
-            headers = (
-                await self.channel_write_headers(thread_id)
+            write = (
+                await self.channel_write(thread_id)
                 if dispatch.channel_of(thread.metadata) is not None
-                else {}
+                else ChannelWrite()
             )
             response = await self.http.post(
                 f"/threads/{thread_id}/runs/{run_id}/cancel",
                 params={"action": "interrupt"},
-                headers=headers,
+                headers=write.headers,
             )
         except httpx.HTTPError, ChannelThreadError:
             logger.warning("Could not interrupt a stopped run", extra=extra, exc_info=True)
@@ -355,14 +383,15 @@ class MdaRuntime:
         *,
         thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
-        channel_headers: Mapping[str, str] | None = None,
+        write: ChannelWrite | None = None,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        On a channel's thread, ``channel_headers`` (:meth:`channel_write_headers`) start the
-        run in its conversation, for the person they name.
+        On a channel's thread, ``write`` (:meth:`channel_write`) starts the run in its
+        conversation, as the person it names; without one the run is the backend's own.
         """
+        write = write or ChannelWrite()
         starting_ms = now_ms()
         config = params.get("config")
         configurable = config.get("configurable") if isinstance(config, dict) else None
@@ -375,11 +404,12 @@ class MdaRuntime:
             },
         }
         strategy = params.get("multitaskStrategy") or params.get("multitask_strategy")
+        metadata = params.get("metadata")
         payload: dict[str, JsonValue] = {
             "assistant_id": params["assistant_id"],
             "input": params.get("input"),
             "config": run_config,
-            "metadata": params.get("metadata"),
+            "metadata": write.acting(metadata if isinstance(metadata, dict) else {}),
             "stream_mode": list(_V3_RUN_STREAM_MODES),
             "stream_subgraphs": True,
             # A client that reads the transcript instead of this stream opts out.
@@ -395,7 +425,7 @@ class MdaRuntime:
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
         response = await self.http.post(
-            f"/threads/{thread_id}/runs", json=rewritten, headers=channel_headers
+            f"/threads/{thread_id}/runs", json=rewritten, headers=write.headers
         )
         if response.is_error:
             logger.warning(

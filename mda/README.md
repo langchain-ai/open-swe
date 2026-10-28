@@ -32,7 +32,7 @@ Every call is authenticated with the run token.
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
   A tool call is this runtime's: it sends the operation its arguments and the run state its spec says it reads (`reads`, `reads_all`), and turns what it answers into the tool's result, the run state it changed, its stream events and git evidence.
   It also sends the credentials of the MDA connections the spec names (`connections`), read as the run (`managed_deepagents.connections`), which the backend hands that call's tool alone: the deployment's own always, and a person's own on a run that acts for one, who is asked to connect it if they have not.
-  The backend names a person's connection only in the catalog of a run that acts for one (the run token's `user_id`), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
+  The backend names a person's connection only in the catalog of a run that acts as one (the run token's `acting_user_id`, never `user_id`, whom the run is only attributed to), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
   A person's connection the run cannot read otherwise (no grant given, Agent Auth not reached) is left out, and the tool works as it did without; a call whose deployment connection is missing or unreadable fails and names it.
   The backend runs no tools node and no tool-call middleware.
   An operation whose box stopped answering ends the run; the backend has told the person.
@@ -201,8 +201,9 @@ A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the p
 Anyone else, bots, and a sender the channel couldn't verify keep the channel's own principal (`null`); the channel endpoints still gate the run and ask the person to connect their account.
 
 The backend's own runs and answers on a channel's thread go through MDA's trusted-backend ingress (see [Linear](#linear)).
-One for a person, such as a dashboard follow-up, runs as the principal that person's channel runs have (`MDA_WORKSPACE_ID`).
-One for no person (stops, system runs, a machine's answers), or for a person whose principal Agent Auth can't name, runs as MDA's channel service principal, `mda:channel`, which owns no user connections.
+One a person started themselves, a dashboard follow-up or answer, runs as the principal that person's channel runs have (`MDA_WORKSPACE_ID`).
+Every other one runs as MDA's channel service principal, `mda:channel`, which owns no user connections: stops, system runs, a machine's answers, a message an agent relays, and runs the backend starts for a person it only attributes them to, such as a wakeup, an event match or a task message.
+So does one for a person whose principal Agent Auth can't name, and then its run token acts as no one either (`acting_user_id`).
 User-owned connections depend on it: any other id there is a person to MDA, so on Slack threads every such run would share that id's grants.
 
 ## Linear

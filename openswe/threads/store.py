@@ -22,7 +22,7 @@ from openswe.agent_api.client import MDA_GRAPH_ID, mda_graph_for
 from openswe.dispatch import channel_of
 from openswe.threads import index
 from openswe.threads.index import IndexedThread
-from openswe.threads.runtimes import RUNTIMES, ChannelThreadError
+from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite
 
 logger = logging.getLogger(__name__)
 
@@ -207,15 +207,13 @@ class ThreadStore:
                 # Not 409, which callers read as "a run is already going" and retry or skip.
                 return _json_reply(410, {"detail": READ_ONLY})
         refusal = channel_write_refusal(thread) if thread is not None else None
-        acting: dict[str, str] = {}
+        write = ChannelWrite()
         if refusal is not None and method not in READ_COMMANDS | ACTING_COMMANDS:
             return _json_reply(409, {"detail": refusal})
         if refusal is not None and method in ACTING_COMMANDS:
             # A run or an answer on a channel's thread: as its sender, in its conversation.
             try:
-                acting = await RUNTIMES.mda_runtime.channel_write_headers(
-                    thread_id, user_id=user_id
-                )
+                write = await RUNTIMES.mda_runtime.channel_write(thread_id, user_id=user_id)
             except ChannelThreadError, httpx.HTTPError:
                 logger.warning(
                     "Can't act on an MDA channel's thread", extra={"thread_id": thread_id}
@@ -238,7 +236,7 @@ class ThreadStore:
                 params,
                 thread_metadata=thread.metadata,
                 graph_id=mda_graph_for(thread.metadata),
-                channel_headers=acting,
+                write=write,
             )
             if reply.get("type") == "success":
                 try:
@@ -255,7 +253,7 @@ class ThreadStore:
             mda = RUNTIMES.mda_runtime
             if refusal is not None:
                 # A channel's thread: read as Studio reads it, written as its conversation.
-                http = mda.http if acting else mda.read_http
+                http = mda.http if write.headers else mda.read_http
             else:
                 await mda.ensure_remote_thread(thread_id)
                 http = mda.http
@@ -264,7 +262,7 @@ class ThreadStore:
         response = await http.post(
             f"/threads/{thread_id}/commands",
             content=body,
-            headers={"Content-Type": "application/json", **acting},
+            headers={"Content-Type": "application/json", **write.headers},
         )
         return CommandReply(
             response.status_code, response.content, response.headers.get("content-type")

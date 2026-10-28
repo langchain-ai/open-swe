@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from standardwebhooks import Webhook
 
 from openswe import dispatch
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.linear import channel, session
 from openswe.linear.session import NO_REPOSITORY, UNREADABLE_SESSION
@@ -229,12 +230,15 @@ async def test_mda_starts_the_run_a_session_turn_prepares(
     token = verify_runtime_token(answer["context"]["__run_token"])
     assert token.thread_id == _THREAD
     assert token.metadata["ls_attribution_identifier"] == "ada"
+    # MDA starts a channel's run as its sender, so its catalog may name their connections.
+    assert token.metadata[ACTING_USER_KEY] == "user-1"
     # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
     metadata = mda_starts(answer)["metadata"]
     assert metadata == answer["metadata"]
     assert metadata["channel"] == "linear"
     assert "invocation_id" in metadata
-    assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
+    reserved = {"user_id", "ls_repo_provider", "ls_attribution_identifier", ACTING_USER_KEY}
+    assert not reserved & metadata.keys()
 
 
 @pytest.mark.asyncio
