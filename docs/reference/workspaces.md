@@ -105,8 +105,7 @@ A refresh writes only snapshot and refresh state and an edit writes only the def
 ### Sandbox cloud workload identity
 
 Admins configure AWS, GCP, and Azure workload identity in **Workspaces → Sandbox Proxy**.
-These are nonsecret federation profiles, stored alongside the existing sandbox creation settings:
-AWS role ARN, GCP workload identity provider and optional service account email, or Azure tenant/client UUIDs and optional resources.
+These are nonsecret federation profiles, stored alongside the existing sandbox creation settings: AWS role ARN, GCP workload identity provider and optional service account email, or Azure tenant/client UUIDs and optional resources.
 Only one rule per cloud is allowed, and federated rules must remain enabled.
 The JSON editor and the admin workspace API/tools edit the same configuration; no cloud keys or client secrets are accepted.
 Existing non-federated cloud rules keep their JSON contract, subject to the existing secret restrictions; federation-only validation does not require those rules to be enabled.
