@@ -917,10 +917,10 @@ def _owned_mcp_servers(
     MDA reads a personal server's connection as the person the run acts as there
     (``acting_user``), whom the run is also attributed to. A run that acts as no one, such
     as a wakeup or a background task's completion, has no person's principal, whoever it
-    is attributed to: on a channel's thread it is MDA's channel service principal
-    (``mda:channel``), which reads no user connections, and on any other thread the
-    principal of the backend's own key, which every such run shares, so one person's
-    grant would reach everyone's servers.
+    is attributed to: MDA starts it as a service principal, MDA's channel one
+    (``mda:channel``) on a channel's thread and the backend key's own on any other, and
+    MDA refuses user connections to a service principal, so a grant there can be neither
+    made nor read.
     """
     metadata = config.get("metadata") or {}
     attributed = metadata.get("ls_attribution_identifier")
