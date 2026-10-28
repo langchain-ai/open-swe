@@ -121,14 +121,13 @@
 
 .chat-markdown a {
   color: var(--text-brand-primary);
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .chat-markdown a:hover,
 .chat-markdown a:focus-visible {
-  text-decoration: underline;
   text-decoration-style: dotted;
-  text-underline-offset: 2px;
 }
 
 .chat-markdown blockquote {
@@ -214,10 +213,8 @@
 .chat-markdown .chat-markdown-table {
   margin: 0.65rem 0;
   max-width: 100%;
-  overflow-x: auto;
   border: 1px solid var(--border-default);
   border-radius: 0.5rem;
-  scrollbar-width: thin;
 }
 
 .chat-markdown table {

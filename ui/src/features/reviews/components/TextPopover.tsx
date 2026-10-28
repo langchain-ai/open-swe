@@ -8,6 +8,8 @@ import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useState, type ReactElement } from "react"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
+
 /**
  * A trigger that opens an anchored popover asking for optional text before acting.
  * It closes on submit; a rejected `onSubmit` puts the text back for the next open.
@@ -77,8 +79,14 @@ export function TextPopover({
           >
             Cancel
           </Button>
-          <Button size="xs" onClick={submit}>
+          <Button
+            size="xs"
+            aria-label={submitLabel}
+            aria-keyshortcuts="Meta+Enter Control+Enter"
+            onClick={submit}
+          >
             {submitLabel}
+            <SubmitShortcut />
           </Button>
         </div>
       </PopoverContent>

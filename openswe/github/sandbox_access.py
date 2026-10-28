@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 RECHECK_MISSING_AFTER = timedelta(minutes=10)
 
+# Clone, fetch, read the pull request, and check CI. Nothing here can write.
+READ_ONLY_REVIEW_PERMISSIONS: PermissionMap = {
+    "actions": "read",
+    "checks": "read",
+    "contents": "read",
+    "issues": "read",
+    "metadata": "read",
+    "pull_requests": "read",
+    "statuses": "read",
+}
+
 
 class _InstallationRepository(BaseModel):
     id: PositiveInt

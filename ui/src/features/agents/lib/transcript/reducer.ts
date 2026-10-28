@@ -17,7 +17,6 @@
 
 import {
   INTERNAL_TOOLS,
-  mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
@@ -66,6 +65,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** What a system message's sender is called when its text introduces no name. */
+  senderName?: string
   /** Invocation an AI message ran under, when the provider reported usage. */
   invocationId?: string
   createdAt: string
@@ -184,6 +185,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      senderName: row.sender?.display_name ?? undefined,
       invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
     }
@@ -446,6 +448,22 @@ function settledStatus(
 }
 
 /**
+ * A request no run ever took (its start died with the server) that a later
+ * turn has already overtaken. It never runs, so it is not waiting for anything.
+ */
+function isStrandedTurn(
+  state: TranscriptState,
+  turn: TranscriptTurnState
+): boolean {
+  if (turn.state !== "requested" || turn.runId !== null) return false
+  const requestedAt = Date.parse(turn.requestedAt)
+  return Object.values(state.turns).some(
+    (other) =>
+      other.startedAt !== null && Date.parse(other.requestedAt) > requestedAt
+  )
+}
+
+/**
  * Waiting behind the live run. A requested turn is queued once its run exists,
  * and already while another turn is running: the run id only follows the
  * request by a moment, and the row should not change shape in between.
@@ -456,6 +474,7 @@ function isQueuedTurn(
 ): boolean {
   if (turn.state !== "requested") return false
   if (turn.runId !== null) return true
+  if (isStrandedTurn(state, turn)) return false
   return Object.values(state.turns).some(
     (other) => other.turnId !== turn.turnId && other.state === "running"
   )
@@ -533,12 +552,20 @@ function putMessage(
   turn: TranscriptTurnState,
   message: TranscriptMessageState
 ): void {
+  // A message stays in the turn that first recorded it, as the server's
+  // projection keeps it: the run that continues a steered turn opens a turn of
+  // its own with the steered turn's message, which must not show it twice.
+  const recorded = draft.state.messages[message.messageId]
+  const home = (recorded && draft.state.turns[recorded.turnId]) || turn
   draft.state = {
     ...draft.state,
-    messages: { ...draft.state.messages, [message.messageId]: message },
+    messages: {
+      ...draft.state.messages,
+      [message.messageId]: { ...message, turnId: home.turnId },
+    },
   }
-  draft.touched.add(turn.turnId)
-  addItem(draft, turn, { kind: "message", id: message.messageId })
+  draft.touched.add(home.turnId)
+  addItem(draft, home, { kind: "message", id: message.messageId })
   if (message.role !== "human") return
   // Only a human message's own text can declare an entity, and a write that
   // declares none keeps the very same Map: every per-turn render cache keys on
@@ -617,6 +644,7 @@ export function applyEvent(
         namespace: [],
         attachments: payload.attachments,
         senderLogin: payload.sender?.login ?? null,
+        senderName: payload.sender?.display_name ?? undefined,
         createdAt: at,
       })
       break
@@ -697,6 +725,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        senderName: payload.sender?.display_name ?? existing?.senderName,
         invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
@@ -841,6 +870,38 @@ export function subagentToolCalls(
   return calls
 }
 
+const outputLoaders = new WeakMap<
+  TranscriptToolCallState,
+  () => Promise<string>
+>()
+
+/**
+ * One loader per settled call, sharing one fetch: a call's turn is rebuilt on
+ * every event while it streams, and consumers keyed on the loader's identity
+ * would otherwise fetch the output again each time. A failed fetch is retried
+ * on the next load.
+ */
+function outputLoader(
+  threadId: string,
+  call: TranscriptToolCallState
+): () => Promise<string> {
+  const existing = outputLoaders.get(call)
+  if (existing) return existing
+  let output: Promise<string> | null = null
+  const load = () => {
+    output ??= fetchToolOutput(threadId, call.toolCallId).then(
+      (response) => response.output,
+      (error: unknown) => {
+        output = null
+        throw error
+      }
+    )
+    return output
+  }
+  outputLoaders.set(call, load)
+  return load
+}
+
 function toolChunk(
   threadId: string,
   call: TranscriptToolCallState
@@ -849,6 +910,7 @@ function toolChunk(
   const chunk: ToolExecutionChunk = {
     kind: "tool-execution",
     toolCallId: call.toolCallId,
+    toolName: call.name,
     timestamp: call.startedAt,
     title: toolTitle(call.name, call.input),
     toolKind: kind,
@@ -857,10 +919,8 @@ function toolChunk(
   }
   const output = call.output?.trim()
   if (output) chunk.output = output
-  if (call.hasOutput && !call.outputComplete) {
-    chunk.loadOutput = async () =>
-      (await fetchToolOutput(threadId, call.toolCallId)).output
-  }
+  if (call.hasOutput && !call.outputComplete)
+    chunk.loadOutput = outputLoader(threadId, call)
   const diffData = maybeDiffFromArgs(call.input)
   if (diffData) chunk.diffData = diffData
   // A `task` call owns the namespace of the subagent it spawned, which is what
@@ -869,6 +929,27 @@ function toolChunk(
     chunk.subagentNamespace = [...call.namespace, call.toolCallId]
   }
   return chunk
+}
+
+/**
+ * The tool calls an `eval` call's code made: the transcript records them under
+ * a namespace that ends in the `eval` call's id, as it does a subagent's.
+ */
+function codeCalls(
+  state: TranscriptState,
+  turn: TranscriptTurnState,
+  call: TranscriptToolCallState
+): Array<ToolExecutionChunk> {
+  const namespace = [...call.namespace, call.toolCallId]
+  const calls: Array<ToolExecutionChunk> = []
+  for (const item of turn.items) {
+    if (item.kind !== "tool") continue
+    const nested = state.toolCalls[item.id]
+    if (!nested || !sameNamespace(nested.namespace, namespace)) continue
+    if (INTERNAL_TOOLS.has(nested.name)) continue
+    calls.push(toolChunk(state.threadId, nested))
+  }
+  return calls
 }
 
 /**
@@ -939,9 +1020,10 @@ function buildHumanMessage(
   if (entity?.senderType === "self") return null
   const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
   const text = taskEvent?.content ?? parsed.content
+  const replies = parsed.type === "message" ? parsed.replies : undefined
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
-  if (!chunks.length && !taskEvent) return null
+  if (!chunks.length && !taskEvent && !replies) return null
   return {
     id: row.messageId,
     ...(taskEvent ? { taskEvent } : {}),
@@ -956,9 +1038,12 @@ function buildHumanMessage(
           structuredSenderId: parsed.sender,
           structuredSenderKind: parsed.senderKind,
           structuredSurface: parsed.surface,
+          ...(replies ? { replies } : {}),
           structuredSenderName:
             entity?.displayName ??
-            (entity?.handle ? `@${entity.handle}` : undefined),
+            (entity?.handle ? `@${entity.handle}` : undefined) ??
+            row.senderName,
+          structuredSenderLogin: row.senderLogin ?? undefined,
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
@@ -1038,7 +1123,7 @@ function turnMessages(
       ...(agent.invocationIds.length
         ? { invocationIds: agent.invocationIds }
         : {}),
-      chunks: mergeTextChunks(agent.chunks),
+      chunks: agent.chunks,
     })
     agent = null
   }
@@ -1084,14 +1169,19 @@ function turnMessages(
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) chunks.push({ kind: "text", text, timestamp: row.createdAt })
       append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }
     const call = state.toolCalls[item.id]
     if (!call || !sameNamespace(call.namespace, namespace)) continue
     if (INTERNAL_TOOLS.has(call.name)) continue
-    append(call.toolCallId, call.startedAt, [toolChunk(state.threadId, call)])
+    const chunk = toolChunk(state.threadId, call)
+    if (chunk.toolKind === "code") {
+      const calls = codeCalls(state, turn, call)
+      if (calls.length) chunk.calls = calls
+    }
+    append(call.toolCallId, call.startedAt, [chunk])
   }
   flush()
 

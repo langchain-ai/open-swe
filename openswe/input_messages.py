@@ -4,7 +4,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
@@ -73,8 +73,10 @@ Identity = PersonIdentity | ChannelIdentity | SystemIdentity
 
 
 type FieldValue = str | int | float | bool
-# A scalar is an attribute of the envelope; a mapping is a ``Fields`` element inside it.
-type EnvelopeData = Mapping[str, FieldValue | Mapping[str, FieldValue | None]]
+type FieldValues = Mapping[str, FieldValue | None]
+# A scalar is an attribute of the envelope; a mapping is a ``Fields`` element inside it,
+# and a list of mappings is one such element apiece, all with the same tag.
+type EnvelopeData = Mapping[str, FieldValue | FieldValues | list[FieldValues]]
 
 
 class InputMessageContext(TypedDict):
@@ -210,6 +212,11 @@ def input_message_timestamps(content: object) -> set[str]:
     }
 
 
+# Starts the id of every message that carries an event sent to the thread, such as
+# monitor output or a task report.
+EVENT_MESSAGE_PREFIX: Final = "event-match:"
+
+
 def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     """Ids of the event matches whose envelopes are already among ``messages``."""
     return {
@@ -220,7 +227,7 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
-def dynamic_context_hash(content: object) -> str | None:
+def _dynamic_context(content: object) -> tuple[tuple[str, str], str] | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
@@ -236,8 +243,14 @@ def dynamic_context_hash(content: object) -> str | None:
         canonical = ElementTree.tostring(root, encoding="unicode")
         context_hash = hashlib.sha256(canonical.encode()).hexdigest()
         if claimed_hash is None or claimed_hash == context_hash:
-            return context_hash
+            key = (root.get("kind", ""), root.get("id") or context_hash)
+            return key, context_hash
     return None
+
+
+def dynamic_context_hash(content: object) -> str | None:
+    context = _dynamic_context(content)
+    return context[1] if context else None
 
 
 def _message_content(message: object) -> object:
@@ -252,12 +265,13 @@ def _message_content(message: object) -> object:
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
-    hashes: set[str] = set()
+    latest: dict[tuple[str, str], str] = {}
     for message in messages:
-        context_hash = dynamic_context_hash(_message_content(message))
-        if context_hash is not None:
-            hashes.add(context_hash)
-    return hashes
+        context = _dynamic_context(_message_content(message))
+        if context is not None:
+            key, context_hash = context
+            latest[key] = context_hash
+    return set(latest.values())
 
 
 def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
@@ -288,7 +302,7 @@ class Fields:
     the envelope escapes.
     """
 
-    values: Mapping[str, FieldValue | None]
+    values: FieldValues
 
     def text(self) -> str:
         return self._lines(escape=False)
@@ -358,6 +372,8 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     for name, value in context.get("data", {}).items():
         if isinstance(value, Mapping):
             children.append(Fields(value).element(name))
+        elif isinstance(value, list):
+            children.extend(Fields(item).element(name) for item in value)
         else:
             attributes.append(f'{_validate_name(name)}="{_xml_attr(value)}"')
     body = "\n".join([_xml_text(text), *children])
@@ -378,6 +394,12 @@ def _structured_content(
             blocks.append({**block, "text": _serialize_message(block["text"], context)})
         else:
             blocks.append(block)
+    # Data elements live in the envelope, so a message without text still needs one.
+    carries_elements = any(
+        isinstance(value, Mapping | list) for value in context.get("data", {}).values()
+    )
+    if carries_elements and not any(block.get("type") == "text" for block in content):
+        blocks.append({"type": "text", "text": _serialize_message("", context)})
     return blocks
 
 

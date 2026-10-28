@@ -5,9 +5,10 @@ import hashlib
 import json
 import logging
 import re
+import weakref
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, get_args
@@ -20,8 +21,8 @@ from langchain_core.tools import BaseTool, StructuredTool, ToolException
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
-from openswe.analytics.segment import record_mcp_tool
-from openswe.mcp.models import MCPConnection
+from openswe.analytics.posthog import record_mcp_tool
+from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
 from openswe.utils.startup_trace import asubphase
@@ -31,6 +32,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
+_DISCOVERY_CONCURRENCY = 8
+_DISCOVERY_SLOTS: weakref.WeakValueDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakValueDictionary()
+)
 
 type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
@@ -46,6 +51,7 @@ class MCPSource:
     only a genuinely absent connection may return None.
     """
 
+    scope: MCPScope = field(kw_only=True)
     namespace: tuple[str, ...]
     list_connections: Callable[[], Awaitable[list[MCPConnection]]]
     get_connection: Callable[[str], Awaitable[MCPConnection | None]]
@@ -136,9 +142,18 @@ def _discovery_error(error: Exception) -> str:
     return f"Could not discover MCP tools ({unknown[0]}); check the URL and authentication headers"
 
 
+def _discovery_slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _DISCOVERY_SLOTS.get(loop)
+    if slots is None:
+        slots = _DISCOVERY_SLOTS[loop] = asyncio.Semaphore(_DISCOVERY_CONCURRENCY)
+    return slots
+
+
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     try:
-        return await asyncio.wait_for(_discover_tools(record, namespace), timeout=_TIMEOUT_SECONDS)
+        async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
+            return await _discover_tools(record, namespace)
     except Exception as exc:
         # The shared cache logs refresh failures, so redact before handing errors to it.
         raise ValueError(_discovery_error(exc)) from None
@@ -147,6 +162,15 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
 def _tool_name(connection_name: str, tool_name: str) -> str:
     full_name = f"mcp_{connection_name}_{tool_name}"
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name)
+    # Without "_" in the connection name, the first "_" after "mcp_" splits the pair unambiguously;
+    # a plain name never ends like a hashed one, so it can't take another pair's hashed name.
+    if (
+        safe == full_name
+        and len(safe) <= 64
+        and "_" not in connection_name
+        and not re.search(r"_[0-9a-f]{10}$", safe)
+    ):
+        return safe
     suffix = hashlib.sha256(json.dumps((connection_name, tool_name)).encode()).hexdigest()[:10]
     return f"{safe[:53]}_{suffix}"
 
@@ -158,6 +182,7 @@ def _wrap_tool(
     definition: Tool,
     namespace: tuple[str, ...],
     sources: tuple[MCPSource, ...],
+    provenance: MCPToolProvenance,
 ) -> BaseTool:
     async def invoke(**arguments: Any) -> Any:
         is_error = True
@@ -201,7 +226,7 @@ def _wrap_tool(
         args_schema=definition.input_schema,
         response_format="content_and_artifact",
         handle_tool_error=True,
-        metadata={"mcp_tool_name": definition.name},
+        metadata={"mcp_tool_name": definition.name, "mcp_provenance": provenance},
     )
 
 
@@ -249,12 +274,23 @@ async def _load_tools(
     source: MCPSource,
     record: MCPConnection,
     sources: tuple[MCPSource, ...],
+    overridden_scopes: list[MCPScope],
 ) -> tuple[list[BaseTool], CatalogOutcome]:
     try:
         definitions, outcome = await _cached_definitions(source, record)
         tools = [
             _wrap_tool(
-                record.name, record.url, record.transport, definition, source.namespace, sources
+                record.name,
+                record.url,
+                record.transport,
+                definition,
+                source.namespace,
+                sources,
+                MCPToolProvenance(
+                    connection_name=record.name,
+                    scope=source.scope,
+                    overridden_scopes=overridden_scopes,
+                ),
             )
             for definition in definitions
             if record.allows_tool(definition.name)
@@ -269,11 +305,12 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
-        resolved = {
-            record.name: (source, record)
-            for source, records in zip(sources, catalogs, strict=True)
-            for record in records
-        }
+        resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
+        scopes: dict[str, list[MCPScope]] = {}
+        for source, records in zip(sources, catalogs, strict=True):
+            for record in records:
+                resolved[record.name] = (source, record)
+                scopes.setdefault(record.name, []).append(source.scope)
     except Exception:
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
@@ -286,7 +323,15 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         and (connection_name is None or record.name == connection_name)
     ]
     groups = await asyncio.gather(
-        *(_load_tools(source, record, sources) for source, record in connections)
+        *(
+            _load_tools(
+                source,
+                record,
+                sources,
+                scopes[record.name][:-1],
+            )
+            for source, record in connections
+        )
     )
     outcomes = Counter(outcome for _, outcome in groups)
     logger.info(

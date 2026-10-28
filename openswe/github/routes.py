@@ -3,7 +3,9 @@
 from fastapi import APIRouter, Response
 
 from openswe.github import webhook as service
+from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
+from openswe.merge_queue.controller import wake_native_queue
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.ui_invalidations import Topic
@@ -51,6 +53,8 @@ async def github_webhook(
     )
     if refs.pull_request is not None:
         await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
+    if event_type in {"installation", "installation_repositories"}:
+        await forget_cached_repos()
     common.logger.info(
         "GitHub webhook received",
         extra={
@@ -60,7 +64,7 @@ async def github_webhook(
         },
     )
 
-    if event_type not in common.SUPPORTED_GH_EVENTS:
+    if event_type not in common.SUPPORTED_GH_EVENTS and event_type != "merge_group":
         common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
@@ -99,6 +103,20 @@ async def github_webhook(
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
 
+    if event_type == "merge_group":
+        queued = await wake_native_queue(payload)
+        return {"status": "accepted" if queued else "ignored"}
+
+    if event_type in {"push", "pull_request", "pull_request_review"}:
+        try:
+            await wake_native_queue(payload)
+        except Exception:
+            # The minute job recovers missed wakeups without blocking other handlers.
+            common.logger.exception(
+                "Failed to wake native merge queue",
+                extra={"github_delivery": delivery_id, "github_event": event_type},
+            )
+
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
     is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
@@ -119,7 +137,10 @@ async def github_webhook(
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
         if action == "synchronize":
+            # Not gated on auto-review: an approval outlives turning review off.
+            background_tasks.add_task(service.withdraw_superseded_approvals, payload)
             background_tasks.add_task(notify_pr_updated, payload)
+            background_tasks.add_task(service.process_github_pr_synchronize, payload)
         if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
             try:
                 await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)

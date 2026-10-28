@@ -25,6 +25,7 @@ _TOOL_MODULES = {
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
+    "monitor": ".monitor",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -41,11 +42,9 @@ _TOOL_MODULES = {
     "publish_review": ".publish_review",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
-    "read_repo_file": "openswe.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
-    "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
@@ -56,15 +55,15 @@ _TOOL_MODULES = {
     "delete_organization_skill": ".organization_skills",
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
-    "save_plan": ".save_plan",
+    "publish_artifact": ".publish_artifact",
     "save_user_instructions": ".save_user_instructions",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
+    "snapshotctl": ".workspaces",
     "send_announcement": ".send_announcement",
-    "search_repo_code": "openswe.github.tools.search_repo_code",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
     "slack_attach_html": "openswe.slack.tools.attach_html",
@@ -109,6 +108,7 @@ __all__ = [
     "list_automations",
     "list_event_types",
     "listen_events",
+    "monitor",
     "list_workspaces",
     "list_findings",
     "list_review_findings",
@@ -125,11 +125,9 @@ __all__ = [
     "publish_review",
     "write_database_rows",
     "read_only_sql",
-    "read_repo_file",
     "read_user_settings",
     "record_human_input",
     "recreate_sandbox",
-    "refresh_workspace_start",
     "configure_repository",
     "report_platform_issue",
     "request_human_review",
@@ -140,15 +138,15 @@ __all__ = [
     "publish_workspace",
     "save_organization_skill",
     "delete_organization_skill",
-    "save_plan",
+    "publish_artifact",
     "save_user_instructions",
     "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_pull_requests",
+    "snapshotctl",
     "send_announcement",
-    "search_repo_code",
     "start_thread",
     "slack_add_reaction",
     "slack_attach_html",
@@ -171,8 +169,6 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from openswe.github.tools.read_repo_file import read_repo_file
-    from openswe.github.tools.search_repo_code import search_repo_code
     from openswe.incidents.tools import manage_incident
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html
@@ -213,9 +209,11 @@ if TYPE_CHECKING:
     from openswe.tools.listen_events import list_event_types, listen_events
     from openswe.tools.manage_baby_sit import manage_baby_sit
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
+    from openswe.tools.monitor import monitor
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe
+    from openswe.tools.publish_artifact import publish_artifact
     from openswe.tools.publish_review import publish_review
     from openswe.tools.read_only_sql import read_only_sql
     from openswe.tools.read_user_settings import read_user_settings
@@ -233,7 +231,6 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
-    from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
@@ -251,7 +248,7 @@ if TYPE_CHECKING:
         delete_workspace,
         list_workspaces,
         publish_workspace,
-        refresh_workspace_start,
+        snapshotctl,
     )
 
 

@@ -4,7 +4,11 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from openswe.linear import webhook as linear_webhook
+
+pytestmark = pytest.mark.usefixtures("no_local_threads")
 
 
 def _full_issue(*, user_email: str | None = "zhen@example.com", user_name: str = "Zhen") -> dict:
@@ -32,6 +36,7 @@ def _run_process(
     *,
     full_issue: dict[str, Any] | None = None,
     thread_workspace: str | None = None,
+    workspace: str | None = None,
 ) -> tuple[dict, dict, str | None, object]:
     captured: dict[str, Any] = {}
 
@@ -99,7 +104,9 @@ def _run_process(
             side_effect=lambda url, _client: {"type": "image_url", "image_url": {"url": url}},
         ),
     ):
-        asyncio.run(linear_webhook.process_linear_issue(issue_data, repo_config))
+        asyncio.run(
+            linear_webhook.process_linear_issue(issue_data, repo_config, workspace=workspace)
+        )
 
     return (
         captured.get("configurable", {}),
@@ -114,6 +121,7 @@ def test_linear_follow_up_keeps_the_threads_workspace() -> None:
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
         thread_workspace="core",
+        workspace="personal",
     )
 
     assert configurable["workspace"] == "core"
@@ -127,6 +135,17 @@ def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace() -> Non
     )
 
     assert configurable["workspace"] == "oss"
+
+
+def test_linear_personal_default_keeps_the_selected_workspace() -> None:
+    configurable, upsert, _email, _content = _run_process(
+        _issue_data(user_email="zhen@example.com"),
+        {"owner": "langchain-ai", "name": "open-swe"},
+        workspace="personal",
+    )
+
+    assert configurable["workspace"] == "personal"
+    assert upsert["workspace"] == "personal"
 
 
 def test_linear_comment_images_stay_with_their_comments() -> None:

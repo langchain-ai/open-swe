@@ -11,7 +11,7 @@ import ipaddress
 import logging
 import re
 import socket
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, Self
 from urllib.parse import urljoin, urlparse
 
@@ -24,8 +24,9 @@ from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_diff import (
-    build_pr_diff_files,
     fetch_file_versions,
+    pull_request_patches,
+    resolve_merge_base,
 )
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.webhook import trigger_pr_review_from_ref
@@ -41,9 +42,14 @@ from openswe.review.findings import (
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
+from openswe.threads import index
+from openswe.threads.status import thread_run_error
+from openswe.threads.succession import SUCCEEDED_BY_KEY
+from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
-from openswe.utils.thread_ops import langgraph_client, thread_run_error
+from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.thread_ops import langgraph_client
 from openswe.walkthrough.record import WalkthroughView
 from openswe.workspaces.store import WORKSPACES
 
@@ -169,6 +175,12 @@ def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     return "idle"
 
 
+def _succeeded(thread: Mapping[str, Any]) -> bool:
+    """A reviewer thread whose review carries on in its successor, which is listed instead."""
+    metadata = thread.get("metadata")
+    return isinstance(metadata, Mapping) and bool(metadata.get(SUCCEEDED_BY_KEY))
+
+
 def _thread_review_summary(
     thread: ThreadLike, findings: Sequence[FindingLike]
 ) -> dict[str, Any] | None:
@@ -249,7 +261,7 @@ async def list_reviews(
             break
         findings = await _thread_findings(threads)
         for thread in threads:
-            if not isinstance(thread, dict):
+            if not isinstance(thread, dict) or _succeeded(thread):
                 continue
             summary = _thread_review_summary(thread, findings.get(thread.get("thread_id"), []))
             if not summary:
@@ -280,11 +292,12 @@ async def get_review_summaries(
                     "kind": REVIEWER_THREAD_KIND,
                     "pr": {"owner": owner, "name": repo, "number": number},
                 },
-                limit=1,
+                limit=2,
                 sort_by="updated_at",
                 sort_order="desc",
             )
-            raw = await _review_summary_of(threads[0]) if threads else None
+            current = next((t for t in threads if not _succeeded(t)), None)
+            raw = await _review_summary_of(current) if current else None
             return f"{owner}/{repo}#{number}".lower(), _as_review_summary(raw)
 
     return dict(await asyncio.gather(*(read(*identity) for identity in identities)))
@@ -611,7 +624,9 @@ def _clean_comment_body(body: str) -> str:
 async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadLike | None:
     """The reviewer thread for this PR, or ``None`` when no review has run."""
     try:
-        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
+        thread = await langgraph_client().threads.get(
+            await index.current_thread_id(reviewer_thread_id(owner, repo, pr_number))
+        )
     except NotFoundError:
         return None
     except Exception:  # noqa: BLE001
@@ -708,6 +723,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
 
     return {
         **summary,
+        "trace_url": (
+            await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
+        ),
         "pr": details,
         "checks": checks,
         "findings": findings,
@@ -718,7 +736,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
             walkthrough_progress.model_dump(mode="json") if walkthrough_progress else None
         ),
         "review_error": review_error,
-        "walkthrough_scout_thread_id": target.thread_id if target else None,
+        "walkthrough_scout_thread_id": await target.current_thread_id() if target else None,
         "assessment": assessment.model_dump() if assessment else None,
     }
 
@@ -933,26 +951,18 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     calls :func:`get_review_file_contents` to expand context on demand.
     """
     async with GitHubClient.as_app(timeout=_GITHUB_TIMEOUT) as github:
-        diff = await build_pr_diff_files(
-            github.http, f"{owner}/{repo}", pr_number, with_contents=False
-        )
+        diff = await pull_request_patches(github.repo(owner, repo).pull_request(pr_number))
     files = diff["files"]
     return {
-        "files": [
-            {
-                **{key: value for key, value in f.items() if key not in _CONTENT_KEYS},
-                "baseSha": diff["base_sha"],
-                "headSha": diff["head_sha"],
-            }
-            for f in files
-        ],
+        "files": [{**f, "baseSha": diff["base_sha"], "headSha": diff["head_sha"]} for f in files],
         "total_additions": sum(f["additions"] for f in files),
         "total_deletions": sum(f["deletions"] for f in files),
         "truncated": diff["truncated"],
     }
 
 
-_CONTENT_KEYS = frozenset({"originalContent", "modifiedContent"})
+# Two commits always share the same merge base.
+_MERGE_BASE_TTL_SECONDS = 24 * 60 * 60
 
 
 async def get_review_file_contents(
@@ -964,13 +974,22 @@ async def get_review_file_contents(
     base_sha: str,
     head_sha: str,
 ) -> dict[str, str | None]:
-    """Return one file's contents at the PR's merge base and head."""
+    """Return one file's contents at the merge base of ``base_sha`` and ``head_sha``, and at the head.
+
+    ``base_sha`` is the base branch tip the diff was listed against; every file
+    of one diff resolves the same merge base, so it is looked up once.
+    """
     if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in (base_sha, head_sha)):
         raise HTTPException(400, "invalid diff revision")
-    full_name = f"{owner}/{repo}"
     async with GitHubClient.as_app(timeout=_GITHUB_TIMEOUT) as github:
+        repository = github.repo(owner, repo)
+        merge_base = await ttl_cache.cached(
+            f"merge-base:{repository.full_name}:{base_sha}...{head_sha}",
+            _MERGE_BASE_TTL_SECONDS,
+            lambda: resolve_merge_base(repository, base_sha, head_sha),
+        )
         return await fetch_file_versions(
-            github.http, full_name, path, original_path or path, base_sha, head_sha
+            repository, path, original_path or path, merge_base, head_sha
         )
 
 
@@ -1248,7 +1267,9 @@ async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -
         number=pr_number,
         url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
     )
-    result = await trigger_pr_review_from_ref(pr_ref, source="dashboard", github_login=login)
+    result = await trigger_pr_review_from_ref(
+        pr_ref, source="dashboard", github_login=login, allow_draft=True
+    )
     if not result.get("success"):
         raise HTTPException(502, str(result.get("error") or "could not trigger review"))
     return result

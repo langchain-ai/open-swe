@@ -34,11 +34,13 @@ function stubFetch() {
 async function recordedSidebarUrl({
   includeAutomations = false,
   includeResolved = false,
+  includeClaudeCode = true,
   repoMode = true,
   sort = "created",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
+  includeClaudeCode?: boolean
   repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
@@ -49,6 +51,7 @@ async function recordedSidebarUrl({
         repoMode,
         includeAutomations,
         includeResolved,
+        includeClaudeCode,
         sort,
       }),
       limit: SIDEBAR_PAGE_SIZE,
@@ -160,6 +163,11 @@ describe("apiWarmupScript", () => {
       name: "resolved included",
       expected: { includeResolved: true },
       prefs: { filters: { includeResolved: true } },
+    },
+    {
+      name: "Claude Code sessions hidden",
+      expected: { includeClaudeCode: false },
+      prefs: { filters: { includeClaudeCode: false } },
     },
     {
       name: "sorted by last update",

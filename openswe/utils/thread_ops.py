@@ -10,10 +10,9 @@ follow-up into a run that's already in flight" path.
 import logging
 
 from langgraph_sdk import get_client
-from langgraph_sdk.client import LangGraphClient
-from pydantic import BaseModel
 
 from openswe.config import ENV
+from openswe.input_messages import system_input
 from openswe.message_queue import QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
@@ -27,25 +26,12 @@ def langgraph_client():
     return get_client(url=langgraph_url())
 
 
-class ThreadRunError(BaseModel):
-    """The exception LangGraph records on a thread whose latest run failed."""
-
-    error: str = ""
-    message: str = ""
-
-    def describe(self) -> str:
-        return ": ".join(part for part in (self.error, self.message) if part)
-
-
-class _ErroredThread(BaseModel):
-    error: ThreadRunError | None = None
-
-
-async def thread_run_error(thread_id: str, client: LangGraphClient | None = None) -> str | None:
-    """Why the thread's latest run failed, or ``None`` when it recorded no error."""
-    thread = await (client or langgraph_client()).threads.get(thread_id)
-    failure = _ErroredThread.model_validate(thread).error
-    return (failure.describe() or None) if failure else None
+async def queue_system_note_for_thread(thread_id: str, note: str) -> bool:
+    """Queue internal context without exposing it as a person's pending message."""
+    message = system_input(
+        note, {"sender_id": "system:slack-note", "surface": "automation", "kind": "system"}
+    )
+    return await queue_message_for_thread(thread_id, dict(message))
 
 
 async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:

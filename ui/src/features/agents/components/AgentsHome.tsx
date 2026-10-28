@@ -1,10 +1,11 @@
+import { LogoMark } from "@/components/Branding"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
-import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
@@ -13,6 +14,7 @@ import {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import type { ComposerSubmission } from "@/features/agents/components/composer/ChatComposer"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Messages } from "@/features/agents/components/messages"
@@ -170,8 +172,22 @@ export function AgentsHome({
   // Workspace first: an explicit pick, else the workspace preferring a
   // repository named from outside (a link or the profile default), else the
   // user's default, then the instance default.
+  const preferredWorkspace = pickComposerWorkspace({
+    override: workspaceOverride,
+    repoWorkspace: null,
+    userDefault: preferences.data?.default_workspace,
+    instanceDefault: defaultWorkspaceSlug,
+    workspaces,
+  })
+  const personalWorkspaceRepo = preferredWorkspace
+    ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
+    : undefined
   const namedRepo = (
-    repoOverride === undefined ? userDefaultRepo : repoOverride
+    repoOverride === undefined
+      ? personalWorkspaceRepo
+        ? null
+        : userDefaultRepo
+      : repoOverride
   )?.toLowerCase()
   const selectedWorkspace = pickComposerWorkspace({
     override: workspaceOverride,
@@ -192,6 +208,9 @@ export function AgentsHome({
   const repo = pickComposerRepo({
     override: repoOverride,
     userDefault: userDefaultRepo,
+    userWorkspaceDefault: selectedWorkspace
+      ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
+      : undefined,
     workspaceDefault:
       workspaces.find((workspace) => workspace.slug === selectedWorkspace)
         ?.default_repo ?? null,
@@ -199,8 +218,6 @@ export function AgentsHome({
   })
   const selectWorkspace = (slug: string | null) => {
     setWorkspaceOverride(slug)
-    // A newly chosen workspace starts from its own default repository.
-    setRepoOverride(undefined)
   }
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
@@ -422,7 +439,7 @@ export function AgentsHome({
     resetPendingSubmit()
   }
 
-  const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
+  const handleSubmit = ({ text: prompt, images }: ComposerSubmission) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
@@ -585,8 +602,7 @@ export function AgentsHome({
         ) : (
           <div className="flex min-h-0 flex-1 overflow-y-auto px-space-3 py-space-5 sm:px-space-5 sm:py-space-6">
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-space-5">
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
+              <LogoMark
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
@@ -672,6 +688,8 @@ export function AgentsHome({
           collapsed={panelCollapsed}
           onCollapsedChange={handlePanelCollapsedChange}
           renderDiff={() => null}
+          renderBrowser={() => null}
+          browserAvailable={false}
         />
       )}
     </>

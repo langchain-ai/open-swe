@@ -10,9 +10,11 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.threads import index
 from openswe.threads.index import ThreadStatus
 from openswe.threads.runtimes import RUNTIMES
+from openswe.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,19 @@ async def refresh_thread_status(thread_id: str) -> ThreadStatus | None:
     status = await RUNTIMES.runs_on(thread.runtime).status(thread_id)
     if status is not None:
         await index.set_status(thread_id, status)
+        if status != thread.status and thread.metadata.get("kind") == "reviewer":
+            pr = thread.metadata.get("pr")
+            if isinstance(pr, dict):
+                owner, repo, number = pr.get("owner"), pr.get("name"), pr.get("number")
+                if isinstance(owner, str) and isinstance(repo, str) and isinstance(number, int):
+                    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
     return status
+
+
+async def thread_run_error(thread_id: str) -> str | None:
+    """Why the thread's latest run failed, as its runtime recorded it; the index keeps no state."""
+    thread = await index.get(thread_id)
+    return await RUNTIMES.runs_on(thread.runtime if thread else "local").run_error(thread_id)
 
 
 async def reconcile_busy_threads() -> int:

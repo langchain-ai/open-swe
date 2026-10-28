@@ -39,6 +39,7 @@ type ToolKind = ToolExecutionChunk["toolKind"]
 export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
   if (lowered === "task") return "task"
+  if (lowered === "eval") return "code"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
   if (lowered === "connect_managed_tools") return "managed-tools"
@@ -81,14 +82,6 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
     }
   }
   return {}
-}
-
-/** Only the last prose chunk of an agent turn survives; the earlier ones were partial. */
-export function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
-  const textIndices = chunks.flatMap((c, i) => (c.kind === "text" ? [i] : []))
-  if (textIndices.length <= 1) return chunks
-  const lastText = textIndices[textIndices.length - 1]
-  return chunks.filter((c, i) => c.kind !== "text" || i === lastText)
 }
 
 type AgentTurn = {
@@ -284,7 +277,7 @@ export function streamMessagesToUi(
 
   const flushAgentTurn = () => {
     if (!agentTurn) return
-    uiMessages.push({ ...agentTurn, chunks: mergeTextChunks(agentTurn.chunks) })
+    uiMessages.push(agentTurn)
     agentTurn = null
   }
 
@@ -339,8 +332,9 @@ export function streamMessagesToUi(
       if (entity?.senderType === "self") return
       const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
       const text = taskEvent?.content ?? parsed.content
+      const replies = parsed.type === "message" ? parsed.replies : undefined
       if (text.trim()) chunks.push({ kind: "text", text })
-      if (!chunks.length && !taskEvent) return
+      if (!chunks.length && !taskEvent && !replies) return
       uiMessages.push({
         id: msgId,
         ...(taskEvent ? { taskEvent } : {}),
@@ -356,6 +350,7 @@ export function streamMessagesToUi(
               structuredSenderId: parsed.sender,
               structuredSenderKind: parsed.senderKind,
               structuredSurface: parsed.surface,
+              ...(replies ? { replies } : {}),
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
@@ -373,7 +368,13 @@ export function streamMessagesToUi(
       const reasoning = reasoningText(raw)
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       const text = raw.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) {
+        chunks.push({
+          kind: "text",
+          text,
+          ...(timestampIsFallback ? {} : { timestamp }),
+        })
+      }
 
       for (const toolCall of raw.tool_calls ?? []) {
         const name = toolCall.name || "tool"
@@ -385,6 +386,7 @@ export function streamMessagesToUi(
         const chunk: ToolExecutionChunk = {
           kind: "tool-execution",
           toolCallId,
+          toolName: name,
           timestamp: messageArrivalTimestamp(toolCallId),
           title: toolTitle(name, args),
           toolKind: toolKind(name),

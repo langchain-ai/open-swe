@@ -84,6 +84,11 @@ describe("streamMessagesToUi", () => {
         content:
           '<input-message sender="system:open-swe" surface="slack" kind="system">\non it\n</input-message>',
       }),
+      new HumanMessage({
+        id: "internal-slack-note",
+        content:
+          '<input-message sender="system:slack-note" surface="automation" kind="system">\nReview accepted\n</input-message>',
+      }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])
 
@@ -119,7 +124,10 @@ describe("streamMessagesToUi", () => {
     expect(messages[1]).toMatchObject({
       author: "agent",
       turnKey: "user-1",
-      chunks: [{ kind: "text", text: "Done" }],
+      chunks: [
+        { kind: "text", text: "Working" },
+        { kind: "text", text: "Done" },
+      ],
     })
   })
 

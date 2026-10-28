@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   writeClipboard: (value) =>
     ipcRenderer.invoke("desktop:write-clipboard", value),
+  copyPageLink: () => ipcRenderer.invoke("desktop:copy-page-link"),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),

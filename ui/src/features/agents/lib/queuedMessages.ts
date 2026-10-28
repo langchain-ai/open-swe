@@ -21,9 +21,33 @@ function messageIds(messages: Array<Message>): Set<string> {
   return new Set(messages.map((message) => message.id))
 }
 
+/**
+ * The label the server will give `login`'s next message: the one their earlier
+ * messages carry, else their own display name, which labels a thread's first
+ * message. A pending message shows it too, so the bubble doesn't drop when the
+ * confirmed message replaces it. Undefined in threads without labels.
+ */
+export function pendingSenderName(
+  messages: Array<Message>,
+  login: string | undefined,
+  displayName: string | undefined
+): string | undefined {
+  if (!login) return undefined
+  const own = messages.findLast(
+    (message) =>
+      message.structuredSenderLogin?.toLowerCase() === login.toLowerCase()
+  )
+  if (own) return own.structuredSenderName
+  if (messages.length === 0) return displayName
+  return messages.some((message) => message.structuredSenderName)
+    ? (displayName ?? `@${login}`)
+    : undefined
+}
+
 export function visiblePendingMessages(
   pendingMessages: Array<PendingThreadMessage> | undefined,
-  messages: Array<Message>
+  messages: Array<Message>,
+  senderName?: string
 ): Array<Message> {
   const persistedIds = messageIds(messages)
   return (pendingMessages ?? [])
@@ -31,11 +55,13 @@ export function visiblePendingMessages(
     .map((message) => ({
       id: message.id,
       author: "user",
+      ...(senderName ? { structuredSenderName: senderName } : {}),
       timestamp: new Date(message.createdAt).toISOString(),
       timestampIsFallback: true,
       deliveryStatus: message.status,
       deliveryError: message.error,
       optimistic: true,
+      ...(message.replies ? { replies: message.replies } : {}),
       chunks: [
         ...(message.images ?? []),
         ...(message.content

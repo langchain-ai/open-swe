@@ -14,6 +14,7 @@ from typing import Any, Literal, NamedTuple
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue
 
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.input_messages import InputMessageContext, SystemIdentity
@@ -23,7 +24,7 @@ from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
-from openswe.tools.background_execute import TASK_ROOT, control_script, encoded, execute
+from openswe.tools.background_execute import TASK_ROOT, list_tasks
 from openswe.utils.background_task_state import (
     RUNNING_BACKGROUND_TASKS_KEY,
     update_background_task_state,
@@ -90,6 +91,22 @@ def _notification(task: dict[str, Any]) -> str:
     )
 
 
+async def completion_configurable(
+    thread_id: str, metadata: Mapping[str, object]
+) -> dict[str, JsonValue]:
+    """The configurable of a run that reports sandbox work back to ``thread_id``."""
+    if metadata.get("task_id") or (
+        metadata.get("visibility") == "private" and metadata.get("owner_type") == "user"
+    ):
+        from openswe.tasks.service import recipient_config
+
+        configurable = await recipient_config(thread_id)
+    else:
+        configurable = follow_up_configurable(metadata, thread_id)
+    configurable["background_task_completion"] = True
+    return configurable
+
+
 async def _claim(backend: Any, task_id: str) -> bool:
     claim = f"{TASK_ROOT}/{task_id}/notify.claim"
     response = await backend.aexecute(f"mkdir {shlex.quote(claim)} 2>/dev/null", timeout=10)
@@ -114,16 +131,7 @@ async def _mark_delivered(backend: Any, task_id: str) -> None:
 
 
 async def _list_tasks(backend: Any, *, required: bool = False) -> list[dict[str, Any]]:
-    script = control_script("list", None)
-    result = await execute(
-        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
-    )
-    tasks = result.get("tasks") if isinstance(result, dict) else None
-    if isinstance(tasks, list):
-        return tasks
-    if required:
-        raise RuntimeError("Background-task list could not be read")
-    return []
+    return list(await list_tasks(backend, required=required))
 
 
 class _Reconciled(NamedTuple):
@@ -139,6 +147,18 @@ def _belongs_to_thread(
     owner = task.get("owner_thread_id")
     # Commands created before ownership tracking belong to the sandbox's host.
     return owner == thread_id or (owner is None and owns_legacy_tasks)
+
+
+async def thread_tasks(
+    backend: Any, thread_id: str, metadata: Mapping[str, object]
+) -> list[dict[str, Any]]:
+    """The sandbox commands in ``backend`` that ``thread_id`` launched."""
+    owns_legacy_tasks = not metadata.get(SANDBOX_HOST_THREAD_KEY)
+    return [
+        task
+        for task in await _list_tasks(backend)
+        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
+    ]
 
 
 async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
@@ -188,11 +208,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
         await sync_slack_background_status(client, thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
     backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
-    tasks = [
-        task
-        for task in await _list_tasks(backend)
-        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
-    ]
+    tasks = await thread_tasks(backend, thread_id, metadata)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
     running_ids = [task_id for task in running if isinstance((task_id := task.get("task_id")), str)]
@@ -233,15 +249,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
             continue
         message = _notification(task)
         try:
-            if metadata.get("task_id") or (
-                metadata.get("visibility") == "private" and metadata.get("owner_type") == "user"
-            ):
-                from openswe.tasks.service import recipient_config
-
-                configurable = await recipient_config(thread_id)
-            else:
-                configurable = follow_up_configurable(metadata, thread_id)
-            configurable["background_task_completion"] = True
+            configurable = await completion_configurable(thread_id, metadata)
             # A completion run can change task state before delivery finishes.
             status_metadata = None
             await dispatch_agent_run(

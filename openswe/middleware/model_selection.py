@@ -1,14 +1,8 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal, NotRequired
 
-from langchain.agents.middleware.types import (
-    AgentState,
-    ModelRequest,
-    ModelResponse,
-    OmitFromOutput,
-)
-from langchain_core.language_models import BaseChatModel
+from langchain.agents.middleware.types import AgentState, OmitFromOutput
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
@@ -69,6 +63,11 @@ async def _select_jev_route(task: str) -> SelectedRoute:
     )
 
 
+async def classify_route(messages: Sequence[object]) -> SelectedRoute:
+    """The route the person's latest request takes, as the classifier reads it."""
+    return await _select_jev_route(_latest_human_task(messages)[-8_000:])
+
+
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
@@ -79,17 +78,10 @@ def normalize_route(route: PersistedRoute) -> SelectedRoute:
     return "fast" if route == "fast_alt" else route
 
 
-async def _emit_routed_model(
-    models: Mapping[str, BaseChatModel],
-    route_model_ids: Mapping[str, str],
-    route: SelectedRoute,
-) -> None:
+def _emit_routed_model(route_model_ids: Mapping[str, str], route: SelectedRoute) -> None:
     """Stream the routed model's id so the UI can show it next to `Auto`."""
     model_id = route_model_ids.get(route)
-    if model_id is None:
-        model = models.get(route)
-        model_id = getattr(model, "model_id", None)
-    if not isinstance(model_id, str) or not model_id:
+    if not model_id:
         return
     try:
         get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
@@ -99,30 +91,23 @@ async def _emit_routed_model(
 
 
 class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
+    """Pick the route of each model call; the run's model choice reads it from state.
+
+    MDA makes the call, so this keeps no models: only the id each route stands for.
+    """
+
     state_schema = ModelSelectionState
 
     def __init__(
         self,
-        models: Mapping[str, BaseChatModel],
-        default_model: BaseChatModel,
+        route_model_ids: Mapping[str, str],
         *,
-        route_model_ids: Mapping[str, str] | None = None,
         routing_mode: RoutingMode | None = "auto",
-        requested_model_factory: Callable[[str, str | None], BaseChatModel] | None = None,
     ) -> None:
-        self._models = {**models, "default": default_model}
-        self._route_model_ids = dict(route_model_ids or {})
+        self._route_model_ids = dict(route_model_ids)
         self._routing_mode = routing_mode
-        self._requested_model_factory = requested_model_factory
-        self._requested_models: dict[tuple[str, str | None], BaseChatModel] = {}
 
-    def use_requested_model(self, model_id: str, effort: str | None = None) -> None:
-        if self._requested_model_factory is None:
-            raise ValueError("Requested model selection is not enabled")
-        key = (model_id, effort)
-        if key not in self._requested_models:
-            self._requested_models[key] = self._requested_model_factory(model_id, effort)
-        self._models["default"] = self._requested_models[key]
+    def use_requested_model(self, model_id: str) -> None:
         self._route_model_ids["default"] = model_id
 
     async def select_route(
@@ -131,18 +116,15 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> SelectedRoute:
         """Select the model route for a turn."""
         if requested_model := state.get("requested_model"):
-            if self._requested_model_factory is not None:
-                self.use_requested_model(requested_model, state.get("requested_effort"))
-                return "default"
+            self.use_requested_model(requested_model)
+            return "default"
         if self._routing_mode is None:
             return "default"
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
             return "fast"
-        messages = state.get("messages", [])
-        task = _latest_human_task(messages)[-8_000:]
-        return await _select_jev_route(task)
+        return await classify_route(state.get("messages", []))
 
     async def abefore_model(
         self,
@@ -152,14 +134,5 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         del runtime
         route = await self.select_route(state)
         if self._routing_mode == "auto" or state.get("requested_model"):
-            await _emit_routed_model(self._models, self._route_model_ids, route)
+            _emit_routed_model(self._route_model_ids, route)
         return {"model_route": route}
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        route: PersistedRoute = request.state.get("model_route", "default")
-        model = self._models.get(normalize_route(route)) or self._models["default"]
-        return await handler(request.override(model=model))

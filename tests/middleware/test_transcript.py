@@ -13,7 +13,8 @@ from langchain_core.callbacks.manager import AsyncCallbackManager
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
-from langgraph.prebuilt.tool_node import ToolCallRequest
+from langchain_core.tools import tool
+from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 
 from openswe.input_messages import build_input_messages
 from openswe.middleware import transcript as mw
@@ -163,6 +164,52 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     assert completed.event.has_output is True
     assert completed.event.output_truncated is False
     assert completed.tool_output == "file body"
+
+
+async def test_tools_called_from_code_are_recorded_under_the_eval_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code mode runs tools with `arun` and the eval call's callbacks, bypassing the tools node."""
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": []}, None)
+
+    @tool
+    def read_file(path: str) -> str:
+        """Read a file."""
+        return f"body of {path}"
+
+    async def eval_handler(request: ToolCallRequest) -> ToolMessage:
+        config = request.runtime.config
+        await read_file.arun({"path": "a.py"}, callbacks=config["callbacks"], config=config)
+        return ToolMessage(content="done", tool_call_id="eval-1")
+
+    request = ToolCallRequest(
+        tool_call={"name": "eval", "args": {"code": "await tools.readFile()"}, "id": "eval-1"},
+        tool=None,
+        state={"messages": []},
+        runtime=ToolRuntime(
+            state={},
+            context=None,
+            config={"callbacks": AsyncCallbackManager(handlers=[])},
+            stream_writer=lambda _: None,
+            tool_call_id="eval-1",
+            store=None,
+        ),
+    )
+    await middleware.awrap_tool_call(request, eval_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    tools = [c.event for c in engine.commands if c.event.type.startswith("tool.")]
+    assert [(e.type, e.namespace) for e in tools] == [
+        ("tool.started", []),
+        ("tool.started", ["eval-1"]),
+        ("tool.completed", ["eval-1"]),
+        ("tool.completed", []),
+    ]
+    assert tools[1].name == "read_file"
+    assert tools[1].input == {"path": "a.py"}
+    assert tools[2].output_preview == "body of a.py"
 
 
 async def test_only_mid_run_human_messages_are_recorded_once(
@@ -597,32 +644,32 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
-    from langchain.agents import create_agent
-    from langchain_core.messages import messages_to_dict
-    from langchain_core.tools import tool
+    from openswe.sandboxes.managed import ManagedSandbox
 
-    from openswe.remote_runtime.graph import RemoteGraph
-    from openswe.remote_runtime.tokens import RemoteRun
+    # A thread with no box of MDA's, so preparing reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    from langchain_core.messages import messages_to_dict
+
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_parts import RunParts
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
 
-    @tool
-    def read_file(path: str) -> str:
-        """Read a file."""
-        return f"contents of {path}"
-
     async def build(config: Any, surface: ToolSurface) -> None:
-        middleware = [mw.TranscriptMiddleware()]
-        surface.graph = create_agent(
-            GenericFakeChatModel(messages=iter([])), tools=[read_file], middleware=middleware
-        )
-        surface.middleware = middleware
+        surface.middleware = [mw.TranscriptMiddleware()]
 
-    async def start_models(cfg: Any) -> Any:
-        raise AssertionError("not asked for")
+    async def never_planned(config: Any, surface: ToolSurface) -> None:
+        raise AssertionError("Reporting a run never plans it")
 
-    graph = RemoteGraph("agent", build, start_models)
+    graph = RemoteGraph("agent", build)
+
+    # Another replica: it reports the run's calls without planning the run.
+    class Reporting(RunParts):
+        reporters = (mw.TranscriptMiddleware(),)
+
+    elsewhere = RemoteGraph("agent", never_planned, Reporting())
     run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
     asked = HumanMessage(content="do the thing", id="human-1")
     delegated = AIMessage(
@@ -636,31 +683,30 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         id="sub-ai-1",
         tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "sub-call-1"}],
     )
-    nested = messages_to_dict([HumanMessage(content="look", id="sub-human"), looked])
     answer = AIMessage(content="found it", id="sub-ai-2")
 
-    await graph.hook(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
+    await graph.api(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
     task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
-    await graph.hook(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
-    inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
-    await graph.hook(
-        run,
-        "call",
-        {
-            **inside,
-            "name": "read_file",
-            "arguments": {"path": "a.py"},
-            "tool_call_id": "sub-call-1",
-        },
+    # Each report names the reply that made the call, never the conversation.
+    await elsewhere.api(run, "tool_started", {"run_id": RUN_ID, "message_id": "ai-1", **task})
+    inside = {"run_id": RUN_ID, "namespace": ["task-1"]}
+    # MDA reports every call it makes, the subagent's included, under its ``task`` call.
+    read = {"name": "read_file", "arguments": {"path": "a.py"}, "tool_call_id": "sub-call-1"}
+    await elsewhere.api(run, "tool_started", {**inside, **read, "message_id": looked.id})
+    contents = ToolMessage(content="contents of a.py", tool_call_id="sub-call-1")
+    await elsewhere.api(
+        run, "tool_result", {**inside, **read, "result": messages_to_dict([contents])[0]}
     )
-    await graph.hook(run, "model_result", {**inside, "response": messages_to_dict([answer])})
+    await elsewhere.api(run, "model_result", {**inside, "response": messages_to_dict([answer])})
     result = ToolMessage(content="found it", tool_call_id="task-1")
-    await graph.hook(
+    await elsewhere.api(
         run,
         "tool_result",
-        {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
+        {"run_id": RUN_ID, **task, "result": messages_to_dict([result])[0]},
     )
+    await elsewhere.api(run, "run_ended", {"run_id": RUN_ID})
 
+    assert engine.types[-1] == "turn.completed"
     recorded = [
         (
             c.event.type,

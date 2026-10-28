@@ -19,13 +19,6 @@ import { reportError } from "@/lib/errorReporting"
 export interface SubmitAgentMessageVariables extends SendAgentMessageVariables {
   /** The stream can reject after the optimistic mutation has already resolved. */
   onStartError?: () => void
-  /** Moves the thread to another sandbox with this message. */
-  handoff?: ThreadHandoff
-}
-
-export interface ThreadHandoff {
-  configurable: Record<string, string>
-  sandboxBridgeClient: "desktop" | null
 }
 
 function setPendingMessage(
@@ -91,6 +84,7 @@ export function useSubmitAgentMessage(threadId: string) {
         id,
         content: vars.content.trim(),
         images: vars.images,
+        ...(vars.replies?.length ? { replies: vars.replies } : {}),
         createdAt: Date.now(),
         status: "sending",
         ...(vars.enqueue ? { queued: true } : {}),
@@ -100,13 +94,7 @@ export function useSubmitAgentMessage(threadId: string) {
           agentThreadKeys.detail(threadId),
           (prev) => (prev ? update(prev) : prev)
         )
-      const handoff = vars.handoff
-      updateThread((thread) => ({
-        ...setPendingMessage(thread, pendingMessage),
-        ...(handoff
-          ? { sandboxBridgeClient: handoff.sandboxBridgeClient }
-          : {}),
-      }))
+      updateThread((thread) => setPendingMessage(thread, pendingMessage))
       // Set before the start is fired: a rejection below flips it to error and
       // nothing may flip it back afterwards.
       setAgentThreadStatus(queryClient, threadId, "running")
@@ -115,11 +103,15 @@ export function useSubmitAgentMessage(threadId: string) {
         { modelId: vars.model_id, effort: vars.effort },
         vars.model_selection_changed
       )
-      Object.assign(configurable, handoff?.configurable)
 
       void source
         .startRun({
-          message: { id, text: vars.content, images: vars.images },
+          message: {
+            id,
+            text: vars.content,
+            images: vars.images,
+            replies: vars.replies,
+          },
           configurable: {
             ...configurable,
             ...(review
@@ -143,10 +135,6 @@ export function useSubmitAgentMessage(threadId: string) {
             })
           )
           setAgentThreadStatus(queryClient, threadId, "error")
-          if (handoff)
-            void queryClient.invalidateQueries({
-              queryKey: agentThreadKeys.detail(threadId),
-            })
           vars.onStartError?.()
           reportError({ title: "Couldn't send message", error })
         })

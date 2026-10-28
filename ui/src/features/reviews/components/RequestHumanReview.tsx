@@ -22,7 +22,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const availability = useQuery({
     queryKey,
     queryFn: () => api.humanReviewAvailability(pr),
-    enabled: pr.reviewDecision !== "approved",
     staleTime: 60_000,
   })
   const [channel, setChannel] = useState<string | null>(null)
@@ -30,13 +29,8 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const permalink = availability.data?.permalink ?? ""
   const needsChannel =
     availability.isSuccess && !availability.data.available && !active
-  const blockers = availability.data?.blockers ?? []
-  const reason = blockers.length
-    ? `A review can't be requested yet: ${blockers.join("; ")}.`
-    : null
   const requestReview = useMutation({
-    mutationFn: () =>
-      api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
+    mutationFn: () => api.requestHumanReview(pr, channel ?? ""),
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
@@ -44,19 +38,15 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData<
         Awaited<ReturnType<typeof api.humanReviewAvailability>>
-      >(queryKey, (previous) =>
-        previous
-          ? {
-              ...previous,
-              active: true,
-              permalink: result.permalink,
-              blockers: [],
-            }
-          : previous
-      )
+      >(queryKey, (previous) => ({
+        available: previous?.available ?? true,
+        active: true,
+        permalink: result.permalink,
+        blockers: [],
+      }))
       if (result.reused) return
       toast.success(
-        `Asked Slack to review ${pullRequestKey(pr)}`,
+        `Asked ${result.channel_name ? `#${result.channel_name}` : "Slack"} to review ${pullRequestKey(pr)}`,
         result.permalink
           ? {
               action: {
@@ -74,17 +64,20 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (pr.reviewDecision === "approved") return null
-  if (availability.isError && !availability.data)
-    return (
-      <PullRequestActionButton
-        label="Retry review status"
-        disabled={availability.isFetching}
-        onClick={() => void availability.refetch()}
-      />
-    )
-  const label =
-    requestReview.isPending || active
+  if (pr.draft !== false) return null
+  const channelHint =
+    active || channel
+      ? null
+      : availability.isPending
+        ? "Checking the default Slack review channel…"
+        : availability.isError
+          ? "Could not check the default Slack review channel. Choose a review channel manually or retry the review status."
+          : needsChannel
+            ? "No default Slack review channel is configured. Choose a review channel manually to enable this button."
+            : null
+  const label = requestReview.isPending
+    ? "Requesting…"
+    : active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -93,37 +86,43 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     <span
       className="inline-flex items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
-      title={reason ?? undefined}
+      title={channelHint ?? undefined}
     >
-      {needsChannel && !reason && !requestReview.isSuccess && (
-        <SlackChannelCombobox
-          value={channel}
-          onValueChange={setChannel}
-          placeholder="Choose a review channel"
-          aria-label="Review channel"
-          eligible={(option) => option.is_member}
-          disabled={requestReview.isPending}
-        />
-      )}
+      {(needsChannel || (availability.isError && !active)) &&
+        !requestReview.isSuccess && (
+          <SlackChannelCombobox
+            value={channel}
+            onValueChange={setChannel}
+            placeholder="Choose a review channel"
+            aria-label="Review channel"
+            eligible={(option) => option.is_member}
+            disabled={requestReview.isPending}
+          />
+        )}
       <PullRequestActionButton
         label={label}
-        disabled={
-          reason !== null ||
-          availability.isPending ||
-          (needsChannel && !channel) ||
-          requestReview.isPending ||
-          (active && !permalink)
-        }
+        loading={requestReview.isPending}
+        disabled={Boolean(channelHint)}
         onClick={() => {
-          if (active) {
-            if (permalink)
-              window.open(permalink, "_blank", "noopener,noreferrer")
+          if (requestReview.isPending) return
+          if (active && permalink) {
+            window.open(permalink, "_blank", "noopener,noreferrer")
+          } else if (channelHint) {
+            toast.error(channelHint)
           } else {
             requestReview.mutate()
           }
         }}
       />
-      {reason && (
+      {availability.isError && (
+        <PullRequestActionButton
+          label="Retry review status"
+          loading={availability.isFetching}
+          disabled={availability.isFetching}
+          onClick={() => void availability.refetch()}
+        />
+      )}
+      {channelHint && (
         <Popover>
           <PopoverTrigger asChild>
             <IconButton
@@ -132,11 +131,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
               size="xs"
               color="secondary"
               variant="plain"
-              tooltipProps={{ title: reason }}
+              tooltipProps={{ title: channelHint }}
             />
           </PopoverTrigger>
           <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)]">
-            <Text variant="xs">{reason}</Text>
+            <Text variant="xs">{channelHint}</Text>
           </PopoverContent>
         </Popover>
       )}

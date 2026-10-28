@@ -6,11 +6,13 @@ import { Button } from "@langchain/macaw-components/Button"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
+import { optimisticUpdate } from "@/lib/optimistic"
 import type {
   ManagedToolsConnectCard,
   ManagedToolsConnectedService,
   ManagedToolsGatewayStatus,
   ManagedToolsMissingCredential,
+  ManagedToolsView,
 } from "@/lib/api"
 import { ConnectLangSmithButton } from "./ConnectionsSection"
 
@@ -49,20 +51,25 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
     }: {
       gatewayId: string
       slug: string
-      popup: Window
+      popup: Window | null
     }) => {
       const result = await api.connectManagedTool(gatewayId, slug, card)
       if (result.url) {
         pending.current = true
-        popup.location.replace(result.url)
+        if (popup) {
+          popup.location.replace(result.url)
+        } else if (!(await window.openSweDesktop?.openExternal(result.url))) {
+          throw new Error("Couldn't open the connection page in your browser")
+        }
       } else {
-        popup.close()
+        popup?.close()
       }
       return result
     },
     onMutate: ({ gatewayId, slug }) => setConnecting(`${gatewayId}:${slug}`),
     onError: (_e, { popup }) => {
-      popup.close()
+      popup?.close()
+      pending.current = false
       setConnecting(null)
     },
     onSuccess: (result) => {
@@ -75,13 +82,54 @@ export function useConnectPopup(card?: ManagedToolsConnectCard) {
   return {
     connecting,
     start: (gatewayId: string, slug: string) => {
-      // Open synchronously in the click so the browser does not block the popup.
-      const popup = window.open("about:blank", "_blank")
-      if (!popup) return
-      popup.opener = null
+      const popup = window.openSweDesktop
+        ? null
+        : window.open("about:blank", "_blank")
+      if (!popup && !window.openSweDesktop) return
+      if (popup) popup.opener = null
       connect.mutate({ gatewayId, slug, popup })
     },
   }
+}
+
+/** Removes the caller's own connection to one service; its row leaves at once. */
+function useDisconnect() {
+  const qc = useQueryClient()
+  const disconnect = useMutation({
+    meta: { errorTitle: "Couldn't disconnect the service" },
+    mutationFn: ({
+      gatewayId,
+      serviceId,
+    }: {
+      gatewayId: string
+      serviceId: string
+    }) => api.disconnectManagedTool(gatewayId, serviceId),
+    onMutate: async ({ gatewayId, serviceId }) => ({
+      undo: await optimisticUpdate<ManagedToolsView>(
+        qc,
+        MANAGED_TOOLS_KEY,
+        (current) => ({
+          ...current,
+          gateways: current.gateways.map((status) =>
+            status.gateway.id === gatewayId
+              ? {
+                  ...status,
+                  connected: status.connected?.filter(
+                    (service) => service.id !== serviceId
+                  ),
+                }
+              : status
+          ),
+        })
+      ),
+    }),
+    onError: (_e, _v, ctx) => ctx?.undo(),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: MANAGED_TOOLS_KEY })
+    },
+  })
+  return (gatewayId: string, serviceId: string) =>
+    disconnect.mutate({ gatewayId, serviceId })
 }
 
 export function MissingRow({
@@ -117,13 +165,33 @@ export function MissingRow({
   )
 }
 
-function ConnectedRow({ service }: { service: ManagedToolsConnectedService }) {
+function ConnectedRow({
+  gatewayId,
+  service,
+  onDisconnect,
+}: {
+  gatewayId: string
+  service: ManagedToolsConnectedService
+  onDisconnect: (gatewayId: string, serviceId: string) => void
+}) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-space-3 px-space-3 py-space-2">
       <span className="text-sm text-primary">{service.name}</span>
-      <span className="text-xs text-secondary">
-        {`Connected · ${service.tool_count} ${service.tool_count === 1 ? "tool" : "tools"}`}
-      </span>
+      <div className="flex items-center gap-space-2">
+        <span className="text-xs text-secondary">
+          {`Connected · ${service.tool_count} ${service.tool_count === 1 ? "tool" : "tools"}`}
+        </span>
+        {service.disconnectable ? (
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            onClick={() => onDisconnect(gatewayId, service.id)}
+          >
+            Disconnect
+          </Button>
+        ) : null}
+      </div>
     </li>
   )
 }
@@ -132,10 +200,12 @@ function GatewayStatus({
   status,
   connecting,
   onConnect,
+  onDisconnect,
 }: {
   status: ManagedToolsGatewayStatus
   connecting: string | null
   onConnect: (gatewayId: string, slug: string) => void
+  onDisconnect: (gatewayId: string, serviceId: string) => void
 }) {
   const connected = status.connected ?? []
   return (
@@ -184,7 +254,12 @@ function GatewayStatus({
             />
           ))}
           {connected.map((service) => (
-            <ConnectedRow key={service.name} service={service} />
+            <ConnectedRow
+              key={service.id}
+              gatewayId={status.gateway.id}
+              service={service}
+              onDisconnect={onDisconnect}
+            />
           ))}
         </ul>
       )}
@@ -196,6 +271,7 @@ function GatewayStatus({
 export function ManagedToolsSection() {
   const view = useQuery(managedToolsQuery)
   const popup = useConnectPopup()
+  const disconnect = useDisconnect()
 
   if (!view.data?.configured && !view.isLoading) return null
   return (
@@ -227,6 +303,7 @@ export function ManagedToolsSection() {
               status={status}
               connecting={popup.connecting}
               onConnect={popup.start}
+              onDisconnect={disconnect}
             />
           ))}
         </div>

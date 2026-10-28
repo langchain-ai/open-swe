@@ -26,6 +26,8 @@ export type RenderItem =
     }
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
+  /** A code-mode `eval` call, with the tool calls its code made nested inside. */
+  | { type: "code-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | {
       type: "managed-tools-item"
@@ -36,12 +38,14 @@ export type RenderItem =
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "worker-launch-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "managed-tools-item",
   "iframe-item",
+  "worker-launch-item",
 ])
 
 /** A run of work that folds behind one row, or a reply shown between such runs. */
@@ -49,24 +53,11 @@ export type TurnSegment =
   | { type: "reply"; item: RenderItem }
   | { type: "work"; key: string; items: Array<RenderItem> }
 
-/**
- * Splits a turn at every reply so each stretch of work folds on its own, in the
- * order it happened. Trailing prose is the turn's answer, so it stays a reply.
- */
+/** Splits a turn at every reply so each stretch of work folds in order. */
 export function segmentTurn(items: Array<RenderItem>): Array<TurnSegment> {
-  let trailingReplyIndex = items.length
-  while (trailingReplyIndex > 0) {
-    const prev = items[trailingReplyIndex - 1]
-    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    trailingReplyIndex -= 1
-  }
-
   const segments: Array<TurnSegment> = []
-  items.forEach((item, index) => {
-    if (
-      index >= trailingReplyIndex ||
-      (item.type !== "text-chunk" && REPLY_ITEM_TYPES.has(item.type))
-    ) {
+  items.forEach((item) => {
+    if (REPLY_ITEM_TYPES.has(item.type)) {
       segments.push({ type: "reply", item })
       return
     }
@@ -109,6 +100,13 @@ function attentionItems(
     return toolNeedsAttention(item.chunk, includeUnfinished) ? [item] : []
   }
 
+  if (item.type === "code-item") {
+    const chunks = [item.chunk, ...(item.chunk.calls ?? [])]
+    return chunks.some((chunk) => toolNeedsAttention(chunk, includeUnfinished))
+      ? [item]
+      : []
+  }
+
   if (item.type === "text-chunk" && item.chunk.kind === "error") {
     return [item]
   }
@@ -136,6 +134,9 @@ export function countWorkActions(items: Array<RenderItem>): number {
       item.type === "tool-item"
     ) {
       return count + 1
+    }
+    if (item.type === "code-item") {
+      return count + 1 + (item.chunk.calls?.length ?? 0)
     }
     return count
   }, 0)
@@ -251,6 +252,15 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (chunk.toolName === "start_async_task") {
+        flushGroups()
+        items.push({
+          type: "worker-launch-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
       if (chunk.display?.type === "output_iframe") {
         flushGroups()
         items.push({
@@ -281,7 +291,13 @@ export function buildRenderItems(
           ? parseManagedToolsCard(chunk.output)
           : null
 
-      if (isEditTool(chunk)) {
+      if (chunk.toolKind === "code") {
+        items.push({
+          type: "code-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+      } else if (isEditTool(chunk)) {
         items.push({
           type: "edit-item",
           key: `tool-${chunk.toolCallId}`,

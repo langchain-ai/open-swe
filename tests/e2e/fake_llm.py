@@ -15,8 +15,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from e2e_env import (
     BASE_BRANCH,
+    BASE_URL,
     DEMO_CHANNEL,
     FAKE_GITHUB_API,
     FEATURE_BRANCH,
@@ -40,6 +42,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
@@ -239,9 +242,26 @@ curl --fail --silent --show-error \
   "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
-# The system prompt of the most recent model call, so specs can assert what the
-# agent was actually told (e.g. the workspace section) rather than infer it.
-LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
+
+class SystemPromptRecord:
+    """The system prompt of the most recent model call, so specs can assert what the
+    agent was actually told (e.g. the workspace section) rather than infer it.
+
+    The harness serves it. A model running in another process, as on the Managed
+    Deep Agents server, sends each prompt there through ``report_to``.
+    """
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.report_to: str | None = None
+
+    def record(self, text: str) -> None:
+        self.text = text
+        if self.report_to is not None:
+            httpx.post(self.report_to, json={"text": text}, timeout=10).raise_for_status()
+
+
+LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
@@ -256,6 +276,22 @@ SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
 SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
+EVAL_DESCRIPTION_MARKER = "E2E_EVAL_DESCRIPTION"
+BACKGROUND_WORK_MARKER = "E2E_BACKGROUND_WORK"
+# Long enough to outlast the spec, short enough not to linger on the host.
+BACKGROUND_WORK_COMMAND = "echo 'building assets'; sleep 110"
+BACKGROUND_WORK_MONITOR_COMMAND = (
+    'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
+)
+BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
+INBOX_MARKER = "E2E_INBOX"
+INBOX_EVENT_LINE = "INBOX_EVENT build finished"
+# Prints its event at once, then outlasts the spec without lingering on the host.
+INBOX_MONITOR_COMMAND = f'echo "{INBOX_EVENT_LINE}"; sleep 90'
+INBOX_FOLLOW_UP = "Please also note the inbox follow-up."
+# The harness holds the run here until the spec has queued what the inbox should bring.
+INBOX_GATE_URL = f"{BASE_URL}/control/inbox-gate"
+_INBOX_GATE_SECONDS = 90.0
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -347,6 +383,13 @@ def _is_reply_nudge(message: BaseMessage) -> bool:
     return isinstance(message, HumanMessage) and _REPLY_GUARD_SENDER_ID in _text(message.content)
 
 
+def _is_dynamic_context(message: BaseMessage) -> bool:
+    """Context the backend adds to a turn, such as the task a watch joined: never a turn itself."""
+    return isinstance(message, HumanMessage) and _text(message.content).lstrip().startswith(
+        "<dynamic-context "
+    )
+
+
 def _is_framing_block(header: str) -> bool:
     """A system envelope that describes where the next turn came from."""
     return 'kind="system"' in header and any(
@@ -392,9 +435,9 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     for index, message in enumerate(messages):
         if not isinstance(message, HumanMessage):
             continue
-        text = _text(message.content).lstrip()
-        if text.startswith("<dynamic-context "):
+        if _is_dynamic_context(message):
             continue
+        text = _text(message.content).lstrip()
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
             if _is_framing_block(header):
@@ -769,14 +812,14 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _save_plan_step(_messages: list[BaseMessage]) -> AIMessage:
+def _publish_artifact_step(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
-        content="Saving the plan for review.",
+        content="Publishing the HTML artifact.",
         tool_calls=[
             {
-                "name": "save_plan",
-                "args": {"plan_file_path": PLAN_FILE_PATH},
-                "id": "call-save-plan",
+                "name": "publish_artifact",
+                "args": {"artifact_file_path": PLAN_FILE_PATH},
+                "id": "call-publish-artifact",
             }
         ],
     )
@@ -832,6 +875,71 @@ def _followup_step(messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(content=f"{FOLLOW_UP_REPLY}{suffix}")
 
 
+def _called(messages: list[BaseMessage], call_id: str) -> int | None:
+    """The index of the model reply that made ``call_id``, when one did."""
+    for index, message in enumerate(messages):
+        if isinstance(message, AIMessage) and any(c["id"] == call_id for c in message.tool_calls):
+            return index
+    return None
+
+
+def _wait_for_inbox_gate() -> None:
+    deadline = time.monotonic() + _INBOX_GATE_SECONDS
+    while time.monotonic() < deadline:
+        gate = httpx.get(INBOX_GATE_URL, params={"waiting": "true"}, timeout=10)
+        gate.raise_for_status()
+        if gate.json().get("released"):
+            return
+        time.sleep(0.25)
+
+
+def _inbox_step(messages: list[BaseMessage]) -> AIMessage:
+    """Start a monitor, hold a model call while the spec sends the thread work, then report
+    what reached the conversation: the inbox brings it in as new messages mid-run, so every
+    step routes on what the run has done rather than on the step count."""
+    started = _called(messages, "call-inbox-monitor")
+    if started is None:
+        return AIMessage(
+            content="Watching the build log.",
+            tool_calls=[
+                {
+                    "name": "monitor",
+                    "args": {
+                        "action": "start",
+                        "command": INBOX_MONITOR_COMMAND,
+                        "description": "the inbox build log",
+                        "timeout": 120,
+                    },
+                    "id": "call-inbox-monitor",
+                }
+            ],
+        )
+    if _called(messages, "call-inbox-list") is None:
+        _wait_for_inbox_gate()
+        return AIMessage(
+            content="Checking the monitors.",
+            tool_calls=[{"name": "monitor", "args": {"action": "list"}, "id": "call-inbox-list"}],
+        )
+    if _called(messages, "call-inbox-reply") is not None:
+        return AIMessage(content="Reported what the inbox brought.")
+    arrived = [_text(m.content) for m in messages[started:] if isinstance(m, HumanMessage)]
+    follow_up = "seen" if any(INBOX_FOLLOW_UP in text for text in arrived) else "missing"
+    events = sum(INBOX_EVENT_LINE in text for text in arrived)
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {
+                    "message": f"Inbox check: follow-up {follow_up}, monitor events {events}.",
+                    "response_type": "final",
+                },
+                "id": "call-inbox-reply",
+            }
+        ],
+    )
+
+
 def _tool_payload(messages: list[BaseMessage], tool_name: str) -> dict[str, Any]:
     for message in reversed(messages):
         if not isinstance(message, ToolMessage) or message.name != tool_name:
@@ -866,9 +974,9 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
 
 def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
+    task_id = _tool_payload(messages, "snapshotctl").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("refresh_workspace_start did not return a task id")
+        raise ValueError("snapshotctl did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -1040,6 +1148,34 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-code-channel-followup",
         ),
     ),
+    "inbox": tuple(_dynamic_step(_inbox_step) for _ in range(6)),
+    "background_work": (
+        _tool_step(
+            "Acknowledging the background work request.",
+            "slack_reply",
+            {"message": "Starting the background work now."},
+            "call-background-work-ack",
+        ),
+        _tool_step(
+            "Building the assets in the background.",
+            "background_execute",
+            {"command": BACKGROUND_WORK_COMMAND, "timeout": 120},
+            "call-background-work-execute",
+        ),
+        _tool_step(
+            "Watching the dev server log for errors.",
+            "monitor",
+            {
+                "action": "start",
+                "command": BACKGROUND_WORK_MONITOR_COMMAND,
+                "filter": "grep -E 'ERROR|Traceback'",
+                "description": BACKGROUND_WORK_MONITOR_DESCRIPTION,
+                "timeout": 120,
+            },
+            "call-background-work-monitor",
+        ),
+        StepSpec(content="Started the build and the log monitor."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -1072,6 +1208,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-desktop-impl",
         ),
         _dynamic_step(_desktop_reply_step),
+    ),
+    # Code-mode calls, each labeled with the description the dashboard shows.
+    "eval_description": (
+        _tool_step(
+            "Acknowledging the request.",
+            "slack_reply",
+            {"message": "On it!", "response_type": "progress"},
+            "call-eval-ack",
+        ),
+        _tool_step(
+            "Counting with code.",
+            "eval",
+            {
+                "display_description": "Count the files in the repository",
+                "code": "['greet.py', 'README.md'].length",
+            },
+            "call-eval-count",
+        ),
+        _tool_step(
+            "Checking the greeting with code.",
+            "eval",
+            {
+                "display_description": "Check the greeting the helper returns",
+                "code": "`Hello, ${'Ada'}!`",
+            },
+            "call-eval-greeting",
+        ),
+        _tool_step(
+            "Reporting back.",
+            "slack_reply",
+            {"message": "The repository has 2 files."},
+            "call-eval-reply",
+        ),
     ),
     "slack_reply_order": (
         _tool_step(
@@ -1400,7 +1569,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
         _dynamic_step(_write_plan_step),
-        _dynamic_step(_save_plan_step),
+        _dynamic_step(_publish_artifact_step),
         _dynamic_step(_plan_complete_step),
         StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
@@ -1427,8 +1596,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
             "Checking the setup script reproduces the image.",
-            "refresh_workspace_start",
-            {"name": WORKSPACE_NAME},
+            "snapshotctl",
+            {"action": "rebuild", "workspace": WORKSPACE_NAME},
             "call-env-refresh",
         ),
         _dynamic_step(_workspace_poll_step),
@@ -1473,10 +1642,11 @@ def _is_pull_request_fix(text: str) -> bool:
 
     Without this it lands on the catch-all implement script and opens a *new* PR,
     which renumbers the fake store under whichever spec runs next."""
-    return "Fix merge conflicts and failing CI checks on" in text
+    return "Resolve the merge conflicts and fix the failing CI checks on" in text
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("inbox", lambda ctx: INBOX_MARKER in ctx.first_text),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
     ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),
@@ -1495,6 +1665,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
     ),
     ScriptRule(
+        "eval_description",
+        lambda ctx: ctx.human_count <= 1 and EVAL_DESCRIPTION_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
@@ -1505,6 +1679,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "code_channel",
         lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "background_work",
+        lambda ctx: ctx.human_count <= 1 and BACKGROUND_WORK_MARKER in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
@@ -1582,12 +1760,19 @@ class FakeScriptedChatModel(BaseChatModel):
         "max_input_tokens": 128_000,
     }
     script: list[Any] = []
+    described_tool_names: list[str] = []
 
     @property
     def _llm_type(self) -> str:
         return "fake-scripted"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+        self.described_tool_names = [
+            spec["function"]["name"]
+            for offered in tools
+            if (spec := convert_to_openai_tool(offered)).get("type") == "function"
+            and "display_description" in spec["function"].get("parameters", {}).get("required", [])
+        ]
         return self
 
     def _generate(
@@ -1599,7 +1784,7 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
-                LAST_SYSTEM_PROMPT["text"] = _text(message.content)
+                LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
         humans = _script_humans(messages)
         context = ScriptContext(
@@ -1609,12 +1794,16 @@ class FakeScriptedChatModel(BaseChatModel):
             pending_text=_latest_turn_text(messages),
         )
         script = _script_for(context)
+        if EVAL_DESCRIPTION_MARKER in context.first_text:
+            assert self.described_tool_names == ["eval"], self.described_tool_names
 
         last_human = max(
             (
                 i
                 for i, m in enumerate(messages)
-                if isinstance(m, HumanMessage) and not _is_reply_nudge(m)
+                if isinstance(m, HumanMessage)
+                and not _is_reply_nudge(m)
+                and not _is_dynamic_context(m)
             ),
             default=-1,
         )

@@ -55,6 +55,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         "get_or_create_sandbox_backend_proxy",
         lambda _: MagicMock(ready=AsyncMock(return_value=MagicMock(id="sandbox-1"))),
     )
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))
     for name in (
         "resolve_triggering_user_identity",
@@ -101,15 +102,11 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
-        recent_thread_context_enabled=False,
         admin_workspaces=False,
     )
     middleware._requested_models = available_requested_models(fable_enabled=False)
     middleware._model_selection = ModelSelectionMiddleware(
-        {"fast": MagicMock()},
-        MagicMock(),
-        routing_mode="fast",
-        requested_model_factory=lambda _model, _effort: MagicMock(),
+        {"fast": "openai:gpt-6-luna"}, routing_mode="fast"
     )
     middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
     return Handoff(middleware, settings, store, record)
@@ -300,6 +297,28 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         assert (await handoff.prepare(state))["selected_model_id"] == model
         handoff.store.assert_awaited_once()
         assert handoff.settings["requested_model"] == model
+
+
+@pytest.mark.parametrize(("effort", "expected_effort"), [("no_request", "low"), ("max", "max")])
+async def test_performance_handoff_uses_tier_effort_unless_overridden(
+    handoff: Handoff, monkeypatch: pytest.MonkeyPatch, effort: str, expected_effort: str
+) -> None:
+    model = "anthropic:claude-opus-5-5"
+    handoff.middleware._routing_defaults["performance"] = (model, "low")
+    monkeypatch.setattr(
+        "openswe.model_request.select_jev_choices",
+        AsyncMock(return_value={"runtime_model": "performance", "runtime_effort": effort}),
+    )
+    state: PrepareRunState = {
+        "messages": [
+            HumanMessage(
+                content='<input-message sender="slack:U1" kind="human" timestamp="2.0">Use perf</input-message>'
+            )
+        ]
+    }
+    prepared = await handoff.prepare(state)
+    assert prepared["selected_model_id"] == model
+    assert prepared["selected_effort"] == expected_effort
 
 
 async def test_later_run_traces_saved_choice_without_classification(

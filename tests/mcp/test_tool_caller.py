@@ -81,26 +81,28 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
         )
     }
 
-    def source(namespace: tuple[str, ...], records: dict[str, MCPConnection]) -> runtime.MCPSource:
+    def source(
+        scope: runtime.MCPScope, namespace: tuple[str, ...], records: dict[str, MCPConnection]
+    ) -> runtime.MCPSource:
         async def list_connections() -> list[MCPConnection]:
             return list(records.values())
 
         async def get_connection(name: str) -> MCPConnection | None:
             return records.get(name)
 
-        return runtime.MCPSource(namespace, list_connections, get_connection)
+        return runtime.MCPSource(namespace, list_connections, get_connection, scope=scope)
 
     monkeypatch.setattr(
         "openswe.mcp.instance.instance_mcp_source",
-        lambda: source(("instance_mcps",), instance),
+        lambda: source("instance", ("instance_mcps",), instance),
     )
     monkeypatch.setattr(
         "openswe.mcp.workspace.workspace_mcp_source",
-        lambda workspace: source(("workspace_mcps", workspace), {}),
+        lambda workspace: source("workspace", ("workspace_mcps", workspace), {}),
     )
     monkeypatch.setattr(
         "openswe.mcp.user.user_mcp_source",
-        lambda login: source(("user_mcps", login), personal if login == "alice" else {}),
+        lambda login: source("user", ("user_mcps", login), personal if login == "alice" else {}),
     )
 
     async def discover(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
@@ -115,7 +117,7 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     fake_mcp_server(monkeypatch, call=call)
     alice = ToolCaller(login="alice", email=None)
     bob = ToolCaller(login="bob", email=None)
-    name = next(name for name in await alice.tools() if name.startswith("mcp_linear_search_"))
+    name = next(name for name in await alice.tools() if name == "mcp_linear_search")
     assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
     assert name in await bob.tools()
     assert "alice.example" in str((await alice.invoke(name, {})).content)

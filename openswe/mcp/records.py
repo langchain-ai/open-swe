@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.mcp.models import MCPConnection
+from openswe.mcp.models import MCPConnection, MCPScope
 from openswe.mcp.runtime import MCPSource
 from openswe.users.records import UserRecords
 from openswe.utils.json_types import JsonObject
@@ -45,6 +45,7 @@ class MCPConnections(ABC):
     """One tier's connections, each under its name."""
 
     namespace: tuple[str, ...]
+    scope: MCPScope
 
     @abstractmethod
     async def _value(self, name: str) -> JsonObject | None: ...
@@ -81,6 +82,7 @@ class MCPConnections(ABC):
 
     def source(self, authorize: Callable[[], Awaitable[None]] | None = None) -> MCPSource:
         return MCPSource(
+            scope=self.scope,
             namespace=self.namespace,
             list_connections=self.records,
             get_connection=self.get,
@@ -94,6 +96,7 @@ class SharedMCPConnections(MCPConnections):
     def __init__(self, workspace: str | None = None) -> None:
         """``workspace`` is a workspace's slug, or ``None`` for the instance tier."""
         self.workspace = None if workspace is None else workspace.strip().lower()
+        self.scope = "instance" if self.workspace is None else "workspace"
         self.namespace = (
             INSTANCE_MCPS_NAMESPACE
             if self.workspace is None
@@ -154,6 +157,7 @@ class UserMCPConnections(MCPConnections):
 
     def __init__(self, login: str) -> None:
         self.login = login.strip().lower()
+        self.scope = "user"
         self.namespace = (*USER_MCPS_NAMESPACE, self.login)
 
     async def _value(self, name: str) -> JsonObject | None:

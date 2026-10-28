@@ -167,7 +167,7 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
     )
     configurable = _build_configurable(inputs)
     try:
-        # With MDA_RUNTIME_URL set on the backend, its proxy runs this on Managed Deep Agents.
+        # The backend's proxy runs this on Managed Deep Agents.
         result = await client.runs.wait(
             thread_id,
             assistant_id=assistant_id,
