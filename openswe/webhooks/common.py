@@ -153,7 +153,7 @@ from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
-from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict, thread_metadata
+from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.multimodal import (
     dedupe_urls,  # noqa: F401
@@ -358,13 +358,8 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
 )
 
 
-def _extract_repo_config_from_thread(thread: ThreadLike) -> dict[str, str] | None:
-    """Extract repo config from persisted thread data."""
-    thread = as_thread_dict(thread)
-    metadata = thread.get("metadata")
-    if not isinstance(metadata, dict):
-        return None
-
+def _repo_in_thread_metadata(metadata: JsonObject) -> dict[str, str] | None:
+    """The repository a thread's metadata records, in its current or legacy keys."""
     repo = metadata.get("repo")
     if isinstance(repo, dict):
         owner = repo.get("owner")
@@ -758,7 +753,7 @@ async def get_slack_repo_config(
             langgraph_client, channel_id, thread_ts
         )
         thread = await langgraph_client.threads.get(resolved_thread_id)
-        thread_repo_config = _extract_repo_config_from_thread(thread)
+        thread_repo_config = _repo_in_thread_metadata(thread_metadata(thread))
         if thread_repo_config:
             repo_config = thread_repo_config
             explicit = True
@@ -861,6 +856,11 @@ class ThreadRecord:
             self.metadata.get("model"), self.metadata.get("effort")
         )
         return (model_id, effort) if model_id and effort else None
+
+    @property
+    def repo(self) -> dict[str, str] | None:
+        """The repository the thread works in, as its last run recorded it."""
+        return _repo_in_thread_metadata(self.metadata)
 
     @property
     def workspace(self) -> str | None:

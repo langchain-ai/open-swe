@@ -133,6 +133,14 @@ class _Issue:
             url=issue.get("url") or "",
         )
 
+    def repository(self) -> dict[str, str] | None:
+        """The repository the issue names as ``repo:owner/name`` or a GitHub link."""
+        return common.extract_repo_from_text(
+            f"{self.title}\n{self.description or ''}",
+            default_owner=common.DEFAULT_REPO_OWNER,
+            explicit_only=True,
+        )
+
 
 class LinearSessionTurn:
     """One turn of a Linear agent session: who asked what about which issue."""
@@ -188,17 +196,25 @@ class LinearSessionTurn:
             return UNREADABLE_SESSION
         return cls(validated, issue)
 
-    async def repository(self, thread_id: str) -> tuple[dict[str, str], str | None] | LinearDecline:
-        """The repository the turn works in, when one is named, preferred or allowed.
+    async def repository(
+        self, thread: common.ThreadRecord
+    ) -> tuple[dict[str, str], str | None] | LinearDecline:
+        """The repository the turn works in, when one is named, remembered or preferred.
 
-        With it, the workspace whose personal default chose it, if one did.
-        Otherwise what to tell the session.
+        A repository the turn names wins; then the one the session's thread already
+        works in, so a follow-up needn't name it again; then one the issue names;
+        then the author's and the workspace's defaults. With it, the workspace whose
+        personal default chose it, if one did. Otherwise what to tell the session.
         """
-        repo = common.extract_repo_from_text(self.body, default_owner=common.DEFAULT_REPO_OWNER)
+        repo = (
+            common.extract_repo_from_text(self.body, default_owner=common.DEFAULT_REPO_OWNER)
+            or thread.repo
+            or self.issue.repository()
+        )
         workspace: str | None = None
         if not repo and self.author.email:
             try:
-                repo, workspace = await self._personal_default(self.author.email, thread_id)
+                repo, workspace = await self._personal_default(self.author.email, thread.workspace)
             except Exception:
                 common.logger.exception(
                     "Reading a Linear user's default repository failed",
@@ -222,23 +238,35 @@ class LinearSessionTurn:
 
     @staticmethod
     async def _personal_default(
-        email: str, thread_id: str
+        email: str, thread_workspace: str | None
     ) -> tuple[dict[str, str] | None, str | None]:
         """The author's default for the thread's workspace, else their global one."""
         user = await User.for_email(email)
         if user is None:
             return None, None
-        workspace = await common.get_thread_workspace(thread_id)
-        if workspace is None:
-            workspace = (await resolve_workspace(login=user.github_login)).slug
+        workspace = thread_workspace or (await resolve_workspace(login=user.github_login)).slug
         personal = await user.default_repo(workspace, fallback_global=False)
         if personal:
             return personal, workspace
         return await user.default_repo(), None
 
+    @staticmethod
+    async def _thread(thread_id: str) -> common.ThreadRecord:
+        """The session's thread as its earlier turns left it; a failed read starts afresh."""
+        try:
+            return await common.ThreadRecord.read(thread_id)
+        except Exception:
+            common.logger.warning(
+                "Reading a Linear session's thread failed; resolving it as new",
+                exc_info=True,
+                extra={"agent_thread_id": thread_id},
+            )
+            return common.ThreadRecord(exists=False, metadata={})
+
     async def prepare_run(self, thread_id: str) -> EndpointAnswer | LinearDecline:
         """Index the session's thread and prepare the run for it, or say why not."""
-        chosen = await self.repository(thread_id)
+        thread = await self._thread(thread_id)
+        chosen = await self.repository(thread)
         if not isinstance(chosen, tuple):
             return chosen
         repo, default_workspace = chosen
@@ -247,9 +275,7 @@ class LinearSessionTurn:
         description = self.issue.description or "No description"
         mapped_login = await User.login_for_email(self.author.email) if self.author.email else None
         workspace = (
-            await common.get_thread_workspace(thread_id)
-            or default_workspace
-            or await common.workspace_for_repo_config(repo)
+            thread.workspace or default_workspace or await common.workspace_for_repo_config(repo)
         )
 
         issue_prompt = prompt(
