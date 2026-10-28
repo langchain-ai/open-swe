@@ -1,5 +1,6 @@
 import json
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -7,7 +8,9 @@ from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
 from openswe.middleware import workflow_push_guard as guard
+from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.workspaces.store import Workspace
 
 
 class _Response:
@@ -102,7 +105,8 @@ class _Request:
 
 
 @pytest.fixture(autouse=True)
-def _clear_backend_cache() -> Any:
+def _clear_backend_cache(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setattr(guard.WORKSPACES, "get", AsyncMock(return_value=None))
     guard.SANDBOX_BACKENDS.clear()
     yield
     guard.SANDBOX_BACKENDS.clear()
@@ -488,3 +492,40 @@ async def test_chained_push_runs_only_without_workflow_changes(
     if refused:
         assert result.status == "error"
         assert json.loads(str(result.content))["error_type"] == "WorkflowPushMustStandAlone"
+
+
+@pytest.mark.parametrize("enabled", [True, False, None])
+@pytest.mark.parametrize("chained", [True, False])
+async def test_workspace_workflow_policy(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool | None, chained: bool
+) -> None:
+    workspace = Workspace(slug="selected", allow_workflow_edits=enabled is True)
+    lookup = AsyncMock(return_value=workspace)
+    if enabled is None:
+        lookup.side_effect = RuntimeError("database unavailable")
+    monkeypatch.setattr(guard.WORKSPACES, "get", lookup)
+    monkeypatch.setattr(
+        guard,
+        "_configurable",
+        lambda request: RunConfig(thread_id="thread-1", workspace="selected"),
+    )
+    monkeypatch.setattr(guard, "workflow_push_approved", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        guard,
+        "ensure_workflow_push_pending",
+        AsyncMock(return_value=({"status": "pending"}, False)),
+    )
+    monkeypatch.setattr(guard, "_post_slack_approval_if_needed", AsyncMock())
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
+    )
+    command = "git -C /repo push origin feature"
+    if chained:
+        command = "git -C /repo commit -am CI && " + command
+    handler = AsyncMock(return_value=ToolMessage(content="pushed", tool_call_id="call-1"))
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request(command)), handler
+    )
+    assert isinstance(result, ToolMessage)
+    assert (result.content == "pushed") is (enabled is True)
+    lookup.assert_awaited_once_with("selected")

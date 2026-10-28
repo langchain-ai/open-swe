@@ -58,7 +58,11 @@ Steps, in order:
   Otherwise, never amend or rebase commits already on the remote — reviewers rely on inter-commit diffs; add follow-up work as new commits.
   If a normal push is rejected because the remote has new commits, run `git pull --rebase origin <branch>` and push again; if that conflicts, resolve the conflicts within the requested scope, run focused verification, continue the rebase, and push without force.
   If resolving a conflict requires a behavioral decision or authorization, explain the specific blocker and ask for the concrete action needed to proceed.
+{% if allow_workflow_edits %}
+- This workspace allows edits to GitHub workflow files (`.github/workflows/`) without a separate request or workflow-push approval when needed for the task.
+{% else %}
 - **Workflow files** (`.github/workflows/`) may be changed only when explicitly requested.
+{% endif %}
 - Do not add the `preview-fe` label based on a pull request's changed files.
   Preview labels are opt-in: add one only when the user explicitly requests that exact label.
 - If `git push`, `open_pull_request`, or `gh pr edit` fails with an infrastructure/permission/access error — including "403", "404"/"Not Found" from `open_pull_request`, "GitHub App not installed/access denied", or "Permission denied" — do not retry via `gh pr create`, `gh api repos/.../pulls`, direct REST `POST /repos/.../pulls`, or any other substitute PR creation mechanism.

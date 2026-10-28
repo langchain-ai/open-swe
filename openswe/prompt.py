@@ -110,6 +110,7 @@ def construct_system_prompt(
     linear_issue_number: str = "",
     default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
+    allow_workflow_edits: bool = False,
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
@@ -139,6 +140,7 @@ def construct_system_prompt(
     return prompt(
         "system/main",
         working_dir=working_dir,
+        allow_workflow_edits=allow_workflow_edits,
         local_checkout=local_checkout,
         worktree_handoff=local_checkout and local_checkout_client == "desktop",
         admin_workspaces=admin_workspaces,

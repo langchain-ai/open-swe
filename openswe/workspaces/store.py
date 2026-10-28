@@ -420,6 +420,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
 
 
 class WorkspaceCreate(BaseModel):
+    allow_workflow_edits: bool = False
     inherit_default_sandbox: bool = True
     name: str
     prompt: str = ""
@@ -484,6 +485,7 @@ class WorkspaceCreate(BaseModel):
 class WorkspaceUpdate(BaseModel):
     """Partial update: only the fields present are written."""
 
+    allow_workflow_edits: bool | None = None
     inherit_default_sandbox: bool | None = None
 
     name: str | None = None
@@ -574,6 +576,7 @@ class Workspace(BaseModel):
     model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
     slug: str
+    allow_workflow_edits: bool = False
     inherit_default_sandbox: bool = False
     name: str = ""
     prompt: str = ""
@@ -634,6 +637,7 @@ class Workspace(BaseModel):
             inherit_default_sandbox=(
                 create.inherit_default_sandbox and slugify(create.name) != DEFAULT_WORKSPACE_SLUG
             ),
+            allow_workflow_edits=create.allow_workflow_edits,
             name=create.name.strip(),
             prompt=create.prompt,
             setup_script=create.setup_script,
@@ -1590,6 +1594,8 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         if record.slug == DEFAULT_WORKSPACE_SLUG and update.inherit_default_sandbox:
             raise ValueError("The default workspace cannot inherit its own sandbox")
         record.inherit_default_sandbox = update.inherit_default_sandbox
+    if update.allow_workflow_edits is not None:
+        record.allow_workflow_edits = update.allow_workflow_edits
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:

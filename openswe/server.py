@@ -1504,6 +1504,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 linear_issue_number=self._linear_issue_number,
                 default_repo=prompt_default_repo,
                 repo_custom_instructions=self._repo_instructions,
+                allow_workflow_edits=(
+                    workspace.allow_workflow_edits
+                    if workspace
+                    and workspace.slug == (workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG)
+                    else False
+                ),
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
                 workspace_repos=workspace.repos if workspace else None,

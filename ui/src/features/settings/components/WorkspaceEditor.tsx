@@ -80,6 +80,7 @@ export function HelpTooltip({
 }
 
 export interface WorkspaceDraft {
+  allowWorkflowEdits: boolean
   name: string
   repos: Array<string>
   slackChannelIds: Array<string>
@@ -91,6 +92,7 @@ export interface WorkspaceDraft {
 
 export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
   return {
+    allowWorkflowEdits: workspace.allow_workflow_edits ?? false,
     name: workspace.name,
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
@@ -102,6 +104,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
 }
 
 export const EMPTY_DRAFT: WorkspaceDraft = {
+  allowWorkflowEdits: false,
   name: "",
   repos: [],
   slackChannelIds: [],
@@ -176,6 +179,22 @@ export function WorkspaceEditor({
 }) {
   return (
     <div className="space-y-space-3 border-t border-default px-space-4 py-space-3 text-primary">
+      <div className="flex items-center justify-between gap-space-3">
+        <div>
+          <p className="text-sm">Allow GitHub Workflow Edits</p>
+          <p className="text-xs text-secondary">
+            Allow edits and pushes to .github/workflows without separate
+            approval in this workspace. Off by default.
+          </p>
+        </div>
+        <Switch
+          aria-label="Allow GitHub workflow edits"
+          checked={draft.allowWorkflowEdits}
+          onChange={(allowWorkflowEdits) =>
+            onChange({ ...draft, allowWorkflowEdits })
+          }
+        />
+      </div>
       <Input
         label="Name"
         aria-label="Workspace name"

@@ -32,7 +32,7 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% include "system/continued-from-collaborative.md" +%}
 
 {% endif %}
-{% include "system/commit-pr.md" +%}
+{% include "system/commit-pr.md.jinja" +%}
 
 {% if repo_instructions_section %}
 {{ repo_instructions_section }}
@@ -56,7 +56,7 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% include "system/sole-writer.md" +%}
 {% endif %}
 
-{% include "system/shared-base.md" +%}
+{% include "system/shared-base.md.jinja" +%}
 
 {% if sandbox_file_downloads %}
 

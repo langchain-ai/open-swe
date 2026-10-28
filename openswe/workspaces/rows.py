@@ -33,6 +33,7 @@ class WorkspaceRow(Base):
     slug: Mapped[str] = mapped_column(unique=True)
     name: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    allow_workflow_edits: Mapped[bool] = mapped_column(server_default="false", default=False)
     inherit_default_sandbox: Mapped[bool] = mapped_column(server_default="false", default=False)
     prompt: Mapped[str] = mapped_column(server_default="", default="")
     setup_script: Mapped[str] = mapped_column(server_default="", default="")
@@ -111,6 +112,7 @@ def to_workspace(
         {
             "slug": row.slug,
             "inherit_default_sandbox": row.inherit_default_sandbox,
+            "allow_workflow_edits": row.allow_workflow_edits,
             "name": row.name,
             "prompt": row.prompt,
             "setup_script": row.setup_script,
@@ -174,6 +176,7 @@ def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
     from reverting the other, such as a refresh restoring revoked access.
     """
     row.inherit_default_sandbox = record.inherit_default_sandbox
+    row.allow_workflow_edits = record.allow_workflow_edits
     row.name = record.name
     row.prompt = record.prompt
     row.setup_script = record.setup_script
