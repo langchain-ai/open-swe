@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
-from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -83,6 +82,7 @@ _MAX_COMMENT_CHARS = 20_000
 _MAX_DETAIL_MESSAGE_CHARS = 4_000
 _MAX_TRANSCRIPT_MESSAGES = 100
 _MAX_TRANSCRIPT_CHARS = 50_000
+_MAX_FINAL_MESSAGE_CHARS = 40_000
 _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
@@ -413,68 +413,149 @@ def _state_messages(state: Any) -> list[Any]:
     return messages if isinstance(messages, list) else []
 
 
-def _last_user_message(state: Any) -> dict[str, Any] | None:
-    for message in reversed(_state_messages(state)):
-        kind = _message_kind(message)
-        if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"human", "user"}:
-            continue
-        content = _message_content(message)
-        text = _plain_message_text(content)
-        if not text:
-            continue
-        truncated = len(text) > _MAX_DETAIL_MESSAGE_CHARS
-        return {
-            "text": text[:_MAX_DETAIL_MESSAGE_CHARS],
-            "truncated": truncated,
-            "sender_id": message_sender_id(content),
-            "timestamp": _message_timestamp(message),
+def _get_thread_call(**arguments: object) -> dict[str, Any]:
+    return {"tool": "get_thread", "arguments": arguments}
+
+
+@dataclass(frozen=True)
+class _TranscriptMessage:
+    """A user or assistant message as `get_thread` shows it, numbered among the visible ones."""
+
+    index: int
+    id: str | None
+    role: Literal["user", "assistant"]
+    text: str
+    sender_id: str | None
+    timestamp: str | None
+
+    def excerpt(self, thread_id: str, *, max_chars: int, char_offset: int = 0) -> dict[str, Any]:
+        end = min(len(self.text), char_offset + max_chars)
+        item: dict[str, Any] = {
+            "id": self.id,
+            "index": self.index,
+            "role": self.role,
+            "text": self.text[char_offset:end],
+            "truncated": char_offset > 0 or end < len(self.text),
+            "total_chars": len(self.text),
+            "sender_id": self.sender_id,
+            "timestamp": self.timestamp,
         }
-    return None
+        if char_offset:
+            item["char_offset"] = char_offset
+        if end < len(self.text):
+            item["remaining_chars"] = len(self.text) - end
+            if self.id:
+                item["continue_with"] = _get_thread_call(
+                    thread_id=thread_id, message_id=self.id, char_offset=end
+                )
+        return item
 
 
-def _message_id(message: Any) -> str | None:
-    value = _value(message, "id")
-    return str(value) if value else None
+class _Transcript:
+    """The user and assistant messages of a thread's state, which `get_thread` pages through.
 
+    Tool calls, tool results, system prompts and injected context are never shown.
+    """
 
-def _transcript(state: Any) -> dict[str, Any]:
-    messages = _state_messages(state)
-    visible: list[dict[str, Any]] = []
-    omitted = 0
-    used_chars = 0
-    for message in messages:
-        kind = _message_kind(message)
-        if kind not in {"human", "user", "ai", "assistant"}:
-            omitted += 1
-            continue
-        content = _message_content(message)
-        text = _plain_message_text(content)
-        if not text:
-            omitted += 1
-            continue
-        if len(visible) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
-            omitted += 1
-            continue
-        remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
-        visible.append(
-            {
-                "id": _message_id(message),
-                "role": "user" if kind in {"human", "user"} else "assistant",
-                "text": returned_text,
-                "truncated": len(returned_text) < len(text),
-                "sender_id": message_sender_id(content),
-                "timestamp": _message_timestamp(message),
-            }
+    def __init__(self, thread_id: str, state: Any) -> None:
+        self.thread_id = thread_id
+        self.message_count = 0
+        self.visible: list[_TranscriptMessage] = []
+        for message in _state_messages(state):
+            self.message_count += 1
+            kind = _message_kind(message)
+            if kind not in {"human", "user", "ai", "assistant"}:
+                continue
+            content = _message_content(message)
+            text = _plain_message_text(content)
+            if not text:
+                continue
+            message_id = _value(message, "id")
+            self.visible.append(
+                _TranscriptMessage(
+                    index=len(self.visible),
+                    id=str(message_id) if message_id else None,
+                    role="user" if kind in {"human", "user"} else "assistant",
+                    text=text,
+                    sender_id=message_sender_id(content),
+                    timestamp=_message_timestamp(message),
+                )
+            )
+
+    def last_user_message(self) -> dict[str, Any] | None:
+        for message in reversed(self.visible):
+            if message.role == "user":
+                return message.excerpt(self.thread_id, max_chars=_MAX_DETAIL_MESSAGE_CHARS)
+        return None
+
+    def page(self, offset: int | None, limit: int) -> dict[str, Any]:
+        """Visible messages from ``offset`` (negative counts from the end) within the size budget.
+
+        The default page (no offset) also carries the latest assistant message, the result
+        a caller usually wants, with more room than the others.
+        """
+        visible_count = len(self.visible)
+        start = 0 if offset is None else max(0, offset + visible_count if offset < 0 else offset)
+        final = (
+            next((item for item in reversed(self.visible) if item.role == "assistant"), None)
+            if offset is None
+            else None
         )
-        used_chars += len(returned_text)
-    return {
-        "messages": visible,
-        "message_count": len(messages),
-        "returned_count": len(visible),
-        "omitted_count": omitted,
-        "truncated": omitted > 0 or any(item["truncated"] for item in visible),
-    }
+        reserved = min(len(final.text), _MAX_FINAL_MESSAGE_CHARS) if final else 0
+        budget = _MAX_TRANSCRIPT_CHARS - reserved
+        returned: list[dict[str, Any]] = []
+        next_index = start
+        for message in self.visible[start : start + limit]:
+            if message is final:
+                returned.append(message.excerpt(self.thread_id, max_chars=reserved))
+            elif budget > 0:
+                item = message.excerpt(
+                    self.thread_id, max_chars=min(_MAX_DETAIL_MESSAGE_CHARS, budget)
+                )
+                budget -= len(item["text"])
+                returned.append(item)
+            else:
+                break
+            next_index += 1
+        if final and final.index >= next_index:
+            returned.append(final.excerpt(self.thread_id, max_chars=reserved))
+            if final.index == next_index:
+                next_index += 1
+        next_offset = next_index if next_index < visible_count else None
+        return {
+            "messages": returned,
+            "message_count": self.message_count,
+            "visible_count": visible_count,
+            "hidden_count": self.message_count - visible_count,
+            "returned_count": len(returned),
+            "omitted_count": self.message_count - len(returned),
+            "offset": start,
+            "next_offset": next_offset,
+            "next_page": _get_thread_call(
+                thread_id=self.thread_id, message_offset=next_offset, message_limit=limit
+            )
+            if next_offset is not None
+            else None,
+            "truncated": next_offset is not None or any(item["truncated"] for item in returned),
+        }
+
+    def message(self, message_id: str, char_offset: int) -> dict[str, Any]:
+        """One visible message from ``char_offset``, as much of it as fits one response."""
+        found = next((item for item in self.visible if item.id == message_id), None)
+        if found is None:
+            return _failure(
+                f"No user or assistant message {message_id} in this thread's transcript",
+                status_code=404,
+            )
+        if char_offset > len(found.text):
+            return _failure(f"char_offset must be at most {len(found.text)} for this message")
+        return {
+            "success": True,
+            "thread_id": self.thread_id,
+            "message": found.excerpt(
+                self.thread_id, max_chars=_MAX_TRANSCRIPT_CHARS, char_offset=char_offset
+            ),
+        }
 
 
 def _state_summary(state: Any) -> dict[str, Any]:
@@ -761,12 +842,33 @@ def _available_actions(
     return actions
 
 
+def _transcript_args(
+    message_offset: int | None, message_limit: int, message_id: str | None, char_offset: int
+) -> dict[str, Any] | None:
+    """Validate transcript paging arguments before any thread access."""
+    if message_id is not None and message_offset is not None:
+        return _failure("Pass message_id or message_offset, not both")
+    if not 1 <= message_limit <= _MAX_TRANSCRIPT_MESSAGES:
+        return _failure(f"message_limit must be between 1 and {_MAX_TRANSCRIPT_MESSAGES}")
+    if char_offset < 0:
+        return _failure("char_offset must not be negative")
+    if char_offset and message_id is None:
+        return _failure("char_offset requires message_id")
+    return None
+
+
 @expose_mcp()
 async def get_thread(
     thread_id: str,
+    message_offset: int | None = None,
+    message_limit: int = _MAX_TRANSCRIPT_MESSAGES,
+    message_id: str | None = None,
+    char_offset: int = 0,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `get_thread` tool."""
+    if invalid := _transcript_args(message_offset, message_limit, message_id, char_offset):
+        return invalid
     actor = await _reader(state)
     if actor is None:
         return _failure(_NO_ACTOR)
@@ -777,6 +879,15 @@ async def get_thread(
             return resolved
         thread_id, summary = resolved
         client = langgraph_client()
+        if message_id is not None or message_offset is not None:
+            transcript = _Transcript(thread_id, await client.threads.get_state(thread_id))
+            if message_id is not None:
+                return transcript.message(message_id, char_offset)
+            return {
+                "success": True,
+                "thread_id": thread_id,
+                "transcript": transcript.page(message_offset, message_limit),
+            }
         async with asyncio.TaskGroup() as tasks:
             thread_task = tasks.create_task(client.threads.get(thread_id))
             state_task = tasks.create_task(client.threads.get_state(thread_id))
@@ -829,6 +940,7 @@ async def get_thread(
     logins = participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
     returned_participants = logins[:100]
     slack_locator = parse_slack_thread_url(locator)
+    transcript = _Transcript(thread_id, thread_state)
     return {
         "success": True,
         "thread": _list_item(summary, locator=locator),
@@ -837,8 +949,8 @@ async def get_thread(
         "participants_truncated": len(returned_participants) < len(logins),
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
-        "last_user_message": _last_user_message(thread_state),
-        "transcript": _transcript(thread_state),
+        "last_user_message": transcript.last_user_message(),
+        "transcript": transcript.page(None, message_limit),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
         "cost": cost,
