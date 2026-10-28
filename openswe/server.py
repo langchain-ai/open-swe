@@ -132,7 +132,11 @@ from openswe.model_request import (
     model_selection_trace,
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
-from openswe.prompt import construct_system_prompt, construct_turn_context
+from openswe.prompt import (
+    construct_recent_threads_context,
+    construct_system_prompt,
+    construct_turn_context,
+)
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
@@ -1159,9 +1163,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     @staticmethod
-    def _turn_context_messages(state: PrepareRunState, content: str) -> list[RunMessage]:
-        """The run context block, sent only when it differs from the newest one visible."""
-        if dynamic_context_hash(content) == latest_visible_dynamic_context_hash(state, "run"):
+    def _context_messages(state: PrepareRunState, kind: str, content: str) -> list[RunMessage]:
+        """A context block, sent only when it differs from the newest visible one of its kind."""
+        if dynamic_context_hash(content) == latest_visible_dynamic_context_hash(state, kind):
             return []
         return [{"role": "user", "content": content}]
 
@@ -1451,9 +1455,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             is True,
             sole_writer=self._sole_writer,
             default_repo=prompt_default_repo,
-            recent_thread_context=recent_thread_context,
         )
-        run_messages = [*sender_messages, *self._turn_context_messages(state, turn_context)]
+        run_messages = [*sender_messages, *self._context_messages(state, "run", turn_context)]
+        if recent_thread_context:
+            run_messages += self._context_messages(
+                state,
+                "recent-threads",
+                construct_recent_threads_context(recent_thread_context),
+            )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(

@@ -169,7 +169,6 @@ def construct_turn_context(
     slack_follow_up_suggestions: bool = False,
     sole_writer: bool = False,
     default_repo: dict[str, str] | None = None,
-    recent_thread_context: str | None = None,
 ) -> str:
     """Render the run-specific context block that follows the turn's inbound message."""
     instructions = prompt(
@@ -188,8 +187,15 @@ def construct_turn_context(
             else ""
         ),
         sole_writer=sole_writer,
-        recent_thread_context=recent_thread_context or "",
     )
     return Fields({"instructions": instructions}).element(
         "dynamic-context", {"kind": "run", "id": f"source:{source}"}
+    )
+
+
+def construct_recent_threads_context(recent_thread_context: str) -> str:
+    """Render the sender's other recent threads, kept apart from the run block because their
+    activity times change far more often than anything in it."""
+    return Fields({"threads": recent_thread_context}).element(
+        "dynamic-context", {"kind": "recent-threads", "id": "recent-threads"}
     )
