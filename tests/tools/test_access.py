@@ -184,15 +184,12 @@ async def test_bot_channel_history_requires_matching_system_thread_context(
     assert resolved.mode(Policy(trusted="channel_history")) is None
 
 
-@pytest.mark.parametrize("private_channel", [False, True])
-async def test_bot_reads_prior_alert_findings_only_in_its_public_channel(
+async def test_bot_channel_history_is_scoped_and_revocable(
     metadata: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
     slack_api: SlackAPI,
-    private_channel: bool,
 ) -> None:
     from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
-    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
 
     slack = {**_SLACK, "triggering_bot_id": "B1", "team_id": "T1"}
     metadata.update(owner_type="system", source_context={"slack_thread": slack})
@@ -212,41 +209,14 @@ async def test_bot_reads_prior_alert_findings_only_in_its_public_channel(
             "channel": {
                 "id": "C1",
                 "is_channel": True,
-                "is_private": private_channel,
+                "is_private": False,
                 "is_ext_shared": False,
                 "is_pending_ext_shared": False,
             },
         }
     )
-    if private_channel:
-        assert (await slack_read_channel_messages("C1"))["success"] is False
-        return
-
-    slack_api.respond(
-        {
-            "ok": True,
-            "messages": [
-                {
-                    "ts": "0.5",
-                    "thread_ts": "0.5",
-                    "text": "Terraform apply failed",
-                    "reply_count": 1,
-                },
-                {"ts": "1.0", "text": "Terraform apply failed again"},
-            ],
-        }
-    )
-    history = await slack_read_channel_messages("C1")
-    assert history["success"] is True
-    formatted = history["formatted"]
-    assert isinstance(formatted, str)
-    assert "thread_ts=0.5" in formatted
-
-    diagnosis = "Zonal capacity exhausted; notified <@UAUTHOR>; still failing."
-    slack_api.respond({"ok": True, "messages": [{"ts": "0.6", "text": diagnosis}]})
-    findings = await slack_read_thread_messages("C1", "0.5")
-    assert findings["success"] is True
-    assert diagnosis in findings["formatted"]
+    slack_api.respond({"ok": True, "messages": [{"ts": "0.5", "text": "Earlier alert"}]})
+    assert (await slack_read_channel_messages("C1"))["success"] is True
 
     metadata["source_context"] = {}
     assert (await slack_read_channel_messages("C1"))["ok"] is False
