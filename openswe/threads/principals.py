@@ -210,7 +210,7 @@ async def require_principal(request: Request) -> Principal:
                 ),
             )
             return principal
-    session = optional_session(request)
+    session = await optional_session(request)
     if session is None:
         raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
     principal = Principal.of_person(session)

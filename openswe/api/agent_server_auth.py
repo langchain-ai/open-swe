@@ -67,7 +67,7 @@ async def authenticate(scope: Scope) -> Auth.types.MinimalUserDict:
     api_key = conn.headers.get("x-api-key", "").strip()
     if api_key and any(hmac.compare_digest(api_key, key) for key in _backend_keys()):
         return {"identity": _BACKEND_IDENTITY, "permissions": [BACKEND_PERMISSION]}
-    session = optional_session(conn)
+    session = await optional_session(conn)
     login = session.get("sub") if session else None
     if isinstance(login, str) and login.strip():
         return {"identity": login.strip(), "permissions": []}

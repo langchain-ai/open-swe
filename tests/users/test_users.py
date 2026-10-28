@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from sqlalchemy import func, select, update
 
+from openswe.dashboard.oauth import current_session
 from openswe.database import postgres
 from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
 
@@ -109,6 +110,24 @@ async def test_a_session_keeps_its_user_after_a_rename_frees_the_login() -> None
     resolved = await User.for_session(renamed.id, "ada")
 
     assert resolved is not None and resolved.id == renamed.id
+
+
+async def test_a_session_answers_to_its_users_current_login_not_a_reassigned_one() -> None:
+    stale = await User.sign_in("github", "1001", login="ada")
+    renamed = await User.sign_in("github", "3003", login="carol")
+    await User.sign_in("github", "3003", login="renamed")
+    taker = await User.sign_in("github", "2002", login="ada")
+    await User.sign_in("github", "4004", login="carol")
+
+    owner = await User.for_login("github", "ada")
+    reloaded = await User.get(stale.id)
+    assert owner is not None and owner.id == taker.id
+    assert reloaded is not None and reloaded.github_login == ""
+    assert await current_session({"sub": "ada", "user_id": str(stale.id)}) is None
+    assert await current_session({"sub": "carol", "user_id": str(renamed.id)}) == {
+        "sub": "renamed",
+        "user_id": str(renamed.id),
+    }
 
 
 async def test_an_unauthorized_github_login_gets_no_user_row() -> None:

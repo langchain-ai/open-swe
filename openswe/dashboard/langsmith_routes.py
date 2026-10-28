@@ -134,7 +134,7 @@ async def langsmith_callback(
         response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
         _clear_state_cookie(response)
         return response
-    session = require_session(request)
+    session = await require_session(request)
     cookie_nonce = request.cookies.get(LANGSMITH_STATE_COOKIE_NAME)
     if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
         raise HTTPException(400, "oauth state mismatch — please retry")

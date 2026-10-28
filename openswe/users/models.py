@@ -447,6 +447,7 @@ class User(Base):
         """Attach another provider account to this person, taking it over if needed."""
         cls = type(self)
         async with postgres.session() as session:
+            await _release_login(session, provider, external_id, login)
             upsert = insert(UserIdentity).values(
                 user_id=self.id,
                 provider=provider,
@@ -540,6 +541,7 @@ class User(Base):
             email=email,
             team_id=team_id,
         )
+        await _release_login(session, provider, external_id, login)
         claimed = await session.scalar(
             upsert.on_conflict_do_update(
                 index_elements=[UserIdentity.provider, UserIdentity.external_id],
@@ -570,6 +572,28 @@ class User(Base):
     @classmethod
     def _with_identities(cls, statement: Select[Self]) -> Select[Self]:
         return statement.options(selectinload(cls.identities))
+
+
+async def _release_login(
+    session: AsyncSession, provider: Provider, external_id: str, login: str
+) -> None:
+    """Clear ``login`` from every other GitHub account still recorded with it.
+
+    GitHub logins are reassigned after a rename, so the account signing in with
+    one now is its only holder; a stale copy would let lookups by login reach
+    the person who gave it up.
+    """
+    if provider != "github" or not login:
+        return
+    await session.execute(
+        update(UserIdentity)
+        .where(
+            UserIdentity.provider == "github",
+            UserIdentity.external_id != external_id,
+            func.lower(UserIdentity.login) == login.lower(),
+        )
+        .values(login="")
+    )
 
 
 def _known(**values: str) -> dict[str, str]:

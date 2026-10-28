@@ -20,12 +20,14 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.requests import HTTPConnection
 
 from openswe.config import ENV
+from openswe.database import postgres
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.authorization import (
     allowed_logins,
     allowed_orgs,
     is_authorized_github_login,
 )
+from openswe.users.models import User
 from openswe.utils.dashboard_links import (
     dashboard_api_base_url,
     dashboard_base_url,
@@ -454,13 +456,45 @@ def build_settings_url() -> str | None:
     return f"{frontend_base}{PROFILE_SETTINGS_PATH}"
 
 
-def require_session(
+async def current_session(session: dict[str, Any]) -> dict[str, Any] | None:
+    """``session`` acting as its person's current GitHub login, or ``None`` once they have none.
+
+    GitHub reassigns a login after a rename, so the login a session was minted
+    with can come to name someone else; everything downstream resolves people by
+    login, so it must be the one the session's ``user_id`` holds now.
+    """
+    user_id = session_user_id(session)
+    if user_id is None or not postgres.configured():
+        return session
+    try:
+        user = await User.for_session(user_id, session["sub"])
+    except Exception:
+        # Best effort: the dashboard must still boot from the session alone when
+        # the database is unreachable.
+        logger.warning(
+            "Could not check a session against its user",
+            extra={"user_id": str(user_id)},
+            exc_info=True,
+        )
+        return session
+    login = user.github_login if user is not None else ""
+    if not login:
+        return None
+    return session if login == session.get("sub") else {**session, "sub": login}
+
+
+_STALE_SESSION = "your GitHub login changed — sign in with GitHub again"
+
+
+async def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
 ) -> dict[str, Any]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
-    session = decode_session(token)
+    session = await current_session(decode_session(token))
+    if session is None:
+        raise HTTPException(401, _STALE_SESSION)
     bind_audit_session(request, session)
     return session
 
@@ -479,20 +513,21 @@ def bind_audit_session(request: HTTPConnection, session: dict[str, object]) -> N
     )
 
 
-def optional_session(request: HTTPConnection) -> dict[str, Any] | None:
+async def optional_session(request: HTTPConnection) -> dict[str, Any] | None:
     """The caller's session, where another credential may serve instead.
 
-    An unreadable cookie reads as no session: a route that accepts more than one
-    kind of credential has to go on and try the others.
+    An unreadable or stale cookie reads as no session: a route that accepts more
+    than one kind of credential has to go on and try the others.
     """
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
     try:
-        return decode_session(token)
+        session = decode_session(token)
     except HTTPException:
         logger.debug("Ignoring an unreadable session cookie on a multi-credential route")
         return None
+    return await current_session(session)
 
 
 def request_origin(request: HTTPConnection) -> str | None:
