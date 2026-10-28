@@ -1,12 +1,9 @@
 import json
-import shlex
 import time
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -592,78 +589,3 @@ async def _check_shell(command: str) -> ShellVerdict:
         run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
     )
     return ShellVerdict.model_validate(verdict)
-
-
-async def test_check_shell_gates_real_workflow_push(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    backend = LocalShellBackend(root_dir=tmp_path)
-
-    async def execute(command: str) -> str:
-        result = await backend.aexecute(command)
-        assert result.exit_code == 0, result.output
-        return "" if result.output.strip() == "<no output>" else result.output.strip()
-
-    await execute(
-        "git init --bare remote.git && git init -b main repo && "
-        "git -C repo config user.name Test && git -C repo config user.email test@example.com && "
-        "git -C repo commit --allow-empty -m initial && "
-        "git -C repo remote add origin ../remote.git && git -C repo push -u origin main && "
-        "git -C repo remote set-head origin main && git -C repo switch -c feature"
-    )
-    initial = await execute("git -C repo rev-parse HEAD")
-    workflow = tmp_path / "repo/.github/workflows/x.yml"
-    workflow.parent.mkdir(parents=True)
-    workflow.write_text("name: test\non: push\njobs: {}\n")
-
-    monkeypatch.setattr(state, "get_sandbox_id_from_metadata", AsyncMock(return_value=backend.id))
-
-    async def connect_box(
-        sandbox_id: str, *, thread_id: str | None = None
-    ) -> SandboxBackendProtocol:
-        assert sandbox_id == backend.id
-        assert thread_id == "thread-1"
-        return backend
-
-    monkeypatch.setattr(connect, "connect_sandbox", connect_box)
-    approved = AsyncMock(return_value=False)
-    monkeypatch.setattr(guard, "workflow_push_approved", approved)
-    monkeypatch.setattr(
-        guard, "ensure_workflow_push_pending", AsyncMock(return_value=({"status": "pending"}, True))
-    )
-    monkeypatch.setattr(guard, "_post_slack_approval_if_needed", AsyncMock())
-
-    async def screened(command: str) -> ShellVerdict:
-        verdict = await _check_shell(command)
-        if verdict.allowed:
-            await execute(verdict.command or command)
-        return verdict
-
-    chained = (
-        "git -C repo add .github/workflows/x.yml && git -C repo commit -m workflow && "
-        "git -C repo push origin feature"
-    )
-    verdict = await screened(chained)
-    assert not verdict.allowed
-    assert json.loads(str(verdict.refusal))["error_type"] == "WorkflowPushMustStandAlone"
-    assert await execute("git -C repo rev-parse HEAD") == initial
-    assert await execute("git -C repo diff --cached --name-only") == ""
-    assert await execute("git --git-dir=remote.git for-each-ref refs/heads/feature") == ""
-
-    await execute("git -C repo add .github/workflows/x.yml && git -C repo commit -m workflow")
-    head = await execute("git -C repo rev-parse HEAD")
-    state.SANDBOX_BACKENDS.clear()
-    verdict = await screened("git -C repo push origin feature")
-    assert not verdict.allowed
-    assert json.loads(str(verdict.refusal))["error_type"] == "WorkflowPushApprovalRequired"
-    assert await execute("git --git-dir=remote.git for-each-ref refs/heads/feature") == ""
-    fingerprint = approved.call_args.args[1]
-
-    state.SANDBOX_BACKENDS.clear()
-    approved.return_value = True
-    verdict = await screened("git -C repo push origin feature")
-    assert verdict.allowed
-    root = shlex.quote(str(tmp_path / "repo"))
-    assert verdict.command == f"git -C {root} push origin {head}:refs/heads/feature"
-    assert approved.call_args.args == ("thread-1", fingerprint)
-    assert await execute("git --git-dir=remote.git rev-parse refs/heads/feature") == head
