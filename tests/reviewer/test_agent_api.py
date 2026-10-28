@@ -634,6 +634,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     # A thread with no box of MDA's, so the catalog reads no thread metadata.
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.runnables import RunnableConfig
@@ -699,6 +700,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
+    metadata = catalog["trace_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
