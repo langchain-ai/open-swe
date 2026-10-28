@@ -1328,6 +1328,47 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+@pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
+async def test_execute_searches_through_the_shell_where_grep_and_glob_are_excluded(
+    monkeypatch: pytest.MonkeyPatch, excluded: list[str]
+) -> None:
+    """The model and code mode see an ``execute`` that sends searches to the shell, not
+    to the ``grep`` and ``glob`` tools the run's catalog keeps from them."""
+    from langchain.agents.middleware.types import ModelRequest
+    from rt.remote_files import RemoteFiles, remote_file_tools
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend(catalog=Catalog(excluded=excluded))
+    remote = RemoteFiles(backend, lambda: "run-1")
+    tools = remote_file_tools(remote, "/")
+    original = tools["execute"].description
+    assert "Instead use the grep, glob tools" in original
+    files = FileToolsMiddleware(backend, 300, remote_files=remote)
+    request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[],
+        tools=list(tools.values()),
+        state={"messages": []},
+    )
+    received = AsyncMock()
+
+    await files.awrap_model_call(request, received)
+
+    [offered] = received.call_args.args
+    descriptions = [tool.description for tool in offered.tools if tool.name == "execute"]
+    descriptions.extend(tool.description for tool in files.code_tools(["execute"]))
+    assert len(descriptions) == 2
+    for description in descriptions:
+        if excluded:
+            assert "`git grep -n` or `grep -rn`" in description
+            assert "no separate grep/glob tools" in description
+            assert "Instead use the grep, glob tools" not in description
+            assert "Use glob tool instead" not in description
+            assert "Use grep tool instead" not in description
+        else:
+            assert description == original
+
+
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
