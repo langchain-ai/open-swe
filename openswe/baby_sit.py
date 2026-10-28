@@ -82,6 +82,7 @@ class BabySitState(BaseModel):
     head_sha: str = ""
     head_ref: str = ""
     ready_head_sha: str = ""
+    ready_dispatch_errors: int = 0
     installation_id: int | None = None
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: SourceContext = Field(default_factory=SourceContext)
@@ -315,6 +316,7 @@ async def start_watch(
         run_config=run_config,
         source_context=source_context,
         ready_head_sha=carried.ready_head_sha if carried else "",
+        ready_dispatch_errors=carried.ready_dispatch_errors if carried else 0,
         retry_count=carried.retry_count if carried else 0,
         dispatch_keys=list(carried.dispatch_keys) if carried else [],
         delivery_ids=list(carried.delivery_ids) if carried else [],
@@ -457,7 +459,17 @@ async def _finish_ready(watch: BabySitWatch) -> str:
         )
     except Exception:
         logger.warning("Failed to dispatch baby-sit ready wakeup for %s", watch.key, exc_info=True)
+        watch.ready_dispatch_errors += 1
+        await WATCHES.save(watch)
+        if watch.ready_dispatch_errors >= MAX_EVALUATION_ERRORS:
+            return await _finish_watch(
+                watch,
+                f"*`/baby-sit` stopped:* {watch.pr_url} finished CI without a failure, but "
+                f"Open SWE could not resume its agent after {MAX_EVALUATION_ERRORS} attempts. "
+                "Check the agent service and restart the CI watch; nothing was merged.",
+            )
         return "error"
+    watch.ready_dispatch_errors = 0
     watch.ready_head_sha = watch.head_sha
     await WATCHES.save(watch)
     return "watching"
@@ -575,6 +587,7 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
     if head_sha != watch.head_sha:
         watch.head_sha = head_sha
         watch.ready_head_sha = ""
+        watch.ready_dispatch_errors = 0
         watch.retry_count = 0
         watch.dispatch_keys = []
         watch.alert_keys = []

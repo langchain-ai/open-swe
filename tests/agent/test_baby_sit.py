@@ -253,6 +253,46 @@ async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
     assert await baby_sit.WATCHES.get("acme/repo#7") is None
 
 
+@pytest.mark.parametrize("recovers", [False, True])
+async def test_ready_wakeup_failures_are_bounded_and_reset_on_recovery(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, recovers: bool
+) -> None:
+    await _start_watch()
+    dispatch = AsyncMock(side_effect=RuntimeError("Agent service unavailable"))
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+    notify = AsyncMock()
+    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+
+    for expected in range(1, baby_sit.MAX_EVALUATION_ERRORS):
+        watch = await baby_sit.WATCHES.get("acme/repo#7")
+        assert watch is not None
+        assert await baby_sit._finish_ready(watch) == "error"
+        saved = await baby_sit.WATCHES.get(watch.key)
+        assert saved is not None
+        assert saved.ready_dispatch_errors == expected
+        assert saved.ready_head_sha == ""
+
+    dispatch.side_effect = None
+    watch = await baby_sit.WATCHES.get("acme/repo#7")
+    assert watch is not None
+    if recovers:
+        assert await baby_sit._finish_ready(watch) == "watching"
+        saved = await baby_sit.WATCHES.get(watch.key)
+        assert saved is not None
+        assert saved.ready_dispatch_errors == 0
+        assert saved.ready_head_sha == "head-1"
+    else:
+        dispatch.side_effect = [RuntimeError("Agent service unavailable"), {"run_id": "notice"}]
+        assert await baby_sit._finish_ready(watch) == "stopped"
+        assert await baby_sit.WATCHES.get(watch.key) is None
+        assert dispatch.await_args is not None
+        message = dispatch.await_args.args[1]
+        assert "/baby-sit --terminal" in message
+        assert "could not resume its agent after 3 attempts" in message
+        assert "restart the CI watch" in message
+    notify.assert_not_awaited()
+
+
 async def test_terminal_notification_falls_back_to_originating_agent_thread(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
