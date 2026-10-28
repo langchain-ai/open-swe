@@ -27,7 +27,7 @@ from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
-_EVENTS_URL = "https://triggers.example/v1/triggers/webhooks/slack-custom-app/events"
+_EVENTS_URL = mda_forwarding.TRIGGER_EVENTS_URL
 _MDA_THREAD = str(uuid.uuid4())
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 # The real lookups, which the fixture below stands in for in the webhook's tests.
@@ -86,7 +86,6 @@ _SLACK_HEADERS = {
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
-    monkeypatch.setenv("OPEN_SWE_SLACK_TRIGGER_EVENTS_URL", _EVENTS_URL)
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -135,7 +134,13 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
     [(task, (url, body, headers))] = tasks.tasks
     # The forward knows which message it carries, to tell its thread if it's lost.
     assert tasks.kwargs == [
-        {"thread_id": _MDA_THREAD, "message_ts": "1786573369.551099", "event_id": "Ev-mda"}
+        {
+            "thread_id": _MDA_THREAD,
+            "message_ts": "1786573369.551099",
+            "event_id": "Ev-mda",
+            # It claimed the conversation, so the backend answers it if Trigger Server won't.
+            "claimed": True,
+        }
     ]
     assert task is mda_forwarding.forward_to_trigger_server
     assert url == _EVENTS_URL
@@ -253,23 +258,6 @@ def test_mda_starts_only_conversations_its_slack_channel_can_run(
     assert mda_forwarding.mda_can_start(**(_PLAIN | message)) is starts
 
 
-async def test_without_a_trigger_server_url_nothing_goes_to_mda(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("OPEN_SWE_SLACK_TRIGGER_EVENTS_URL")
-    lookup = AsyncMock(return_value=None)
-    monkeypatch.setattr(mda_forwarding, "lookup_slack_thread_id", lookup)
-
-    assert await _OWNED_THREAD("C1", "1.2") is None
-    assert (
-        await _STARTABLE_THREAD(
-            app_id="A1", team_id="T1", channel_id="C1", root_ts="1.2", can_start=True
-        )
-        is None
-    )
-    lookup.assert_not_awaited()
-
-
 def test_mda_thread_ids_match_trigger_servers_thread_key() -> None:
     assert mda_forwarding.mda_thread_id("A1", "T1", "C1", "1.2") == str(
         uuid.uuid5(uuid.NAMESPACE_URL, "slack:v1:A1:T1:C1:1.2")
@@ -318,6 +306,7 @@ def _trigger_server(
     monkeypatch.setattr(mda_forwarding.asyncio, "sleep", AsyncMock())
     monkeypatch.setattr(mda_forwarding.time, "time", lambda: 1786573369.0)
     monkeypatch.setattr(mda_forwarding, "report_lost", AsyncMock(return_value=True))
+    monkeypatch.setattr(mda_forwarding, "take_back", AsyncMock(return_value=True))
     seen: list[httpx2.Request] = []
 
     def recording(request: httpx2.Request) -> httpx2.Response:
@@ -328,7 +317,7 @@ def _trigger_server(
     return seen
 
 
-async def _forward(message_ts: str = "1.1") -> None:
+async def _forward(message_ts: str = "1.1", *, claimed: bool = False) -> None:
     await mda_forwarding.forward_to_trigger_server(
         _EVENTS_URL,
         b"{}",
@@ -336,6 +325,7 @@ async def _forward(message_ts: str = "1.1") -> None:
         thread_id=_MDA_THREAD,
         message_ts=message_ts,
         event_id="Ev-1",
+        claimed=claimed,
     )
 
 
@@ -378,6 +368,19 @@ async def test_a_refused_forward_tells_the_slack_thread(
         _MDA_THREAD,
         "1.1",
     )
+
+
+@pytest.mark.parametrize("status", [401, 503])
+async def test_a_new_conversation_trigger_server_refuses_is_answered_here(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    # 401: no Slack app registered for MDA in this environment; 503 that never clears.
+    _trigger_server(monkeypatch, lambda _request: httpx2.Response(status))
+
+    await _forward(claimed=True)
+
+    cast(AsyncMock, mda_forwarding.take_back).assert_awaited_once_with(_MDA_THREAD, "1.1")
+    cast(AsyncMock, mda_forwarding.report_lost).assert_not_awaited()
 
 
 async def test_a_forward_that_gives_up_tells_the_slack_thread(

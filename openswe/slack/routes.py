@@ -125,23 +125,22 @@ def _hand_to_mda(
     thread_id: str,
     event_id: str,
     message_ts: str = "",
+    claimed: bool = False,
 ) -> WebhookResponse:
     """Forward Slack's request to MDA's Slack channel, through Trigger Server, after answering Slack.
 
-    ``message_ts`` names the message remembered for the channel, which hears of a lost forward.
+    ``message_ts`` names the message remembered for the channel, which hears of a lost forward;
+    one that ``claimed`` its conversation goes back to the backend instead.
     """
-    url = mda_forwarding.events_url()
-    if not url:
-        common.logger.error("An MDA-owned Slack conversation has no Trigger Server URL to go to")
-        return ignored("MDA's Slack channel isn't configured here")
     background_tasks.add_task(
         mda_forwarding.forward_to_trigger_server,
-        url,
+        mda_forwarding.TRIGGER_EVENTS_URL,
         body,
         headers,
         thread_id=thread_id,
         message_ts=message_ts,
         event_id=event_id,
+        claimed=claimed,
     )
     return accepted(message)
 
@@ -847,6 +846,7 @@ async def slack_webhook(
         # A conversation MDA owns, or a new one MDA's Slack channel can start, goes there.
         root_ts = reply_thread_ts or original_message_ts
         mda_thread_id = await mda_forwarding.owned_thread(channel_id, root_ts)
+        new_conversation = False
         if mda_thread_id is None and await mda_forwarding.startable_thread(
             app_id=envelope.api_app_id,
             team_id=team_id or "",
@@ -876,6 +876,7 @@ async def slack_webhook(
                 root_ts,
                 owner_login=await service.slack_login(user_id),
             )
+            new_conversation = mda_thread_id is not None
         if mda_thread_id is not None and not mda_forwarding.trigger_server_takes(event.subtype):
             # Trigger Server would drop it, and the thread is MDA's, so nothing can run it.
             common.logger.info(
@@ -935,6 +936,7 @@ async def slack_webhook(
                     thread_id=mda_thread_id,
                     event_id=event_id,
                     message_ts=original_message_ts,
+                    claimed=new_conversation,
                 )
             if (
                 message.action is SlackAction.BREAKOUT_WEB
