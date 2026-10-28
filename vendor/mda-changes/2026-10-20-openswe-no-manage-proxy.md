@@ -14,12 +14,14 @@ Before every command it runs in the box, MDA replaces the box's whole proxy conf
 
 **Cost:** on these boxes no MDA connection, channel or connector can inject credentials through the proxy, since MDA no longer writes any rules there.
 
+Open SWE sets it only on the boxes whose proxy config its backend writes. Where the backend names `MDA_GITHUB_PROXY_CONNECTION` and the thread's GitHub token is not narrowed, the run's box definition declares the whole config instead: GitHub's rules from that connection and the backend's own rules for the box. The backend then writes none of it, so one writer still owns every rule. To have MDA write it before the backend uses the box, Open SWE runs a no-op command through a fresh handle from the hook backend's `bind_runtime`: the hook's own handle keeps the box definition it resolved first, from before the backend's rules were known.
+
 ## Upstream
 
 Each writer should own only its rules and leave the rest:
 
 - **LangSmith sandboxes:** an atomic per-namespace rule write, so writers never read-modify-write the whole config.
-- **MDA:** write its rules under its own namespace and never touch the others.
+- **MDA:** write its rules under its own namespace and never touch the others, and offer a call that writes them now, outside a command.
 - **Open SWE:** write its rules under its own namespace, then drop this option.
 
 Separately, MDA keeps one box per thread but resolves user-owned connections for whoever started the current run. Code running in a shared box can use one user's injected credentials, or keep what they fetched, during another user's run. MDA should inject only credentials the thread's box may hold for everyone who runs in it, or give each user a separate box.

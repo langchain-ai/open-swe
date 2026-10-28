@@ -31,6 +31,7 @@ from runtime_api.catalog import (
     CliResultRules,
     InboxSpec,
     LoopRules,
+    McpServerSpec,
     ReplyRules,
     RoutingRules,
 )
@@ -905,6 +906,36 @@ async def _mcp_tools_for(
         if managed_gateway:
             sources.append(managed_mcp_source(credential_login, managed_gateway))
     return await load_mcp_tools(*sources)
+
+
+def _owned_mcp_servers(
+    config: RunnableConfig, credential_login: str | None, servers: Sequence[McpServerSpec]
+) -> list[McpServerSpec]:
+    """``servers`` without the personal ones, unless the MDA run acts for their owner.
+
+    MDA reads a personal server's connection as the person the run acts for there: the
+    user the run is attributed to (``dispatch._run_user_metadata``). A run attributed to
+    no one, such as a background task's completion, has no person's principal: on a
+    channel's thread it is MDA's channel service principal (``mda:channel``), which reads
+    no user connections, and on any other thread the principal of the backend's own key,
+    which every such run shares, so one person's grant would reach everyone's servers.
+    """
+    attributed = (config.get("metadata") or {}).get("ls_attribution_identifier")
+    for_owner = (
+        isinstance(attributed, str)
+        and credential_login is not None
+        and attributed.lower() == credential_login.lower()
+    )
+    owned: list[McpServerSpec] = []
+    for server in servers:
+        if server.connection.owner == "user" and not for_owner:
+            logger.warning(
+                "Leaving out a personal MCP server of a run that does not act for its owner",
+                extra={"mcp_name": server.name},
+            )
+            continue
+        owned.append(server)
+    return owned
 
 
 async def _run_mcp_tools(
@@ -2117,6 +2148,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     ]
     surface.dynamic = dynamic_tool_middleware
+    surface.mcp_servers = _owned_mcp_servers(
+        config,
+        credential_login,
+        mcp_tools.runtime_servers if isinstance(mcp_tools, MCPTools) else [],
+    )
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
     surface.backend_paths = tuple(

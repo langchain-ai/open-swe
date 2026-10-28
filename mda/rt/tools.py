@@ -2,10 +2,11 @@
 
 They carry the names, descriptions and argument schemas the backend gives its
 operations, so the prompts, the transcript and the dashboard see what an
-in-process run shows. The tool call is this runtime's: it sends the arguments and
-the run state the operation reads, then turns what the operation answers into the
-tool's result and its state updates. The file and shell tools are this runtime's
-own (``rt.file_tools``).
+in-process run shows. The tool call is this runtime's: it sends the arguments, the
+run state the operation reads and, read as the run, the credentials of the MDA
+connections its tool uses, then turns what the operation answers into the tool's
+result and its state updates. The file and shell tools are this runtime's own
+(``rt.file_tools``).
 """
 
 import logging
@@ -19,6 +20,12 @@ from langchain_core.tools import StructuredTool
 from langchain_quickjs import UnresolvedToolError
 from langgraph.config import get_config
 from langgraph.types import Command
+from managed_deepagents import (
+    ConnectionNotFoundError,
+    CredentialAuthorizationRequiredError,
+    CredentialStoreError,
+    connections,
+)
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ToolSpec
 from runtime_api.endpoint import LONG_CALL_SECONDS, call
@@ -55,6 +62,14 @@ _TIMED_OUT: Final = (
 _UNREACHABLE: Final = (
     "Error: The Open SWE backend could not be reached for this tool call. "
     "It may or may not have run; check state before retrying."
+)
+_NO_CONNECTION: Final = (
+    "Error: This tool reads its credential from the deployment's {slug} connection, which "
+    "is not set up, so it did not run. An admin creates it with `mda connections create {slug}`."
+)
+_UNREAD_CONNECTION: Final = (
+    "Error: This tool could not read its credential from the deployment's connections, so "
+    "it did not run: {reason}"
 )
 _json = TypeAdapter(JsonValue)
 _json_list = TypeAdapter(list[dict[str, JsonValue]])
@@ -162,12 +177,54 @@ async def cited(
     return result.model_copy(update={"content": _content(reply.content)})
 
 
+async def _credentials(spec: ToolSpec) -> dict[str, str] | str:
+    """What the run reads of each connection ``spec`` names, by slug, or what the call
+    fails with when it cannot read one of the deployment's.
+
+    A person who has not granted a user connection is asked to, and the run pauses
+    until they answer (``GraphBubbleUp``). A user connection the run cannot read
+    otherwise (it acts for no person, they would not grant it, Agent Auth could not
+    be reached) is left out, and the operation goes on as it did without it.
+    """
+    credentials: dict[str, str] = {}
+    for ref in spec.connections:
+        extra = {"operation": spec.name, "connection": ref.slug}
+        try:
+            credentials[ref.slug] = await connections.get(ref.slug, {"type": ref.owner})
+        except ConnectionNotFoundError:
+            logger.warning("An operation's connection is not set up", extra=extra)
+            return _NO_CONNECTION.format(slug=ref.slug)
+        except (CredentialStoreError, CredentialAuthorizationRequiredError) as exc:
+            if ref.owner == "agent":
+                # Its message quotes no more of Agent Auth's answer than the problem's
+                # detail and remedy, never a credential, so the model may read it.
+                logger.warning(
+                    "Could not read an operation's connection", extra=extra, exc_info=True
+                )
+                return _UNREAD_CONNECTION.format(reason=exc)
+            logger.info(
+                "The run reads no user connection for an operation",
+                extra={**extra, "reason": str(exc)},
+            )
+        except OSError:
+            # The SDK raises ``urllib.error.URLError`` when Agent Auth does not answer.
+            logger.warning(
+                "Could not reach Agent Auth for an operation's connection",
+                extra=extra,
+                exc_info=True,
+            )
+            if ref.owner == "agent":
+                return _UNREAD_CONNECTION.format(reason="Agent Auth could not be reached.")
+    return credentials
+
+
 async def _operate(
     backend: OpenSweBackend,
     spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     tool_call_id: str,
+    credentials: dict[str, str],
 ) -> ToolMessage | Command:
     request = _reading(spec, runtime.state).model_copy(
         update={
@@ -175,6 +232,7 @@ async def _operate(
             "arguments": dict(arguments),
             "request_id": tool_call_id,
             "grant": backend.grant(spec),
+            "credentials": credentials,
         }
     )
     try:
@@ -192,15 +250,16 @@ async def _operate(
     return _result(answer, tool_call_id, spec.name)
 
 
-async def run_operation(
+async def called(
     backend: OpenSweBackend,
-    spec: ToolSpec,
+    name: str,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
+    make: Callable[[str], Awaitable[ToolMessage | Command]],
     *,
     cites_evidence: bool = False,
 ) -> ToolMessage | Command:
-    """Call ``spec``'s operation with ``arguments``, for one tool call.
+    """Make one call of tool ``name`` with ``arguments``: ``make``, given the call's id.
 
     Code mode calls tools directly, past the agent's tool-call chain that reports each
     call and cites it as incident evidence, so a call it makes does both itself, under
@@ -208,14 +267,12 @@ async def run_operation(
     """
     outer = reported_call()
     if outer is None or outer == runtime.tool_call_id:
-        return await _operate(backend, spec, arguments, runtime, runtime.tool_call_id or "")
-    tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
-    report = tool_report(
-        runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
-    )
+        return await make(runtime.tool_call_id or "")
+    tool_call_id = f"{outer}:{name}:{uuid4().hex[:8]}"
+    report = tool_report(runtime.state, name=name, arguments=arguments, tool_call_id=tool_call_id)
     backend.outbox.started(report)
     try:
-        result = await _operate(backend, spec, arguments, runtime, tool_call_id)
+        result = await make(tool_call_id)
     except Exception as exc:
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
@@ -224,7 +281,7 @@ async def run_operation(
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
     if cites_evidence:
-        message = await cited(backend, spec.name, arguments, message)
+        message = await cited(backend, name, arguments, message)
     backend.outbox.finished(report, message)
     if isinstance(result, ToolMessage):
         return message
@@ -245,6 +302,28 @@ def _answer(result: Command, tool_call_id: str) -> ToolMessage:
 
 def _update(result: Command) -> dict[str, object]:
     return dict(result.update) if isinstance(result.update, Mapping) else {}
+
+
+async def run_operation(
+    backend: OpenSweBackend,
+    spec: ToolSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    *,
+    cites_evidence: bool = False,
+) -> ToolMessage | Command:
+    """Call ``spec``'s operation with ``arguments``, for one tool call, with what the run
+    reads of the connections it names."""
+    # Read before code mode reports the call: a pause for a grant runs the code again,
+    # which reports the call under a new id, so a report made first would never finish.
+    credentials = await _credentials(spec)
+
+    async def make(tool_call_id: str) -> ToolMessage | Command:
+        if isinstance(credentials, str):
+            return ToolMessage(content=credentials, tool_call_id=tool_call_id, status="error")
+        return await _operate(backend, spec, arguments, runtime, tool_call_id, credentials)
+
+    return await called(backend, spec.name, arguments, runtime, make, cites_evidence=cites_evidence)
 
 
 def operation_tool(

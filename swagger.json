@@ -1488,6 +1488,31 @@
         "title": "ConnectedService",
         "type": "object"
       },
+      "ConnectionRef": {
+        "description": "A connection's slug, and whose credential under it the run reads.",
+        "properties": {
+          "owner": {
+            "enum": [
+              "agent",
+              "user"
+            ],
+            "title": "Owner",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:[-/][a-z0-9]+)*$",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "owner"
+        ],
+        "title": "ConnectionRef",
+        "type": "object"
+      },
       "Conversation": {
         "properties": {
           "items": {
@@ -3076,6 +3101,27 @@
             "title": "Allowed Tools",
             "type": "array"
           },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connection_header": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Header"
+          },
           "enabled": {
             "default": true,
             "title": "Enabled",
@@ -3142,6 +3188,27 @@
             },
             "title": "Allowed Tools",
             "type": "array"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connection_header": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Header"
           },
           "enabled": {
             "default": true,

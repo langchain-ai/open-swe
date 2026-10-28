@@ -12,7 +12,14 @@ Every call is authenticated with the run token.
 - **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith box, one per thread.
   The catalog gives the options it is created with (the workspace snapshot, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
   Before `prepare`, the run opens the box (`open_sandbox`) and reports its name; the backend binds the thread to it (`sandbox_owner: mda`) and connects as to any reused box: proxy credentials, git identity, tool channel.
-  MDA leaves the proxy config to the backend (`_openswe_no_manage_proxy=True`).
+  The box's proxy config, which gives its commands their credentials, is written whole, so one side writes all of it.
+  The backend writes it with a GitHub token it mints for the thread, and MDA leaves it alone (`_openswe_no_manage_proxy=True`), unless the catalog names the connection the box's GitHub rules carry (`SandboxSpec.github_proxy`, `runtime_api.sandbox_proxy`).
+  The catalog names one where the backend's `MDA_GITHUB_PROXY_CONNECTION` does and the thread reaches the whole GitHub App installation, as that connection's token does.
+  Reviewer and review scout threads, and threads an event or automation on a public repository started, are narrowed, so the backend keeps writing theirs.
+  Where the catalog names one, MDA writes the config before each command it runs in the box: the two GitHub rules with the token it reads from `mda/github-token`, which Agent Auth renews, and the backend's own rules for the box, which it asks for once the box is open (`sandbox_proxy`): its tool channel's capability, and the workspace's own proxy rules, its cloud identity rules among them.
+  It writes it before `prepare` too, retrying for up to three minutes, as long as the host takes to suspend an idle box, while the sandbox API takes no proxy config; a run that still cannot write it there ends, since the backend never writes it on that box.
+  It writes it after a replacement, which starts with the proxy config the backend chose for it (a cloud identity applies only at create) and keeps it until that write lands, and every five minutes before a model or tool call, for the commands the backend runs in the box; a run resumed from an interrupt writes it before its first tool call.
+  A backend that refuses `sandbox_proxy` (its setting no longer names the connection) writes the config itself, and MDA stops writing it for the rest of the run.
   `recreate_sandbox` on such a box comes back from the backend as what to replace it with; MDA replaces it under the same name (`replace_sandbox`, the old box stopped and kept renamed), and the backend reconnects through `sandbox_replaced`.
   The backend never creates or replaces an MDA-owned box.
   A tool MDA runs that finds the box unreachable ends the run, and the backend tells the person through `sandbox_unreachable`.
@@ -24,6 +31,9 @@ Every call is authenticated with the run token.
   The context names the tools and carries none of their specs, since the Agent Server copies the context into every checkpoint; the run reads their specs and grants from the backend as it starts (`tool_specs`).
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
   A tool call is this runtime's: it sends the operation its arguments and the run state its spec says it reads (`reads`, `reads_all`), and turns what it answers into the tool's result, the run state it changed, its stream events and git evidence.
+  It also sends the credentials of the MDA connections the spec names (`connections`), read as the run (`managed_deepagents.connections`), which the backend hands that call's tool alone: the deployment's own always, and a person's own on a run that acts for one, who is asked to connect it if they have not.
+  The backend names a person's connection only in the catalog of a run that acts for one (the run token's `user_id`), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
+  A person's connection the run cannot read otherwise (no grant given, Agent Auth not reached) is left out, and the tool works as it did without; a call whose deployment connection is missing or unreadable fails and names it.
   The backend runs no tools node and no tool-call middleware.
   An operation whose box stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
@@ -31,6 +41,12 @@ Every call is authenticated with the run token.
   The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs.
   `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `resolve_tool` which tool that is, with the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
+- **MCP servers:** the backend serves its MCP servers' tools as operations, with credentials it keeps, except a server whose credential is an MDA connection (`connection` on its Open SWE record).
+  The catalog names those (`mcp_servers`), and `rt/mcp.py` connects to them before the run's first model call, in a node of its own: it reads each credential with `managed_deepagents.connections`, the deployment's for an instance or workspace server and the person's own for a personal one, lists the server's tools, and offers those the catalog allows under the backend's names to each model call, since `search_tools` finds only the backend's tools.
+  Each call reads the credential again and sends it only to the server's HTTPS origin, at a public address.
+  Only `open-swe-mcp-<server>` connections qualify, so no server gets a credential Open SWE or a channel reads for itself, such as `mda/github-token`.
+  A person who has not granted a connection is asked to (MDA's credential interrupt); a run that acts for no one, or whose agent connection is missing, goes without that server.
+  The backend names a personal server only to a run that acts for its owner, never to one for no person, such as a background task's completion.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   Where MDA owns the box they run in it.
   On the paths the backend serves (`files.backend_paths`: offloaded images), and on a thread whose box is not MDA's, such as a desktop thread, deepagents' own tools run against the backend's files through the typed files API (`rt/remote_files.py`).
@@ -51,7 +67,7 @@ Every call is authenticated with the run token.
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
     Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read waits for it; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;
-  - `RunLoop` (`rt/loop.py`), around each model call, as the catalog's `LoopRules` say: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`), keeps the GitHub proxy fresh (`refresh_github_proxy`), picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
+  - `RunLoop` (`rt/loop.py`), around each model call, as the catalog's `LoopRules` say: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`), keeps the GitHub proxy the backend writes fresh (`refresh_github_proxy`), picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
     After an answer that calls no tool it asks again for the CLI result and the Slack reply the run owes, then posts the answer itself (`reply_on_behalf`).
     At the end it reports the run ended (`run_ended`: transcript, usage, git work) and does the graph's own end-of-run work (`step_limit_reached`, `settle_review_check`, `finish_scout_plan`);
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
@@ -124,6 +140,9 @@ The backend:
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
+| `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the boxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those boxes without one. Unset: the backend writes every box's |
+| `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses. Unset: the backend's `EXA_API_KEY` |
+| `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Open SWE knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
 
 ## Run locally
 
@@ -181,6 +200,11 @@ The backend maps the sender as every other ingress does (`User.for_person`): a l
 A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
 Anyone else, bots, and a sender the channel couldn't verify keep the channel's own principal (`null`); the channel endpoints still gate the run and ask the person to connect their account.
 
+The backend's own runs and answers on a channel's thread go through MDA's trusted-backend ingress (see [Linear](#linear)).
+One for a person, such as a dashboard follow-up, runs as the principal that person's channel runs have (`MDA_WORKSPACE_ID`).
+One for no person (stops, system runs, a machine's answers), or for a person whose principal Agent Auth can't name, runs as MDA's channel service principal, `mda:channel`, which owns no user connections.
+User-owned connections depend on it: any other id there is a person to MDA, so on Slack threads every such run would share that id's grants.
+
 ## Linear
 
 The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear.
@@ -218,6 +242,10 @@ Without a terminal, deploy brings the App from `MDA_GITHUB_APP_ID`, `MDA_GITHUB_
 Both deploy workflows set them for a deployment that has no App yet: the App and installation IDs are the ones its backend uses, and the key and webhook secret come from the `MDA_GITHUB_APP_PRIVATE_KEY_<ENVIRONMENT>` and `MDA_GITHUB_WEBHOOK_SECRET_<ENVIRONMENT>` repository secrets, the same values as the backend's `GITHUB_APP_PRIVATE_KEY` and `GITHUB_WEBHOOK_SECRET`.
 A deployment that already has its App keeps it.
 Without them, the deploy of a deployment with no App fails before uploading anything.
+
+The channel asks for the App's repository permissions (`app.permissions`), so the token deploy keeps at `mda/github-token` can do what the backend's sandbox token does, for the boxes whose GitHub proxy MDA writes (Sandbox, above).
+Deploy renews the token with them only where the App's installation grants them and the App is installed once; its report names the token's permissions, which `MDA_GITHUB_PROXY_CONNECTION` needs in full.
+Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
 
 The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`.
 The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing.

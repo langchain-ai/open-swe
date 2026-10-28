@@ -408,7 +408,7 @@ class ThreadRouter:
             await _refuse_local(scope, send, thread)
             return
         # The person the run is attributed to, which only the backend writes
-        # (``dispatch.prepare_durable_run``); a run for none acts as the backend.
+        # (``dispatch.prepare_durable_run``); a run for none is the channel's own.
         run_metadata = payload.get("metadata")
         user_id = run_metadata.get("user_id") if isinstance(run_metadata, dict) else None
         headers = await _channel_write_headers(
