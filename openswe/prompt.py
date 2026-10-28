@@ -1,9 +1,12 @@
 import logging
+from collections.abc import Collection
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
+from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
 from openswe.prompts import prompt
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -37,28 +40,6 @@ def _load_default_prompt() -> str:
             DEFAULT_PROMPT_PATH or "openswe.resources/default_prompt.md",
         )
     return ""
-
-
-def _render_source_guidance(
-    source: str,
-    slack_context: bool,
-    slack_ask: bool = False,
-    slack_breakout: bool = False,
-    slack_by_the_way: bool = False,
-) -> str:
-    if source == "background_task":
-        name = "background-task"
-    elif source == "slack" and slack_context:
-        name = "slack-by-the-way" if slack_by_the_way else "slack-ask" if slack_ask else "slack"
-    elif source in {"linear", "github", "schedule", "dashboard"}:
-        name = source
-    else:
-        name = "generic"
-    if name in {"slack", "schedule"}:
-        guidance = prompt(f"system/source-{name}", breakout=slack_breakout, slack=slack_context)
-    else:
-        guidance = prompt(f"system/source-{name}")
-    return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
 
 
 def _render_repository_scope_section() -> str:
@@ -103,57 +84,32 @@ def _render_collaboration_section() -> str:
 
 
 def construct_system_prompt(
-    working_dir: str,
     dashboard_base_url: str = "",
     artifact_url: str | None = None,
-    linear_project_id: str = "",
-    linear_issue_number: str = "",
     default_repo: dict[str, str] | None = None,
     repo_custom_instructions: str | None = None,
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
     sole_writer: bool = False,
-    source: str = "dashboard",
-    slack_context: bool = False,
-    slack_ask: bool = False,
-    slack_breakout: bool = False,
-    slack_by_the_way: bool = False,
-    slack_follow_up_suggestions: bool = False,
-    sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
-    local_checkout: bool = False,
-    local_checkout_client: BridgeClient = "cli",
-    recent_thread_context: str | None = None,
     workspace_repos: list[str] | None = None,
 ) -> str:
-    """Render the agent's system prompt.
+    """Render the agent's system prompt, once for the thread's whole life.
 
-    ``local_checkout`` says the working directory already *is* the user's own
-    repository — a thread bridged to their machine — so the clone-or-sync and
-    git-identity steps a hosted sandbox needs would rewrite their checkout.
-    ``local_checkout_client`` is the app serving that machine: only the CLI
-    prints a result the run must hand it.
+    Any byte that differs between two runs makes the model provider's prompt cache
+    miss from there on, so every later turn would pay again for the whole
+    conversation. What can change from one turn to the next is a ``TurnContext``.
     """
-    del linear_project_id, linear_issue_number
     return prompt(
         "system/main",
-        working_dir=working_dir,
-        local_checkout=local_checkout,
-        worktree_handoff=local_checkout and local_checkout_client == "desktop",
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
-        sandbox_file_downloads=sandbox_file_downloads,
         default_repo=(
             f"{default_repo['owner']}/{default_repo['name']}"
             if default_repo and default_repo.get("owner") and default_repo.get("name")
             else ""
-        ),
-        working_environment_section=prompt(
-            "system/working-environment-local" if local_checkout else "system/working-environment",
-            working_dir=working_dir,
-            desktop=local_checkout_client == "desktop",
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",
@@ -161,26 +117,101 @@ def construct_system_prompt(
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
-        source_guidance_section=prompt(
-            "system/source-context",
-            source_guidance=_render_source_guidance(
-                source, slack_context, slack_ask, slack_breakout, slack_by_the_way
-            )
-            + (
-                "\n" + prompt("system/slack-follow-up-suggestions")
-                if slack_context and slack_follow_up_suggestions
-                else ""
-            ),
-        ),
         default_prompt_section=_load_default_prompt(),
-        repository_scope_section=(
-            _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
-        ),
         collaboration_section=_render_collaboration_section(),
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
-        recent_thread_context_section=recent_thread_context or "",
         workspace_section=_render_workspace_section(
             workspace_name, workspace_instructions, workspace_repos
         ),
     )
+
+
+@dataclass(frozen=True)
+class TurnContext:
+    """Where a turn runs and where it came from: guidance the system prompt leaves out.
+
+    Each part reaches the model as a ``run`` context block, added when it differs
+    from the one the model last saw.
+
+    ``local_checkout`` says the working directory already *is* the user's own
+    repository — a thread bridged to their machine — so the clone-or-sync and
+    git-identity steps a hosted sandbox needs would rewrite their checkout.
+    ``local_checkout_client`` is the app serving that machine: only the CLI
+    prints a result the run must hand it.
+    """
+
+    working_dir: str
+    source: str = "dashboard"
+    slack_context: bool = False
+    slack_ask: bool = False
+    slack_breakout: bool = False
+    slack_by_the_way: bool = False
+    slack_follow_up_suggestions: bool = False
+    sandbox_file_downloads: bool = False
+    local_checkout: bool = False
+    local_checkout_client: BridgeClient = "cli"
+    # Why the run's managed tool catalog could not be read, if it could not.
+    tool_catalog_note: str = ""
+    # The sender's other recent threads, whose activity changes from turn to turn.
+    recent_threads: str = ""
+
+    def environment(self) -> str:
+        environment = prompt(
+            "system/working-environment-local"
+            if self.local_checkout
+            else "system/working-environment",
+            working_dir=self.working_dir,
+            desktop=self.local_checkout_client == "desktop",
+        )
+        if self.sandbox_file_downloads:
+            environment += "\n\n" + prompt("system/sandbox-file-downloads")
+        if note := self.tool_catalog_note.strip():
+            environment += "\n\n" + note
+        return environment
+
+    def source_guidance(self) -> str:
+        sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
+        if not self.local_checkout and (scope := _render_repository_scope_section()):
+            sections.append(scope)
+        return "\n\n".join(sections)
+
+    def _source_guidance(self) -> str:
+        if self.source == "background_task":
+            name = "background-task"
+        elif self.source == "slack" and self.slack_context:
+            name = (
+                "slack-by-the-way"
+                if self.slack_by_the_way
+                else "slack-ask"
+                if self.slack_ask
+                else "slack"
+            )
+        elif self.source in {"linear", "github", "schedule", "dashboard"}:
+            name = self.source
+        else:
+            name = "generic"
+        if name in {"slack", "schedule"}:
+            guidance = prompt(
+                f"system/source-{name}", breakout=self.slack_breakout, slack=self.slack_context
+            )
+        else:
+            guidance = prompt(f"system/source-{name}")
+        guidance = f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
+        if self.slack_context and self.slack_follow_up_suggestions:
+            guidance += "\n" + prompt("system/slack-follow-up-suggestions")
+        return guidance
+
+    def messages(self, visible: Collection[str]) -> list[RunMessage]:
+        """The blocks the model does not see as they now are, given the ``visible`` context hashes."""
+        blocks = [
+            run_context("environment", self.environment()),
+            run_context("source", self.source_guidance()),
+        ]
+        if self.recent_threads:
+            blocks.append(run_context("recent-threads", self.recent_threads))
+        return [
+            {"role": "user", "content": block}
+            for block in blocks
+            if dynamic_context_hash(block) not in visible
+        ]

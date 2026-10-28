@@ -1,3 +1,5 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { CircularProgress } from "@langchain/macaw-components/CircularProgress"
 import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
@@ -24,7 +26,7 @@ import { Link } from "@tanstack/react-router"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
@@ -180,14 +182,18 @@ export function Header({
                 carrying && "-translate-y-1 opacity-0"
               )}
             >
-              <a
+              <MacawLink
+                variant="xs"
                 href={githubUrls.repo(pr)}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 hover:text-primary hover:underline max-lg:hidden"
+                className={cn(
+                  INHERITED_LINK,
+                  "shrink-0 hover:text-primary hover:underline max-lg:hidden"
+                )}
               >
                 {pr.owner}/{pr.repo}
-              </a>
+              </MacawLink>
               <span aria-hidden className="max-lg:hidden">
                 ·
               </span>
@@ -202,36 +208,48 @@ export function Header({
                     ? "wanted to merge into"
                     : "wants to merge into"}
               </span>
-              <a
+              <MacawLink
+                variant="xs"
                 href={githubUrls.branch(pr, detail.pr.base_ref)}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary"
+                className={cn(
+                  INHERITED_LINK,
+                  "shrink-0 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary"
+                )}
               >
                 {detail.pr.base_ref}
-              </a>
+              </MacawLink>
               <span className="shrink-0 max-xl:hidden">from</span>
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="xs"
+                aria-label={`Copy ${detail.pr.head_ref}`}
                 type="button"
                 title={`Copy ${detail.pr.head_ref}`}
                 onClick={() =>
                   copyText(detail.pr.head_ref, "Copied the branch name")
                 }
-                className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-space-1 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary max-xl:hidden"
+                className="group/branch h-auto max-w-[32ch] min-w-[8ch] gap-space-1 border-0 bg-surface-level-3 px-space-1 py-px font-mono hover:text-primary max-xl:hidden"
               >
                 <span className="truncate">{detail.pr.head_ref}</span>
                 <CopyIcon
                   className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100"
                   weight="regular"
                 />
-              </button>
-              <button
+              </Button>
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`+${detail.pr.additions} −${detail.pr.deletions}`}
                 type="button"
                 title="Go to the changes"
                 onClick={() =>
                   firstEntry && jumpTo({ kind: "entry", id: firstEntry.id })
                 }
-                className="hidden shrink-0 rounded-sm px-0.5 font-mono tabular-nums hover:bg-surface-level-1-hover lg:inline"
+                className="hidden h-auto shrink-0 border-0 px-0.5 font-mono tabular-nums hover:bg-surface-level-1-hover lg:inline"
               >
                 <span className="text-success-secondary">
                   +{detail.pr.additions}
@@ -239,25 +257,34 @@ export function Header({
                 <span className="text-error-secondary">
                   −{detail.pr.deletions}
                 </span>
-              </button>
+              </Button>
               {detail.pr.created_at && (
-                <a
+                <MacawLink
+                  variant="xs"
                   href={githubUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="hidden shrink-0 hover:text-primary hover:underline xl:inline"
+                  className={cn(
+                    INHERITED_LINK,
+                    "hidden shrink-0 hover:text-primary hover:underline xl:inline"
+                  )}
                 >
                   · opened <RelativeTimestamp value={detail.pr.created_at} />
-                </a>
+                </MacawLink>
               )}
             </p>
             {current && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`${current.standing.headline}. Back to top`}
                 type="button"
                 inert={!carrying}
                 onClick={() => jumpTo({ kind: "top" })}
                 className={cn(
-                  "group col-start-1 row-start-1 flex min-w-0 items-center gap-space-2 justify-self-start rounded-sm px-0.5 text-left text-xs transition-[opacity,translate] duration-normal ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
+                  "h-auto justify-start border-0 px-0",
+                  "group col-start-1 row-start-1 min-w-0 gap-space-2 justify-self-start px-0.5 text-left transition-[opacity,translate] ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
                   !carrying && "translate-y-1 opacity-0"
                 )}
               >
@@ -272,7 +299,7 @@ export function Header({
                   <ArrowUpIcon className="size-3" />
                   Back to top
                 </span>
-              </button>
+              </Button>
             )}
           </div>
         ) : (
@@ -291,15 +318,25 @@ export function Header({
           </div>
         )}
         {files.length > 0 && (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={`${viewedCount} / ${files.length} viewed`}
             type="button"
             onClick={jumpToUnviewed}
             title="Go to the next file you haven't viewed"
-            className="hidden shrink-0 items-center gap-space-2 rounded-md px-space-2 py-space-1 text-xs text-secondary tabular-nums hover:bg-surface-level-1-hover hover:text-primary md:flex"
+            className="hidden shrink-0 gap-space-2 px-space-2 py-space-1 text-secondary tabular-nums hover:bg-surface-level-1-hover hover:text-primary md:flex"
           >
-            <ProgressRing value={viewedCount / files.length} />
+            <CircularProgress
+              segments={[
+                { variant: "brand", percentage: viewedCount / files.length },
+              ]}
+              size={16}
+              strokeWidth={2}
+            />
             {viewedCount}/{files.length} viewed
-          </button>
+          </Button>
         )}
         {compactRail && (
           <Button
@@ -366,34 +403,5 @@ export function Header({
         </DropdownMenu>
       </div>
     </header>
-  )
-}
-
-function ProgressRing({ value }: { value: number }) {
-  const radius = 6
-  const circumference = 2 * Math.PI * radius
-  return (
-    <svg viewBox="0 0 16 16" className="size-4 -rotate-90" aria-hidden>
-      <circle
-        cx="8"
-        cy="8"
-        r={radius}
-        fill="none"
-        stroke="var(--border-default)"
-        strokeWidth="2"
-      />
-      <circle
-        cx="8"
-        cy="8"
-        r={radius}
-        fill="none"
-        stroke="var(--icon-brand)"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - value)}
-        className="transition-[stroke-dashoffset] duration-slow"
-      />
-    </svg>
   )
 }

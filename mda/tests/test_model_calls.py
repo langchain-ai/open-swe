@@ -18,6 +18,7 @@ from langchain_core.messages import (
     AnyMessage,
     BaseMessage,
     HumanMessage,
+    SystemMessage,
     ToolMessage,
 )
 from langchain_fireworks import ChatFireworks
@@ -223,3 +224,54 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
     )
 
     assert forwarded.model is (_OPENAI if with_image else _FIREWORKS)
+
+
+async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every run's prompt follows the graph's own, which ends in an Anthropic cache
+    breakpoint that a fallback to another provider does not carry."""
+    built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
+    monkeypatch.setattr(
+        "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
+    )
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    static = SystemMessage(content="The graph's own instructions")
+    sent: list[ModelRequest] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        sent.append(request)
+        if request.model is _ANTHROPIC:
+            raise RuntimeError("overloaded")
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    for prompt in ("First run's prompt", "Next run's prompt"):
+        call = ModelCall(
+            system_prompt=prompt,
+            model=ModelSpec(model_id="anthropic:opus", kwargs={}),
+            fallback=ModelSpec(model_id="openai:gpt", kwargs={}),
+            use_gateway=False,
+        )
+        messages: list[AnyMessage] = [HumanMessage(content="go")]
+        request = ModelRequest(
+            model=_ANTHROPIC,
+            messages=messages,
+            system_message=static,
+            state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+        )
+        await BackendRunMiddleware(run.backend).awrap_model_call(request, handler)
+
+    cached = {"type": "ephemeral", "ttl": "1h"}
+    first, first_fallback, second, _ = (cast(SystemMessage, r.system_message) for r in sent)
+    assert first.content == [
+        {"type": "text", "text": "The graph's own instructions", "cache_control": cached},
+        {"type": "text", "text": "First run's prompt"},
+    ]
+    assert second.content[0] == first.content[0]
+    assert second.content[1] == {"type": "text", "text": "Next run's prompt"}
+    assert first_fallback.content == [
+        {"type": "text", "text": "The graph's own instructions"},
+        {"type": "text", "text": "First run's prompt"},
+    ]
+    assert static.content == "The graph's own instructions"
