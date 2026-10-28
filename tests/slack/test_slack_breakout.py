@@ -126,12 +126,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
     request = _request()
-    destination = f"in <#{explicit}> " if explicit else ""
-    command = Command.from_message(
-        ParsedSlackMessage.parse(
-            f"<@U0BOT> /workspace:other /breakout {destination}fix it", "U0BOT"
-        )
-    )
+    command = Command("fix it", channel_id=explicit, options="/workspace:other", workspace="other")
     if email_only:
         request = request.model_copy(update={"thread_id": None})
         command = Command("fix it", channel_id=explicit)
