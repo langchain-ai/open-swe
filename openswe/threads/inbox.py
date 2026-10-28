@@ -247,7 +247,12 @@ class ThreadInbox:
             # model of any follow-up queued behind it.
             resolved_model_id = spec.model_id or await _resolve_thread_model_id(self.thread_id)
 
-        for content in contents:
+        for queued in queued_messages:
+            content = queued.content
+            if (message := queued.run_message) is not None:
+                _flush_blocks(queued_updates, content_blocks, injected)
+                queued_updates.append(cast(dict[str, Any], message))
+                continue
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on

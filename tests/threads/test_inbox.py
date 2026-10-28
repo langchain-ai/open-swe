@@ -8,6 +8,7 @@ from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import ReplySurface
 from openswe.threads.inbox import Taken, ThreadInbox
+from openswe.utils.thread_ops import queue_system_note_for_thread
 
 
 def _envelope(message: RunMessage) -> str:
@@ -42,6 +43,32 @@ async def test_inbox_announces_the_move_to_web_only_once(registry_db: None) -> N
 
     envelopes = [_envelope(message) for message in taken.messages]
     assert not any("system:dashboard-handoff" in envelope for envelope in envelopes)
+
+
+@pytest.mark.asyncio
+async def test_system_notes_reach_the_agent_without_waiting_in_the_dashboard(
+    registry_db: None,
+) -> None:
+    from openswe.threads.handlers import get_dashboard_thread_queued_messages
+
+    await queue_system_note_for_thread("thread-1", "Review accepted")
+
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        assert await get_dashboard_thread_queued_messages("thread-1", "octocat") == []
+    await QueuedMessage.put("thread-1", {"text": "My follow-up"})
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        previews = await get_dashboard_thread_queued_messages("thread-1", "octocat")
+    assert [preview.text for preview in previews] == ["My follow-up"]
+    taken = await _read()
+    envelope = _envelope(taken.messages[0])
+    assert envelope.startswith(
+        '<input-message sender="system:slack-note" surface="automation" kind="system">'
+    )
+    assert envelope.count("<input-message") == 1
+    assert "Review accepted" in envelope
+    assert "My follow-up" in _envelope(taken.messages[-1])
+    await ThreadInbox("thread-1").receive(taken.queued)
+    assert await QueuedMessage.for_thread("thread-1") == []
 
 
 @pytest.mark.asyncio

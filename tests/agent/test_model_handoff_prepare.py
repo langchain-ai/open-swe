@@ -99,8 +99,6 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         title_model=MagicMock(),
         source="slack",
         user_email="",
-        linear_project_id="",
-        linear_issue_number="",
         draft_prs=False,
         admin_workspaces=False,
     )
