@@ -102,7 +102,7 @@ class Readiness:
         if checks is None:
             return None
         required = await RequiredCheck.for_branch(
-            pull.repo, PullRequestPayload.model_validate(pr).base_ref
+            pull.repo, PullRequestPayload.model_validate(pr).base_ref, require_mappable_rules=True
         )
         if required is None:
             return None
