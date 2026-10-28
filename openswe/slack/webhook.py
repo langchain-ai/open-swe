@@ -1185,6 +1185,7 @@ async def _process_slack_mention_impl(
         "user_email": user_email,
         "source": "slack",
         "slack_kickoff_eligible": False,
+        "slack_action_token": request.action_token,
     }
     if review_guide:
         # The thread keeps the last run's configurable, which may be a click's.

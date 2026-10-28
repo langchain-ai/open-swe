@@ -12,7 +12,7 @@ import re
 import uuid
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
@@ -68,6 +68,7 @@ class SlackAskRequest(BaseModel):
     thread_id: str
     command: str = ASK_COMMAND
     team_id: str = ""
+    action_token: str = Field(default="", repr=False)
     response_url: str = ""
     selected_message: str = ""
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
@@ -290,6 +291,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
 
     configurable: dict[str, Any] = {
         **source_context.dump(),
+        "slack_action_token": request.action_token,
         "repo": repo,
         "source": "slack",
         "github_login": login,
