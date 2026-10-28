@@ -1,10 +1,13 @@
 import shlex
+import subprocess
+from pathlib import Path
 from typing import cast
 
+import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.sandboxes.lifecycle import configure_git_identity
-from openswe.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.paths import resolve_checkout_dir, resolve_repo_dir, resolve_sandbox_work_dir
 
 
 class _FakeProvider:
@@ -153,3 +156,24 @@ async def test_desktop_checkout_keeps_its_cwd_over_workspace() -> None:
     probes = len(backend.commands)
     assert await resolve_sandbox_work_dir(sandbox) == "/home/me/repo"
     assert len(backend.commands) == probes
+
+
+class _ShellBackend:
+    id = "shell-sandbox"
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        del timeout
+        result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
+        return ExecuteResponse(output=result.stdout, exit_code=result.returncode)
+
+
+async def test_a_workspace_checkout_is_found_from_another_work_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace" / "repo" / ".git").mkdir(parents=True)
+    monkeypatch.setattr("openswe.sandboxes.paths.WORKSPACE_DIR", str(tmp_path / "workspace"))
+    sandbox = cast(SandboxBackendProtocol, _ShellBackend())
+
+    checkout = await resolve_checkout_dir(sandbox, str(tmp_path / "root"), "repo")
+
+    assert checkout == str(tmp_path / "workspace" / "repo")
