@@ -254,7 +254,6 @@ async def test_source_switch_keeps_system_prompt_and_moves_run_context_to_messag
         run_ids.append(ElementTree.fromstring(added[0]["content"]).get("id") if added else None)
 
     assert len(system_prompts) == 1
-    assert "Repository Modification Scope" in system_prompts.pop()
     assert run_ids == [
         "source:slack",
         "source:github",

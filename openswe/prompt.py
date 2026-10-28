@@ -148,7 +148,8 @@ def construct_system_prompt(
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
         default_prompt_section=_load_default_prompt(),
-        repository_scope_section=_render_repository_scope_section(),
+        # A local checkout is the user's own repository, which the org boundary never covered.
+        repository_scope_section="" if local_checkout else _render_repository_scope_section(),
         collaboration_section=_render_collaboration_section(),
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
