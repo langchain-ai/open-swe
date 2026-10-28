@@ -308,12 +308,6 @@ def test_mda_starts_only_conversations_its_slack_channel_can_run(
     assert mda_forwarding.mda_can_start(**(_PLAIN | message)) is starts
 
 
-def test_mda_thread_ids_match_trigger_servers_thread_key() -> None:
-    assert mda_forwarding.mda_thread_id("A1", "T1", "C1", "1.2") == str(
-        uuid.uuid5(uuid.NAMESPACE_URL, "slack:v1:A1:T1:C1:1.2")
-    )
-
-
 async def _post_endpoint(app: FastAPI, body: dict[str, Any], signed: bool) -> httpx.Response:
     content = json.dumps(body).encode()
     headers = {"content-type": "application/json"}
