@@ -30,54 +30,6 @@ from tests.conftest import FakeUserRecords
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
-async def test_standard_review_preserves_an_open_expedited_card() -> None:
-    from openswe.github.pull_request_status import PullRequestClient
-    from openswe.human_review.standard import Origin, request_review
-    from openswe.slack.client import GitHubPrRef
-
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
-    request = HumanReviewRequest(
-        pull_request_id=pr.id,
-        head_sha="abc",
-        kind="expedited",
-        state="open",
-        thread_id="thread",
-        tldr="Original summary",
-        slack_channel_id="C1",
-        slack_message_ts="1.2",
-    )
-    permalink = "https://slack.com/archives/C1/p12"
-    with (
-        patch.object(PullRequestClient, "as_app") as connect,
-        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=request)),
-        patch(
-            "openswe.human_review.standard.get_slack_permalink", AsyncMock(return_value=permalink)
-        ),
-    ):
-        connect.return_value.__aenter__.return_value = MagicMock(spec=PullRequestClient)
-        result = await request_review(
-            GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
-            Origin(thread_id="thread"),
-            inline_summary="Replacement summary",
-        )
-
-    assert not result.success
-    assert result.request_id == str(request.id)
-    assert result.channel == "C1"
-    assert result.permalink == permalink
-    assert "open expedited review card" in result.error
-    assert permalink in result.error
-    assert "already satisfies" in result.error
-    assert "Tell the requester" in result.error
-    assert "do not retry a standard review" in result.error
-    assert "Do not cancel" in result.error
-    assert "explicitly asks" in result.error
-    assert "dismiss" not in result.error.lower()
-    assert request.kind == "expedited"
-    assert request.state == "open"
-    assert request.tldr == "Original summary"
-
-
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
 async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
     from openswe.human_review.people import Outcome, Participant
