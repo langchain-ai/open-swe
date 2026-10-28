@@ -7,7 +7,7 @@ import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, quote
 
 import httpx2
@@ -212,6 +212,7 @@ __all__ = [
     "is_pr_diff_unchanged_since_last_review",
     "is_repo_allowed",
     "is_repo_auto_review_enabled",
+    "account_link_reason",
     "post_account_link_prompt",
     "refresh_thread_github_token_after_401",
     "repo_id_from_payload",
@@ -943,12 +944,45 @@ async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
     ) or DEFAULT_WORKSPACE_SLUG
 
 
+AccountLinkReason = Literal["revoked", "unlinked"]
+
+
+async def account_link_reason(login: str | None) -> AccountLinkReason | None:
+    """Why ``login`` must sign in to Open SWE before starting a run, or ``None``.
+
+    Open SWE acts on GitHub as the person who asked, so a run needs their usable
+    GitHub token. ``"unlinked"``: they never signed in with GitHub. ``"revoked"``:
+    the stored authorization is no longer usable. A failed read asks them to sign
+    in rather than starting a run that can't act as them.
+    """
+    if not login:
+        return "unlinked"
+    try:
+        if await get_valid_access_token(login):
+            return None
+    except Exception:
+        logger.warning(
+            "Resolving a GitHub token failed; asking to sign in",
+            exc_info=True,
+            extra={"github_login": login},
+        )
+    try:
+        return "revoked" if await has_access_token_record(login) else "unlinked"
+    except Exception:
+        logger.warning(
+            "Checking for a GitHub token record failed; asking to sign in",
+            exc_info=True,
+            extra={"github_login": login},
+        )
+        return "unlinked"
+
+
 async def post_account_link_prompt(
     channel_id: str,
     thread_ts: str,
     user_id: str,
     user_email: str | None,
-    reason: str = "unlinked",
+    reason: AccountLinkReason = "unlinked",
     agent_thread_id: str | None = None,
     ephemeral: bool = False,
 ) -> None:

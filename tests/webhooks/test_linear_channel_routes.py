@@ -16,6 +16,7 @@ from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.linear import channel, session
 from openswe.linear.session import NO_REPOSITORY, UNREADABLE_SESSION
+from openswe.users import User, UserIdentity
 from tests.mda_helpers import mda_declines, mda_starts, stub_mda_runtime
 
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
@@ -188,7 +189,9 @@ async def test_mda_starts_the_run_a_session_turn_prepares(
         "repository",
         AsyncMock(return_value=({"owner": "acme", "name": "api"}, None)),
     )
-    monkeypatch.setattr(session.User, "login_for_email", AsyncMock(return_value="ada"))
+    ada = User(identities=[UserIdentity(provider="github", external_id="1", login="ada")])
+    monkeypatch.setattr(session.User, "for_email", AsyncMock(return_value=ada))
+    monkeypatch.setattr(session.common, "get_valid_access_token", AsyncMock(return_value="gho"))
     monkeypatch.setattr(
         session.common.ThreadRecord,
         "read",
@@ -239,6 +242,51 @@ async def test_mda_starts_the_run_a_session_turn_prepares(
     assert "invocation_id" in metadata
     reserved = {"user_id", "ls_repo_provider", "ls_attribution_identifier", ACTING_USER_KEY}
     assert not reserved & metadata.keys()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("signed_in", "decline"),
+    [
+        (None, "using the same email as your Linear account"),
+        (False, "Your GitHub sign-in to Open SWE is no longer valid"),
+    ],
+    ids=["unknown-author", "revoked-authorization"],
+)
+async def test_a_session_turn_from_someone_who_cant_run_as_themselves_asks_them_to_sign_in(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, signed_in: bool | None, decline: str
+) -> None:
+    ada = User(identities=[UserIdentity(provider="github", external_id="1", login="ada")])
+    monkeypatch.setattr(
+        session.User, "for_email", AsyncMock(return_value=None if signed_in is None else ada)
+    )
+    monkeypatch.setattr(session.common, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(session.common, "has_access_token_record", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        session, "build_settings_url", lambda: "https://swe.example/my-settings/connections"
+    )
+    thread = AsyncMock()
+    monkeypatch.setattr(session.common.ThreadRecord, "read", thread)
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "created",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "agentSession": {
+            "id": "session-1",
+            "issue": {"id": "issue-1", "identifier": "ENG-1", "title": "Bug"},
+            "comment": {"id": "comment-1", "body": "@Open SWE fix it in repo:acme/api"},
+            "creator": {"id": "user-1", "name": "Ada", "email": "ada@example.com"},
+        },
+    }
+
+    response = await _post(app, _call("AgentSessionEvent.created", payload))
+
+    text = mda_declines(response.json())
+    assert decline in text
+    assert "(https://swe.example/my-settings/connections)" in text
+    # Declined before the thread is read or adopted.
+    thread.assert_not_awaited()
 
 
 @pytest.mark.asyncio
