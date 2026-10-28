@@ -69,7 +69,7 @@ class RequiredCheck:
     async def for_branch(
         cls, repo: RepoClient, branch: str, *, include_review_checks: bool = False
     ) -> set[Self] | None:
-        """Checks ``branch`` requires, from branch protection and rulesets; read access suffices."""
+        """Required status checks, or ``None`` if unreadable or rules cannot map to check names."""
         try:
             protection = _Branch.model_validate(await repo.branch(branch)).protection
             rules = _BRANCH_RULES.validate_python(await repo.branch_rules(branch))
@@ -78,6 +78,17 @@ class RequiredCheck:
                 "Failed to read required checks",
                 extra={"repo_full_name": repo.full_name, "branch": branch},
                 exc_info=True,
+            )
+            return None
+        unsupported = sorted({rule.type for rule in rules} & {"workflows", "code_scanning"})
+        if unsupported:
+            logger.warning(
+                "Required checks include unsupported rules",
+                extra={
+                    "repo_full_name": repo.full_name,
+                    "branch": branch,
+                    "rule_types": unsupported,
+                },
             )
             return None
         required: set[Self] = set()
