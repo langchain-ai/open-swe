@@ -38,6 +38,7 @@ from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
+from openswe.threads.store import THREADS
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -210,6 +211,38 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     return result
 
 
+async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
+    result = {key: item.get(key) for key in ("id", "status", "createdAt", "updatedAt", "title")}
+    result["webUrl"] = _web_link(item)
+    pr = item.get("pr")
+    result["pr"] = (
+        {key: pr.get(key) for key in ("url", "number", "state")}
+        if isinstance(pr, Mapping)
+        else None
+    )
+    messages = item.get("messages")
+    final_message = item.get("final_message")
+    outcome = (
+        final_message
+        if isinstance(final_message, str) and final_message
+        else _last_assistant_outcome(messages if isinstance(messages, list) else [])
+    )
+    thread_id = item.get("id")
+    if outcome is None and isinstance(thread_id, str):
+        thread_state = await THREADS.state(thread_id)
+        outcome = _last_assistant_outcome(_state_messages(thread_state))
+    result["final_message"] = outcome[:500] if outcome else None
+    return result
+
+
+def _last_assistant_outcome(messages: list[object]) -> str | None:
+    for message in reversed(messages):
+        if _message_kind(message) in {"ai", "assistant"} and not _value(message, "tool_calls"):
+            if text := _plain_message_text(_message_content(message)):
+                return text
+    return None
+
+
 def _exact_locator_filters(
     *,
     participant: str | None,
@@ -258,6 +291,7 @@ async def list_threads(
     scope: ThreadScope = "all",
     automation_id: str | None = None,
     admin_threads: bool | None = None,
+    summary_only: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
@@ -272,6 +306,7 @@ async def list_threads(
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
 
+    compact = summary_only if summary_only is not None else scope == "automation"
     normalized_query = query.strip() if isinstance(query, str) else ""
     exact_locator = (
         parse_langsmith_locator(normalized_query) is not None
@@ -306,9 +341,20 @@ async def list_threads(
             if isinstance(resolved_locator, dict):
                 return resolved_locator
             _, summary = resolved_locator
+            try:
+                item = (
+                    await _compact_list_item(summary)
+                    if compact
+                    else _list_item(summary, locator=normalized_query)
+                )
+            except Exception:
+                logger.exception(
+                    "Could not load thread outcome", extra={"thread_id": summary.get("id")}
+                )
+                return _failure("Could not list threads")
             return {
                 "success": True,
-                "items": [_list_item(summary, locator=normalized_query)],
+                "items": [item],
                 "limit": 1,
                 "offset": 0,
                 "has_more": False,
@@ -347,9 +393,16 @@ async def list_threads(
     items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
+    try:
+        results = [
+            await _compact_list_item(item) if compact else _list_item(item) for item in items
+        ]
+    except Exception:
+        logger.exception("Could not load thread outcomes")
+        return _failure("Could not list threads")
     return {
         "success": True,
-        "items": [_list_item(item) for item in items],
+        "items": results,
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
@@ -437,12 +490,26 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
+def _last_assistant_message(state: object) -> dict[str, object] | None:
+    for message in reversed(_state_messages(state)):
+        if _message_kind(message) not in {"ai", "assistant"}:
+            continue
+        text = _plain_message_text(_message_content(message))
+        if text:
+            return {
+                "text": text[-_MAX_DETAIL_MESSAGE_CHARS:],
+                "truncated": len(text) > _MAX_DETAIL_MESSAGE_CHARS,
+                "timestamp": _message_timestamp(message),
+            }
+    return None
+
+
 def _transcript(state: Any) -> dict[str, Any]:
     messages = _state_messages(state)
     visible: list[dict[str, Any]] = []
     omitted = 0
     used_chars = 0
-    for message in messages:
+    for message in reversed(messages):
         kind = _message_kind(message)
         if kind not in {"human", "user", "ai", "assistant"}:
             omitted += 1
@@ -456,7 +523,7 @@ def _transcript(state: Any) -> dict[str, Any]:
             omitted += 1
             continue
         remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        returned_text = text[-min(_MAX_DETAIL_MESSAGE_CHARS, remaining) :]
         visible.append(
             {
                 "id": _message_id(message),
@@ -469,7 +536,7 @@ def _transcript(state: Any) -> dict[str, Any]:
         )
         used_chars += len(returned_text)
     return {
-        "messages": visible,
+        "messages": list(reversed(visible)),
         "message_count": len(messages),
         "returned_count": len(visible),
         "omitted_count": omitted,
@@ -766,7 +833,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Implement the `get_thread` tool."""
+    """Inspect a thread, including last_assistant_message (text tail, truncated, timestamp) or None."""
     actor = await _reader(state)
     if actor is None:
         return _failure(_NO_ACTOR)
@@ -838,6 +905,7 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "last_assistant_message": _last_assistant_message(thread_state),
         "transcript": _transcript(thread_state),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
