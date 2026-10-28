@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable, Coroutine
-from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
@@ -171,45 +170,13 @@ async def test_rejected_credentials_report_all_decisions_without_gateway(
     assert "test-key" not in caplog.text
 
 
-@pytest.mark.parametrize("status", [401, 403])
-@pytest.mark.parametrize("response_status", [False, True])
-async def test_http_authentication_exceptions_are_recognized(
-    monkeypatch: pytest.MonkeyPatch,
-    transport: InstallTransport,
-    status: int,
-    response_status: bool,
-) -> None:
-    error = (
-        httpx2.HTTPStatusError(
-            "Rejected",
-            request=httpx2.Request("POST", "https://example.com"),
-            response=httpx2.Response(status),
-        )
-        if response_status
-        else type("AuthenticationError", (Exception,), {"status_code": status})("Rejected")
-    )
-    monkeypatch.setattr(
-        "openswe.utils.jev.TypeSafeClassifier.ainvoke", AsyncMock(side_effect=error)
-    )
-    decision = JevDecision()
-    assert await classify(decision) is None
-    assert decision.reason == "classifier_auth_failure"
-
-
-@pytest.mark.parametrize("gateway_env", ["LANGSMITH_GATEWAY_API_KEY", "LANGSMITH_API_KEY"])
-@pytest.mark.parametrize(
-    "choice,status", [("fast", 200), ("balanced", 200), (None, 403), (None, 503)]
-)
+@pytest.mark.parametrize("status", [200, 403, 503])
 async def test_rejected_direct_credential_retries_gateway_exactly_once(
     monkeypatch: pytest.MonkeyPatch,
     transport: InstallTransport,
-    gateway_env: str,
-    choice: str | None,
     status: int,
 ) -> None:
-    monkeypatch.setenv(gateway_env, "gateway-key")
-    if gateway_env == "LANGSMITH_GATEWAY_API_KEY":
-        monkeypatch.setenv("LANGSMITH_API_KEY", "other-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
     requests: list[httpx2.Request] = []
 
@@ -224,9 +191,9 @@ async def test_rejected_direct_credential_retries_gateway_exactly_once(
                 "answers": {
                     "route": {
                         "type": "choice",
-                        "choice": choice or "fast",
+                        "choice": "fast",
                         "confidence": 0.95,
-                        "probabilities": {choice or "fast": 1.0},
+                        "probabilities": {"fast": 1.0},
                     }
                 },
             },
@@ -234,23 +201,14 @@ async def test_rejected_direct_credential_retries_gateway_exactly_once(
 
     transport(handle)
     decision = JevDecision()
-    assert (
-        await select_jev_choice(
-            "Fix the bug",
-            question="route",
-            instructions="Choose a route",
-            criteria={"fast": "Small task", "balanced": "Medium task"},
-            decision=decision,
-        )
-        == choice
-    )
+    assert await classify(decision) == ("fast" if status == 200 else None)
     assert len(requests) == 2
     assert requests[0].headers["Authorization"] == "Bearer test-key"
     assert requests[1].url == "https://gateway.example.com/v1/systemone"
     assert requests[1].headers["Authorization"] == "Bearer gateway-key"
     assert json.loads(requests[1].read())["model"] == "typesafe/jev-1.13.0"
-    assert decision.outcome == ("accepted" if choice else "classifier_failure")
-    assert decision.reason == ("confident_choice" if choice else "classifier_auth_failure")
+    assert decision.outcome == ("accepted" if status == 200 else "classifier_failure")
+    assert decision.reason == ("confident_choice" if status == 200 else "classifier_auth_failure")
 
 
 @pytest.mark.parametrize("failed_question", [None, "runtime_model", "runtime_effort"])

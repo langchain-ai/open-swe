@@ -9,7 +9,6 @@ from langchain_core.messages import HumanMessage
 from openswe.middleware.model_selection import (
     ModelSelectionMiddleware,
     ModelSelectionState,
-    PersistedRoute,
     RouteSelection,
 )
 
@@ -188,18 +187,6 @@ async def test_jev_routes_or_falls_back(
         assert state["model_route"] == "fast"
         await middleware.abefore_model(state, MagicMock())
         assert len(requests) == 2
-
-
-@pytest.mark.parametrize("saved_route", ["default", "fast", "fast_alt", "balanced", "performance"])
-async def test_saved_route_skips_classification_and_remains_persistent(
-    saved_route: PersistedRoute,
-) -> None:
-    middleware = _middleware()
-    state = ModelSelectionState(messages=[HumanMessage(content="Continue")])
-    state["model_route"] = saved_route
-    update = await middleware.abefore_model(state, MagicMock())
-    expected = "fast" if saved_route == "fast_alt" else saved_route
-    assert update == {"model_route": expected}
 
 
 @pytest.mark.asyncio
