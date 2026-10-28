@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolCall, ToolMessage
 from langgraph.config import get_config
@@ -19,7 +20,7 @@ from langgraph_sdk import get_client
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
-from openswe.sandboxes.state import SANDBOX_BACKENDS
+from openswe.sandboxes.state import SANDBOX_BACKENDS, get_sandbox_backend
 from openswe.slack.client import (
     LANGGRAPH_URL,
     get_active_slack_thread,
@@ -45,7 +46,7 @@ _DIFF_PREVIEW_MAX_LINES = 400
 
 
 class WorkflowPushInspectionError(RuntimeError):
-    """A lease-protected push could not be inspected safely."""
+    """A push could not be inspected safely."""
 
 
 @dataclass(frozen=True)
@@ -62,11 +63,10 @@ class ParsedGitPush:
         return self.remote_ref.removeprefix("refs/heads/")
 
     def inspection_failed(self) -> None:
-        if self.force_with_lease is not None:
-            raise WorkflowPushInspectionError(
-                "Cannot inspect this lease-protected push. Push the current branch to the "
-                "same branch on origin and ensure the repository can be inspected. Nothing ran."
-            )
+        raise WorkflowPushInspectionError(
+            "Cannot inspect this push. Push the current branch to the same branch on origin "
+            "and ensure the repository can be inspected. Nothing ran."
+        )
 
     def command_for_head(self, repo_dir: str, head_sha: str) -> str:
         args = ["push"]
@@ -135,8 +135,19 @@ def _thread_id(request: ToolCallRequest) -> str | None:
     return _configurable(request).thread_id or None
 
 
-def _backend(thread_id: str | None) -> Any | None:
-    return SANDBOX_BACKENDS.get(thread_id) if thread_id else None
+async def _backend(thread_id: str | None) -> SandboxBackendProtocol | None:
+    if not thread_id:
+        return None
+    backend = SANDBOX_BACKENDS.get(thread_id)
+    if backend is not None:
+        return backend
+    try:
+        return await get_sandbox_backend(thread_id)
+    except Exception:
+        logger.warning(
+            "Workflow push sandbox connection failed", extra={"thread_id": thread_id}, exc_info=True
+        )
+        return None
 
 
 # What deepagents' local shell backend reports for a command that printed nothing.
@@ -462,13 +473,6 @@ async def _workflow_change_for_push(
     if not root:
         return parsed.inspection_failed()
 
-    branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
-    branch_name = _first_line(branch.output) if branch.ok else ""
-    if not branch_name or branch_name == "HEAD" or parsed.remote_branch != branch_name:
-        return parsed.inspection_failed()
-    if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
-        return parsed.inspection_failed()
-
     target_sha = await _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
     head = _first_line(target_sha.output) if target_sha.ok else ""
     if not head or not _GIT_OBJECT_ID.fullmatch(head):
@@ -506,6 +510,13 @@ async def _workflow_change_for_push(
     )
     if not files:
         return None
+
+    branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
+    branch_name = _first_line(branch.output) if branch.ok else ""
+    if not branch_name or branch_name == "HEAD" or parsed.remote_branch != branch_name:
+        return parsed.inspection_failed()
+    if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
+        return parsed.inspection_failed()
 
     diff = await _run_git(
         backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows"
@@ -695,7 +706,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             parsed = _parse_git_push(command)
             if parsed is None:
                 continue
-            backend = _backend(_thread_id(request))
+            backend = await _backend(_thread_id(request))
             if backend is None:
                 return parsed.inspection_failed()
             return await _workflow_change_for_push(backend, parsed)
@@ -753,9 +764,9 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             for command in shell_commands(request)
             for repo_dir in _chained_push_dirs(command)
         ]
-        backend = _backend(_thread_id(request)) if dirs else None
+        backend = await _backend(_thread_id(request)) if dirs else None
         if backend is None:
-            return False
+            return bool(dirs)
         for repo_dir in dirs:
             if await _may_push_workflow_changes(backend, repo_dir):
                 return True
