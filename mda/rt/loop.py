@@ -171,6 +171,19 @@ def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
     return None
 
 
+def _run_guidance(messages: Sequence[BaseMessage]) -> dict[str, str]:
+    """The latest run guidance for each block id in the conversation."""
+    latest: dict[str, str] = {}
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        for text in _texts(message.content):
+            root = _root(text, "dynamic-context")
+            if root is not None and root.get("kind") == "run" and (key := root.get("id")):
+                latest[key] = text
+    return latest
+
+
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     held = state.get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
@@ -269,7 +282,12 @@ class RunLoop:
         update = await self._github_proxy(held)
         context = await self._task_context()
         visible = _visible(state)
-        added: list[BaseMessage] = []
+        visible_guidance = _run_guidance(visible)
+        added: list[BaseMessage] = [
+            HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}")
+            for key, text in _run_guidance(_messages(state)).items()
+            if key != "task-role" and text != visible_guidance.get(key)
+        ]
         if context.instructions and context.instructions != _latest(visible, _ROLE):
             added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
         run_context = _latest(_messages(state), _RUN_CONTEXT)
