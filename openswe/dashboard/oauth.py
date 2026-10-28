@@ -457,7 +457,7 @@ def build_settings_url() -> str | None:
 
 
 async def current_session(session: dict[str, Any]) -> dict[str, Any] | None:
-    """``session`` acting as its person's current GitHub login, or ``None`` once they have none.
+    """``session`` acting as its person's current GitHub login, or ``None`` once it is not theirs.
 
     GitHub reassigns a login after a rename, so the login a session was minted
     with can come to name someone else; everything downstream resolves people by
@@ -468,6 +468,8 @@ async def current_session(session: dict[str, Any]) -> dict[str, Any] | None:
         return session
     try:
         user = await User.for_session(user_id, session["sub"])
+        login = user.github_login if user is not None else ""
+        holder = await User.for_login("github", login) if login else None
     except Exception:
         # Best effort: the dashboard must still boot from the session alone when
         # the database is unreachable.
@@ -477,8 +479,9 @@ async def current_session(session: dict[str, Any]) -> dict[str, Any] | None:
             exc_info=True,
         )
         return session
-    login = user.github_login if user is not None else ""
-    if not login:
+    if user is None:
+        return session
+    if holder is None or holder.id != user.id:
         return None
     return session if login == session.get("sub") else {**session, "sub": login}
 
