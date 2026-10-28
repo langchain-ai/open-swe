@@ -68,7 +68,6 @@ from langgraph.types import Command
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
 from runtime_api.catalog import (
-    CATALOG,
     SEARCH_TOOLS,
     Catalog,
     FilesSpec,
@@ -189,7 +188,6 @@ from openswe.agent_api.tokens import (
     AgentTurnSettings,
     RemoteRun,
     RunSettings,
-    sign_runtime_token,
 )
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -442,12 +440,12 @@ class RunSession:
             ),
         )
 
-    async def plan(self, run: RemoteRun | None = None) -> Catalog:
+    async def plan(self) -> Catalog:
         """The catalog, with who the run acts for, the box MDA creates for it, and the grant
-        of each operation to the run (``run``, or the one this session serves)."""
+        of each operation to the run this session serves."""
         sandbox = await self.sandbox()
         catalog = self.catalog()
-        run = run or self.run
+        run = self.run
         return catalog.model_copy(
             update={
                 "trace_metadata": trace_actor(self.config),
@@ -1267,17 +1265,6 @@ def _message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
     return [block for block in content if isinstance(block, str | dict)]
 
 
-async def _catalog(session: RunSession, _request: RunRequest) -> Catalog:
-    """The catalog of a run started without it, and a token that carries what was decided."""
-    if session.run is None:
-        return await session.plan()
-    run = session.run.model_copy(update={"settings": session.settings()})
-    if run.grant_id is None:
-        run = run.granting()
-    catalog = await session.plan(run)
-    return catalog.model_copy(update={"run_token": sign_runtime_token(run)})
-
-
 def _b64(data: bytes | None) -> str | None:
     return None if data is None else base64.b64encode(data).decode()
 
@@ -1408,8 +1395,6 @@ TOOL_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
 # The calls answered from the run's plan: its preparation, and every phase and tool
 # call of a run still served from it.
 API: Final = Handlers[RunSession]()
-# Only for runs started without their catalog in the context.
-API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(AFTER_MODEL, RunSession.after_model)

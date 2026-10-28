@@ -401,8 +401,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     ) -> tuple[dict[str, object] | None, bool]:
         """The update preparing the run makes, and whether the box is open, as far as
         this run tried."""
-        # Every call the run makes reads its catalog; the graph holds none of it.
-        await self._backend.run.plan()
         trace = turn_trace(self._backend.run)
         trace.start(self._trace_metadata())
         if self._backend.awaiting_adoption:

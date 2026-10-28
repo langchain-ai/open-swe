@@ -770,7 +770,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
     graph = RemoteGraph("agent", build)
-    catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
+    run = RUN.granting()
+    started = await graph.start_run(run)
+    catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]
@@ -818,17 +820,11 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     from openswe.prompts import prompt
 
     assert catalog["search_tools_description"] == prompt("tools/search_tools")
-    # A run started without its catalog gets a token that carries what was decided for
-    # it here, and grants its operations under it, but lives no longer than the one it had.
-    token = catalog["run_token"]
-    assert isinstance(token, str)
-    resigned = verify_runtime_token(token)
-    assert resigned.thread_id == RUN.thread_id and resigned.grant_id is not None
-    assert resigned.expires_at == RUN.expires_at
-    assert resigned.settings.draft_prs is False
+    # What planning decided for the run rides in its settings, and each operation is
+    # granted to the run under its grant id.
+    assert started.settings.draft_prs is False
     assert all(
-        isinstance(op, dict) and resigned.granted(str(op["name"]), str(op["grant"]))
-        for op in operations
+        isinstance(op, dict) and run.granted(str(op["name"]), str(op["grant"])) for op in operations
     )
 
 
@@ -972,6 +968,7 @@ async def _call_status(
     monkeypatch: pytest.MonkeyPatch, token: str, endpoint: str
 ) -> tuple[int, list[tuple[str, str]]]:
     """Call ``endpoint`` with ``token`` and report the status and what served it, as whom."""
+    from runtime_api.catalog import Catalog
     from runtime_api.endpoint import Handlers, UnknownEndpointError
     from runtime_api.workers import ADOPT, Adopt, Adopted
 
@@ -980,14 +977,14 @@ async def _call_status(
     served: list[tuple[str, str]] = []
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
-        if called not in {"catalog", "prepare", "before_model", "after_agent"}:
+        if called not in {"prepare", "before_model", "after_agent"}:
             raise UnknownEndpointError(called)
         served.append((called, run.thread_id))
         return {}
 
     async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         served.append(("adopt", grant.coordinator.thread_id))
-        return Adopted(run_token="worker-token")
+        return Adopted(run_token="worker-token", catalog=Catalog())
 
     grants = Handlers[WorkerGrant]()
     grants.serve(ADOPT, adopt)
@@ -1075,7 +1072,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     assert hook["session_name"] == "turns"
 
 
-async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_else(
+async def test_a_worker_grant_only_adopts_a_run_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
@@ -1085,12 +1082,15 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     with pytest.raises(RuntimeTokenError):
         verify_worker_grant(sign_runtime_token(coordinator))
 
-    assert await _call_status(monkeypatch, grant, "catalog") == (
-        200,
-        [("catalog", "coordinator")],
-    )
     assert await _call_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
-    for endpoint in ("prepare", "before_model", "operation", "after_agent", "launch_worker"):
+    for endpoint in (
+        "catalog",
+        "prepare",
+        "before_model",
+        "operation",
+        "after_agent",
+        "launch_worker",
+    ):
         assert await _call_status(monkeypatch, grant, endpoint) == (403, [])
     # A run token never adopts: only a launched worker's grant does.
     status, _ = await _call_status(monkeypatch, sign_runtime_token(coordinator), "adopt")
@@ -1188,7 +1188,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
-    # Planned as the worker's own run, so its first run never asks for a catalog.
+    # Planned as the worker's own run.
     assert reply.catalog == planned
     assert graph.start_run.await_args.args[0].thread_id == "worker"
     # The settings the worker's run starts with ride in its token.

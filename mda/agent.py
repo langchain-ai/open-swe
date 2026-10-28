@@ -129,7 +129,7 @@ async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
         # A read: through the agent's graph, which has every graph's shape.
         return GraphInputs()
     context = RunContext.model_validate(execution.context or {})
-    catalog = await context.run().plan()
+    catalog = context.run().planned
     return GraphInputs(graph=context.graph, worker_webhook=catalog.worker_webhook)
 
 
