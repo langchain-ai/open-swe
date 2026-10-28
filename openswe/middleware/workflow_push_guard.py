@@ -463,21 +463,7 @@ def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     return dashboard_workflow_approval_url(thread_id, fingerprint)
 
 
-async def _new_branch_base(
-    backend: SandboxBackendProtocol, root: str, head: str, base_branch: str | None
-) -> str:
-    if base_branch:
-        branch = base_branch.removeprefix("refs/heads/").removeprefix("origin/")
-        base_ref = (
-            base_branch
-            if base_branch.startswith("refs/remotes/")
-            else f"refs/remotes/origin/{branch}"
-        )
-        merge_base = await _run_git(
-            backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
-        )
-        if merge_base.ok and merge_base.output:
-            return _first_line(merge_base.output)
+async def _new_branch_base(backend: SandboxBackendProtocol, root: str, head: str) -> str:
     upstream = await _run_git(backend, root, "rev-parse --symbolic-full-name '@{upstream}'")
     if upstream.ok and upstream.output:
         merge_base = await _run_git(
@@ -503,7 +489,7 @@ async def _new_branch_base(
 
 
 async def _workflow_change_for_push(
-    backend: SandboxBackendProtocol, parsed: ParsedGitPush, *, base_branch: str | None = None
+    backend: SandboxBackendProtocol, parsed: ParsedGitPush
 ) -> WorkflowPushChange | None:
     root_result = await _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
     if not root_result.ok:
@@ -525,7 +511,7 @@ async def _workflow_change_for_push(
         base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(remote_branch)}")
         base_sha = _first_line(base_result.output) if base_result.ok else ""
     else:
-        base_sha = await _new_branch_base(backend, root, head, base_branch)
+        base_sha = await _new_branch_base(backend, root, head)
     if not base_sha:
         return parsed.inspection_failed()
     range_expr = f"{shlex.quote(base_sha)}..{shlex.quote(head)}"
@@ -746,9 +732,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             backend = await _backend(_thread_id(request))
             if backend is None:
                 return parsed.inspection_failed()
-            return await _workflow_change_for_push(
-                backend, parsed, base_branch=_configurable(request).base_branch
-            )
+            return await _workflow_change_for_push(backend, parsed)
         return None
 
     async def _handle_change_async(

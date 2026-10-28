@@ -112,7 +112,6 @@ class RunConfig(BaseModel):
     repo_private: bool | None = None
     repo_explicitly_none: bool | None = None
     branch_name: str | None = None
-    base_branch: str | None = None
 
     # Where the run came from
     slack_thread: SlackThreadRef | None = None

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shlex
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -228,9 +229,9 @@ class _GitBackend:
         return result.output.strip()
 
 
-@pytest.mark.parametrize("base", [None, "v15-stable"])
+@pytest.mark.parametrize("upstream", [False, True])
 async def test_release_branch_push_excludes_inherited_workflows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base: str | None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: bool
 ) -> None:
     backend = _GitBackend(tmp_path)
     await backend.git("init -b main")
@@ -253,12 +254,18 @@ async def test_release_branch_push_excludes_inherited_workflows(
     (tmp_path / "uv.lock").write_text("dependency update\n")
     await backend.git("add uv.lock")
     await backend.git("commit -qm dependency")
-    parsed = guard.ParsedGitPush(str(tmp_path), "origin", "feature", "feature")
-    assert await guard._workflow_change_for_push(backend, parsed, base_branch=base) is None
+    if upstream:
+        await backend.git("config remote.origin.url https://github.com/example/repo.git")
+        await backend.git("config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'")
+        await backend.git("branch --set-upstream-to=origin/v15-stable")
+    monkeypatch.setattr(guard, "_backend", AsyncMock(return_value=backend))
+    request = _Request(f"git -C {shlex.quote(str(tmp_path))} push origin feature")
+    middleware = guard.WorkflowPushGuardMiddleware()
+    assert await middleware._change_for_request(request) is None
 
     workflow.write_text("new workflow\n")
     await backend.git("commit -qam workflow")
-    change = await guard._workflow_change_for_push(backend, parsed, base_branch=base)
+    change = await middleware._change_for_request(request)
     assert change is not None
     assert change.base_sha == release_sha
     assert "-release workflow" in change.diff_preview
