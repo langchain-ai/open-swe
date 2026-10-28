@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
+from xml.etree import ElementTree
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
@@ -131,11 +132,11 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = await User.login_for_email(email)
     if not login:
         return None
-    current_login = _latest_state_github_login(state)
-    if current_login and current_login.lower() != login.lower():
-        login = current_login
-        email = None
     try:
+        current_login = await _latest_state_github_login(state)
+        if current_login and current_login.lower() != login.lower():
+            login = current_login
+            email = None
         await enforce_github_login_gate(login)
     except HTTPException:
         return None
@@ -558,7 +559,7 @@ def _state_summary(state: Any) -> dict[str, Any]:
     }
 
 
-def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
+async def _latest_state_github_login(state: Mapping[str, object] | None) -> str | None:
     messages = state.get("messages") if isinstance(state, Mapping) else None
     if not isinstance(messages, list):
         return None
@@ -571,7 +572,58 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
         sender_id = message_sender_id(content)
         if isinstance(sender_id, str) and sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
-            return login or None
+            if not login.isdigit():
+                return login or None
+            blocks = content if isinstance(content, list) else [content]
+            for block in blocks:
+                text = _value(block, "text") if isinstance(block, Mapping) else block
+                if not isinstance(text, str):
+                    continue
+                try:
+                    envelope = ElementTree.fromstring(text)
+                except ElementTree.ParseError:
+                    continue
+                if (
+                    envelope.tag == "input-message"
+                    and envelope.get("sender") == sender_id
+                    and envelope.get("surface") in {"web", "automation"}
+                ):
+                    return login
+            for context_message in reversed(messages):
+                context_content = _message_content(context_message)
+                if dynamic_context_hash(context_content) is None:
+                    continue
+                blocks = context_content if isinstance(context_content, list) else [context_content]
+                for block in blocks:
+                    text = _value(block, "text") if isinstance(block, Mapping) else block
+                    if not isinstance(text, str):
+                        continue
+                    try:
+                        context = ElementTree.fromstring(text)
+                    except ElementTree.ParseError:
+                        continue
+                    if (
+                        context.tag != "dynamic-context"
+                        or context.get("kind") != "person"
+                        or context.get("id") != sender_id
+                    ):
+                        continue
+                    for line in (context.text or "").splitlines():
+                        field, separator, value = line.partition(":")
+                        if field == "github_login" and separator and value.strip():
+                            return value.strip()
+            try:
+                user = await User.for_identity("github", login)
+            except Exception as exc:
+                logger.warning(
+                    "Could not resolve GitHub sender",
+                    extra={"sender_id": sender_id},
+                    exc_info=True,
+                )
+                raise HTTPException(403, _NO_ACTOR) from exc
+            if user is None or not user.github_login:
+                raise HTTPException(403, _NO_ACTOR)
+            return user.github_login
         return None
     return None
 
