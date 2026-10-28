@@ -89,7 +89,7 @@ describe("describeWorkEntry", () => {
         title: "shell",
         toolKind: "execute",
         status: "error",
-        input: { command: "pnpm test" },
+        input: { command: "cd /workspace/open-swe && pnpm test" },
       }),
       repoPath
     )
@@ -98,6 +98,7 @@ describe("describeWorkEntry", () => {
     expect(entry.icon).toBe("terminal")
     expect(entry.heading).toBe("Shell")
     expect(entry.preview).toBe("pnpm test")
+    expect(entry.expandedText).toBe("pnpm test")
   })
 
   it("falls back to tool locations when the input carries no argument", () => {

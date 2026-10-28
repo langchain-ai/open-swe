@@ -6,6 +6,7 @@ import type {
 } from "@/features/agents/lib/types"
 import {
   formatPathDisplayParts,
+  formatShellCommand,
   formatToolDisplayParts,
   toolTextArguments,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
@@ -115,7 +116,10 @@ function expandedTextForChunk(
 
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
-  if (command) blocks.push(command)
+  if (command)
+    blocks.push(
+      chunk.toolKind === "execute" ? formatShellCommand(command) : command
+    )
   const textArguments = toolTextArguments(chunk.input)
   for (const [key, value] of textArguments) {
     blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
