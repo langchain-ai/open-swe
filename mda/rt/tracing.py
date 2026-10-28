@@ -21,6 +21,26 @@ _SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
 
 MIDDLEWARE_TRACE_POLICY = TracePolicy(process_inputs=omit_payload)
 
+_ENVIRONMENTS: Final = {
+    "open-swe-mda-prod": "production",
+    "open-swe-mda-staging": "staging",
+    "open-swe-mda-preview": "preview",
+}
+
+
+def _deployment_provenance() -> dict[str, JsonValue]:
+    """The MDA code and deployment serving this turn.
+
+    Set on the root explicitly, since LangSmith only fills ``revision_id`` when the run's
+    metadata lacks one, and a queued run's metadata names the deployment that queued it.
+    """
+    provenance: dict[str, JsonValue] = {}
+    if revision := os.environ.get("LANGSMITH_REVISION_ID"):
+        provenance["revision_id"] = revision
+    if environment := _ENVIRONMENTS.get(os.environ.get("MDA_DEPLOYMENT_NAME", "")):
+        provenance["environment"] = environment
+    return provenance
+
 
 class TurnTrace:
     """The actual runtime's turn trace, never a backend hook or a previous turn."""
@@ -61,17 +81,7 @@ class TurnTrace:
         try:
             self.root = self.current_root()
             if self.root is not None:
-                self.root.metadata.update(metadata)
-                if revision := os.environ.get("LANGSMITH_REVISION_ID"):
-                    self.root.metadata["revision_id"] = revision
-                deployment = os.environ.get("MDA_DEPLOYMENT_NAME", "")
-                environment = {
-                    "open-swe-mda-prod": "production",
-                    "open-swe-mda-staging": "staging",
-                    "open-swe-mda-preview": "preview",
-                }.get(deployment)
-                if environment is not None:
-                    self.root.metadata["environment"] = environment
+                self.root.metadata.update({**metadata, **_deployment_provenance()})
                 self.root.metadata["open_swe_git_evidence"] = {}
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)

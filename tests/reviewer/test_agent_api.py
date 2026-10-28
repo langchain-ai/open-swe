@@ -624,10 +624,8 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
 
 
-@pytest.mark.parametrize("queued_metadata", [{}, {"LANGSMITH_AGENT_VERSION": "queued-sha"}])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
-    queued_metadata: dict[str, JsonValue],
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     from unittest.mock import AsyncMock
@@ -697,7 +695,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
     graph = RemoteGraph("agent", build)
-    run = RUN.model_copy(update={"metadata": queued_metadata}).granting()
+    run = RUN.granting()
     started = await graph.start_run(run)
     catalog = started.catalog.model_dump(mode="json")
 

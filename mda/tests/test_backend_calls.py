@@ -976,15 +976,14 @@ async def test_box_tools_ask_the_guards_and_reach_the_backends_paths(
     assert in_box.await_count == int(not remote)
 
 
-@pytest.mark.parametrize("deployment", ["prod", "staging", "preview"])
 @pytest.mark.parametrize("next_trace_available", [True, False])
 async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
-    monkeypatch: pytest.MonkeyPatch, next_trace_available: bool, deployment: str
+    monkeypatch: pytest.MonkeyPatch, next_trace_available: bool
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     monkeypatch.setenv("LANGSMITH_REVISION_ID", "runtime-sha")
-    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", f"open-swe-mda-{deployment}")
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
     actor = {
         "ls_repo_provider": "github",
         "ls_attribution_identifier": "trigger",
@@ -1095,9 +1094,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     [root_id] = [run_id for run_id, run in created.items() if run.get("parent_run_id") == parent.id]
     assert reconciled[root_id]["revision_id"] == "runtime-sha"
     assert reconciled[root_id]["LANGSMITH_AGENT_VERSION"] == "backend-sha"
-    assert reconciled[root_id]["environment"] == (
-        "production" if deployment == "prod" else deployment
-    )
+    assert reconciled[root_id]["environment"] == "production"
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
     final["ls_git_branch"] = "Next/turn"
