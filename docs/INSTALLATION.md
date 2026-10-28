@@ -364,6 +364,7 @@ CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated
 
 MDA_RUNTIME_URL=""                    # the Managed Deep Agents deployment of mda/; required
 MDA_RUNTIME_API_KEY=""                # LangSmith key to call it with; defaults to LANGSMITH_API_KEY
+MDA_WORKSPACE_ID=""                   # its LangSmith workspace; defaults to this backend's
 REMOTE_RUNTIME_TOKEN_SECRET=""        # openssl rand -hex 32     (signs the run tokens it calls back with); required
 ```
 

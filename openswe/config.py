@@ -214,6 +214,12 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "MDA_WORKSPACE_ID",
+    "LangSmith workspace of the deployment at MDA_RUNTIME_URL (its LANGSMITH_WORKSPACE_ID, or "
+    "else its LANGSMITH_TENANT_ID), which its channels resolve people's Agent Auth principals "
+    "in; defaults to this backend's own workspace.",
+)
+ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
     "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
