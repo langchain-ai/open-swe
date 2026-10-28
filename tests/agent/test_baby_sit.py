@@ -2,6 +2,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx
 import httpx2
 import pytest
 
@@ -13,6 +14,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.tasks.store import Task
+from tests.support.github_sdk import mock_github_sdk
 
 
 async def _start_watch() -> baby_sit.BabySitWatch:
@@ -37,7 +39,11 @@ async def _start_watch() -> baby_sit.BabySitWatch:
 @pytest.mark.parametrize(
     ("read_method", "status_code", "body", "retryable"),
     [
-        ("token", None, "Token unavailable", True),
+        ("token", 404, "Not Found", False),
+        ("token", 403, "Installation suspended", False),
+        ("token", 503, "Service unavailable", True),
+        ("token", 403, "API rate limit exceeded", True),
+        ("token", None, "Connection failed", True),
         ("pull", 403, "API rate limit exceeded for installation", True),
         ("pull", 503, "Service unavailable", True),
         ("pull", None, "Connection failed", True),
@@ -58,7 +64,8 @@ async def test_github_read_failures_only_end_watches_when_persistent(
 ) -> None:
     watch = await _start_watch()
     token = AsyncMock(return_value="t")
-    monkeypatch.setattr(github_app, "get_github_app_installation_token", token)
+    if read_method != "token":
+        monkeypatch.setattr(github_app, "get_github_app_installation_token", token)
     reads = {
         "pull": AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
         "check_runs": AsyncMock(return_value=[{"name": "tests", "status": "in_progress"}]),
@@ -78,9 +85,21 @@ async def test_github_read_failures_only_end_watches_when_persistent(
         if status_code is not None
         else httpx2.ConnectError(body)
     )
-    read = token if read_method == "token" else reads[read_method]
+    read = reads.get(read_method, token)
+    token_failed = True
     if read_method == "token":
-        read.return_value = None
+        monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
+        monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "test-key")
+        monkeypatch.setattr(github_app, "_TOKEN_CACHE", {})
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            if token_failed:
+                if status_code is None:
+                    raise httpx.ConnectError(body, request=request)
+                return httpx.Response(status_code, json={"message": body})
+            return httpx.Response(201, json={"token": "t", "expires_at": "2099-01-01T00:00:00Z"})
+
+        mock_github_sdk(monkeypatch, handle)
     else:
         read.side_effect = failure
     notify = AsyncMock(return_value=True)
@@ -103,7 +122,7 @@ async def test_github_read_failures_only_end_watches_when_persistent(
         notify.assert_not_awaited()
         dispatch.assert_not_awaited()
         read.side_effect = None
-        token.return_value = "t"
+        token_failed = False
         assert await baby_sit.evaluate_watch(watch.key) == "pending"
         stored = await baby_sit.WATCHES.get(watch.key)
         assert stored is not None and stored.active
@@ -111,7 +130,13 @@ async def test_github_read_failures_only_end_watches_when_persistent(
         # A Slack-started watch hands its terminal notice to the owning agent thread.
         assert dispatch.await_args is not None
         message = dispatch.await_args.args[1]
-        assert ("not found" if status_code == 404 else "denied access") in message
+        assert (
+            "GitHub App token unavailable"
+            if read_method == "token"
+            else "not found"
+            if status_code == 404
+            else "denied access"
+        ) in message
 
 
 async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(

@@ -243,6 +243,10 @@ class GitHubSignInRequired(Exception):
 class GitHubAppUnavailable(Exception):
     """No GitHub App installation token can be minted for the request."""
 
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
 
 class RepoFileUnreadableError(RuntimeError):
     """A repository file could not be read reliably."""
@@ -335,6 +339,7 @@ class GitHubClient:
             installation_id=installation_id,
             repositories=[repo] if permissions is not None and repo is not None else None,
             permissions=permissions,
+            raise_errors=True,
         )
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
