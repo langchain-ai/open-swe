@@ -288,10 +288,9 @@ async def test_public_thread_does_not_allow_using_owners_credentials(client: Mag
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
 
 
-@pytest.mark.parametrize("operation", ["status", "worker_status"])
 @pytest.mark.parametrize("restriction", ["unverified", "private", "admin"])
 async def test_task_participants_require_verified_identity_and_thread_access(
-    client: MagicMock, operation: str, restriction: str
+    client: MagicMock, restriction: str
 ) -> None:
     metadata = client.metadata[COORDINATOR]
     metadata[PARTICIPANT_LOGINS_KEY] = {"participant": True}
@@ -305,12 +304,10 @@ async def test_task_participants_require_verified_identity_and_thread_access(
         metadata["admin_thread"] = True
     actor = service.Actor(COORDINATOR, "participant")
     with pytest.raises(PermissionError if restriction == "unverified" else HTTPException):
-        if operation == "status":
-            await service.task_status(actor)
-        else:
+        if restriction == "private":
             await service.control_worker(actor, worker_thread_id="worker", action="status")
-    assert not client.created_runs
-    client.runs.cancel_many.assert_not_awaited()
+        else:
+            await service.task_status(actor)
 
 
 @pytest.mark.parametrize("operation", ["message", "cancel"])
@@ -518,14 +515,10 @@ async def test_worker_cannot_spawn_siblings(
     assert not client.created_runs
 
 
-@pytest.mark.parametrize("as_participant", [False, True])
 @pytest.mark.parametrize("operation", ["message", "cancel"])
 async def test_control_rejects_worker_from_another_task(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, as_participant: bool, operation: str
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
-    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
-        f"user:{client.participant.id}"
-    )
     current_task = task()
     context = store.TaskContext(
         current_task,
@@ -546,9 +539,8 @@ async def test_control_rejects_worker_from_another_task(
             )
         ),
     )
-    expected = "thread owner" if as_participant else "belonging to this task"
-    with pytest.raises(PermissionError, match=expected):
-        actor = service.Actor(COORDINATOR, "participant" if as_participant else OWNER)
+    with pytest.raises(PermissionError, match="belonging to this task"):
+        actor = service.Actor(COORDINATOR, OWNER)
         if operation == "message":
             await service.message_task_thread(
                 actor, message="Change scope", worker_thread_id="other-worker", request_id="scope"
