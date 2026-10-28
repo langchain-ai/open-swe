@@ -93,7 +93,6 @@ def construct_system_prompt(
     admin_workspaces: bool = False,
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
-    recent_thread_context: str | None = None,
     workspace_repos: list[str] | None = None,
 ) -> str:
     """Render the agent's system prompt, once for the thread's whole life.
@@ -122,7 +121,6 @@ def construct_system_prompt(
         collaboration_section=_render_collaboration_section(),
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
-        recent_thread_context_section=recent_thread_context or "",
         workspace_section=_render_workspace_section(
             workspace_name, workspace_instructions, workspace_repos
         ),
@@ -155,6 +153,8 @@ class TurnContext:
     local_checkout_client: BridgeClient = "cli"
     # Why the run's managed tool catalog could not be read, if it could not.
     tool_catalog_note: str = ""
+    # The sender's other recent threads, whose activity changes from turn to turn.
+    recent_threads: str = ""
 
     def environment(self) -> str:
         environment = prompt(
@@ -172,7 +172,7 @@ class TurnContext:
 
     def source_guidance(self) -> str:
         sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
-        if self.source in {"dashboard", "slack"} and (scope := _render_repository_scope_section()):
+        if not self.local_checkout and (scope := _render_repository_scope_section()):
             sections.append(scope)
         return "\n\n".join(sections)
 
@@ -208,6 +208,8 @@ class TurnContext:
             run_context("environment", self.environment()),
             run_context("source", self.source_guidance()),
         ]
+        if self.recent_threads:
+            blocks.append(run_context("recent-threads", self.recent_threads))
         return [
             {"role": "user", "content": block}
             for block in blocks

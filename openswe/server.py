@@ -1420,6 +1420,19 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
+        audience = self._recent_context_audience(cfg)
+        recent_threads = (
+            await recent_thread_context_section(
+                audience=audience,
+                login=self._profile_login,
+                email=self._user_email or None,
+                exclude_thread_id=self._thread_id,
+                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
+                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
+            )
+            if audience is not None
+            else ""
+        )
         turn = TurnContext(
             working_dir=work_dir,
             source="background_task" if cfg.background_task_completion else self._source,
@@ -1436,6 +1449,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
+            recent_threads=recent_threads,
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (
@@ -1509,19 +1523,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-        audience = self._recent_context_audience(cfg)
-        recent_thread_context = (
-            await recent_thread_context_section(
-                audience=audience,
-                login=self._profile_login,
-                email=self._user_email or None,
-                exclude_thread_id=self._thread_id,
-                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
-                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
-            )
-            if audience is not None
-            else ""
-        )
         return construct_system_prompt(
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
@@ -1533,7 +1534,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
-            recent_thread_context=recent_thread_context,
         )
 
 
