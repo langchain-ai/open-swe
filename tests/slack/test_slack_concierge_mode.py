@@ -159,13 +159,13 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 
     monkeypatch.setattr(dm, "lookup_slack_thread_id", AsyncMock(return_value="concierge-thread"))
     queue = AsyncMock(return_value=True)
-    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+    monkeypatch.setattr(dm, "queue_system_note_for_thread", queue)
 
     await dm._record_in_concierge_thread("D1", "Mark the PR ready for review")
 
     queue.assert_awaited_once()
     assert queue.await_args.args[0] == "concierge-thread"
-    note = queue.await_args.args[1][0]["text"]
+    note = queue.await_args.args[1]
     assert "Mark the PR ready for review" in note
     assert "not written by this person" in note
     assert "already sent" in note
@@ -182,12 +182,12 @@ async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
     lookup = AsyncMock(return_value="concierge-thread")
     monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
     queue = AsyncMock(return_value=True)
-    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+    monkeypatch.setattr(dm, "queue_system_note_for_thread", queue)
 
     await dm.note_for_concierge("U1", "D1", "a note")
 
     if concierge_on:
         lookup.assert_awaited_once_with("D1", CONCIERGE_TS)
-        queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
+        queue.assert_awaited_once_with("concierge-thread", "a note")
     else:
         queue.assert_not_awaited()
