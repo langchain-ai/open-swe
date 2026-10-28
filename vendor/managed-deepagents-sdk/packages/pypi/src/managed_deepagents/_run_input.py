@@ -109,17 +109,20 @@ class ManagedTurnTracer(LangChainTracer):
                     if id(cause) in seen:
                         continue
                     seen.add(id(cause))
+                    if isinstance(cause, TimeoutError) or type(cause).__name__ == "UserTimeout":
+                        reason = "failed"
+                        break
                     if (
                         type(cause).__name__ == "UserInterrupt"
                         and str(cause).startswith("superseded by run ")
                         and "(multitask_strategy=interrupt)" in str(cause)
                     ):
                         reason = "superseded"
-                        break
                     pending.extend(arg for arg in cause.args if isinstance(arg, BaseException))
                     if cause.__cause__ is not None:
                         pending.append(cause.__cause__)
-                run.error = None
+                if reason != "failed":
+                    run.error = None
             run.metadata["end_reason"] = reason
         return run
 

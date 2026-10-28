@@ -109,6 +109,10 @@ class UserInterrupt(Exception):
     pass
 
 
+class UserTimeout(Exception):
+    pass
+
+
 @pytest.mark.parametrize(
     ("failure", "reason"),
     [
@@ -122,6 +126,10 @@ class UserInterrupt(Exception):
             ),
             "superseded",
         ),
+        (TimeoutError("run deadline exceeded"), "failed"),
+        (asyncio.CancelledError(TimeoutError("run deadline exceeded")), "failed"),
+        (asyncio.CancelledError(UserTimeout("run deadline exceeded")), "failed"),
+        (asyncio.CancelledError(UserTimeout(TimeoutError("run deadline exceeded"))), "failed"),
         (asyncio.CancelledError(), "cancelled"),
         (GeneratorExit(), "cancelled"),
         (RuntimeError("provider failed"), "failed"),
@@ -145,6 +153,9 @@ async def test_managed_root_records_its_end_reason(
     assert patches
     assert _run_metadata(patches[-1])["end_reason"] == reason
     assert bool(patches[-1].get("error")) == (reason == "failed")
+    if reason == "failed":
+        assert failure is not None
+        assert str(failure) in str(patches[-1]["error"])
 
 
 async def test_root_termination_closes_children_and_suppresses_late_spans() -> None:
