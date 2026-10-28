@@ -92,6 +92,10 @@ _MEMBERSHIP_SUBTYPES = frozenset(
     }
 )
 _EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
+_THREAD_CONFLICT = (
+    "Open SWE found conflicting state for this Slack thread and will not guess "
+    "which agent thread to use."
+)
 _OPTION_ACTION_ID = "open_swe_option_select"
 
 
@@ -125,12 +129,11 @@ def _hand_to_mda(
     thread_id: str,
     event_id: str,
     message_ts: str = "",
-    claimed: bool = False,
 ) -> WebhookResponse:
     """Forward Slack's request to MDA's Slack channel, through Trigger Server, after answering Slack.
 
-    ``message_ts`` names the message remembered for the channel, which hears of a lost forward;
-    one that ``claimed`` its conversation goes back to the backend instead.
+    ``message_ts`` names the message remembered for the channel, which a lost forward
+    hands back to the backend or reports (:func:`mda_forwarding.forward_to_trigger_server`).
     """
     background_tasks.add_task(
         mda_forwarding.forward_to_trigger_server,
@@ -140,7 +143,6 @@ def _hand_to_mda(
         thread_id=thread_id,
         message_ts=message_ts,
         event_id=event_id,
-        claimed=claimed,
     )
     return accepted(message)
 
@@ -852,21 +854,25 @@ async def slack_webhook(
             if in_code_channel or in_concierge_mode
             else await mda_forwarding.owned_thread(channel_id, root_ts)
         )
-        new_conversation = False
-        if mda_thread_id is None and await mda_forwarding.startable_thread(
-            app_id=envelope.api_app_id,
-            team_id=team_id or "",
-            channel_id=channel_id,
-            root_ts=root_ts,
-            can_start=mda_forwarding.mda_can_start(
-                subtype=event.subtype,
-                from_bot=allowed_bot is not None,
-                code_channel=in_code_channel,
-                concierge_dm=in_concierge_mode,
-                kitchen_channel=in_kitchen_channel,
-                breakout=message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB},
-            ),
-        ):
+        new_mda_thread_id = (
+            None
+            if mda_thread_id is not None
+            else await mda_forwarding.startable_thread(
+                app_id=envelope.api_app_id,
+                team_id=team_id or "",
+                channel_id=channel_id,
+                root_ts=root_ts,
+                can_start=mda_forwarding.mda_can_start(
+                    subtype=event.subtype,
+                    from_bot=allowed_bot is not None,
+                    code_channel=in_code_channel,
+                    concierge_dm=in_concierge_mode,
+                    kitchen_channel=in_kitchen_channel,
+                    breakout=message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB},
+                ),
+            )
+        )
+        if new_mda_thread_id is not None:
             # Gated before it's claimed: a person who can't run gets the prompt here, and
             # the conversation stays unclaimed for whoever can.
             link_needed = await service.account_link_needed(user_id)
@@ -875,14 +881,6 @@ async def slack_webhook(
                     return ignored("Duplicate Slack event delivery")
                 background_tasks.add_task(link_needed.prompt, channel_id, thread_ts)
                 return accepted("Slack account link requested")
-            mda_thread_id = await mda_forwarding.claim_conversation(
-                envelope.api_app_id,
-                team_id or "",
-                channel_id,
-                root_ts,
-                owner_login=await service.slack_login(user_id),
-            )
-            new_conversation = mda_thread_id is not None
         if mda_thread_id is not None and not mda_forwarding.trigger_server_takes(event.subtype):
             # Trigger Server would drop it, and the thread is MDA's, so nothing can run it.
             common.logger.info(
@@ -891,14 +889,15 @@ async def slack_webhook(
             )
             return ignored("MDA's Slack channel doesn't take this kind of message")
         try:
-            thread_id = mda_thread_id or await common.resolve_slack_thread_id(
-                get_langgraph_client(), channel_id, thread_ts
+            thread_id = (
+                mda_thread_id
+                or new_mda_thread_id
+                or await common.resolve_slack_thread_id(
+                    get_langgraph_client(), channel_id, thread_ts
+                )
             )
         except common.SlackThreadMappingError as exc:
-            raise SlackRequestError(
-                "Open SWE found conflicting state for this Slack thread and will not guess "
-                "which agent thread to use."
-            ) from exc
+            raise SlackRequestError(_THREAD_CONFLICT) from exc
         repo = await common.get_slack_repo_config(
             channel_id,
             thread_ts,
@@ -932,6 +931,19 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            if new_mda_thread_id is not None:
+                # Claimed only now, so nothing that fails before the hand-off strands the
+                # conversation on MDA with no message for its channel.
+                try:
+                    mda_thread_id = await mda_forwarding.claim_conversation(
+                        envelope.api_app_id,
+                        team_id or "",
+                        channel_id,
+                        root_ts,
+                        owner_login=await service.slack_login(user_id),
+                    )
+                except common.SlackThreadMappingError as exc:
+                    raise SlackRequestError(_THREAD_CONFLICT) from exc
             if mda_thread_id is not None:
                 await mda_forwarding.remember(request, repo, original_message_ts)
                 return _hand_to_mda(
@@ -942,7 +954,6 @@ async def slack_webhook(
                     thread_id=mda_thread_id,
                     event_id=event_id,
                     message_ts=original_message_ts,
-                    claimed=new_conversation,
                 )
             if (
                 message.action is SlackAction.BREAKOUT_WEB
