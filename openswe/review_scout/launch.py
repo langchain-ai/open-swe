@@ -6,6 +6,7 @@ from pydantic import BaseModel, ValidationError
 
 from openswe.database import postgres
 from openswe.dispatch import create_durable_run, dispatch_client
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
@@ -13,6 +14,7 @@ from openswe.thread_ids import review_scout_thread_id
 from openswe.threads import index, succession
 from openswe.threads.creation import ensure_titled_thread
 from openswe.threads.status import thread_run_error
+from openswe.walkthrough.eligibility import needs_walkthrough
 from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)
@@ -182,12 +184,15 @@ class ReviewScoutTarget(BaseModel):
             return None
         return await thread_run_error(thread_id) or "The review scout run ended with an error."
 
-    async def start(self) -> str:
+    async def start(self) -> str | None:
         """The scout run for this head, started when none is already running.
 
         A newer head interrupts a scout still working on an older one, so only
         the latest head's walkthrough is ever written.
         """
+        async with PullRequestClient.as_app(self.owner, self.repo, self.pr_number) as pull:
+            if not await needs_walkthrough(pull):
+                return None
         client = dispatch_client()
         thread_id = await succession.succeed(
             review_scout_thread_id(self.owner, self.repo, self.pr_number)
@@ -244,6 +249,8 @@ class ReviewScoutTarget(BaseModel):
         if existing is not None:
             return existing
         run_id = await self.start()
+        if run_id is None:
+            return None
         # Polled rather than joined: one join request idles for the whole run
         # and would hit the client's 300s read timeout first.
         client = dispatch_client()

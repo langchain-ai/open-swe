@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dispatch import create_durable_run
 from openswe.expedited_review.reviews import github_token_hint
+from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
@@ -45,6 +46,7 @@ from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.walkthrough.eligibility import MIN_CHANGED_LINES, needs_walkthrough
 from openswe.webhooks.common import upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,14 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         raise GuideStartError(f"@{login} cannot read that pull request on GitHub")
     if head.state != "open":
         raise GuideStartError("the pull request is not open")
+    async with GitHubClient.connect(token=user_token) as github:
+        if not await needs_walkthrough(
+            github.repo(start.owner, start.repo).pull_request(start.number)
+        ):
+            raise GuideStartError(
+                f"Walkthroughs are skipped for changes with fewer than {MIN_CHANGED_LINES} "
+                "added and deleted non-test lines; review this pull request directly on GitHub."
+            )
     pull_request = await PullRequest(
         owner=start.owner, repo=start.repo, number=start.number
     ).ensure()

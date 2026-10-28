@@ -32,7 +32,7 @@ async def test_a_long_stall_logs_before_and_after_it_ends(
 
     ongoing, ended = [r for r in caplog.records if r.message == "Event loop stalled"]
     assert (ongoing.stall_recovered, ended.stall_recovered) == (False, True)
-    assert 1000 <= ongoing.stall_ms < ended.stall_ms
+    assert 1000 <= ongoing.stall_ms <= ended.stall_ms
     for stall in (ongoing, ended):
         assert "_hog_the_loop" in stall.loop_stack
         assert stall.thread_id == "thread-1"

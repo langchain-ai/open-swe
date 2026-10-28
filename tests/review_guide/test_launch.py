@@ -55,3 +55,37 @@ async def test_requester_who_cannot_read_the_pull_request_gets_no_dm_or_channel(
 
     post_dm.assert_not_awaited()
     create_code_channel.assert_not_awaited()
+
+
+async def test_small_pull_request_gets_no_walkthrough_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        launch.User,
+        "for_identity",
+        AsyncMock(return_value=SimpleNamespace(github_login="alice")),
+    )
+    monkeypatch.setattr(launch, "get_valid_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        launch,
+        "fetch_head",
+        AsyncMock(return_value=SimpleNamespace(state="open")),
+    )
+    monkeypatch.setattr(launch, "needs_walkthrough", AsyncMock(return_value=False))
+    post_dm = AsyncMock()
+    create_code_channel = AsyncMock()
+    monkeypatch.setattr(launch, "post_dm", post_dm)
+    monkeypatch.setattr(launch, "create_code_channel", create_code_channel)
+
+    with pytest.raises(launch.GuideStartError, match="fewer than 100"):
+        await launch.start_review_guide(
+            launch.GuideStart(
+                owner="acme",
+                repo="api",
+                number=1,
+                origin=launch.GuideOrigin(requester_slack_id="U1"),
+            )
+        )
+
+    post_dm.assert_not_awaited()
+    create_code_channel.assert_not_awaited()
