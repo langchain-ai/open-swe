@@ -159,7 +159,8 @@ vendor-check: vendor-sdk-rust-check vendor-sdk-python-check vendor-quickjs-check
 vendor-sdk-rust-check:
 	cd $(MDA_SDK) && cargo fmt --check
 	cd $(MDA_SDK) && cargo clippy --locked --all-targets -- -D warnings
-	cd $(MDA_SDK) && $(VENDOR_TEST_ENV) cargo test --locked
+	# `mda connection create` reads a secret from a piped stdin, which an open pipe never ends.
+	cd $(MDA_SDK) && $(VENDOR_TEST_ENV) cargo test --locked </dev/null
 
 # Against the runtime's own lock. Our pyproject.toml's [tool.ty] would claim the
 # package; upstream type-checks it with no ty configuration.

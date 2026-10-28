@@ -149,11 +149,8 @@ PROJECTS: Final = {
                 "README.md",
                 "crates",
                 "packages/pypi",
-                # Shared by the runtime's tests and the CLI's: fixtures, and the npm
-                # runtime's pins the CLI's tests compare with its own.
+                # The runtime's tests' fixtures.
                 "packages/testdata",
-                "packages/npm/package.json",
-                "packages/npm/src/runtime/browser-langsmith.ts",
             ),
             build_outputs=("target", "packages/pypi/src/managed_deepagents/_binaries"),
             prs_record_name="mda-upstream-prs",
