@@ -7,6 +7,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -148,7 +149,6 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
 @pytest.mark.parametrize(
     "options",
     [
-        "--force",
         "--force-with-lease=",
         "--force-with-lease=../feature",
         "--force-with-lease=feature:not-a-sha",
@@ -363,6 +363,9 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
         f"git -C /repo push --force-with-lease=refs/heads/feature:{'b' * 40} origin feature",
         "git -C /repo push --force-with-lease origin HEAD:refs/heads/feature",
         "git -C /repo push --force-with-lease origin refs/heads/feature:refs/heads/feature",
+        "git -C /repo push --force-with-lease --force-if-includes origin feature",
+        "git -C /repo push -f origin feature",
+        "git -C /repo push origin feature --force",
     ],
 )
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
@@ -445,6 +448,9 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         "--force-with-lease=feature",
         "--force-with-lease=refs/heads/feature:",
         f"--force-with-lease=refs/heads/feature:{'b' * 40}",
+        "--force-with-lease --force-if-includes",
+        "-f",
+        "--force",
     ],
 )
 @pytest.mark.parametrize(
@@ -476,11 +482,16 @@ async def test_approved_workflow_push_runs_fixed_command(
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
-    options = f"--set-upstream {lease} ".replace("  ", " ")
+    options = "--set-upstream "
+    if lease:
+        # The fake remote has no ``feature`` branch, so a forced push is leased to its absence.
+        options += "--force-with-lease=refs/heads/feature: "
+        if "--force-if-includes" in lease:
+            options += "--force-if-includes "
     assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
 
 
-@pytest.mark.parametrize("option", ["", "--force-with-lease", "--verbose"])
+@pytest.mark.parametrize("option", ["", "--force-with-lease", "--force", "--verbose"])
 @pytest.mark.parametrize("refspec", ["feature", "evil:feature", "feature:other"])
 async def test_non_workflow_push_runs_without_approval(
     monkeypatch: pytest.MonkeyPatch, option: str, refspec: str
@@ -540,11 +551,11 @@ async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bo
         "git -C /repo add -A && git -C /repo commit -qm 'Add CI' && "
         "git -C /repo push -u origin feature",
         "git commit -qam 'Add CI'&&git push",
+        "git commit -qam 'Add CI'&&git push --force-with-lease origin feature",
         "(cd /repo && git push)",
         "cd /repo; git push",
-        "git -C /repo push --verbose origin feature:other",
     ],
-    ids=["spaced", "unspaced", "subshell", "semicolon", "unsupported-option"],
+    ids=["spaced", "unspaced", "force-push", "subshell", "semicolon"],
 )
 @pytest.mark.parametrize(
     ("backend", "refused"),
@@ -584,6 +595,63 @@ async def test_chained_push_runs_only_without_workflow_changes(
         assert json.loads(str(result.content))["error_type"] == "WorkflowPushMustStandAlone"
 
 
+async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    backend = LocalShellBackend(root_dir=str(repo), virtual_mode=False, inherit_env=True)
+    setup = await backend.aexecute("""
+        set -e
+        git init -q -b main
+        git config user.name Test
+        git config user.email test@example.com
+        mkdir -p .github/workflows
+        printf 'name: old\n' > .github/workflows/ci.yml
+        git add .github/workflows/ci.yml
+        git commit -qm base
+        git init -q --bare -b main ../origin.git
+        git remote add origin ../origin.git
+        git checkout -qb feature
+        git push -qu origin feature
+        git clone -q -b feature ../origin.git ../other
+        git -C ../other -c user.name=Other -c user.email=other@example.com \
+            commit -q --allow-empty -m 'unseen remote commit'
+        git -C ../other push -q origin feature
+        printf 'name: new\n' > .github/workflows/ci.yml
+        git commit -qam workflow
+    """)
+    assert setup.exit_code == 0, setup.output
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
+
+    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        command = request.tool_call["args"]["command"]
+        assert isinstance(command, str)
+        pushed = await backend.aexecute(command)
+        return ToolMessage(content=str(pushed.exit_code), tool_call_id="call-1")
+
+    stale_tip = (await backend.aexecute("git rev-parse origin/feature")).output.strip()
+    remote_tip = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert stale_tip not in remote_tip
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(
+            ToolCallRequest,
+            _Request(f"git -C {shlex.quote(str(repo))} push --force origin feature"),
+        ),
+        handler,
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.content != "0"
+    after = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert after == remote_tip
+
+
 @pytest.mark.parametrize(
     ("chained", "connection", "inspectable", "approved", "lease", "error"),
     [
@@ -593,6 +661,9 @@ async def test_chained_push_runs_only_without_workflow_changes(
         (False, "reconnect", True, False, "", "WorkflowPushApprovalRequired"),
         (False, "registered", True, True, "", None),
         (False, "reconnect", True, True, "", None),
+        (False, "registered", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
+        (False, "reconnect", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
+        (False, "missing", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
         (False, "missing", True, False, "", "WorkflowPushInspectionError"),
         (False, "missing", True, False, "--force-with-lease ", "WorkflowPushInspectionError"),
         (False, "registered", False, False, "", "WorkflowPushInspectionError"),
