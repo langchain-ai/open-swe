@@ -211,7 +211,7 @@ async def _readable_threads(session: DashboardSession, thread_ids: set[str]) -> 
                 extra={"agent_thread_id": thread_id},
             )
             continue
-        if thread_is_readable(thread_metadata(thread), session.login, session.email):
+        if thread_is_readable(thread_metadata(thread), session):
             readable.add(thread_id)
     return readable
 

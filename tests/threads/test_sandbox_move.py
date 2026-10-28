@@ -5,11 +5,13 @@ import pytest
 
 from openswe.threads import moves
 from openswe.threads.moves import SANDBOX_MOVED_KEY, SandboxMove
+from tests.support.sessions import signed_in, user_id_of
 
 ON_THE_MAC = {
     "source": "dashboard",
     "visibility": "private",
     "owner_login": "alice",
+    "owner_user_id": str(user_id_of("alice")),
     "sandbox_id": "bridge:b1",
     "sandbox_kind": "bridge",
     "sandbox_bridge_client": "desktop",
@@ -36,7 +38,7 @@ async def test_moving_to_the_cloud_leaves_the_box_and_the_carry_to_mda(
     monkeypatch.setattr(moves.BridgeStore, "is_connected", AsyncMock(return_value=True))
 
     move = await SandboxMove.requested(
-        "thread-1", ON_THE_MAC, login="alice", bridge=None, target="cloud"
+        "thread-1", ON_THE_MAC, session=signed_in("alice"), bridge=None, target="cloud"
     )
     assert move is not None
     await move.carry_out()

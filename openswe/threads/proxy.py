@@ -13,9 +13,9 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from openswe.threads.access import (
-    _authorized_thread_metadata,
     _readable_thread_metadata,
 )
 from openswe.threads.machine_reads import machine_thread
@@ -72,20 +72,18 @@ def langgraph_proxy_headers(
 
 async def proxy_dashboard_thread_stream_events(
     thread_id: str,
-    login: str,
+    principal: Principal,
     body: bytes,
     *,
-    email: str | None = None,
     content_type: str = "application/json",
-    principal: Principal | None = None,
 ) -> AsyncIterator[bytes]:
     # Preflight here (not in the generator) so auth/content-type failures
     # surface as real HTTP errors before the SSE response starts streaming.
     require_json_content_type(content_type)
-    if principal is not None and principal.machine:
+    if principal.machine:
         await machine_thread(thread_id, principal)
     else:
-        await _readable_thread_metadata(thread_id, login=login, email=email)
+        await _readable_thread_metadata(thread_id, principal.person)
     return stream_thread_events(thread_id, body, content_type)
 
 
@@ -156,22 +154,17 @@ async def _observe_dashboard_run_ttft(
 
 async def proxy_dashboard_thread_commands(
     thread_id: str,
-    login: str,
+    principal: Principal,
     body: bytes,
     *,
-    email: str | None = None,
     content_type: str = "application/json",
-    principal: Principal | None = None,
     relayed_from: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
-    ``principal`` is how a machine gets in. Without one the sender is the person
-    named by ``login``, which is what the dashboard and the agent's own tools pass.
     ``relayed_from`` names the agent thread that sent it on that person's behalf.
     """
     received_at_ms = _now_ms()
-    principal = principal or Principal.of_login(login, email)
     require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -235,10 +228,19 @@ async def proxy_dashboard_thread_commands(
         turn = await steer_target(thread_id) if transcribed and not enqueue else None
         handled = await (
             steer_running_thread(
-                thread_id, login, parsed, metadata=metadata, turn=turn, email=email
+                thread_id,
+                principal.person,
+                parsed,
+                metadata=metadata,
+                turn=turn,
             )
             if not enqueue and (turn is not None or not transcribed)
-            else queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
+            else queue_follow_up_run(
+                thread_id,
+                principal.person,
+                parsed,
+                metadata=metadata,
+            )
         )
         return 200, json.dumps(handled).encode(), "application/json"
     # Enrichment rewrites the command in place; a start that loses the thread
@@ -260,11 +262,10 @@ async def proxy_dashboard_thread_commands(
     else:
         enriched = await _enrich_run_start_command(
             thread_id,
-            login,
+            principal.person,
             parsed,
             metadata=metadata,
             creating=creating,
-            email=email,
         )
     outgoing = json.dumps(enriched).encode()
 
@@ -307,7 +308,11 @@ async def proxy_dashboard_thread_commands(
         or (isinstance(response_payload, dict) and response_payload.get("type") == "error")
     )
     if requeueable is not None and not run_start_succeeded:
-        requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
+        requeued = await _queue_if_thread_turned_busy(
+            thread_id,
+            principal.person,
+            requeueable,
+        )
         if requeued is not None:
             return 200, json.dumps(requeued).encode(), "application/json"
     if run_start_refused:
@@ -350,7 +355,9 @@ async def proxy_dashboard_thread_commands(
 
 
 async def _queue_if_thread_turned_busy(
-    thread_id: str, login: str, command: dict[str, Any], *, email: str | None
+    thread_id: str,
+    session: DashboardSession,
+    command: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Queue a start that a run begun after the busy check made LangGraph refuse.
 
@@ -369,7 +376,10 @@ async def _queue_if_thread_turned_busy(
     if thread is None or thread.status != "busy":
         return None
     return await queue_follow_up_run(
-        thread_id, login, command, metadata=dict(thread.metadata), email=email
+        thread_id,
+        session,
+        command,
+        metadata=dict(thread.metadata),
     )
 
 
@@ -392,14 +402,13 @@ async def _fail_requested_turn(thread_id: str, enriched: dict[str, Any]) -> None
 
 async def proxy_dashboard_thread_history(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     body: bytes,
     *,
-    email: str | None = None,
     content_type: str = "application/json",
 ) -> tuple[int, bytes, str | None]:
     require_json_content_type(content_type)
-    await _readable_thread_metadata(thread_id, login=login, email=email)
+    await _readable_thread_metadata(thread_id, session)
     try:
         payload = json.loads(body or b"{}")
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -423,13 +432,12 @@ async def proxy_dashboard_thread_history(
 
 async def proxy_dashboard_thread_runs_list(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     *,
     limit: int = 10,
     offset: int = 0,
     status: str | None = None,
     select: list[str] | None = None,
-    email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Read-only passthrough for the SDK's ``runs.list()``.
 
@@ -437,7 +445,7 @@ async def proxy_dashboard_thread_runs_list(
     ``#refreshPending()``, which call this directly (not through ``commands``)
     to read a thread's pending runs.
     """
-    await _readable_thread_metadata(thread_id, login=login, email=email)
+    await _readable_thread_metadata(thread_id, session)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs"
     headers = langgraph_proxy_headers()
     params: list[tuple[str, str | int | float | None]] = [
@@ -484,10 +492,9 @@ async def _get_thread_tolerating_create_race(client: Any, thread_id: str) -> dic
 
 async def proxy_dashboard_thread_run_enqueue(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     body: bytes,
     *,
-    email: str | None = None,
     content_type: str = "application/json",
 ) -> dict[str, Any]:
     """Create a durable, attributed ``multitask_strategy="enqueue"`` run.
@@ -516,7 +523,7 @@ async def proxy_dashboard_thread_run_enqueue(
     if thread is None:
         raise HTTPException(404, "thread not found")
     metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
+    _assert_thread_postable(metadata, session)
 
     command = {
         "method": "run.start",
@@ -526,7 +533,12 @@ async def proxy_dashboard_thread_run_enqueue(
             "metadata": body_dict.get("metadata"),
         },
     }
-    queued = await queue_follow_up_run(thread_id, login, command, metadata=metadata, email=email)
+    queued = await queue_follow_up_run(
+        thread_id,
+        session,
+        command,
+        metadata=metadata,
+    )
     run_id = queued.get("result", {}).get("run_id") if isinstance(queued, dict) else None
     if not isinstance(run_id, str) or not run_id:
         raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
@@ -539,20 +551,22 @@ async def proxy_dashboard_thread_run_enqueue(
 async def proxy_dashboard_thread_run_cancel(
     thread_id: str,
     run_id: str,
-    login: str,
+    session: DashboardSession,
     *,
     wait: str = "0",
     action: str = "interrupt",
-    email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
-    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
-    _assert_thread_postable(metadata, login, email)
+    metadata = await _readable_thread_metadata(thread_id, session)
+    _assert_thread_postable(metadata, session)
     try:
         run = await langgraph_client().runs.get(thread_id, run_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "run not found") from exc
     queued_by = (run.get("metadata") or {}).get(QUEUED_BY_KEY)
-    if isinstance(queued_by, str) and login not in {queued_by, metadata.get("owner_login")}:
+    if isinstance(queued_by, str) and str(session.user_id) not in {
+        queued_by,
+        metadata.get("owner_user_id"),
+    }:
         raise HTTPException(403, "only its sender can withdraw a queued follow-up")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()

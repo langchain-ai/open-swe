@@ -295,6 +295,11 @@ async def slack_breakout_thread(
     if visibility not in ("public", "private") or owner_type not in ("user", "system"):
         return {"success": False, "error": "Invalid parent thread ownership"}
     owner_login = (cfg.github_login or "").strip().lower()
+    requesting_user = (
+        await User.for_login("github", owner_login)
+        if owner_login and not cfg.background_task_completion
+        else None
+    )
     if owner_type == "system":
         if visibility != "public":
             return {"success": False, "error": "System threads cannot be private"}
@@ -307,8 +312,9 @@ async def slack_breakout_thread(
                 "error": "A direct authenticated user run is required to start a breakout thread",
             }
         if visibility == "private":
-            parent_owner = parent_metadata.get("owner_login")
-            if not isinstance(parent_owner, str) or parent_owner.strip().lower() != owner_login:
+            if requesting_user is None or parent_metadata.get("owner_user_id") != str(
+                requesting_user.id
+            ):
                 return {
                     "success": False,
                     "error": "Only the private thread owner can start a breakout",
@@ -316,11 +322,10 @@ async def slack_breakout_thread(
 
     requester_context = cfg.slack_thread
     if owner_login and not cfg.background_task_completion:
-        user = await User.for_login("github", owner_login)
-        requester_id = user.slack_user_id if user else ""
+        requester_id = requesting_user.slack_user_id if requesting_user else ""
         requester_context = SlackThreadRef(
             triggering_user_id=requester_id,
-            triggering_user_name=user.display_name if user else owner_login,
+            triggering_user_name=requesting_user.display_name if requesting_user else owner_login,
             triggering_user_email=cfg.user_email or "",
             triggering_event_ts=(
                 cfg.slack_thread.triggering_event_ts
@@ -465,6 +470,8 @@ async def slack_breakout_thread(
         )
     if owner_type == "user":
         metadata["owner_login"] = owner_login
+        if requesting_user is not None:
+            metadata["owner_user_id"] = str(requesting_user.id)
         metadata.update(await participant_metadata({}, login=owner_login))
     if cfg.github_login:
         metadata["github_login"] = cfg.github_login

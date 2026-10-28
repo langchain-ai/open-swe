@@ -12,6 +12,13 @@ from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeUserRecords
+from tests.support.sessions import SessionUsers, user_id_of
+
+
+@pytest.fixture(autouse=True)
+def _people(session_users: SessionUsers) -> None:
+    session_users.add("alice")
+    session_users.add("bob")
 
 
 @pytest.fixture
@@ -38,6 +45,7 @@ def saved_scope(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "visibility": "private",
         "owner_type": "user",
         "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
         "participant_logins": ["alice", "bob"],
     }
     monkeypatch.setattr(
@@ -128,8 +136,11 @@ async def test_workspace_repo_patch_preserves_global_and_rejects_invalid_maps(
         ({"github_login": None, "user_email": "alice@example.com"}, {}),
         ({"github_login": "bob"}, {}),
         ({"thread_id": None}, {}),
-        ({"visibility": "private", "owner_login": "Alice"}, {"visibility": "public"}),
-        ({}, {"owner_login": ""}),
+        (
+            {"visibility": "private", "owner_login": "Alice"},
+            {"visibility": "public"},
+        ),
+        ({}, {"owner_login": "", "owner_user_id": ""}),
         ({}, {"visibility": "unknown"}),
         ({}, {"owner_type": "system"}),
         ({"background_task_completion": True}, {}),

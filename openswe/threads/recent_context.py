@@ -15,6 +15,7 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.github.comments import sanitize_github_comment_body
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
@@ -29,6 +30,7 @@ from openswe.threads.summary import (
     thread_source,
     thread_updated_ms,
 )
+from openswe.users import User
 from openswe.utils.json_types import ThreadLike
 from openswe.utils.thread_participants import participant_search_filters
 
@@ -85,10 +87,10 @@ def _thread_resolved(metadata: Mapping[str, object]) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _eligible_for_private_or_dm(metadata: Mapping[str, object], login: str | None) -> bool:
+def _eligible_for_private_or_dm(metadata: Mapping[str, object], session: DashboardSession) -> bool:
     """Private destination: the sender's own public and privately-owned threads."""
     if thread_is_private(metadata):
-        return thread_is_owner(metadata, login)
+        return thread_is_owner(metadata, session)
     return True
 
 
@@ -97,10 +99,9 @@ def _eligible_for_shared_slack(
     *,
     team_id: str,
     channel_id: str,
-    login: str | None,
 ) -> bool:
     """Shared Slack channel: only this channel's public threads, same Slack team."""
-    if thread_is_private(metadata) or not login:
+    if thread_is_private(metadata):
         return False
     ref = SourceContext.from_metadata(metadata).slack_thread
     if ref is None:
@@ -128,8 +129,7 @@ class RecentContextSelector:
         client: LangGraphClient,
         *,
         audience: RecentContextAudience,
-        login: str | None,
-        email: str | None = None,
+        session: DashboardSession,
         exclude_thread_id: str | None = None,
         slack_team_id: str | None = None,
         slack_channel_id: str | None = None,
@@ -137,14 +137,11 @@ class RecentContextSelector:
     ) -> None:
         self._client = client
         self._audience = audience
-        self._login = login
-        self._email = email
+        self._session = session
         self._exclude_thread_id = exclude_thread_id
         self._slack_team_id = slack_team_id or ""
         self._slack_channel_id = slack_channel_id or ""
         self._scan_cap = max(scan_cap, RECENT_CONTEXT_THREAD_COUNT)
-        if not login:
-            raise ValueError("recent thread context requires a verified sender login")
 
     async def select(self) -> list[RecentThreadContext]:
         """Newest-first eligible threads, deduplicated by thread ID."""
@@ -160,10 +157,7 @@ class RecentContextSelector:
 
     async def _collect(self, eligible: EligibilityPredicate) -> list[RecentThreadContext]:
         selected: dict[str, RecentThreadContext] = {}
-        login = self._login
-        if not login:
-            return []
-        metadata_filters = participant_search_filters(login, self._email)
+        metadata_filters = participant_search_filters(self._session.login, self._session.email)
         filter_cap = max(self._scan_cap // len(metadata_filters), RECENT_CONTEXT_THREAD_COUNT)
         for metadata_filter in metadata_filters:
             offset = 0
@@ -217,11 +211,10 @@ class RecentContextSelector:
             metadata,
             team_id=self._slack_team_id,
             channel_id=self._slack_channel_id,
-            login=self._login,
         )
 
     def _private_eligible(self, metadata: Mapping[str, object]) -> bool:
-        return _eligible_for_private_or_dm(metadata, self._login)
+        return _eligible_for_private_or_dm(metadata, self._session)
 
     @staticmethod
     def _ordered(selected: dict[str, RecentThreadContext]) -> list[RecentThreadContext]:
@@ -283,8 +276,10 @@ async def recent_thread_context_section(
     client: LangGraphClient | None = None,
 ) -> str:
     """The prompt section for this sender, or "" when ineligible or unavailable."""
-    if not login:
+    sender = await User.for_login("github", login) if login else None
+    if sender is None:
         return ""
+    session = DashboardSession.of(sender, email=email)
     if client is None:
         from openswe.utils.thread_ops import langgraph_client
 
@@ -294,8 +289,7 @@ async def recent_thread_context_section(
         selector = RecentContextSelector(
             client,
             audience=audience,
-            login=login,
-            email=email,
+            session=session,
             exclude_thread_id=exclude_thread_id,
             slack_team_id=slack_team_id,
             slack_channel_id=slack_channel_id,

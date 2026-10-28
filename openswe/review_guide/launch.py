@@ -121,9 +121,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
     )
     origin_channel_id, origin_message_ts = await origin.message(pull_request, head.title)
     thread_id = (
-        await _fork(
-            langgraph_client(), origin.source_thread_id, login, is_private=origin.is_private
-        )
+        await _fork(langgraph_client(), origin.source_thread_id, user, is_private=origin.is_private)
         if origin.source_thread_id
         else str(uuid.uuid4())
     )
@@ -155,7 +153,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             source_context=SourceContext(slack_thread=location),
             workspace=origin.workspace_slug,
             visibility="private" if origin.is_private else "public",
-            owner_login=login,
+            owner=user,
         ):
             raise GuideStartError("could not create the review thread")
         await bind_slack_thread_id(channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
@@ -218,7 +216,7 @@ class _SourceMetadata(BaseModel):
 
 
 async def _fork(
-    client: LangGraphClient, source_thread_id: str, login: str, *, is_private: bool = False
+    client: LangGraphClient, source_thread_id: str, owner: User, *, is_private: bool = False
 ) -> str:
     """A copy of the asking thread that shares its sandbox, so the walkthrough knows its work.
 
@@ -238,7 +236,8 @@ async def _fork(
                 **dict.fromkeys(copied.metadata),
                 "visibility": "private" if is_private else "public",
                 "owner_type": "user",
-                "owner_login": login,
+                "owner_login": owner.github_login,
+                "owner_user_id": str(owner.id),
                 "created_at_ms": int(time.time() * 1000),
                 **(
                     {

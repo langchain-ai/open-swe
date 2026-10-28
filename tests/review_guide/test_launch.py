@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.review_guide import launch
+from openswe.users.models import User, UserIdentity
 
 
 @pytest.mark.parametrize("is_private", [False, True])
@@ -20,11 +21,12 @@ async def test_fork_preserves_visibility_without_copying_source_credentials(
     client = SimpleNamespace(threads=threads)
     monkeypatch.setattr(launch, "sandbox_host_thread_id", AsyncMock(return_value="source"))
 
-    assert await launch._fork(client, "source", "requester", is_private=is_private) == "copy"
+    requester = User(identities=[UserIdentity(provider="github", external_id="1", login="me")])
+    assert await launch._fork(client, "source", requester, is_private=is_private) == "copy"
 
     metadata = threads.update.call_args.kwargs["metadata"]
     assert metadata["visibility"] == ("private" if is_private else "public")
-    assert metadata["owner_login"] == "requester"
+    assert metadata["owner_user_id"] == str(requester.id)
     assert metadata["github_login"] is None
 
 

@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.threads import pr_fixes
+from tests.support.sessions import signed_in, user_id_of
 
 pytestmark = pytest.mark.usefixtures("no_local_threads")
 
@@ -112,10 +113,12 @@ async def test_every_intent_locks_on_the_same_key_so_only_one_thread_is_created(
     monkeypatch.setattr(pr_fixes, "agent_thread_pr_state_lock", recording_lock)
 
     for intent in (OPEN, FIX, ADDRESS_COMMENTS):
-        await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+        await pr_fixes.start_pull_request_thread(
+            "acme", "app", 12, signed_in("alice"), intent=intent
+        )
 
     assert [key for key in keys if key.startswith("pr-thread:")] == [
-        f"pr-thread:alice:{PR_URL}"
+        f"pr-thread:{user_id_of('alice')}:{PR_URL}"
     ] * 3
 
 
@@ -127,16 +130,21 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     }
     setup.threads["private"] = {
         "thread_id": "private",
-        "metadata": {"source": "dashboard", "visibility": "private", "owner_login": "bob"},
+        "metadata": {
+            "source": "dashboard",
+            "visibility": "private",
+            "owner_login": "bob",
+            "owner_user_id": str(user_id_of("bob")),
+        },
     }
     FakeRegistry.thread_ids = ["admin", "private"]
 
-    assert await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None) == []
+    assert await pr_fixes.find_pr_threads("acme", "app", 12, signed_in("alice")) == []
     assert await pr_fixes.pull_request_thread_running(
-        "acme", "app", 12, "alice"
+        "acme", "app", 12, signed_in("alice")
     ) == pr_fixes.PullRequestThreadStatus(running=False)
     assert await pr_fixes.start_pull_request_thread(
-        "acme", "app", 12, "alice", intent=FIX
+        "acme", "app", 12, signed_in("alice"), intent=FIX
     ) == pr_fixes.PullRequestThreadRun(thread_id="new")
 
 
@@ -145,7 +153,7 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
         "acme",
         "app",
         12,
-        "alice",
+        signed_in("alice"),
         "Pick a reviewer",
         title="Reviewer assignment",
         before_dispatch=AsyncMock(),
@@ -158,34 +166,37 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
     setup.threads["new"]["metadata"].update(metadata)
     FakeRegistry.thread_ids.append("new")
     assert [
-        t["thread_id"] for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None)
+        t["thread_id"]
+        for t in await pr_fixes.find_pr_threads("acme", "app", 12, signed_in("alice"))
     ] == ["existing"]
     assert [
         t["thread_id"]
-        for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
+        for t in await pr_fixes.find_pr_threads(
+            "acme", "app", 12, signed_in("alice"), unlisted=True
+        )
     ] == ["new"]
 
 
 async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(setup):
-    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, signed_in("alice"), intent=OPEN)
     setup.client.threads.update.assert_not_awaited()
     setup.threads["existing"]["metadata"]["review_chat"] = True
     await pr_fixes.start_pull_request_thread(
         "acme",
         "app",
         12,
-        "alice",
+        signed_in("alice"),
         intent=pr_fixes.MessageIntent(intent="message", title="Discuss PR", message="Explain this"),
     )
     assert "review_chat" not in setup.client.threads.update.await_args.kwargs["metadata"]
-    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, signed_in("alice"), intent=FIX)
     assert setup.client.threads.update.await_args.kwargs["metadata"]["review_chat"] is False
 
 
 async def test_denied_repo_never_reads_or_starts_threads(setup):
     pr_fixes.require_repo_access_for_user.side_effect = HTTPException(403, "denied")
     with pytest.raises(HTTPException):
-        await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
+        await pr_fixes.start_pull_request_thread("acme", "app", 12, signed_in("alice"), intent=FIX)
     setup.client.threads.get.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     pr_fixes.dispatch_agent_run.assert_not_awaited()
@@ -203,7 +214,9 @@ async def test_single_comment_run_rejects_a_comment_from_another_pull_request(se
     intent = pr_fixes.AddressCommentIntent(intent="address-comment", comment_url=comment_url)
 
     with pytest.raises(HTTPException) as exc:
-        await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+        await pr_fixes.start_pull_request_thread(
+            "acme", "app", 12, signed_in("alice"), intent=intent
+        )
 
     assert exc.value.status_code == 422
     pr_fixes.dispatch_agent_run.assert_not_awaited()
@@ -213,7 +226,7 @@ async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypat
     from openswe.threads import runs
 
     FakeRegistry.thread_ids = []
-    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, signed_in("alice"), intent=OPEN)
     metadata = setup.client.threads.update.await_args.kwargs["metadata"]
     assert metadata["review_chat"] is True
     monkeypatch.setattr(runs, "resolve_run_email", AsyncMock(return_value=None))
@@ -243,13 +256,13 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     FakeRegistry.thread_ids = ["duplicate", "slack-thread"]
 
     assert await pr_fixes.pull_request_thread_running(
-        "acme", "app", 12, "alice"
+        "acme", "app", 12, signed_in("alice")
     ) == pr_fixes.PullRequestThreadStatus(running=True)
     assert await pr_fixes.start_pull_request_thread(
-        "acme", "app", 12, "alice", intent=FIX
+        "acme", "app", 12, signed_in("alice"), intent=FIX
     ) == pr_fixes.PullRequestThreadRun(thread_id="slack-thread", already_running=True)
     assert await pr_fixes.start_pull_request_thread(
-        "acme", "app", 12, "alice", intent=OPEN
+        "acme", "app", 12, signed_in("alice"), intent=OPEN
     ) == pr_fixes.PullRequestThreadRun(thread_id="slack-thread", already_running=False)
     pr_fixes.dispatch_agent_run.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()

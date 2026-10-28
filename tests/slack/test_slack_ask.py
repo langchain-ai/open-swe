@@ -13,6 +13,7 @@ from openswe.tasks import service as task_service
 from openswe.threads.listing import _metadata_matches_filters
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from tests.support.sessions import user_id_of
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
 
     assert upsert.await_args.kwargs["unlisted"] is True
     assert upsert.await_args.kwargs["visibility"] == "private"
-    assert upsert.await_args.kwargs["owner_login"] == "octocat"
+    assert upsert.await_args.kwargs["github_login"] == "octocat"
     configurable = dispatch.await_args.args[2]
     assert configurable["slack_ask"] is True
     assert configurable["slack_thread"]["triggering_user_id"] == "U1"
@@ -91,15 +92,19 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     client.threads.get.return_value = {
         "metadata": {
             "owner_type": "user",
-            "owner_login": saved["owner_login"],
+            "owner_login": saved["github_login"],
+            "owner_user_id": str(user_id_of(saved["github_login"])),
             "visibility": saved["visibility"],
             "source": saved["source"],
             "source_context": saved["source_context"].dump(),
         }
     }
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
-    owner = User(identities=[UserIdentity(provider="github", external_id="1", login="octocat")])
-    monkeypatch.setattr(task_schemas, "user_for_login", AsyncMock(return_value=owner))
+    owner = User(
+        id=user_id_of("octocat"),
+        identities=[UserIdentity(provider="github", external_id="1", login="octocat")],
+    )
+    monkeypatch.setattr(task_schemas.User, "get", AsyncMock(return_value=owner))
     monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
     monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))

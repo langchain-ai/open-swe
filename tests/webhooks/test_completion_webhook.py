@@ -9,6 +9,7 @@ from openswe.message_queue import QueuedMessage
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
+from tests.support.sessions import SessionUsers, user_id_of
 
 
 class _FakeThreads:
@@ -115,16 +116,24 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 async def test_leftover_follow_ups_get_one_pickup_run(
     monkeypatch: pytest.MonkeyPatch,
     registry_db: None,
+    session_users: SessionUsers,
     status: str,
     metadata: dict[str, object],
     worker: bool,
     cancelled: bool,
     picks_up: bool,
 ) -> None:
+    session_users.add("owner")
     pending = {"text": "Check logout too", "source": "dashboard"}
     await QueuedMessage.put("t1", pending)
     client = SimpleNamespace(
-        threads=_FakeThreads({"source": "dashboard", "owner_login": "owner"}),
+        threads=_FakeThreads(
+            {
+                "source": "dashboard",
+                "owner_login": "owner",
+                "owner_user_id": str(user_id_of("owner")),
+            }
+        ),
         runs=SimpleNamespace(list=AsyncMock(return_value=[])),
     )
     dispatched: list[dict[str, object]] = []

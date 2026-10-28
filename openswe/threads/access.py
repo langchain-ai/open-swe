@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from openswe.config import ENV
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.http import github_reauth_message
 from openswe.threads.summary import assert_thread_readable
@@ -35,40 +36,15 @@ async def _ensure_dashboard_github_token(login: str) -> None:
         raise HTTPException(401, github_reauth_message(login))
 
 
-async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
-    return thread
-
-
-async def _authorized_thread_metadata(
-    thread_id: str, login: str, *, email: str | None = None
-) -> dict[str, Any]:
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    return metadata
-
-
-async def _readable_thread(
-    thread_id: str, *, login: str | None = None, email: str | None = None
-) -> ThreadLike:
+async def _authorized_thread(thread_id: str, session: DashboardSession) -> ThreadLike:
     """Fetch a thread and authorize the authenticated caller."""
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
+    assert_thread_readable(thread_metadata(thread), session)
     return thread
 
 
-async def _readable_thread_metadata(
-    thread_id: str, *, login: str | None = None, email: str | None = None
-) -> dict[str, Any]:
-    thread = await _readable_thread(thread_id, login=login, email=email)
-    metadata = thread_metadata(thread)
-    return metadata
+async def _readable_thread_metadata(thread_id: str, session: DashboardSession) -> dict[str, Any]:
+    return thread_metadata(await _authorized_thread(thread_id, session))

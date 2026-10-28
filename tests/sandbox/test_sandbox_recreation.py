@@ -6,6 +6,7 @@ import pytest
 
 from openswe.sandboxes.lifecycle import HandedOver, hand_sandbox_to_mda
 from openswe.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
+from tests.support.sessions import user_id_of
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +69,11 @@ async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-old", "owner_login": "octocat"},
+            return_value={
+                "sandbox_id": "sandbox-old",
+                "owner_login": "octocat",
+                "owner_user_id": str(user_id_of("octocat")),
+            },
         ),
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock

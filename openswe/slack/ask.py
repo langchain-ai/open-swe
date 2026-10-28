@@ -281,7 +281,6 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         source_context=source_context,
         workspace=workspace,
         visibility="private",
-        owner_login=login,
         unlisted=True,
     )
     if not persisted:

@@ -28,6 +28,7 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.rebuild import rebuild_thread_projections
 from openswe.transcript.snapshot import TranscriptSnapshot, load_snapshot
+from tests.support.sessions import user_id_of
 
 OWNER = "test-user"
 TOOL_OUTPUT = "line of output\n" * 500
@@ -44,7 +45,11 @@ async def _seed(thread_id: str, turn_id: UUID) -> None:
                     title="A thread",
                     source="dashboard",
                     owner_login=OWNER,
-                    metadata={"owner_login": OWNER, "visibility": "public"},
+                    metadata={
+                        "owner_login": OWNER,
+                        "owner_user_id": str(user_id_of(OWNER)),
+                        "visibility": "public",
+                    },
                 ),
                 actor_kind="user",
             )

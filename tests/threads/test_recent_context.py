@@ -12,6 +12,7 @@ from openswe.threads.recent_context import (
     render_recent_thread_context,
 )
 from openswe.utils.json_types import JsonObject, ThreadLike
+from tests.support.sessions import signed_in, user_id_of
 
 
 class FakeThreads:
@@ -63,6 +64,7 @@ def thread(
 ) -> ThreadLike:
     metadata: JsonObject = {
         "owner_login": owner_login,
+        "owner_user_id": str(user_id_of(owner_login)) if owner_login else None,
         "visibility": visibility,
         "source": source,
         "participant_logins": participants or {"alice": True},
@@ -107,8 +109,7 @@ def selector(
     return RecentContextSelector(
         client,
         audience=audience,
-        login="alice",
-        email=email,
+        session=signed_in("alice", email=email),
         exclude_thread_id=exclude_thread_id,
         slack_team_id=slack_team_id,
         slack_channel_id=slack_channel_id,

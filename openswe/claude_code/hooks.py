@@ -350,6 +350,7 @@ class SessionMirror:
             "origin": CLAUDE_CODE_SOURCE,
             "owner_type": "user",
             "owner_login": login,
+            "owner_user_id": str(self.owner.id),
             # A local session can hold anything on its machine, so only its owner sees it.
             "visibility": "private",
             "thread_category": "interactive",

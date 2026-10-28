@@ -8,6 +8,7 @@ from langgraph.graph.state import RunnableConfig
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import plan_agent
+from tests.support.sessions import user_id_of
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -22,7 +23,13 @@ def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureR
     client = SimpleNamespace(
         threads=SimpleNamespace(
             get=AsyncMock(
-                return_value={"metadata": {"visibility": request.param, "owner_login": "octocat"}}
+                return_value={
+                    "metadata": {
+                        "visibility": request.param,
+                        "owner_login": "octocat",
+                        "owner_user_id": str(user_id_of("octocat")),
+                    }
+                }
             )
         )
     )

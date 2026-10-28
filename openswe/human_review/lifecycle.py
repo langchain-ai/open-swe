@@ -13,6 +13,7 @@ from uuid import UUID
 import httpx2
 from langgraph_sdk import get_client
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dispatch import dispatch_agent_run
 from openswe.expedited_review import card as expedited_card
 from openswe.expedited_review.channels import (
@@ -638,8 +639,10 @@ class ReviewCard:
         request = self.request
         pr = request.pull_request
         if not request.thread_id:
-            login = request.requester_login
-            if not login:
+            requester = request.requested_by or await User.for_login(
+                "github", request.requester_login
+            )
+            if requester is None or not requester.github_login:
                 logger.info(
                     "Review request has no agent thread or requester to wake",
                     extra={"request_id": str(request.id)},
@@ -656,7 +659,7 @@ class ReviewCard:
                 pr.owner,
                 pr.repo,
                 pr.number,
-                login,
+                DashboardSession.of(requester),
                 prompt,
                 title=title,
                 before_dispatch=record_thread,

@@ -25,7 +25,9 @@ from openswe.slack import thinking as slack_thinking
 from openswe.tasks import service as task_service
 from openswe.tools import threads
 from openswe.tools.background_execute import TASK_ROOT, background_execute
+from openswe.users.models import User, UserIdentity
 from openswe.utils.background_task_state import update_background_task_state
+from tests.support.sessions import SessionUsers, signed_in, user_id_of
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
@@ -478,8 +480,13 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     [(False, False, False), (True, False, False), (False, True, False), (False, False, True)],
 )
 async def test_reconcile_enqueues_one_claimed_completion(
-    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool, private: bool
+    monkeypatch: pytest.MonkeyPatch,
+    session_users: SessionUsers,
+    tracking_failure: bool,
+    worker: bool,
+    private: bool,
 ) -> None:
+    session_users.add("worker-owner")
     task = {
         "task_id": "task-1",
         "owner_thread_id": "thread-1",
@@ -507,6 +514,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
             visibility="private" if private else "public",
             owner_type="user",
             owner_login="worker-owner",
+            owner_user_id=str(user_id_of("worker-owner")),
         )
         if worker:
             client.threads.get.return_value["metadata"].update(
@@ -517,7 +525,14 @@ async def test_reconcile_enqueues_one_claimed_completion(
         monkeypatch.setattr(
             task_service.ThreadMetadata,
             "owner",
-            AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), github_login="worker-owner")),
+            AsyncMock(
+                return_value=User(
+                    id=user_id_of("worker-owner"),
+                    identities=[
+                        UserIdentity(provider="github", external_id="1", login="worker-owner")
+                    ],
+                )
+            ),
         )
         monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
         monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
@@ -552,7 +567,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
         from openswe.run_config import RunConfig
 
         assert (
-            private_owner_login(
+            await private_owner_login(
                 RunConfig.parse(configurable), client.threads.get.return_value["metadata"]
             )
             == "worker-owner"
@@ -562,7 +577,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
         monkeypatch.setattr(threads, "get_config", lambda: config)
         monkeypatch.setattr(task_service, "get_config", lambda: config)
         assert await task_service.Actor.resolve({}) == task_service.Actor(
-            thread_id="thread-1", login="worker-owner"
+            thread_id="thread-1", session=signed_in("worker-owner")
         )
     assert dispatch.await_args.kwargs["context"] == {
         "sender_id": "system:background-task",

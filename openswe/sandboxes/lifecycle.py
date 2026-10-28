@@ -416,9 +416,6 @@ async def _attach_task_worker_sandbox(
         host_owner = await host.owner()
         if owner.id != host_owner.id:
             raise PermissionError("The shared sandbox host has different ownership or permissions")
-        for target_id, binding in ((thread_id, worker), (host_id, host)):
-            if binding.owner_user_id is None:
-                await client.threads.update(target_id, metadata={"owner_user_id": str(owner.id)})
     backend = await ensure_sandbox_for_thread(
         host_id, workspace_slug=context.task.workspace.slug, require_existing=True
     )

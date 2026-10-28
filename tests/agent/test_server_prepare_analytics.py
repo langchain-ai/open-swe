@@ -15,6 +15,7 @@ from langgraph.runtime import Runtime
 import openswe.server as server
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.utils import ttl_cache
+from tests.support.sessions import user_id_of
 
 _INSTALLATION_TOKEN = "installation-token"
 
@@ -165,7 +166,11 @@ async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
     prepare_harness: dict[str, Any], github_client: _FakeGitHubClient
 ) -> None:
     prepare_harness["github_token"] = "oauth-token"
-    prepare_harness["thread_metadata"] = {"visibility": "private", "owner_login": "mason-gh"}
+    prepare_harness["thread_metadata"] = {
+        "visibility": "private",
+        "owner_login": "mason-gh",
+        "owner_user_id": str(user_id_of("mason-gh")),
+    }
     github_client._responses.append(
         _FakeResponse(
             200, {"id": 7, "login": "mason-gh", "name": "Mason", "email": "m@example.com"}

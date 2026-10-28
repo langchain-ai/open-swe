@@ -6,6 +6,12 @@ import langgraph_sdk
 import pytest
 
 from openswe.github import token as auth
+from tests.support.sessions import SessionUsers, user_id_of
+
+
+@pytest.fixture(autouse=True)
+def _people(session_users: SessionUsers) -> None:
+    session_users.add("mason-gh")
 
 
 def _slack_config(github_login: str | None = "mason-gh") -> dict:
@@ -44,7 +50,13 @@ def _stub_dashboard_store(
         lambda: SimpleNamespace(
             threads=SimpleNamespace(
                 get=AsyncMock(
-                    return_value={"metadata": {"visibility": "private", "owner_login": "mason-gh"}}
+                    return_value={
+                        "metadata": {
+                            "visibility": "private",
+                            "owner_login": "mason-gh",
+                            "owner_user_id": str(user_id_of("mason-gh")),
+                        }
+                    }
                 )
             )
         ),

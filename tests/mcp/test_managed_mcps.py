@@ -17,7 +17,7 @@ from openswe.dashboard.workspace_settings import (
 )
 from openswe.mcp import cards, managed, routes, runtime
 from openswe.users.models import User
-from tests.support.sessions import signed_in
+from tests.support.sessions import signed_in, user_id_of
 
 GATEWAY_ID = "01a0f8da-0f4b-7817-b2da-27b7bfa5f0f8"
 
@@ -297,7 +297,12 @@ async def test_disconnect_removes_only_the_callers_credential_for_a_gateway_serv
 
 
 def private_thread(monkeypatch, owner: str) -> dict[str, str]:
-    metadata = {"visibility": "private", "owner_type": "user", "owner_login": owner}
+    metadata = {
+        "visibility": "private",
+        "owner_type": "user",
+        "owner_login": owner,
+        "owner_user_id": str(user_id_of(owner)),
+    }
     monkeypatch.setattr(
         langgraph_sdk,
         "get_client",

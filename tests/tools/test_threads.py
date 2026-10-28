@@ -7,12 +7,21 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.message_queue import QueuedMessage
+from tests.support.sessions import SessionUsers, signed_in, user_id_of
 
 threads_tool = importlib.import_module("openswe.tools.threads")
 
 
+@pytest.fixture(autouse=True)
+def _people(session_users: SessionUsers) -> None:
+    for login in ("octocat", "reviewer", "thread-owner"):
+        session_users.add(login)
+
+
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:
-    actor = threads_tool._Actor(login=login, email=f"{login}@example.com", name=login)
+    actor = threads_tool._Actor(
+        login=login, user_id=user_id_of(login), email=f"{login}@example.com", name=login
+    )
     if admin:
         return SimpleNamespace(
             login=actor.login,
@@ -49,7 +58,9 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
 
     actor = await threads_tool._actor(state)
 
-    assert actor == threads_tool._Actor(login="reviewer", email=None, name="reviewer")
+    assert actor == threads_tool._Actor(
+        login="reviewer", user_id=user_id_of("reviewer"), email=None, name="reviewer"
+    )
 
 
 async def test_list_threads_denies_actor_outside_allowed_org(
@@ -267,7 +278,8 @@ async def test_get_thread_counts_pending_run_outside_history_window(
 async def test_list_threads_resolves_slack_reply_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    actor = _actor()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=actor))
     lookup = AsyncMock(return_value="thread-1")
     monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
@@ -287,9 +299,7 @@ async def test_list_threads_resolves_slack_reply_link(
         "thread_ts": "1788425314.774339",
     }
     lookup.assert_awaited_once_with("C123", "1788425314.774339")
-    get_dashboard_thread.assert_awaited_once_with(
-        "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
-    )
+    get_dashboard_thread.assert_awaited_once_with("thread-1", actor, mark_viewed=False)
 
 
 async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
@@ -392,7 +402,7 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     result = await threads_tool.manage_thread("thread-1", "cancel", state=state)
 
     assert result == {"success": False, "error": "thread not found", "status_code": 404}
-    cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
+    cancel.assert_awaited_once_with("thread-1", signed_in("reviewer"))
 
 
 async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPatch) -> None:

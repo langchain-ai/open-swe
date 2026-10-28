@@ -5,6 +5,7 @@ import pytest
 
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
+from tests.support.sessions import user_id_of
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -18,7 +19,12 @@ async def _seed() -> None:
         await index.create(
             f"t{n}",
             runtime="mda" if n else "local",
-            metadata={"owner_login": owner, "visibility": visibility, "repo": {"name": "app"}},
+            metadata={
+                "owner_login": owner,
+                "owner_user_id": str(user_id_of(owner)),
+                "visibility": visibility,
+                "repo": {"name": "app"},
+            },
             status=status,
             created_at=_DAY + timedelta(hours=n),
             updated_at=_DAY + timedelta(hours=10 - n),
@@ -60,7 +66,11 @@ async def test_search_filters_sorts_and_pages_like_the_agent_server() -> None:
     def ids(found: list[index.IndexedThread]) -> list[str]:
         return [thread.thread_id for thread in found]
 
-    assert ids(await ThreadSearch(metadata={"owner_login": "ada"}).run()) == ["t1", "t0"]
+    assert ids(
+        await ThreadSearch(
+            metadata={"owner_login": "ada", "owner_user_id": str(user_id_of("ada"))}
+        ).run()
+    ) == ["t1", "t0"]
     assert ids(await ThreadSearch(metadata={"repo": {"name": "app"}}, limit=2).run()) == [
         "t2",
         "t1",
@@ -76,7 +86,12 @@ async def test_search_filters_sorts_and_pages_like_the_agent_server() -> None:
     assert ids(await ThreadSearch(metadata={"visibility": "public"}, ids=["t0", "t1"]).run()) == [
         "t1"
     ]
-    assert await ThreadSearch(metadata={"owner_login": "ada"}, limit=1).count() == 2
+    assert (
+        await ThreadSearch(
+            metadata={"owner_login": "ada", "owner_user_id": str(user_id_of("ada"))}, limit=1
+        ).count()
+        == 2
+    )
 
 
 async def test_a_text_search_ranks_title_matches_and_recent_activity_first() -> None:

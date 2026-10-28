@@ -54,7 +54,7 @@ async def api_concierge(
     thread_id = await lookup_slack_thread_id(channel_id, CONCIERGE_TS) if channel_id else None
     if thread_id:
         thread = await langgraph_client().threads.get(thread_id)
-        assert_thread_readable(thread_metadata(thread), session.login, session.email)
+        assert_thread_readable(thread_metadata(thread), session)
     return {"thread_id": thread_id, "channel_id": channel_id}
 
 

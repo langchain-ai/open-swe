@@ -9,6 +9,7 @@ from openswe.mcp import MCPConnection, runtime
 from openswe.mcp.models import MCPScope
 from openswe.sandboxes.tool_runtime import ToolSurface
 from tests.mcp_helpers import fake_mcp_server
+from tests.support.sessions import SessionUsers, user_id_of
 
 
 def record(name="linear", **fields):
@@ -163,11 +164,19 @@ async def test_unavailable_source_does_not_expose_lower_precedence_tools(remote,
     assert "private store details" not in caplog.text
 
 
-async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monkeypatch):
+async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(
+    remote, monkeypatch, session_users: SessionUsers
+):
+    session_users.add("alice")
     from openswe.mcp import user
     from openswe.mcp.records import UserMCPConnections
 
-    metadata = {"visibility": "private", "owner_type": "user", "owner_login": "alice"}
+    metadata = {
+        "visibility": "private",
+        "owner_type": "user",
+        "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
+    }
     monkeypatch.setattr(
         langgraph_sdk,
         "get_client",

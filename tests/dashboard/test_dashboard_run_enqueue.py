@@ -10,11 +10,13 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.threads import proxy as thread_proxy
 from tests.conftest import patch_thread_module
+from tests.support.sessions import signed_in, user_id_of
 
 DASHBOARD_METADATA = {
     "source": "dashboard",
     "visibility": "public",
     "owner_login": "octocat",
+    "owner_user_id": str(user_id_of("octocat")),
 }
 
 
@@ -73,6 +75,7 @@ async def test_enqueue_requires_posting_access(monkeypatch) -> None:
                 **DASHBOARD_METADATA,
                 "visibility": "private",
                 "owner_login": "someone-else",
+                "owner_user_id": str(user_id_of("someone-else")),
             }
         }
     )
@@ -80,7 +83,7 @@ async def test_enqueue_requires_posting_access(monkeypatch) -> None:
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_proxy.proxy_dashboard_thread_run_enqueue("tid", "octocat", _body())
+        await thread_proxy.proxy_dashboard_thread_run_enqueue("tid", signed_in("octocat"), _body())
     assert exc_info.value.status_code == 404
 
 
@@ -95,7 +98,7 @@ async def test_enqueue_502s_when_queue_follow_up_run_returns_no_run_id(monkeypat
     monkeypatch.setattr(thread_proxy, "queue_follow_up_run", fake_queue_follow_up_run)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_proxy.proxy_dashboard_thread_run_enqueue("tid", "octocat", _body())
+        await thread_proxy.proxy_dashboard_thread_run_enqueue("tid", signed_in("octocat"), _body())
     assert exc_info.value.status_code == 502
 
 
@@ -110,5 +113,7 @@ async def test_enqueue_tolerates_a_brief_create_race_then_succeeds(monkeypatch) 
 
     monkeypatch.setattr(thread_proxy, "queue_follow_up_run", fake_queue_follow_up_run)
 
-    result = await thread_proxy.proxy_dashboard_thread_run_enqueue("tid", "octocat", _body())
+    result = await thread_proxy.proxy_dashboard_thread_run_enqueue(
+        "tid", signed_in("octocat"), _body()
+    )
     assert result == runs.get_result

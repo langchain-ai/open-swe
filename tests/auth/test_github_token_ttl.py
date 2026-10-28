@@ -21,6 +21,7 @@ from openswe.github import thread_token as github_token
 from openswe.github import webhook as github_webhooks
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
+from tests.support.sessions import SessionUsers, user_id_of
 
 
 @pytest.fixture(autouse=True)
@@ -103,12 +104,20 @@ class _MockHttpxClient:
 
 
 @pytest.mark.usefixtures("no_local_threads")
-async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monkeypatch):
+async def test_private_pr_followup_rejected_before_credentials_or_dispatch(
+    monkeypatch, session_users: SessionUsers
+):
+    session_users.add("alice")
     thread_id = "00000000-0000-0000-0000-000000000001"
     client = MagicMock()
     client.threads.get = AsyncMock(
         return_value={
-            "metadata": {"source": "dashboard", "visibility": "private", "owner_login": "alice"}
+            "metadata": {
+                "source": "dashboard",
+                "visibility": "private",
+                "owner_login": "alice",
+                "owner_user_id": str(user_id_of("alice")),
+            }
         }
     )
     monkeypatch.setattr(webhook_common, "get_client", lambda **kwargs: client)
@@ -145,7 +154,7 @@ async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monke
         )
     token.assert_not_awaited()
     dispatch.assert_not_awaited()
-    await webhook_common.authorize_github_thread(thread_id, "ALICE")
+    await webhook_common.authorize_github_thread(thread_id, None, "ALICE")
     client.threads.get.side_effect = RuntimeError("store unavailable")
     with pytest.raises(RuntimeError, match="store unavailable"):
         await github_webhooks.process_github_pr_comment({}, "issue_comment")

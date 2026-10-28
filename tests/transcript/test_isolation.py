@@ -42,7 +42,7 @@ from openswe.transcript.routes import (
 )
 from openswe.transcript.snapshot import load_access, load_snapshot
 from openswe.transcript.turns import settle_run_turn
-from tests.support.sessions import signed_in
+from tests.support.sessions import signed_in, user_id_of
 
 OWNER = "test-user"
 
@@ -53,7 +53,12 @@ def _created(*, visibility: str = "public") -> ThreadCreated:
         source="dashboard",
         owner_login=OWNER,
         visibility=visibility,  # type: ignore[arg-type]
-        metadata={"owner_login": OWNER, "visibility": visibility, "source": "dashboard"},
+        metadata={
+            "owner_login": OWNER,
+            "owner_user_id": str(user_id_of(OWNER)),
+            "visibility": visibility,
+            "source": "dashboard",
+        },
     )
 
 

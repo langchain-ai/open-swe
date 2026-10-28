@@ -14,6 +14,7 @@ from openswe.tasks.store import Task, TaskContext, TaskMembership
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.workspaces.rows import WorkspaceRow
+from tests.support.sessions import user_id_of
 
 
 @pytest.fixture
@@ -33,6 +34,7 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
         "coordinator": {
             "owner_type": "user",
             "owner_login": "owner",
+            "owner_user_id": str(user_id_of("owner")),
             "workspace": "default",
             "sandbox_id": "sb-old",
             "github_token_repositories": ["langchain-ai/open-swe"],
@@ -83,6 +85,7 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
         for metadata in shared_sandbox.values():
             metadata["owner_type"] = "system"
             metadata.pop("owner_login")
+            metadata.pop("owner_user_id")
         for method in ("get", "for_login", "for_identity"):
             monkeypatch.setattr(User, method, AsyncMock(side_effect=AssertionError("User lookup")))
     host_sandbox_id = "sb-replacement"
@@ -221,7 +224,9 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
                 metadata["visibility"] = "private"
         else:
             shared_sandbox["worker"]["owner_user_id"] = str(uuid4())
-            monkeypatch.setattr(User, "get", AsyncMock(return_value=User()))
+            monkeypatch.setattr(
+                User, "get", AsyncMock(side_effect=lambda user_id: User(id=user_id))
+            )
     else:
         shared_sandbox["worker"]["github_token_repositories"] = []
     connect = AsyncMock()

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.threads import listing, summary
+from tests.support.sessions import signed_in, user_id_of
 
 
 def _review_thread(**metadata: object) -> dict[str, object]:
@@ -14,6 +15,7 @@ def _review_thread(**metadata: object) -> dict[str, object]:
             "source": "review_chat",
             "kind": "review_chat",
             "github_login": "alice",
+            "owner_user_id": str(user_id_of("alice")),
             "repo_owner": "acme",
             "repo_name": "api",
             "pr_number": 7,
@@ -37,10 +39,10 @@ def _client(runs: list[dict[str, str]] | Exception) -> SimpleNamespace:
 
 def test_review_chat_is_readable_only_by_its_owner():
     metadata = _review_thread()["metadata"]
-    assert summary.thread_is_readable(metadata, "Alice")
-    assert not summary.thread_is_readable(metadata, "bob")
+    assert summary.thread_is_readable(metadata, signed_in("Alice"))
+    assert not summary.thread_is_readable(metadata, signed_in("bob"))
     assert not summary.thread_is_readable(metadata, None)
-    assert not summary.thread_is_promptable(metadata, "alice")
+    assert not summary.thread_is_promptable(metadata, signed_in("alice"))
 
 
 @pytest.mark.asyncio

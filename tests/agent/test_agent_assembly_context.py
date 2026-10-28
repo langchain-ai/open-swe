@@ -17,6 +17,7 @@ from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import _registered_tool_name, plan_agent
 from openswe.threads.inbox import ThreadInbox
+from tests.support.sessions import SessionUsers, owned_by, user_id_of
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -27,8 +28,18 @@ _MODEL_DEFAULTS = {
 
 
 @pytest.fixture(autouse=True)
+def _people(session_users: SessionUsers) -> None:
+    for login in ("octocat", "owner", "draft-preference-owner"):
+        session_users.add(login)
+
+
+@pytest.fixture(autouse=True)
 def saved_thread_scope(monkeypatch):
-    metadata = {"visibility": "private", "owner_login": "octocat"}
+    metadata = {
+        "visibility": "private",
+        "owner_login": "octocat",
+        "owner_user_id": str(user_id_of("octocat")),
+    }
     monkeypatch.setattr(
         langgraph_sdk,
         "get_client",
@@ -119,7 +130,7 @@ async def test_task_tools_require_a_served_sandbox(
     connected: bool,
     available: bool,
 ) -> None:
-    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    saved_thread_scope.update(owner_type="user", **owned_by("owner"))
     saved_thread_scope.update(binding)
 
     with patch("openswe.tasks.schemas.BridgeStore.is_connected", return_value=connected):
@@ -138,7 +149,10 @@ async def test_existing_task_keeps_controls_without_delegation(
     from openswe.workspaces.rows import WorkspaceRow
 
     saved_thread_scope.update(
-        owner_type="user", owner_login="owner", sandbox_id="bridge:cli", sandbox_bridge_client="cli"
+        owner_type="user",
+        **owned_by("owner"),
+        sandbox_id="bridge:cli",
+        sandbox_bridge_client="cli",
     )
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
@@ -260,7 +274,7 @@ async def _plan_agent(
 async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
     saved_thread_scope,
 ) -> None:
-    saved_thread_scope["owner_login"] = "draft-preference-owner"
+    saved_thread_scope.update(owned_by("draft-preference-owner"))
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -271,6 +285,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
         profile={"draft_prs": False},
         thread_settings={
             "owner_login": "draft-preference-owner",
+            "owner_user_id": str(user_id_of("draft-preference-owner")),
             "model_id": "openai:gpt-6.1-sol",
         },
     )

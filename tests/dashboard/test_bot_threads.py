@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard import oauth
 from openswe.threads import handlers, listing, plan_api, summary, workflow_approval_api
 from tests.support.sessions import signed_in
 
@@ -41,17 +42,17 @@ def bot_thread(monkeypatch):
         monkeypatch.setattr(
             module, "fetch_thread_metadata", AsyncMock(return_value=thread["metadata"])
         )
-    monkeypatch.setattr(summary, "is_admin", lambda email, login=None: login in _ADMINS)
+    monkeypatch.setattr(oauth, "is_admin", lambda email, login=None: login in _ADMINS)
     return thread, client
 
 
 def test_bot_thread_is_readable_and_still_promptable_from_slack(bot_thread):
     metadata = bot_thread[0]["metadata"]
-    assert summary.thread_is_readable(metadata, "bob")
+    assert summary.thread_is_readable(metadata, signed_in("bob"))
     # Slack and GitHub webhooks share this check; only the dashboard is read-only.
-    assert summary.thread_is_promptable(metadata, "bob")
+    assert summary.thread_is_promptable(metadata, signed_in("bob"))
     with pytest.raises(HTTPException) as exc:
-        summary._assert_thread_promptable(metadata, "bob")
+        summary._assert_thread_promptable(metadata, signed_in("bob"))
     assert exc.value.status_code == 403
     assert exc.value.detail == summary.BOT_THREAD_READ_ONLY
 
@@ -61,8 +62,8 @@ async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypat
     _, client = bot_thread
     session = signed_in(login)
     operations = [
-        lambda: handlers.get_dashboard_terminal_sandbox("bot-thread", login),
-        lambda: handlers.delete_dashboard_thread("bot-thread", login),
+        lambda: handlers.get_dashboard_terminal_sandbox("bot-thread", signed_in(login)),
+        lambda: handlers.delete_dashboard_thread("bot-thread", signed_in(login)),
         lambda: plan_api.post_plan_comment(
             "bot-thread", plan_api.CommentBody(body="comment"), session
         ),
@@ -80,7 +81,7 @@ async def test_dashboard_can_only_stop_a_bot_thread(bot_thread, login, monkeypat
     client.runs.cancel_many.assert_not_awaited()
 
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
-    await handlers.cancel_dashboard_thread("bot-thread", login)
+    await handlers.cancel_dashboard_thread("bot-thread", signed_in(login))
     assert client.threads.update.await_args.kwargs["metadata"]["latest_run_status"] == "interrupted"
 
 
@@ -114,11 +115,11 @@ async def test_bot_scope_lists_bot_threads_for_any_user(bot_thread, monkeypatch)
             side_effect=lambda _client, threads, **_: [{"id": t["thread_id"]} for t in threads]
         ),
     )
-    page = await listing.list_dashboard_threads_page("bob", scope="bot")
+    page = await listing.list_dashboard_threads_page(signed_in("bob"), scope="bot")
     assert searches == [{"trigger_kind": "slack_bot"}]
     assert {item["id"] for item in page["items"]} == {"bot-thread", "other-bot-thread"}
 
     searches.clear()
-    page = await listing.list_dashboard_threads_page("bob", scope="bot", bot="T123:B123")
+    page = await listing.list_dashboard_threads_page(signed_in("bob"), scope="bot", bot="T123:B123")
     assert searches == [{"trigger_kind": "slack_bot", "triggering_bot": "T123:B123"}]
     assert [item["id"] for item in page["items"]] == ["bot-thread"]

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 from openswe.dispatch import thread_workspace
 from openswe.input_messages import SystemIdentity, build_input_messages
@@ -34,11 +35,16 @@ class SandboxMove:
     """A person moving their thread onto their machine's bridge, or off it to the cloud."""
 
     def __init__(
-        self, thread_id: str, metadata: Mapping[str, Any], update: dict[str, Any], *, login: str
+        self,
+        thread_id: str,
+        metadata: Mapping[str, Any],
+        update: dict[str, Any],
+        *,
+        session: DashboardSession,
     ) -> None:
         self.thread_id = thread_id
         self.update = update
-        self._login = login
+        self._login = session.login
         self._workspace = thread_workspace(metadata)
         self._transcribed = metadata.get("transcript") == TRANSCRIPT_VERSION
         self._before = {key: metadata.get(key) for key in update}
@@ -49,7 +55,7 @@ class SandboxMove:
         thread_id: str,
         metadata: Mapping[str, Any],
         *,
-        login: str,
+        session: DashboardSession,
         bridge: Bridge | None,
         target: object,
     ) -> Self | None:
@@ -58,13 +64,13 @@ class SandboxMove:
             raise HTTPException(422, "sandbox_target must be cloud")
         current = metadata.get("sandbox_id")
         if bridge is not None and bridge.sandbox_id != current:
-            if metadata.get("visibility") != "private" or not thread_is_owner(metadata, login):
+            if metadata.get("visibility") != "private" or not thread_is_owner(metadata, session):
                 raise HTTPException(
                     409, "only its owner's private thread can move to their machine"
                 )
             update: dict[str, Any] = SandboxBridgeBinding.of(bridge).dump()
         elif bridge is None and target == "cloud" and Bridge.bridge_id_of(current) is not None:
-            if not thread_is_owner(metadata, login):
+            if not thread_is_owner(metadata, session):
                 raise HTTPException(409, "only its owner can move a thread off their machine")
             update = {"sandbox_id": None, "sandbox_kind": None, "sandbox_bridge_client": None}
         else:
@@ -85,7 +91,7 @@ class SandboxMove:
             "to_cloud": bridge is None,
             "carried": update[HANDOFF_FROM_KEY] is not None,
         }
-        return cls(thread_id, metadata, update, login=login)
+        return cls(thread_id, metadata, update, session=session)
 
     @property
     def to_cloud(self) -> bool:

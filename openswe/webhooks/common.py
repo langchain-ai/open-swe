@@ -23,7 +23,7 @@ from openswe.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
 )
-from openswe.dashboard.oauth import build_settings_url
+from openswe.dashboard.oauth import DashboardSession, build_settings_url
 from openswe.dashboard.options import (
     default_vision_model_pair,
     model_supports_images,  # noqa: F401
@@ -537,7 +537,7 @@ async def upsert_agent_thread_metadata(
     workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
     visibility: str = "public",
-    owner_login: str = "",
+    owner: User | None = None,
     owner_type: str = "user",
     unlisted: bool = False,
     token_repositories: Sequence[str] | None = None,
@@ -548,9 +548,9 @@ async def upsert_agent_thread_metadata(
 
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
-    sender onto the thread's participants here. ``visibility`` and ``owner_login``
-    are stamped once, when the thread is created, and never changed afterwards, as
-    is ``token_repositories``, the repositories the thread's GitHub token is
+    sender onto the thread's participants here. ``visibility`` and the owner (``owner``,
+    else the sender) are stamped once, when the thread is created, and never changed
+    afterwards, as is ``token_repositories``, the repositories the thread's GitHub token is
     narrowed to (see :mod:`openswe.github.token_scope`).
     Slack events on an existing thread also pass ``slack_participant_user_ids`` so
     every linked human in the Slack thread becomes an Open SWE participant of the
@@ -662,9 +662,12 @@ async def upsert_agent_thread_metadata(
             )
         if token_repositories is not None:
             metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(token_repositories)
-        initiating_login = owner_login.strip() or sender_login.strip()
-        if initiating_login and owner_type == "user":
-            metadata["owner_login"] = initiating_login
+        initiator = owner or (
+            await User.for_login("github", sender_login) if owner_type == "user" else None
+        )
+        if initiator is not None and initiator.github_login and owner_type == "user":
+            metadata["owner_login"] = initiator.github_login
+            metadata["owner_user_id"] = str(initiator.id)
 
     try:
         if existing is None:
@@ -848,11 +851,9 @@ class ThreadRecord:
             raise
         return cls(exists=True, metadata=thread_metadata(thread))
 
-    def authorize(self, github_login: str) -> JsonObject:
+    def authorize(self, viewer: DashboardSession | None) -> JsonObject:
         """Reject a private-thread follow-up from someone who may not prompt it."""
-        if thread_is_private(self.metadata) and not thread_is_promptable(
-            self.metadata, github_login
-        ):
+        if thread_is_private(self.metadata) and not thread_is_promptable(self.metadata, viewer):
             raise HTTPException(404, "thread not found")
         return self.metadata
 
@@ -1085,9 +1086,27 @@ def build_github_issue_comments_text(
     return "\n\n## Comments:\n" + "".join(lines)
 
 
-async def authorize_github_thread(thread_id: str, github_login: str) -> JsonObject:
+async def github_person(github_user_id: int | None, github_login: str) -> User | None:
+    """The person behind a GitHub account, found by its id whenever the event carries one."""
+    user = (
+        await User.for_identity("github", str(github_user_id))
+        if github_user_id is not None
+        else await User.for_login("github", github_login)
+    )
+    return user if user is not None and user.github_login else None
+
+
+async def github_viewer(github_user_id: int | None, github_login: str) -> DashboardSession | None:
+    person = await github_person(github_user_id, github_login)
+    return DashboardSession.of(person) if person is not None else None
+
+
+async def authorize_github_thread(
+    thread_id: str, github_user_id: int | None, github_login: str
+) -> JsonObject:
     """Reject private-thread follow-ups before reading credentials or dispatching."""
-    return (await ThreadRecord.read(thread_id)).authorize(github_login)
+    viewer = await github_viewer(github_user_id, github_login)
+    return (await ThreadRecord.read(thread_id)).authorize(viewer)
 
 
 async def trigger_or_queue_run(
@@ -1107,7 +1126,8 @@ async def trigger_or_queue_run(
     must be narrowed but could not record it is not started.
     """
     record = await ThreadRecord.read(thread_id)
-    record.authorize(github_login)
+    sender = await github_person(github_user_id, github_login)
+    record.authorize(DashboardSession.of(sender) if sender is not None else None)
     # An existing thread keeps the workspace it started in even if its
     # repository has since moved: the settings and MCP connections a
     # conversation began with must not change under it.
@@ -1120,6 +1140,7 @@ async def trigger_or_queue_run(
         title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
+        owner=sender,
         token_repositories=token_repositories,
     )
     if not persisted and token_repositories is not None:

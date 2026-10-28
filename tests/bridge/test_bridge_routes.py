@@ -18,9 +18,10 @@ from openswe.bridge.routes import (
 )
 from openswe.bridge.store import BridgeStore
 from openswe.threads.principals import Principal
+from tests.support.sessions import signed_in
 
-OWNER = Principal.of_login("test-user")
-INTRUDER = Principal.of_login("someone-else")
+OWNER = Principal.of_person(signed_in("test-user"))
+INTRUDER = Principal.of_person(signed_in("someone-else"))
 
 
 async def _open() -> str:

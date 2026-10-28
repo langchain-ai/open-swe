@@ -115,8 +115,8 @@ export function AgentThreadHeader({
   const session = useSession()
   // A thread on its owner's machine runs commands there, so it stays private.
   const canShare = Boolean(
-    thread?.ownerLogin &&
-    thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase() &&
+    thread?.ownerUserId &&
+    thread.ownerUserId === session.data?.user_id &&
     !thread.sandboxBridgeClient
   )
   const [shareOpen, setShareOpen] = useState(false)

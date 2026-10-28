@@ -127,7 +127,7 @@ async def api_act_on_pull_request(
 async def api_pull_request_thread_status(
     owner: str, repo: str, number: int, session: DashboardSession = SESSION_DEP
 ) -> PullRequestThreadStatus:
-    return await pull_request_thread_running(owner, repo, number, session.login, session.email)
+    return await pull_request_thread_running(owner, repo, number, session)
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/thread")
@@ -139,9 +139,7 @@ async def api_start_pull_request_thread(
     body: PullRequestThreadIntent,
     session: DashboardSession = SESSION_DEP,
 ) -> PullRequestThreadRun:
-    return await start_pull_request_thread(
-        owner, repo, number, session.login, session.email, intent=body
-    )
+    return await start_pull_request_thread(owner, repo, number, session, intent=body)
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/review-threads/resolve")

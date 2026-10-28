@@ -250,7 +250,7 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
     admin = await actor_is_admin(cfg, login=login)
     return Access(
         private=private,
-        owner=private_owner_login(cfg, metadata) is not None,
+        owner=await private_owner_login(cfg, metadata) is not None,
         admin=admin,
         admin_thread=admin and cfg.admin_thread is True and (private or scope.admin_thread is True),
         admin_surface=admin and private and is_private_admin_surface(cfg),

@@ -1167,12 +1167,14 @@ async def process_github_pr_comment(
             )
             return
         if common.thread_is_private(agent_metadata) and not common.thread_is_promptable(
-            agent_metadata, github_login
+            agent_metadata, await common.github_viewer(github_user_id, github_login)
         ):
             return
     email = await User.email_for_login(github_login) or ""
     if email:
-        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
+        thread_metadata = await common.authorize_github_thread(
+            thread_id, github_user_id, github_login
+        )
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
@@ -1218,8 +1220,12 @@ async def process_github_pr_comment(
         )
     ):
         return
+    author_id = event.get("user", {}).get("id")
     if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
-        thread_metadata, event_comment["author"]
+        thread_metadata,
+        await common.github_viewer(
+            author_id if isinstance(author_id, int) else None, event_comment["author"]
+        ),
     ):
         return
 
@@ -1640,6 +1646,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
         workspace=workspace,
+        owner=await common.github_person(
+            github_user_id if isinstance(github_user_id, int) else None, github_login
+        ),
         token_repositories=token_repositories,
     )
     if not persisted and token_repositories is not None:

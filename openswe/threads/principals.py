@@ -26,7 +26,6 @@ from openswe.api_keys.deps import api_key_from_token, bind_audit_key
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
-from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import DashboardSession, bind_audit_session, optional_session
 from openswe.federation.github_oidc import (
     GitHubActionsClaims,
@@ -51,13 +50,11 @@ _UNAUTHENTICATED = "authenticate with an API key, a federated workflow token, or
 
 @dataclass(frozen=True, kw_only=True)
 class Principal:
-    """One authenticated principal. Machines carry a workspace; people carry a login."""
+    """One authenticated principal. Machines carry a workspace; people carry their session."""
 
     kind: PrincipalKind
     workspace: str = ""
-    login: str | None = None
-    email: str | None = None
-    admin: bool = False
+    session: DashboardSession | None = None
     started_by_id: str = ""
     started_by_name: str = ""
     created_by: str = ""
@@ -95,34 +92,37 @@ class Principal:
         )
 
     @classmethod
-    def of_login(cls, login: str, email: str | None = None) -> Principal:
-        return cls(
-            kind="person",
-            login=login,
-            email=email,
-            admin=is_admin(email, login=login),
-        )
-
-    @classmethod
     def of_person(cls, session: DashboardSession) -> Principal:
-        return cls(kind="person", login=session.login, email=session.email, admin=session.admin)
+        return cls(kind="person", session=session)
 
     @property
     def machine(self) -> bool:
         return self.kind != "person"
 
     @property
-    def person(self) -> str:
-        if self.login is None:
+    def person(self) -> DashboardSession:
+        if self.session is None:
             raise RuntimeError("principal is a machine, not a person")
-        return self.login
+        return self.session
+
+    @property
+    def login(self) -> str | None:
+        return self.session.login if self.session is not None else None
+
+    @property
+    def email(self) -> str | None:
+        return self.session.email if self.session is not None else None
+
+    @property
+    def admin(self) -> bool:
+        return self.session is not None and self.session.admin
 
     @property
     def sender_id(self) -> str:
         """The identity a run records as having sent its opening message."""
         if self.machine:
             return f"system:{self.started_by_id.replace(':', '/')}"
-        return f"github:{self.person}"
+        return f"github:{self.person.login}"
 
     def authorize(self, requested: ThreadType) -> None:
         """Refuse a kind of thread this principal may not create."""
@@ -135,13 +135,13 @@ class Principal:
         if self.machine:
             self._assert_started_it(metadata)
             return
-        assert_thread_readable(metadata, self.login, self.email)
+        assert_thread_readable(metadata, self.person)
 
     def assert_can_post(self, metadata: JsonObject) -> None:
         if self.machine:
             self._assert_started_it(metadata)
             return
-        _assert_thread_postable(metadata, self.person, self.email)
+        _assert_thread_postable(metadata, self.person)
 
     def _assert_started_it(self, metadata: JsonObject) -> None:
         # Deliberately not "is this thread in my workspace": a key is not an

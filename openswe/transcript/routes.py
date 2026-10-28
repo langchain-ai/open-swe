@@ -69,7 +69,7 @@ async def _authorized_read(
         metadata = await load_access(thread_id, conn=conn)
         if metadata is None:
             raise HTTPException(404, "transcript_unavailable")
-        assert_thread_readable(metadata, session.login, session.email)
+        assert_thread_readable(metadata, session)
         yield conn
 
 
@@ -92,7 +92,7 @@ async def _stream_access(
     if metadata is None:
         return "deleted"
     try:
-        assert_thread_readable(metadata, session.login, session.email)
+        assert_thread_readable(metadata, session)
     except HTTPException:
         return "revoked"
     return "ok"

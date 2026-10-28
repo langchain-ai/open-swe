@@ -10,6 +10,7 @@ from langgraph_sdk.schema import Thread
 from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_request_status import pull_request_identity
@@ -245,7 +246,7 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
 
 
 async def find_pr_threads(
-    owner: str, repo: str, number: int, login: str, email: str | None, *, unlisted: bool = False
+    owner: str, repo: str, number: int, session: DashboardSession, *, unlisted: bool = False
 ) -> list[Thread]:
     client = langgraph_client()
     candidates: dict[str, Thread] = {}
@@ -262,7 +263,7 @@ async def find_pr_threads(
         if (metadata.get("unlisted") is True) is not unlisted:
             continue
         try:
-            _assert_thread_postable(metadata, login, email)
+            _assert_thread_postable(metadata, session)
         except HTTPException:
             continue
         candidates[thread_id] = thread
@@ -273,22 +274,21 @@ async def find_pr_threads(
     )
 
 
-def _pr_thread_lock_key(login: str, url: str) -> str:
+def _pr_thread_lock_key(session: DashboardSession, url: str) -> str:
     """One key for every dispatcher, because they all create-or-find the same thread.
 
     Separate keys would let two of them read an empty lookup at once and dispatch
     competing agents onto the same branch; the per-thread lock taken afterwards
     cannot catch that, since by then the thread ids differ.
     """
-    return f"pr-thread:{login}:{url}"
+    return f"pr-thread:{session.user_id}:{url}"
 
 
 async def _find_or_create_pr_thread(
     owner: str,
     repo: str,
     number: int,
-    login: str,
-    email: str | None,
+    session: DashboardSession,
     *,
     prompt: str,
     title: str,
@@ -300,15 +300,14 @@ async def _find_or_create_pr_thread(
     # A thread made before Managed Deep Agents takes no new work; a new one starts instead.
     candidates = [
         thread
-        for thread in await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
+        for thread in await find_pr_threads(owner, repo, number, session, unlisted=unlisted)
         if await index.live_thread_id(thread["thread_id"]) == thread["thread_id"]
     ]
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
-        login=login,
-        email=email,
+        session=session,
         repo_config={"owner": owner, "name": repo},
         prompt=prompt,
         title=title,
@@ -343,12 +342,15 @@ async def _link_pr_thread(owner: str, repo: str, number: int, thread_id: str) ->
 
 
 async def pull_request_thread_running(
-    owner: str, repo: str, number: int, login: str, email: str | None = None
+    owner: str,
+    repo: str,
+    number: int,
+    session: DashboardSession,
 ) -> PullRequestThreadStatus:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    await require_repo_access_for_user(login, f"{owner}/{repo}")
-    threads = await find_pr_threads(owner, repo, number, login, email)
+    await require_repo_access_for_user(session.login, f"{owner}/{repo}")
+    threads = await find_pr_threads(owner, repo, number, session)
     return PullRequestThreadStatus(
         running=any(thread.get("status") == "busy" for thread in threads)
     )
@@ -358,32 +360,30 @@ async def start_pull_request_thread(
     owner: str,
     repo: str,
     number: int,
-    login: str,
-    email: str | None = None,
+    session: DashboardSession,
     *,
     intent: PullRequestThreadIntent,
 ) -> PullRequestThreadRun:
     full_name = f"{owner}/{repo}"
     if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    await require_repo_access_for_user(login, full_name)
-    await _ensure_dashboard_github_token(login)
+    await require_repo_access_for_user(session.login, full_name)
+    await _ensure_dashboard_github_token(session.login)
     url = f"https://github.com/{full_name}/pull/{number}"
     prompt = intent.prompt(url)
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(session, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,
             number,
-            login,
-            email,
+            session,
             prompt=prompt,
             title=intent.thread_title(full_name, number),
             review_chat=isinstance(intent, (OpenThreadIntent, MessageIntent)),
         )
         current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
+        _assert_thread_postable(thread_metadata(current), session)
         if not intent.dispatches_run:
             return PullRequestThreadRun(thread_id=thread_id)
         busy = current.get("status") == "busy"
@@ -400,9 +400,9 @@ async def start_pull_request_thread(
                 },
             )
         current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
+        _assert_thread_postable(thread_metadata(current), session)
         configurable = await _build_dashboard_configurable(
-            thread_id, login, thread_metadata(current)
+            thread_id, session.login, thread_metadata(current)
         )
         await dispatch_agent_run(
             thread_id,
@@ -420,29 +420,29 @@ async def dispatch_pull_request_prompt(
     owner: str,
     repo: str,
     number: int,
-    login: str,
+    session: DashboardSession,
     prompt: str,
     *,
     title: str,
     before_dispatch: Callable[[str], Awaitable[None]],
     unlisted: bool = False,
 ) -> str:
-    """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
+    """Enqueue ``prompt`` on ``session``'s thread for a pull request, creating it if needed; its id.
 
     ``before_dispatch`` receives the thread id before the run is queued, so the caller
     can record which thread it woke before that thread can act.
     """
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(session, url)):
         thread_id = await _find_or_create_pr_thread(
-            owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
+            owner, repo, number, session, prompt=prompt, title=title, unlisted=unlisted
         )
         await before_dispatch(thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"review_chat": False})
         current = await client.threads.get(thread_id)
         configurable = await _build_dashboard_configurable(
-            thread_id, login, thread_metadata(current)
+            thread_id, session.login, thread_metadata(current)
         )
         await dispatch_agent_run(
             thread_id,

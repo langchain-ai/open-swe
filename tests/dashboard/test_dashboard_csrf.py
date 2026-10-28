@@ -7,6 +7,8 @@ from starlette.requests import Request
 
 from openswe.dashboard import oauth, routes
 from openswe.threads import proxy as thread_proxy
+from openswe.threads.principals import Principal
+from tests.support.sessions import signed_in
 
 
 def _request(
@@ -202,7 +204,7 @@ async def test_proxy_commands_rejects_non_json_content_type() -> None:
         with pytest.raises(HTTPException) as exc:
             await thread_proxy.proxy_dashboard_thread_commands(
                 "tid",
-                "octocat",
+                Principal.of_person(signed_in("octocat")),
                 b'{"method": "run.start"}',
                 content_type=content_type,
             )
@@ -214,7 +216,7 @@ async def test_proxy_commands_accepts_json_content_type_with_charset() -> None:
     with pytest.raises(HTTPException) as exc:
         await thread_proxy.proxy_dashboard_thread_commands(
             "tid",
-            "octocat",
+            Principal.of_person(signed_in("octocat")),
             b"not-json",
             content_type="application/json; charset=utf-8",
         )

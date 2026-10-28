@@ -60,7 +60,7 @@ async def test_terminal_connection_requires_owner_before_issuing_ticket(
         signed_in("alice", email="alice@example.com"),
     )
 
-    get_sandbox.assert_awaited_once_with("thread-1", "alice", email="alice@example.com")
+    get_sandbox.assert_awaited_once_with("thread-1", signed_in("alice", email="alice@example.com"))
     assert response.headers["cache-control"] == "no-store"
     assert connection["url"] == ("wss://agent.example/dashboard/api/threads/thread-1/terminal")
     assert connection["protocol"] == "open-swe-terminal"

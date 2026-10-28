@@ -236,7 +236,7 @@ export interface SessionUser {
   display_name?: string
   email: string | null
   avatar_url: string | null
-  user_id?: string | null
+  user_id: string
   slack_user_id?: string | null
   is_admin: boolean
   /** Mirrors the user's preference: what Enter does while a run is live. */

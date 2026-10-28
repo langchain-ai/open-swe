@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.review.session import ReviewSessionMetadata
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
@@ -21,6 +22,7 @@ from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     SLACK_BOT_TRIGGER_KIND,
     TRIGGERING_BOT_KEY,
+    Viewer,
     _is_automation_thread,
     _is_thread_resolved,
     _metadata_repo,
@@ -71,7 +73,7 @@ class _ScoutRunStatus(BaseModel):
 
 
 def _participant_search_filters(
-    login: str, *, email: str | None = None, include_all: bool = False
+    login: str, email: str | None = None, *, include_all: bool = False
 ) -> list[dict[str, Any]]:
     if include_all:
         return [{}]
@@ -149,13 +151,13 @@ def _metadata_matches_filters(
     repo: str | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
-    owner: str | None = None,
+    owner: Viewer | None = None,
     exclude_sources: Collection[str] = (),
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     if thread_is_unlisted(metadata):
         return False
-    if owner and not thread_is_owner(metadata, owner):
+    if owner is not None and not thread_is_owner(metadata, owner):
         return False
     thread_repo = _metadata_repo(metadata)[2]
     if repo and thread_repo.lower() != repo.lower():
@@ -350,8 +352,7 @@ async def _summarize_threads(
 async def _readable_threads_by_id(
     client: LangGraphClient,
     thread_ids: Sequence[str],
-    login: str,
-    email: str | None,
+    session: Viewer,
     *,
     include_private: bool = True,
     resolved: bool | None = None,
@@ -366,7 +367,7 @@ async def _readable_threads_by_id(
             thread_id = _thread_id(thread)
             if (
                 thread_id
-                and thread_is_readable(metadata, login, email)
+                and thread_is_readable(metadata, session)
                 and not thread_is_unlisted(metadata)
                 and (include_private or metadata.get("visibility", "public") == "public")
                 and (resolved is None or _is_thread_resolved(metadata) is resolved)
@@ -410,8 +411,7 @@ def _attach_task_membership(
 async def attach_task_workers(
     client: LangGraphClient,
     summaries: list[JsonObject],
-    login: str,
-    email: str | None,
+    session: Viewer,
     *,
     resolved: bool | None = None,
     include_private: bool = True,
@@ -428,7 +428,7 @@ async def attach_task_workers(
     children = await sidebar_memberships(coordinator_ids, workers_of=True)
     parent_ids = list({membership.coordinator_thread_id for membership in memberships.values()})
     related = await _readable_threads_by_id(
-        client, [*parent_ids, *children], login, email, include_private=include_private
+        client, [*parent_ids, *children], session, include_private=include_private
     )
     worker_threads = [
         related[key]
@@ -465,8 +465,7 @@ def _attach_flat_task_memberships(
 async def _task_hierarchy_page(
     client: LangGraphClient,
     candidates: list[ThreadLike],
-    login: str,
-    email: str | None,
+    session: Viewer,
     *,
     offset: int,
     limit: int,
@@ -489,8 +488,7 @@ async def _task_hierarchy_page(
     parents = await _readable_threads_by_id(
         client,
         list(parent_ids),
-        login,
-        email,
+        session,
         include_private=include_private,
         resolved=resolved,
     )
@@ -551,8 +549,7 @@ async def _task_hierarchy_page(
     await attach_task_workers(
         client,
         items,
-        login,
-        email,
+        session,
         resolved=resolved,
         include_private=include_private,
         filter_workers=filter_workers,
@@ -580,8 +577,7 @@ async def _collect_thread_candidates(
     owned: bool = False,
     admin_threads: bool | None = None,
     exclude_sources: Collection[str] = (),
-    viewer_login: str | None = None,
-    viewer_email: str | None = None,
+    viewer: Viewer,
     include_private: bool = True,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
@@ -622,11 +618,10 @@ async def _collect_thread_candidates(
                 if thread_source(metadata) == "incidents_agent":
                     continue
                 review = ReviewSessionMetadata.parse(metadata)
-                if review is not None and not review.owned_by(viewer_login):
+                if review is not None and not review.owned_by(viewer.user_id):
                     continue
                 if metadata.get("visibility", "public") != "public" and (
-                    not include_private
-                    or not thread_is_readable(metadata, viewer_login, viewer_email)
+                    not include_private or not thread_is_readable(metadata, viewer)
                 ):
                     continue
                 if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
@@ -642,7 +637,7 @@ async def _collect_thread_candidates(
                     repo=repo,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
-                    owner=viewer_login if owned else None,
+                    owner=viewer if owned else None,
                     exclude_sources=exclude_sources,
                 ):
                     continue
@@ -685,8 +680,7 @@ async def _collect_thread_candidates(
                     await _readable_threads_by_id(
                         client,
                         list(parent_ids),
-                        viewer_login or "",
-                        viewer_email,
+                        viewer,
                         include_private=include_private,
                         resolved=resolved,
                     )
@@ -722,11 +716,11 @@ async def _collect_thread_candidates(
 
 
 async def list_unresolved_dashboard_threads(
-    login: str, *, email: str | None = None
+    session: Viewer,
 ) -> list[ThreadLike]:
     client = langgraph_client()
     seen: dict[str, ThreadLike] = {}
-    for metadata in _participant_search_filters(login, email=email):
+    for metadata in _participant_search_filters(session.login, session.email):
         offset = 0
         while batch := await _search_threads_batch(
             client, metadata, limit=_THREADS_SEARCH_PAGE, offset=offset
@@ -737,7 +731,7 @@ async def list_unresolved_dashboard_threads(
                 if (
                     thread_id
                     and thread_source(thread_metadata) in _SURFACED_SOURCES
-                    and thread_is_readable(thread_metadata, login, email)
+                    and thread_is_readable(thread_metadata, session)
                     and not thread_is_unlisted(thread_metadata)
                     and not _is_thread_resolved(thread_metadata)
                 ):
@@ -747,11 +741,10 @@ async def list_unresolved_dashboard_threads(
 
 
 async def list_dashboard_threads(
-    login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
+    session: Viewer, *, limit: int = 50, include_all: bool = False
 ) -> list[dict[str, Any]]:
     page = await list_dashboard_threads_page(
-        login,
-        email=email,
+        session,
         limit=limit,
         offset=0,
         include_all=include_all,
@@ -761,10 +754,9 @@ async def list_dashboard_threads(
 
 async def _pinned_thread_summaries(
     client: LangGraphClient,
-    login: str,
-    email: str | None,
+    session: Viewer,
 ) -> list[JsonObject]:
-    pin_ids = await list_thread_pin_ids(login)
+    pin_ids = await list_thread_pin_ids(session.login)
     threads_by_id: dict[str, ThreadLike] = {}
     # Search by ID independently of sidebar filters/pages, selecting no conversation
     # state. Refresh idle metadata too: external runs and visibility can change.
@@ -777,7 +769,7 @@ async def _pinned_thread_summaries(
         )
         for thread in threads:
             thread_id = _thread_id(thread)
-            if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
+            if thread_id and thread_is_readable(_thread_metadata(thread), session):
                 threads_by_id[thread_id] = thread
     # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
     summaries = await _summarize_threads(
@@ -785,22 +777,19 @@ async def _pinned_thread_summaries(
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
     )
-    await attach_task_workers(client, summaries, login, email)
+    await attach_task_workers(client, summaries, session)
     return summaries
 
 
 async def list_dashboard_pinned_threads(
-    login: str,
-    *,
-    email: str | None = None,
+    session: Viewer,
 ) -> list[dict[str, Any]]:
-    return await _pinned_thread_summaries(langgraph_client(), login, email)
+    return await _pinned_thread_summaries(langgraph_client(), session)
 
 
 async def list_dashboard_thread_repos(
-    login: str,
+    session: Viewer,
     *,
-    email: str | None = None,
     include_resolved: bool = False,
     include_automations: bool = False,
     owned: bool = False,
@@ -815,9 +804,8 @@ async def list_dashboard_thread_repos(
     """
     candidates = await _collect_thread_candidates(
         langgraph_client(),
-        _participant_search_filters(login, email=email, include_all=include_all),
-        viewer_login=login,
-        viewer_email=email,
+        _participant_search_filters(session.login, session.email, include_all=include_all),
+        viewer=session,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
         owned=owned,
@@ -843,7 +831,7 @@ async def list_dashboard_thread_repos(
     return sorted(repos.values(), key=lambda entry: entry["updatedAt"], reverse=True)
 
 
-async def pin_dashboard_thread(thread_id: str, login: str) -> None:
+async def pin_dashboard_thread(thread_id: str, session: DashboardSession) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -851,8 +839,8 @@ async def pin_dashboard_thread(thread_id: str, login: str) -> None:
         raise HTTPException(404, "thread not found") from exc
     if not isinstance(thread, Mapping):
         raise HTTPException(404, "thread not found")
-    assert_thread_readable(_thread_metadata(thread), login)
-    await pin_thread(login, thread_id)
+    assert_thread_readable(_thread_metadata(thread), session)
+    await pin_thread(session.login, thread_id)
 
 
 async def unpin_dashboard_thread(thread_id: str, login: str) -> None:
@@ -860,9 +848,8 @@ async def unpin_dashboard_thread(thread_id: str, login: str) -> None:
 
 
 async def list_dashboard_threads_page(
-    login: str,
+    session: Viewer,
     *,
-    email: str | None = None,
     limit: int = 25,
     offset: int = 0,
     include_all: bool = False,
@@ -886,8 +873,8 @@ async def list_dashboard_threads_page(
     hierarchy: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
-    search_login = filter_participant_login or login
-    search_email = email if search_login == login else None
+    search_login = filter_participant_login or session.login
+    search_email = session.email if search_login == session.login else None
     if scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
     elif scope == "bot" and filter_participant_login is None:
@@ -916,8 +903,7 @@ async def list_dashboard_threads_page(
         owned=owned,
         admin_threads=admin_threads,
         exclude_sources=exclude_sources,
-        viewer_login=login,
-        viewer_email=email,
+        viewer=session,
         include_private=include_private,
         target_per_search=target,
         surfaced_only=surfaced_only,
@@ -931,8 +917,7 @@ async def list_dashboard_threads_page(
         return await _task_hierarchy_page(
             client,
             candidates,
-            login,
-            email,
+            session,
             offset=safe_offset,
             limit=safe_limit,
             resolved=resolved,
@@ -951,7 +936,7 @@ async def list_dashboard_threads_page(
                     repo=repo,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
-                    owner=login if owned else None,
+                    owner=session if owned else None,
                     exclude_sources=exclude_sources,
                 )
                 and (

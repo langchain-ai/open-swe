@@ -163,9 +163,7 @@ export function AgentThreadView({
   // A mirrored Claude Code session runs in Claude Code; this is a window onto it.
   const mirroredSession = thread.source === "claude_code"
   const ownsThread = Boolean(
-    thread.ownerLogin &&
-    session.data &&
-    thread.ownerLogin.toLowerCase() === session.data.login.toLowerCase()
+    thread.ownerUserId && thread.ownerUserId === session.data?.user_id
   )
   const canPost =
     !runsElsewhere &&

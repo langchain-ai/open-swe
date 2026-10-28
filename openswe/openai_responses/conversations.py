@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import HTTPException, Request
 from sqlalchemy import text
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.openai_responses.ids import OpenSweId
@@ -22,7 +23,7 @@ from openswe.sandboxes.tool_access import (
     authenticate_tool_access,
 )
 from openswe.threads.runs import create_dashboard_thread_record, start_sandbox_guest_run
-from openswe.threads.summary import repo_config_from_metadata
+from openswe.threads.summary import repo_config_from_metadata, thread_owner
 from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
@@ -58,12 +59,12 @@ class SandboxCaller:
         host = await langgraph_client().threads.get(access.thread_id)
         return cls(access.thread_id, access.sandbox_id, thread_metadata(host))
 
-    @property
-    def owner_login(self) -> str:
-        owner = self.host_metadata.get("owner_login")
-        if not isinstance(owner, str) or not owner.strip():
+    async def owner(self) -> DashboardSession:
+        """The person this sandbox's thread belongs to, whom its programs act as."""
+        owner = await thread_owner(self.host_metadata)
+        if owner is None:
             raise HTTPException(403, "This sandbox's thread has no owning user to act as")
-        return owner.strip()
+        return DashboardSession.of(owner)
 
     async def guest_thread(self, thread_id: str) -> JsonObject:
         """A thread this sandbox started; any other id is reported as missing."""
@@ -124,7 +125,7 @@ class SandboxCaller:
         workspace = self.host_metadata.get("workspace")
         await create_dashboard_thread_record(
             thread_id,
-            login=self.owner_login,
+            session=await self.owner(),
             repo_config=repo_config_from_metadata(self.host_metadata),
             repo_explicitly_none=self.host_metadata.get("repo_explicitly_none") is True,
             prompt=prompt,
@@ -161,7 +162,7 @@ class SandboxCaller:
             )
         return await start_sandbox_guest_run(
             thread_id,
-            self.owner_login,
+            (await self.owner()).login,
             prompt=prompt,
             tool_results=tool_results,
             overrides=overrides,

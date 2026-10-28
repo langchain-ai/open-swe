@@ -11,6 +11,7 @@ from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
+from tests.support.sessions import user_id_of
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -179,10 +180,19 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     harness = _Harness(monkeypatch)
 
     status, created = await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
+        "POST",
+        "/threads",
+        {
+            "thread_id": THREAD,
+            "metadata": {"owner_login": "ada", "owner_user_id": str(user_id_of("ada"))},
+        },
     )
     assert status == 200 and isinstance(created, dict)
-    assert created["metadata"] == {"owner_login": "ada", "runtime": "mda"}
+    assert created["metadata"] == {
+        "owner_login": "ada",
+        "owner_user_id": str(user_id_of("ada")),
+        "runtime": "mda",
+    }
     assert (await harness.request("POST", "/threads", {"thread_id": THREAD}))[0] == 409
 
     await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
@@ -191,7 +201,9 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
         "POST", "/threads/search", {"metadata": {"title": "Fix it"}, "select": ["thread_id"]}
     )
     _, counted = await harness.request(
-        "POST", "/threads/count", {"metadata": {"owner_login": "ada"}}
+        "POST",
+        "/threads/count",
+        {"metadata": {"owner_login": "ada", "owner_user_id": str(user_id_of("ada"))}},
     )
     _, matched = await harness.request(
         "POST", "/threads/search?text=fix", {"select": ["thread_id"]}
@@ -199,7 +211,12 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     _, missed = await harness.request("POST", "/threads/count?text=nope", {})
 
     assert isinstance(read, dict)
-    assert read["metadata"] == {"owner_login": "ada", "title": "Fix it", "runtime": "mda"}
+    assert read["metadata"] == {
+        "owner_login": "ada",
+        "owner_user_id": str(user_id_of("ada")),
+        "title": "Fix it",
+        "runtime": "mda",
+    }
     assert found == [{"thread_id": THREAD}]
     assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
     assert missed == 0
@@ -216,7 +233,11 @@ async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(
     harness = _Harness(monkeypatch)
     harness.runtimes.local.threads[THREAD] = {
         "thread_id": THREAD,
-        "metadata": {"runtime": "mda", "owner_login": "ada"},
+        "metadata": {
+            "runtime": "mda",
+            "owner_login": "ada",
+            "owner_user_id": str(user_id_of("ada")),
+        },
         "status": "busy",
         "created_at": "2026-10-01T00:00:00+00:00",
         "updated_at": "2026-10-02T00:00:00+00:00",
@@ -237,7 +258,11 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     harness = _Harness(monkeypatch)
     # A stop before this run asked to start leaves it be.
     stopped = {index.STOPPED_AT_KEY: runtimes.now_ms() - 1000}
-    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada", **stopped})
+    await index.create(
+        THREAD,
+        runtime="mda",
+        metadata={"owner_login": "ada", "owner_user_id": str(user_id_of("ada")), **stopped},
+    )
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -266,7 +291,11 @@ async def test_a_stop_while_a_run_starts_interrupts_it_once_mda_has_it(
 ) -> None:
     # Working out the run takes a while, and a stop meanwhile finds no run to cancel.
     harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    await index.create(
+        THREAD,
+        runtime="mda",
+        metadata={"owner_login": "ada", "owner_user_id": str(user_id_of("ada"))},
+    )
     harness.while_starting = lambda: index.update(THREAD, {index.STOPPED_AT_KEY: runtimes.now_ms()})
 
     status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
@@ -325,7 +354,12 @@ async def test_a_new_thread_runs_on_mda(
 ) -> None:
     harness = _Harness(monkeypatch)
     await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada", **metadata}}
+        "POST",
+        "/threads",
+        {
+            "thread_id": THREAD,
+            "metadata": {"owner_login": "ada", "owner_user_id": str(user_id_of("ada")), **metadata},
+        },
     )
     run = {
         "assistant_id": "agent",
@@ -495,10 +529,17 @@ async def test_under_custom_auth_only_the_backend_is_answered_from_the_index(
         ),
     )
     harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="local", metadata={"owner_login": "bob"})
+    await index.create(
+        THREAD,
+        runtime="local",
+        metadata={"owner_login": "bob", "owner_user_id": str(user_id_of("bob"))},
+    )
 
     _, read = await harness.request("GET", f"/threads/{THREAD}")
 
     # Anyone else's call reaches the Agent Server, whose rules show ada only her own threads.
     assert harness.reached_here == ([] if from_index else [f"/threads/{THREAD}"])
-    assert (isinstance(read, dict) and read.get("metadata") == {"owner_login": "bob"}) is from_index
+    assert (
+        isinstance(read, dict)
+        and read.get("metadata") == {"owner_login": "bob", "owner_user_id": str(user_id_of("bob"))}
+    ) is from_index
