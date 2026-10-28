@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from managed_deepagents import CredentialStoreError
+from managed_deepagents._agent_auth import AgentAuthContext, ResolvePrincipalIdentity
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
@@ -28,9 +30,16 @@ AS_THE_CONVERSATION = {
     "x-mda-source-provider": "linear",
     "x-mda-source-thread-id": "org/ISS-1",
 }
-# A person's Open SWE user, which their channel runs act as (``mda/identity.py``).
+# A person's Open SWE user, which ``resolve_user`` names their channel runs by.
 USER_ID = "0190a3c4-0000-7000-8000-00000000ada0"
-AS_THE_PERSON = {**AS_THE_CONVERSATION, "x-mda-user-id": USER_ID}
+# MDA's workspace, and the Agent Auth principal its channels run that user as there.
+WORKSPACE = "6f1e2d3c-0000-4000-8000-0000000000aa"
+PRINCIPAL = "8c4b2a19-0000-4000-8000-0000000000bb"
+AS_THE_PERSON = {
+    **AS_THE_CONVERSATION,
+    "x-mda-user-id": PRINCIPAL,
+    "x-mda-agent-auth-principal-id": PRINCIPAL,
+}
 
 
 class _Http:
@@ -120,9 +129,7 @@ class _Harness:
 
         def mda(request: httpx.Request) -> httpx.Response:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
-            self.acted_as.append(
-                {k: v for k, v in request.headers.items() if k in AS_THE_CONVERSATION}
-            )
+            self.acted_as.append({k: v for k, v in request.headers.items() if k in AS_THE_PERSON})
             return httpx.Response(
                 200,
                 json={"run_id": "remote-run"},
@@ -517,8 +524,30 @@ async def test_a_channel_thread_takes_a_run_started_by_command(
     assert indexed is not None and indexed.status == "busy"
 
 
+Resolved = list[tuple[str | None, str | None, ResolvePrincipalIdentity]]
+
+
+@pytest.fixture
+def agent_auth(monkeypatch: pytest.MonkeyPatch) -> Resolved:
+    """Agent Auth, as it resolves an identity to a principal: what it was asked, with what."""
+    monkeypatch.setenv("MDA_RUNTIME_API_KEY", "lsv2_sk_mda")
+    monkeypatch.setenv("MDA_WORKSPACE_ID", WORKSPACE)
+    resolved: Resolved = []
+
+    class AgentAuth:
+        def __init__(self, context: AgentAuthContext) -> None:
+            self.context = context
+
+        def resolve_principal(self, identity: ResolvePrincipalIdentity) -> str:
+            resolved.append((self.context.api_key, self.context.workspace_id, identity))
+            return PRINCIPAL
+
+    monkeypatch.setattr(runtimes, "AgentAuth", AgentAuth)
+    return resolved
+
+
 async def test_a_persons_run_on_a_channel_thread_acts_as_them(
-    monkeypatch: pytest.MonkeyPatch, secret: None
+    monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
@@ -533,6 +562,14 @@ async def test_a_persons_run_on_a_channel_thread_acts_as_them(
 
     assert status == 200
     assert harness.acted_as == [AS_THE_PERSON]
+    # The principal MDA resolves the user ``resolve_user`` names to, with MDA's key.
+    assert agent_auth == [
+        (
+            "lsv2_sk_mda",
+            WORKSPACE,
+            {"provider": "trusted_backend", "issuer": WORKSPACE, "subject": USER_ID},
+        )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -543,7 +580,10 @@ async def test_a_persons_run_on_a_channel_thread_acts_as_them(
     ],
 )
 async def test_a_persons_command_on_a_channel_thread_acts_as_them(
-    monkeypatch: pytest.MonkeyPatch, secret: None, command: dict[str, JsonValue]
+    monkeypatch: pytest.MonkeyPatch,
+    secret: None,
+    agent_auth: Resolved,
+    command: dict[str, JsonValue],
 ) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     harness = _Harness(monkeypatch)
@@ -553,6 +593,26 @@ async def test_a_persons_command_on_a_channel_thread_acts_as_them(
 
     assert reply.status == 200
     assert harness.acted_as == [AS_THE_PERSON]
+
+
+async def test_without_their_principal_a_persons_run_acts_as_the_backend(
+    monkeypatch: pytest.MonkeyPatch, secret: None, agent_auth: Resolved
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
+    harness = _Harness(monkeypatch)
+    await _channel_thread(harness)
+
+    def unavailable(self: object, identity: ResolvePrincipalIdentity) -> str:
+        raise CredentialStoreError("Agent Auth resolve principal failed", 503, {})
+
+    monkeypatch.setattr(runtimes.AgentAuth, "resolve_principal", unavailable)
+    command = {"id": 7, "method": "input.respond", "params": {}}
+
+    reply = await store.THREADS.command(THREAD, json.dumps(command).encode(), user_id=USER_ID)
+
+    # Never the user's id unresolved, which MDA would take for another person.
+    assert reply.status == 200
+    assert harness.acted_as == [AS_THE_CONVERSATION]
 
 
 async def test_a_dashboard_command_on_a_channel_thread_is_its_senders(
