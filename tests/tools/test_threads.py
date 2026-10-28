@@ -102,7 +102,10 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     ],
 )
 async def test_list_threads_outcomes_and_pagination(
-    monkeypatch: pytest.MonkeyPatch, scope: str, summary_only: bool | None, compact: bool
+    monkeypatch: pytest.MonkeyPatch,
+    scope: threads_tool.ThreadScope,
+    summary_only: bool | None,
+    compact: bool,
 ) -> None:
     outcome = "Backport investigation. " * 30 + (
         "source=org/repo#123 target=release-2 attempts=3 "
@@ -141,8 +144,10 @@ async def test_list_threads_outcomes_and_pagination(
     records[0]["final_message"] = outcome
     records[1]["messages"] = [{"role": "assistant", "content": outcome}]
 
-    async def get_state(thread_id: str) -> dict[str, object]:
+    async def get_state(thread_id: str) -> dict[str, object] | None:
         assert thread_id not in {"thread-0", "thread-1"}
+        if thread_id == "thread-48":
+            return None
         return {
             "values": {
                 "messages": [
@@ -160,11 +165,7 @@ async def test_list_threads_outcomes_and_pagination(
 
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
-    monkeypatch.setattr(
-        threads_tool,
-        "langgraph_client",
-        lambda: SimpleNamespace(threads=SimpleNamespace(get_state=get_state)),
-    )
+    monkeypatch.setattr(threads_tool.THREADS, "state", get_state)
     result = await threads_tool.list_threads(scope=scope, summary_only=summary_only, limit=50)
     assert result["success"] is True
     assert result["offset"] == 0
@@ -183,6 +184,7 @@ async def test_list_threads_outcomes_and_pagination(
         assert collected[1]["final_message"] == outcome[:500]
         assert collected[2]["final_message"] == outcome[:500]
         assert collected[3]["final_message"] == "No eligible backports."
+        assert collected[-2]["final_message"] is None
         assert collected[-1]["final_message"] is None
     else:
         assert collected[0]["plan"] == records[0]["plan"]

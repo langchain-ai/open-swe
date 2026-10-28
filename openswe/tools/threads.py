@@ -38,6 +38,7 @@ from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
+from openswe.threads.store import THREADS
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -228,7 +229,7 @@ async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
     )
     thread_id = item.get("id")
     if outcome is None and isinstance(thread_id, str):
-        thread_state = await langgraph_client().threads.get_state(thread_id)
+        thread_state = await THREADS.state(thread_id)
         outcome = _last_assistant_outcome(_state_messages(thread_state))
     result["final_message"] = outcome[:500] if outcome else None
     return result
