@@ -37,7 +37,7 @@ async def test_unowned_repo_is_ignored_when_policy_is_ignore(
     async def fail_if_called(*args: object, **kwargs: object) -> None:
         raise AssertionError("an unowned repository's issue run must not start")
 
-    monkeypatch.setattr(forwarding, "forward_to_mda_channel", fail_if_called)
+    monkeypatch.setattr(forwarding, "queue_forward", fail_if_called)
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
@@ -58,7 +58,7 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
     async def fake_forward(body: bytes, headers: dict[str, str]) -> None:
         called["event_type"] = headers["X-GitHub-Event"]
 
-    monkeypatch.setattr(forwarding, "forward_to_mda_channel", fake_forward)
+    monkeypatch.setattr(forwarding, "queue_forward", fake_forward)
     register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
@@ -82,7 +82,7 @@ async def test_unreadable_workspace_list_asks_github_to_retry(
         raise AssertionError("no event may be processed while ownership is unknown")
 
     monkeypatch.setattr(github_routes, "repo_is_routable", unreadable)
-    monkeypatch.setattr(forwarding, "forward_to_mda_channel", fail_if_called)
+    monkeypatch.setattr(forwarding, "queue_forward", fail_if_called)
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
