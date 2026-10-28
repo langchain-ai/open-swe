@@ -58,7 +58,7 @@ new_prs: as drafts
 ```xml
 <dynamic-context kind="run" id="source:slack">
 instructions:
-  This run's context replaces any earlier `run` context block.
+  The newest `run` context block replaces any earlier one.
 
   ### Source Context
 
@@ -167,7 +167,7 @@ new_prs: as drafts
 ```xml
 <dynamic-context kind="run" id="source:slack">
 instructions:
-  This run's context replaces any earlier `run` context block.
+  The newest `run` context block replaces any earlier one.
 
   ### Source Context
 
@@ -253,7 +253,7 @@ ship it
 ```xml
 <dynamic-context kind="run" id="source:dashboard">
 instructions:
-  This run's context replaces any earlier `run` context block.
+  The newest `run` context block replaces any earlier one.
 
   ### Source Context
 
@@ -303,7 +303,7 @@ standing_instructions:
 ```xml
 <dynamic-context kind="run" id="source:slack">
 instructions:
-  This run's context replaces any earlier `run` context block.
+  The newest `run` context block replaces any earlier one.
 
   ### Source Context
 

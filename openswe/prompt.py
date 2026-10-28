@@ -101,8 +101,8 @@ def _render_collaboration_section() -> str:
     )
 
 
-# Keep this byte-identical across a thread's runs so the provider's prompt cache keeps
-# the conversation prefix; anything that varies per run belongs in construct_turn_context.
+# Only thread-stable inputs belong here: the provider's prompt cache keeps the conversation
+# prefix only while this renders the same, so per-run context goes in construct_turn_context.
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
