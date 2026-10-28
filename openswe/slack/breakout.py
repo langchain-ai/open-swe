@@ -301,9 +301,7 @@ async def process_slack_breakout(
             login=await service.slack_login(request.user_id) if request.user_id else None,
         )
         target = destination.channel_id
-        if error := await destination.channel_error(
-            request.channel_id, check_audience=not command.channel_id
-        ):
+        if error := await destination.channel_error(request.channel_id):
             await _tell_sender(request, error)
             return
         if command.instruction:
