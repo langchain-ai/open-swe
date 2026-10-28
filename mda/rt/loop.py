@@ -91,6 +91,8 @@ _GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 # Starts the id of each message that tells the model its role in the thread's task.
 _ROLE: Final = "task-role:"
+# Starts the id of the message holding what the backend worked out for this run.
+_RUN_CONTEXT: Final = "run-context:"
 
 
 def content_text(content: object) -> str:
@@ -148,10 +150,14 @@ def _json_payload(message: ToolMessage) -> object:
         return None
 
 
+def _messages(state: Mapping[str, object]) -> list[AnyMessage]:
+    messages = state.get("messages")
+    return list(messages) if isinstance(messages, list) else []
+
+
 def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
     """The messages the model still sees: summarization drops those before its cutoff."""
-    messages = state.get("messages")
-    listed = list(messages) if isinstance(messages, list) else []
+    listed = _messages(state)
     event = state.get(_SUMMARIZATION_EVENT)
     cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
     return listed[cutoff:] if isinstance(cutoff, int) and cutoff >= 0 else listed
@@ -266,6 +272,9 @@ class RunLoop:
         added: list[BaseMessage] = []
         if context.instructions and context.instructions != _latest(visible, _ROLE):
             added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
+        run_context = _latest(_messages(state), _RUN_CONTEXT)
+        if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
+            added.append(HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"))
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in visible
         ):

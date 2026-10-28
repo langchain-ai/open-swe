@@ -191,6 +191,29 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert [message.content for message in messages_from_dict(demoted.messages)] == [worker]
 
 
+async def test_a_run_context_summarized_away_is_sent_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    history = [
+        HumanMessage(content="Review this PR", id="human-1"),
+        HumanMessage(content="# Run context\nhead_sha: old", id="run-context:1"),
+        HumanMessage(content="# Run context\nhead_sha: new", id="run-context:2"),
+        AIMessage(content="Reading the diff", id="ai-1"),
+    ]
+
+    seen = await loop.before_model({"messages": history, STATE_KEY: {}})
+    summarized = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 3}}
+    )
+
+    assert seen.messages == []
+    assert [message.content for message in messages_from_dict(summarized.messages)] == [
+        "# Run context\nhead_sha: new"
+    ]
+
+
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
