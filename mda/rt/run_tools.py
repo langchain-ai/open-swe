@@ -7,9 +7,10 @@ call names; code mode reaches the same tools (``RunCodeInterpreter``). A subagen
 prompt and model, and the run's limit on model calls, are the run's too.
 """
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
-from weakref import finalize
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -30,6 +31,8 @@ from rt.models import build_model
 from rt.search_tools import search_tools_tool
 from rt.tools import operation_tool
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
+logger = logging.getLogger(__name__)
 
 _TASK_TOOL: Final = "task"
 _EVAL_TOOL: Final = "eval"
@@ -217,8 +220,11 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._named = list(named)
         self._active = active
         self._prompts = RunLocal[list[tuple[frozenset[str], str] | None]](lambda: [None])
-        self._slots = RunLocal[set[str]](set)
+        self._slots: dict[str, asyncio.Lock] = {}
         super().__init__(ptc=[], subagents=subagents, mode=mode)
+
+    def __del__(self) -> None:
+        """Slots are released asynchronously by invocation hooks, never by collecting middleware."""
 
     @property
     def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
@@ -231,16 +237,19 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
 
     def _slot_id(self, state: Mapping[str, object]) -> str:
         slot_id = super()._slot_id(state)
-        run = current_run()
-        slots = self._slots.get(run)
-        if slot_id not in slots:
-            slots.add(slot_id)
-            finalize(run, self._evict, slot_id)
+        self._slots.setdefault(slot_id, asyncio.Lock())
         return slot_id
 
-    def _evict(self, slot_id: str) -> None:
-        self._ptc_tools_by_slot.pop(slot_id, None)
-        self._registry.evict(slot_id)
+    async def _aevict(self, slot_id: str, *, keep_tools: bool = False) -> None:
+        lock = self._slots.get(slot_id)
+        if lock is None:
+            return
+        async with lock:
+            await self._registry.aevict(slot_id)
+            if not keep_tools:
+                self._ptc_tools_by_slot.pop(slot_id, None)
+                self._ptc_prompt_by_slot.pop(slot_id, None)
+                self._slots.pop(slot_id, None)
 
     @property
     def _ptc(self) -> list[str | BaseTool]:
@@ -264,19 +273,81 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         update = self._slot_update_for_runtime()
         prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
         self._slot_id(prepared)
-        restored = await super().abefore_agent(prepared, runtime)
+        try:
+            restored = await super().abefore_agent(prepared, runtime)
+        except BaseException:
+            await self._aevict(update["_quickjs_slot_id"])
+            raise
         return {**update, **(restored or {})} or None
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         if not self._runs_code():
             tools = [tool for tool in request.tools if getattr(tool, "name", None) != _EVAL_TOOL]
             return await handler(request.override(tools=tools))
-        return await super().awrap_model_call(request, handler)
+        try:
+            return await super().awrap_model_call(request, handler)
+        except BaseException:
+            await self._aevict(self._slot_id(request.state))
+            raise
+
+    @staticmethod
+    def _cancelled(error: BaseException) -> bool:
+        pending = [error]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            if isinstance(current, asyncio.CancelledError):
+                return True
+            if isinstance(current, BaseExceptionGroup):
+                pending.extend(current.exceptions)
+            for cause in (current.__cause__, current.__context__):
+                if cause is not None:
+                    pending.append(cause)
+        return False
+
+    async def awrap_tool_call(
+        self, request: ToolCallRequest, handler: ToolHandler
+    ) -> ToolMessage | Command:
+        if not self._runs_code():
+            return await handler(request)
+        slot_id = self._slot_id(request.state)
+        try:
+            if request.tool_call["name"] != _EVAL_TOOL:
+                return await handler(request)
+            async with self._slots[slot_id]:
+                try:
+                    return await handler(request)
+                except ValueError as exc:
+                    if str(exc) != "already closed":
+                        raise
+                    task = asyncio.current_task()
+                    if (task is not None and task.cancelling()) or self._cancelled(exc):
+                        raise asyncio.CancelledError() from exc
+                    logger.warning("QuickJS slot closed during eval", exc_info=True)
+            await self._aevict(slot_id, keep_tools=True)
+            return ToolMessage(
+                content="Error: the code interpreter closed during eval. Its state has been "
+                "discarded. The code may have partially executed; host-tool calls are not retried.",
+                tool_call_id=request.tool_call["id"],
+                name=_EVAL_TOOL,
+                status="error",
+            )
+        except BaseException:
+            await self._aevict(slot_id)
+            raise
 
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
         if not self._runs_code():
             return None
-        return await super().aafter_agent(state, runtime)
+        slot_id = self._slot_id(state)
+        try:
+            async with self._slots[slot_id]:
+                return await super().aafter_agent(state, runtime)
+        finally:
+            await self._aevict(slot_id)
 
 
 class RunModelCallLimit(ModelCallLimitMiddleware):

@@ -736,13 +736,26 @@ class _ThreadREPL:
         outer_runtime: ToolRuntime | None = None,
         outer_loop: asyncio.AbstractEventLoop | None = None,
     ) -> EvalOutcome:
-        return await self._worker.run_async(
-            self._aeval_async(
-                code,
-                outer_runtime=outer_runtime,
-                outer_loop=outer_loop,
-            )
-        )
+        caller_loop = asyncio.get_running_loop()
+        unwound = asyncio.Event()
+
+        async def evaluate() -> EvalOutcome:
+            try:
+                return await self._aeval_async(
+                    code,
+                    outer_runtime=outer_runtime,
+                    outer_loop=outer_loop,
+                )
+            finally:
+                caller_loop.call_soon_threadsafe(unwound.set)
+
+        try:
+            return await self._worker.run_async(evaluate())
+        except asyncio.CancelledError:
+            # The cross-thread future cancels before the worker finishes unwinding.
+            # Keep the context alive until its pending jobs have stopped touching it.
+            await unwound.wait()
+            raise
 
     def create_snapshot(self) -> bytes:
         """Capture the current context snapshot as bytes."""

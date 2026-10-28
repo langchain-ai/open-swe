@@ -4,6 +4,7 @@ import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
@@ -17,8 +18,11 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolC
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
+from langchain_quickjs._repl import EvalOutcome, _ThreadREPL
 from langgraph.config import get_config
+from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
 from langsmith.sandbox import (
@@ -37,7 +41,7 @@ from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
-from rt.backend import Run, current_run
+from rt.backend import Run, RunContext, current_run
 from rt.run_tools import RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
@@ -723,3 +727,174 @@ async def test_only_the_coding_agent_browses_and_never_hands_the_browser_over(
     assert instructed == {"agent": True, "reviewer": False}
     browser = mda_browser._browser_name("thread:browsed")
     assert browsers == [(browser, False), (browser, True)]
+
+
+@pytest.mark.parametrize("cancel_one", [False, True])
+async def test_awaiting_code_survives_transient_context_gc_in_concurrent_runs(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel_one: bool
+) -> None:
+    pending = asyncio.Event()
+    release = asyncio.Event()
+    transient: list[weakref.ReferenceType[Run]] = []
+    observed: list[str] = []
+    original = _ThreadREPL.eval_async
+    count = 0
+
+    async def evaluate(
+        repl: _ThreadREPL,
+        code: str,
+        *,
+        outer_runtime: ToolRuntime | None = None,
+        outer_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> EvalOutcome:
+        assert outer_runtime is not None
+        run = Run(RunContext())
+        transient.append(weakref.ref(run))
+        interpreter = next(
+            item
+            for item in agent._parts("agent").middleware
+            if isinstance(item, RunCodeInterpreter)
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr("rt.run_tools.current_run", lambda run=run: run)
+            interpreter._slot_id(outer_runtime.state)
+        del run
+        return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        results = [message for message in messages if isinstance(message, ToolMessage)]
+        if results:
+            observed.append(results[-1].text)
+            reply = AIMessage(content="done")
+        else:
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(name="eval", args={"code": "await tools.lookup({})"}, id="eval")
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    client = httpx2.AsyncClient()
+    post = cast(AsyncMock, client.post)
+    original_post = post.side_effect
+    assert callable(original_post)
+
+    async def slow_post(
+        url: str, *, headers: dict[str, str], json: dict[str, JsonValue], **kwargs: object
+    ) -> httpx2.Response:
+        nonlocal count
+        if url.endswith("/operation"):
+            count += 1
+            if count == 2:
+                pending.set()
+            await release.wait()
+        return await original_post(url, headers=headers, json=json, **kwargs)
+
+    post.side_effect = slow_post
+    monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    tasks = [
+        asyncio.create_task(
+            _run(InMemoryStore(), f"gc-live-{i}", _context("agent", f"token-{i}", catalog))
+        )
+        for i in range(2)
+    ]
+    try:
+        await asyncio.wait_for(pending.wait(), 10)
+        gc.collect()
+        assert all(reference() is None for reference in transient)
+        if cancel_one:
+            tasks[0].cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await tasks[0]
+    finally:
+        release.set()
+        await asyncio.gather(*tasks, return_exceptions=cancel_one)
+    assert len(observed) == (1 if cancel_one else 2)
+    assert all("found" in result for result in observed)
+
+
+@pytest.mark.parametrize("cancel", ["none", "task", "masked"])
+async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_terminal(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel: str
+) -> None:
+    entered = asyncio.Event()
+    original = _ThreadREPL.eval_async
+    attempts = 0
+    observed: list[ToolMessage] = []
+
+    async def evaluate(
+        repl: _ThreadREPL,
+        code: str,
+        *,
+        outer_runtime: ToolRuntime | None = None,
+        outer_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> EvalOutcome:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            entered.set()
+            if cancel != "none":
+                try:
+                    if cancel == "masked":
+                        raise BaseExceptionGroup("worker cancelled", [asyncio.CancelledError()])
+                    await asyncio.Event().wait()
+                except BaseException as exc:
+                    raise ValueError("already closed") from exc
+            raise ValueError("already closed")
+        return await original(repl, code, outer_runtime=outer_runtime, outer_loop=outer_loop)
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        results = [message for message in messages if isinstance(message, ToolMessage)]
+        if len(results) == 3:
+            observed.extend(results)
+            reply = AIMessage(content="done")
+        else:
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="eval",
+                        args={
+                            "code": "await tools.lookup({})"
+                            if len(results) < 2
+                            else "throw new Error('ordinary eval failure')"
+                        },
+                        id=f"eval-{len(results)}",
+                    )
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    task = asyncio.create_task(_run(InMemoryStore(), "closed", _context("agent", "token", catalog)))
+    await asyncio.wait_for(entered.wait(), 10)
+    if cancel != "none":
+        if cancel == "task":
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError if cancel == "task" else NodeCancelledError):
+            await task
+        assert not observed
+        assert attempts == 1
+    else:
+        await task
+        assert observed[0].status == "error"
+        assert "found" in observed[1].text
+        assert attempts == 3
+        assert "ordinary eval failure" in observed[2].text
+        assert sum(operation is not None for _, _, operation in backend_calls) == 1
+    interpreter = next(
+        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
+    )
+    assert not interpreter._registry._slots
+    assert not interpreter._slots
