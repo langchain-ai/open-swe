@@ -1,8 +1,9 @@
-"""The reviewer replaces an unreachable sandbox; the coding agent still fails loudly.
+"""A thread whose old sandbox is gone or abandoned is handed to MDA; nothing replaces it here.
 
-A reviewer sandbox holds only a checkout `prepare_review_repo` re-derives every
-run, and reviewer threads (one per PR) outlive their sandbox, so refusing to
-replace one bricks reviews on that PR permanently.
+A box the backend made before MDA owned them that is deleted holds nothing, and a
+reviewer's holds only a checkout `prepare_review_repo` re-derives every run, so the
+thread is unbound and its next run starts in the box MDA creates. Any other
+unreachable box fails loudly, because a fresh one would lose the thread's work.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,69 +16,63 @@ from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandb
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.providers.registry import SandboxGoneError
-from openswe.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
+from openswe.sandboxes.state import (
+    SandboxHandedOverError,
+    SandboxUnreachableError,
+    set_sandbox_backend,
+)
+
+_HANDED_OVER = {"sandbox_id": None, "sandbox_base_proxy_config": None}
 
 
 @pytest.mark.asyncio
-async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
-    thread_id = "thread-reviewer-dead-sandbox"
+@pytest.mark.parametrize(
+    ("failure", "owner", "abandon", "handed_over"),
+    [
+        (SandboxGoneError("Sandbox 'sandbox-old' not found"), None, False, True),
+        (RuntimeError("connection refused"), None, True, True),
+        (RuntimeError("connection refused"), None, False, False),
+        (SandboxGoneError("Sandbox 'sandbox-old' not found"), "mda", True, False),
+    ],
+)
+async def test_an_old_sandbox_that_cannot_be_reached_is_handed_to_mda_or_fails(
+    failure: Exception, owner: str | None, abandon: bool, handed_over: bool
+) -> None:
+    thread_id = "thread-old-sandbox"
     SANDBOX_BACKENDS.clear()
-    replacement = MagicMock()
-    replacement.id = "sandbox-replacement"
+    metadata = {"sandbox_id": "sandbox-old"} | ({"sandbox_owner": owner} if owner else {})
 
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-deleted"},
+            return_value=metadata,
         ),
         patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.connect_existing_sandbox",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
+            side_effect=failure,
         ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=replacement,
-        ) as create_replacement,
-        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
+        pytest.raises(SandboxUnreachableError) as excinfo,
     ):
-        result = await ensure_sandbox_for_thread(
-            thread_id,
-            workspace_slug="large",
-            allow_replacement=True,
-        )
+        await ensure_sandbox_for_thread(thread_id, abandon_unreachable=abandon)
 
-    assert result.id == "sandbox-replacement"
-    create_replacement.assert_awaited_once_with(
-        thread_id=thread_id,
-        github_proxy_repositories=None,
-        github_proxy_permissions=None,
-        workspace_slug="large",
-        record_stale_boot=False,
-    )
-    # The stale id is cleared by persisting the replacement, so later runs stop
-    # reconnecting to a sandbox that no longer exists.
-    assert update_thread.await_args_list[-1].kwargs == {
-        "thread_id": thread_id,
-        "metadata": {"sandbox_id": "sandbox-replacement"},
-    }
+    # Typed, so callers still recognize it and tell the person whether a fresh box follows.
+    assert excinfo.value.sandbox_id == "sandbox-old"
+    assert isinstance(excinfo.value, SandboxHandedOverError) is handed_over
+    writes = [call.kwargs["metadata"] for call in update_thread.await_args_list]
+    assert writes == ([_HANDED_OVER] if handed_over else [])
     SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
-async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() -> None:
+async def test_an_abandoned_cached_sandbox_is_forgotten() -> None:
     thread_id = "thread-reviewer-dead-cache"
     SANDBOX_BACKENDS.clear()
-    dead = MagicMock()
-    dead.id = "sandbox-cached-dead"
-    proxy = set_sandbox_backend(thread_id, dead)
-    replacement = MagicMock()
-    replacement.id = "sandbox-replacement"
+    proxy = set_sandbox_backend(thread_id, MagicMock(id="sandbox-cached-dead"))
 
     with (
         patch(
@@ -90,88 +85,19 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
             new_callable=AsyncMock,
             side_effect=SandboxClientError("sandbox is gone"),
         ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=replacement,
-        ) as create_replacement,
-        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
-    ):
-        result = await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
-
-    create_replacement.assert_awaited_once()
-    # Replaced in place, so handles already built around the proxy stay valid.
-    assert result is proxy
-    assert proxy.current is replacement
-    SANDBOX_BACKENDS.clear()
-
-
-@pytest.mark.asyncio
-async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
-    thread_id = "thread-reviewer-replacement-fails"
-    SANDBOX_BACKENDS.clear()
-
-    with (
-        patch(
-            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-            new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-deleted"},
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("sandbox API outage"),
-        ),
-        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
-        pytest.raises(SandboxUnreachableError) as excinfo,
-    ):
-        await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
-
-    # Typed, so the reviewer still recognizes it and notifies on the PR.
-    assert excinfo.value.sandbox_id == "sandbox-deleted"
-    assert "sandbox API outage" in str(excinfo.value)
-    SANDBOX_BACKENDS.clear()
-
-
-@pytest.mark.asyncio
-async def test_unreachable_sandbox_still_fails_by_default() -> None:
-    thread_id = "thread-agent-dead-sandbox"
-    SANDBOX_BACKENDS.clear()
-
-    with (
-        patch(
-            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-            new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-deleted"},
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-        ) as create_replacement,
         patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError),
     ):
-        await ensure_sandbox_for_thread(thread_id)
+        await ensure_sandbox_for_thread(thread_id, abandon_unreachable=True)
 
-    create_replacement.assert_not_awaited()
+    # Handles already built around the proxy reach no box until the thread has one again.
+    assert not proxy.has_backend
     SANDBOX_BACKENDS.clear()
 
 
 @pytest.mark.asyncio
-async def test_reviewer_opts_into_replacement() -> None:
+async def test_reviewer_opts_into_abandoning_an_unreachable_sandbox() -> None:
     sandbox_backend = MagicMock()
 
     with patch(
@@ -186,11 +112,12 @@ async def test_reviewer_opts_into_replacement() -> None:
 
     assert result is sandbox_backend
     assert ensure.await_args is not None
-    assert ensure.await_args.kwargs["allow_replacement"] is True
+    assert ensure.await_args.kwargs["abandon_unreachable"] is True
 
 
 @pytest.mark.asyncio
-async def test_reviewer_notifies_when_replacement_also_fails() -> None:
+@pytest.mark.parametrize("handed_over", [True, False])
+async def test_reviewer_says_whether_its_next_run_gets_a_fresh_sandbox(handed_over: bool) -> None:
     config: RunnableConfig = {
         "configurable": {"repo": {"owner": "langchain-ai", "name": "open-swe"}}
     }
@@ -202,7 +129,9 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
         patch(
             "openswe.reviewer.ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
-            side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
+            side_effect=(SandboxHandedOverError if handed_over else SandboxUnreachableError)(
+                "thread-reviewer", "sandbox-deleted", "not found"
+            ),
         ),
         patch(
             "openswe.reviewer.post_sandbox_unreachable_notification",
@@ -216,49 +145,5 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
     assert notify.await_args is not None
     assert notify.await_args.kwargs == {
         "sandbox_id": "sandbox-deleted",
-        "replacement_attempted": True,
+        "handed_to_mda": handed_over,
     }
-
-
-@pytest.mark.asyncio
-async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
-    thread_id = "thread-agent-gone-sandbox"
-    SANDBOX_BACKENDS.clear()
-    replacement = MagicMock()
-    replacement.id = "sandbox-replacement"
-    order: list[str] = []
-
-    with (
-        patch(
-            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-            new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-deleted"},
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
-            new_callable=AsyncMock,
-            side_effect=SandboxGoneError("Sandbox 'sandbox-deleted' not found"),
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            side_effect=lambda *_a, **_k: (order.append("init"), replacement)[1],
-        ) as create_replacement,
-        patch(
-            "openswe.sandboxes.lifecycle.client.threads.update",
-            new_callable=AsyncMock,
-            side_effect=lambda **_: order.append("bind"),
-        ) as update_thread,
-    ):
-        result = await ensure_sandbox_for_thread(thread_id)
-
-    assert result.id == "sandbox-replacement"
-    create_replacement.assert_awaited_once()
-    assert update_thread.await_args_list[-1].kwargs == {
-        "thread_id": thread_id,
-        "metadata": {"sandbox_id": "sandbox-replacement"},
-    }
-    # The thread binds to the sandbox only once it is created and initialized;
-    # the identity write is joined inside the creation step.
-    assert order == ["init", "bind"]
-    SANDBOX_BACKENDS.clear()

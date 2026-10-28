@@ -621,8 +621,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
-    # A provider MDA declares no box for, so the catalog reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from unittest.mock import AsyncMock
+
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # A thread with no box of MDA's, so the catalog reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.runnables import RunnableConfig

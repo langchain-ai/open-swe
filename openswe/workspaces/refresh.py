@@ -40,7 +40,6 @@ from openswe.workspaces.store import (
     RefreshStep,
     Workspace,
     capture_workspace_snapshot,
-    require_capture_support,
     script_command,
     script_log_path,
 )
@@ -282,11 +281,6 @@ async def refresh_workspace(
         return {"status": "no_update_script", "slug": slug}
     if kind == "update" and record.ready_snapshot_id is None:
         return {"status": "no_snapshot_to_update", "slug": slug}
-    try:
-        require_capture_support()
-    except RuntimeError as exc:
-        return {"status": "unsupported", "slug": slug, "error": str(exc)}
-
     base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
     # This job's own marker: its earlier claim wrote it, or queueing it did over a
     # refresh that had already gone stale. Either way the builder it names is lost.
@@ -450,14 +444,12 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     """Tail a script's live ``bash -x`` trace off the builder, or ``None``.
 
     Best-effort by design: the builder is released the moment the capture lands,
-    so an unreachable box means "no live trace", never a failed poll. Goes
-    through the provider registry rather than the LangSmith client so every
-    provider — the local one the E2E runs on included — takes this same path.
+    so an unreachable box means "no live trace", never a failed poll.
     """
-    from openswe.sandboxes.providers.registry import create_sandbox
+    from openswe.sandboxes.providers.registry import connect_existing_sandbox
 
     try:
-        backend = await create_sandbox(sandbox_id=sandbox_id)
+        backend = await connect_existing_sandbox(sandbox_id)
         result = await backend.aexecute(
             f"tail -c {LIVE_LOG_MAX_BYTES} {shlex.quote(path)} 2>/dev/null",
             timeout=LIVE_LOG_READ_TIMEOUT_SECONDS,
