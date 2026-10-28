@@ -11,8 +11,11 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from openswe.input_messages import InputMessageContext, human_input
 from openswe.thread_title import (
+    MAX_TITLE_INPUT_CHARS,
     _ThreadTitle,
+    _title_input,
     generate_and_store_thread_title,
     schedule_thread_title_generation,
 )
@@ -54,6 +57,27 @@ class _Threads:
     async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
         assert thread_id == "thread-123"
         self.metadata.update(metadata)
+
+
+def test_breakout_title_prioritizes_new_request_over_inherited_transcript() -> None:
+    request = "Find new open bugs against langchain.mcp namespace"
+    context: InputMessageContext = {
+        "sender_id": "person:requester",
+        "surface": "slack",
+        "kind": "human",
+    }
+    inherited = human_input("Which beta APIs should graduate? " * MAX_TITLE_INPUT_CHARS, context)[
+        "content"
+    ]
+    opening = human_input(request, context)["content"]
+    assert isinstance(inherited, str) and isinstance(opening, str)
+    messages = [HumanMessage(content=inherited), HumanMessage(content=opening)]
+
+    conversation = _title_input(messages)
+
+    assert conversation is not None
+    assert conversation.startswith(f"{request}\n\nWhich beta APIs should graduate?")
+    assert len(conversation) == MAX_TITLE_INPUT_CHARS
 
 
 @pytest.mark.parametrize(
