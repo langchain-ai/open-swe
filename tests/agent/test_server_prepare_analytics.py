@@ -1,8 +1,9 @@
-"""Analytics wiring in ``PrepareAgentRunMiddleware._prepare``.
+"""``PrepareAgentRunMiddleware._prepare`` with the services it reads faked.
 
 Covers the identity data the middleware hands to ``record_agent_invocation_usage``
 across public and private thread scopes, including the public GitHub profile
-lookup hit / null-name / failure / cache paths.
+lookup hit / null-name / failure / cache paths, and the system prompt a thread
+keeps from one turn to the next.
 """
 
 import json
@@ -10,10 +11,12 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 
 import openswe.server as server
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.prompt import construct_system_prompt
 from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
@@ -79,8 +82,6 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         title_model=MagicMock(),
         source=config["configurable"]["source"],
         user_email="",
-        linear_project_id="",
-        linear_issue_number="",
         draft_prs=False,
         admin_workspaces=False,
         credential_login=credential_login,
@@ -221,3 +222,61 @@ async def test_public_scope_resolves_profile_via_installation_token(
         "https://api.github.com/user",
     ]
     assert prepare_harness["recorded"]["github_user_id"] == 99
+
+
+async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_came_from(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any change to the system prompt misses the model provider's cache for the whole thread."""
+    monkeypatch.setattr(server, "construct_system_prompt", construct_system_prompt)
+    monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
+    prepare_harness["thread_metadata"] = {}
+    runtime = cast(Runtime[Any], MagicMock())
+    asked = HumanMessage(content="Fix the login", id="human-1")
+
+    from_slack = await _middleware(_slack_config())._prepare(
+        cast(PrepareRunState, {"messages": [asked]}), runtime
+    )
+    told = [HumanMessage(content=message["content"]) for message in from_slack["messages"]]
+    later = cast(
+        PrepareRunState,
+        {
+            **{key: value for key, value in from_slack.items() if key != "messages"},
+            "messages": [asked, *told, AIMessage(content="Done."), HumanMessage("And signup?")],
+        },
+    )
+    dashboard = {"thread_id": "thread-1", "source": "dashboard", "invocation_id": "inv-2"}
+    from_dashboard = await _middleware({"configurable": dashboard})._prepare(later, runtime)
+
+    system_prompt = from_slack["rendered_system_prompt"]
+    assert "triggered from Slack" not in system_prompt and "/workspace" not in system_prompt
+    assert [message["content"] for message in from_slack["messages"]] == [
+        AnyContext("environment", "/workspace"),
+        AnyContext("source", "triggered from Slack"),
+    ]
+    # Only what changed is told again, and the prompt is not rendered again.
+    assert "rendered_system_prompt" not in from_dashboard
+    assert [message["content"] for message in from_dashboard["messages"]] == [
+        AnyContext("source", "handled in the dashboard")
+    ]
+
+    # A thread whose prompt came from before it was fixed for good renders it once more.
+    legacy = {**later, "system_prompt_fixed": None}
+    rerendered = await _middleware({"configurable": dashboard})._prepare(
+        cast(PrepareRunState, legacy), runtime
+    )
+    assert rerendered["rendered_system_prompt"] == system_prompt
+
+
+class AnyContext:
+    """A ``run`` context block with ``context_id`` that says ``text``."""
+
+    def __init__(self, context_id: str, text: str) -> None:
+        self._opening = f'<dynamic-context kind="run" id="{context_id}">'
+        self._text = text
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and other.startswith(self._opening) and self._text in other
+
+    def __repr__(self) -> str:
+        return f"AnyContext({self._opening!r}, {self._text!r})"

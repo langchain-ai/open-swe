@@ -354,10 +354,14 @@ const FileDiffSection = memo(
 
     return (
       <div ref={sectionRef} className="overflow-hidden border-b border-default">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={`${file.treePath} +${file.additions} -${file.deletions}`}
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-space-2 bg-surface-level-1 px-space-3 py-space-2 text-left text-xs transition-colors hover:bg-surface-level-1-hover"
+          className="h-auto w-full justify-start gap-space-2 bg-surface-level-1 px-space-3 py-space-2 text-left whitespace-normal text-inherit hover:bg-surface-level-1-hover"
         >
           <CaretDownIcon
             weight="regular"
@@ -374,7 +378,7 @@ const FileDiffSection = memo(
             <span className="text-success-secondary">+{file.additions}</span>
             <span className="text-error-secondary">-{file.deletions}</span>
           </span>
-        </button>
+        </Button>
         {open &&
           (file.unrenderable ? (
             file.patch ? (
