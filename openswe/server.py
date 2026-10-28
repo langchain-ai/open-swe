@@ -1165,7 +1165,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     @staticmethod
     def _context_messages(state: PrepareRunState, kind: str, content: str) -> list[RunMessage]:
         """A context block, sent only when it differs from the newest visible one of its kind."""
-        if dynamic_context_hash(content) == latest_visible_dynamic_context_hash(state, kind):
+        content_hash = dynamic_context_hash(content)
+        if content_hash is not None and content_hash == latest_visible_dynamic_context_hash(
+            state, kind
+        ):
             return []
         return [{"role": "user", "content": content}]
 
