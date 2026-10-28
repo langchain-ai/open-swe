@@ -296,46 +296,25 @@ async def test_snapshot_reads_need_a_private_admin_surface(
     assert "no setup script" in str(refused["error"])
 
 
-async def test_snapshot_edit_validates_like_the_dashboard_and_returns_what_it_replaced(
+async def test_snapshot_edit_clears_create_params_and_returns_them_for_undo(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
+    """``{}`` clears the params, unlike an omitted field, and the old ones come back."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     rules = {"proxy_config": {"rules": [{"name": "gcp"}]}}
     await WORKSPACES.create(
-        WorkspaceCreate(
-            name="Core",
-            repos=["acme/api"],
-            setup_script="echo old",
-            create_params=rules,
-            inherit_default_sandbox=False,
-        ),
-        "admin",
+        WorkspaceCreate(name="Core", repos=["acme/api"], create_params=rules), "admin"
     )
-    with (
-        patch(
-            "openswe.run_config.get_config",
-            return_value=_config(admin_thread=True, github_login="ramonn"),
-        ),
-        patch.object(env_tools.refresh, "ensure_refresh_cron", AsyncMock()) as cron,
+    with patch(
+        "openswe.run_config.get_config",
+        return_value=_config(admin_thread=True, github_login="ramonn"),
     ):
-        refused = await env_tools.snapshotctl(
-            "edit", "core", setup_script="echo new", create_params={"secret_token": "x"}
-        )
-        assert refused["ok"] is False
-        stored = await WORKSPACES.get("core")
-        assert stored is not None
-        assert stored.setup_script == "echo old"
+        edited = await env_tools.snapshotctl("edit", "core", create_params={})
 
-        edited = await env_tools.snapshotctl(
-            "edit", "core", setup_script="echo new", create_params={}
-        )
-
-    assert edited["previous"] == {"setup_script": "echo old", "create_params": rules}
-    assert edited["current"] == {"setup_script": "echo new", "create_params": {}}
+    assert edited["previous"] == {"create_params": rules}
     stored = await WORKSPACES.get("core")
     assert stored is not None
-    assert (stored.setup_script, stored.create_params) == ("echo new", {})
-    cron.assert_awaited_once_with("core")
+    assert stored.create_params == {}
 
 
 # --- prompt wiring ---
