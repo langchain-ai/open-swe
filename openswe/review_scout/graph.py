@@ -7,8 +7,10 @@ the lines the carried-over plan does not already cover, and when there are
 none it finishes without a model call.
 """
 
+import asyncio
 import logging
 import re
+import uuid
 from collections.abc import Mapping
 from functools import partial
 from typing import Any, NotRequired, cast
@@ -22,6 +24,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
@@ -31,6 +34,7 @@ from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -50,7 +54,7 @@ from openswe.runtime import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
-from openswe.sandboxes.repo_prep import prepare_review_repo
+from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
@@ -136,17 +140,54 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         backend = await _ensure_scout_sandbox(self._thread_id, cfg)
         checkout = await PinnedCheckout.locate(backend, cfg.repo.name)
         work_dir = checkout.repo_dir.rpartition("/")[0]
-        ready = await prepare_review_repo(
-            backend,
-            work_dir=work_dir,
-            repo_owner=cfg.repo.owner,
-            repo_name=cfg.repo.name,
-            head_sha=cfg.head_sha,
-            pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
-        )
-        if not ready:
-            raise RuntimeError("review scout could not check out the pull request")
+        nothing_to_plan = {
+            "work_dir": work_dir,
+            "rendered_system_prompt": "",
+            "scout_nothing_to_plan": True,
+            "has_human_input": False,
+        }
+        for attempt in range(2):
+            failure: ReviewRepoPreparationError | None = None
+            try:
+                await prepare_review_repo_or_raise(
+                    backend,
+                    work_dir=work_dir,
+                    repo_owner=cfg.repo.owner,
+                    repo_name=cfg.repo.name,
+                    head_sha=cfg.head_sha,
+                    pr_number=cfg.pr_number,
+                    base_sha=cfg.base_sha,
+                )
+            except ReviewRepoPreparationError as exc:
+                failure = exc
+                logger.warning(
+                    "Review scout repository preparation failed",
+                    extra={"pr_number": cfg.pr_number, "prep_attempt": attempt + 1},
+                    exc_info=True,
+                )
+            try:
+                async with PullRequestClient.as_app(
+                    cfg.repo.owner, cfg.repo.name, cfg.pr_number
+                ) as pull:
+                    if await pull.head_sha() != cfg.head_sha:
+                        logger.info(
+                            "Review scout head is stale; nothing to plan",
+                            extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                        )
+                        return nothing_to_plan
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Review scout could not check the current pull request head",
+                    extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                    exc_info=True,
+                )
+            if failure is None:
+                break
+            if attempt == 1:
+                raise RuntimeError(
+                    f"review scout could not check out the pull request: {failure}"
+                ) from failure
+            await asyncio.sleep(3)
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
@@ -162,16 +203,14 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             )
             workspace = None
         if workspace is None or workspace.complete:
-            return {
-                "work_dir": work_dir,
-                "rendered_system_prompt": "",
-                "scout_nothing_to_plan": True,
-                "has_human_input": False,
-            }
+            return nothing_to_plan
         system_prompt = prompt(
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
+        )
+        run_context = prompt(
+            "review-scout/run-context",
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=checkout.repo_dir,
             carried=bool(workspace.plan.chunks),
@@ -180,10 +219,11 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         if history is not None:
             human_input = prompt("review-scout/human-input", messages=history.messages_block())
-            system_prompt = f"{system_prompt}\n\n{human_input}"
+            run_context = f"{run_context}\n\n{human_input}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
             "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,

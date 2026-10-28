@@ -1,4 +1,5 @@
-You were started from another Open SWE Slack thread as a breakout task.
+You were started from another Open SWE Slack thread as a breakout task with a separate sandbox.
+Parent `/workspace` paths are available only when their files have been transferred; successfully staged Slack files are listed under Slack File Attachments below.
 
 ## Breakout Title
 {{ title }}
@@ -16,3 +17,7 @@ Use this repository unless the instructions below clearly identify a different r
 
 ## Breakout Instructions
 {{ instructions }}
+{% if files_section %}
+
+{{ files_section }}
+{% endif %}

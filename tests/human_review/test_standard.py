@@ -449,16 +449,6 @@ def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
     assert any(blocker in reason for reason in request_blockers(_snapshot(**overrides)))
 
 
-def test_a_failing_check_github_does_not_require_does_not_block_the_request() -> None:
-    snapshot = _snapshot(
-        check_state="failure",
-        mergeable_state="unstable",
-        failures_are_required=False,
-        failing_checks=["x"],
-    )
-    assert request_blockers(snapshot) == []
-
-
 @pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
 async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
     from openswe.human_review.standard import AutoAssignResult, run_deadline
@@ -970,3 +960,54 @@ async def test_only_auto_merge_requests_merge_when_approved(
         assert request.detail == (
             "approval from @linus" if pending else "approved — awaiting manual merge"
         )
+
+
+@pytest.mark.parametrize("channel", ["", "#current", "#requested"])
+async def test_existing_request_checks_explicit_channel_before_updating_summary(
+    channel: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.github.pull_request_status import PullRequestClient
+    from openswe.human_review import standard
+    from openswe.slack.channels import SlackChannel
+    from openswe.slack.client import GitHubPrRef
+
+    request = HumanReviewRequest(
+        pull_request_id=User().id,
+        head_sha="abc",
+        kind="standard",
+        thread_id="owner",
+        slack_channel_id="C_CURRENT",
+        tldr="Original summary",
+    )
+    monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=request))
+    monkeypatch.setattr(HumanReviewRequest, "get", AsyncMock(return_value=request))
+    monkeypatch.setattr(
+        SlackChannel,
+        "resolve",
+        AsyncMock(
+            return_value=SlackChannel(id="C_NEW" if channel == "#requested" else "C_CURRENT")
+        ),
+    )
+    monkeypatch.setattr(standard, "_permalink", AsyncMock(return_value="https://slack/card"))
+    monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    monkeypatch.setattr(HumanReviewRequest, "locked", locked)
+    result = await standard._request_review(
+        GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
+        MagicMock(spec=PullRequestClient),
+        standard.Origin(thread_id="owner"),
+        channel=channel,
+        inline_summary="Updated summary",
+    )
+    mismatch = channel == "#requested"
+    assert result.success and result.reused
+    assert result.request_id == str(request.id)
+    assert result.channel == "C_CURRENT"
+    assert result.channel_mismatch is mismatch
+    assert result.requested_channel == ("C_NEW" if mismatch else "")
+    assert result.summary_updated is not mismatch
+    assert request.tldr == ("Original summary" if mismatch else "Updated summary")

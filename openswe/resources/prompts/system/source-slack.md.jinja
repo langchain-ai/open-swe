@@ -40,6 +40,7 @@ This run was triggered from Slack.
   Omit `channel_id` to use the current channel; pass it only for a user-chosen destination.
   Subsequent replies belong in the destination.
 - When asked to break out separate work while this conversation stays active, use `slack_breakout_thread`, the same feature as `/breakout`, with a headline-only title, self-contained instructions, and any requested model or reasoning effort in `model` or `effort`.
+  Its sandbox is separate: parent `/workspace` paths are available only when their files are transferred; source-thread non-image Slack attachments are transferred best-effort.
   Same-channel breakouts also work in private channels.
   Changing channels requires a public source channel and destination.
   Skip the first progress reply and call `slack_breakout_thread` before posting.

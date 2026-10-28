@@ -218,11 +218,13 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
+    call_seconds,
     code_name,
     code_only,
     direct_and_from_code,
 )
 from openswe.slack.tools.reply import send_slack_reply
+from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
 
 logger = logging.getLogger(__name__)
@@ -382,6 +384,7 @@ class RunSession:
                     reads=(injections := Injections.of(operations[described.name])).reads,
                     reads_all=injections.reads_all,
                     code_name=code_name(described.name),
+                    seconds=call_seconds(described.name),
                 )
                 for described in self.surface.catalog()
                 if described.name in operations
@@ -445,7 +448,10 @@ class RunSession:
         run = self.run
         return catalog.model_copy(
             update={
-                "trace_metadata": TurnGitMetadata(self.config).actor,
+                "trace_metadata": {
+                    **TurnGitMetadata(self.config).actor,
+                    **agent_version_metadata(),
+                },
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
@@ -713,12 +719,8 @@ async def run_operation(
         return OperationResult(
             content=f"{request.name} is not one of this run's operations", status="error"
         )
-    unexpected = _unexpected_arguments(tool, request.arguments)
-    if unexpected:
-        return OperationResult(
-            content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
-            status="error",
-        )
+    if rejection := _argument_rejection(tool, request.name, request.arguments):
+        return OperationResult(content=rejection, status="error")
     if client is not None and (pending := client.pending_result(request.name, request.request_id)):
         return _operation_result(pending, request.request_id)
     events: list[object] = []
@@ -853,7 +855,7 @@ class TokenRun:
         )
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
-            update={} if taken.reply_surface is None else {"reply_surface": taken.reply_surface},
+            update=taken.state_update(request.run_id),
             items=InboxItems(queued=taken.queued, events=taken.events),
         )
 
@@ -982,7 +984,8 @@ class TokenRun:
 
     async def route_model(self, request: Routed) -> Route:
         """The route the person's latest request takes."""
-        return Route(route=await classify_route(messages_from_dict(request.humans)))
+        selection = await classify_route(messages_from_dict(request.humans))
+        return Route(route=selection.route, persist=selection.persist)
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)
@@ -1186,13 +1189,26 @@ def _json_or_text(value: object) -> JsonValue:
         return str(value)
 
 
-def _unexpected_arguments(tool: BaseTool, arguments: Mapping[str, JsonValue]) -> set[str]:
+def _argument_rejection(
+    tool: BaseTool, name: str, arguments: Mapping[str, JsonValue]
+) -> str | None:
+    """Why ``arguments`` don't fit ``tool``'s schema, naming what it accepts instead."""
     schema = tool_parameters(tool)
     additional = schema.get("additionalProperties")
     if additional is True or isinstance(additional, Mapping):
-        return set()
-    properties = schema.get("properties")
-    return set(arguments) - (set(properties) if isinstance(properties, Mapping) else set())
+        return None
+    raw_properties = schema.get("properties")
+    properties = sorted(raw_properties) if isinstance(raw_properties, Mapping) else []
+    unexpected = sorted(set(arguments) - set(properties))
+    if not unexpected:
+        return None
+    raw_required = schema.get("required")
+    required = set(raw_required) if isinstance(raw_required, list) else set()
+    accepted = ", ".join(f"{key}{'*' if key in required else ''}" for key in properties)
+    return (
+        f"Unexpected arguments for {name}: {', '.join(unexpected)}. "
+        f"Accepted parameters: {accepted or '(none)'} (* = required)"
+    )
 
 
 def _operation_result(outcome: ToolMessage | Command, request_id: str) -> OperationResult:

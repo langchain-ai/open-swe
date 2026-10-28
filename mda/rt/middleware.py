@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -95,6 +96,7 @@ from rt.backend import (
 )
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
+from rt.model_calls import PROMPT_CACHE_TTL
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.tools import STATE_KEY, cited, run_id, tool_report
@@ -287,6 +289,31 @@ class DescribedToolsMiddleware(AgentMiddleware):
             return await handler(request)
         args = {k: v for k, v in tool_call["args"].items() if k != DISPLAY_DESCRIPTION}
         return await handler(request.override(tool_call={**tool_call, "args": args}))
+
+
+def _with_run_prompt(
+    static: SystemMessage | None, prompt: str, model: BaseChatModel | str
+) -> SystemMessage:
+    """The graph's own system prompt, then the run's.
+
+    What the graph adds is the same for every run, so it leads and, for Anthropic,
+    ends in a cache breakpoint of its own: a later run with the same tools reuses it
+    whatever its prompt.
+    """
+    if static is None or not static.content:
+        return SystemMessage(content=prompt)
+    blocks: list[str | dict] = (
+        [{"type": "text", "text": static.content}]
+        if isinstance(static.content, str)
+        else list(static.content)
+    )
+    if isinstance(model, ChatAnthropic):
+        last = blocks[-1]
+        blocks[-1] = {
+            **({"type": "text", "text": last} if isinstance(last, str) else last),
+            "cache_control": {"type": "ephemeral", "ttl": PROMPT_CACHE_TTL},
+        }
+    return static.model_copy(update={"content": [*blocks, {"type": "text", "text": prompt}]})
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):
@@ -495,28 +522,37 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if own is not None:
             # The run's own model, unless the loop names another for this call.
             request = request.override(model=own)
+            models = self._backend.run.catalog.models
+            if models is not None:
+                self._traces.get(self._backend.run).record_model(models.model.model_id)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
             return await handler(request)
         planned = ModelCall.model_validate(raw)
-        existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
-        request = request.override(system_message=SystemMessage(content=prompt))
+        static = request.system_message
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
+            self._traces.get(self._backend.run).record_model(model.model_id)
         try:
-            return await handler(request)
+            return await handler(
+                request.override(
+                    system_message=_with_run_prompt(static, planned.system_prompt, request.model)
+                )
+            )
         except Exception as exc:
             if planned.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
+            fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            self._traces.get(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(
                 request.override(
-                    model=build_model(planned.fallback, use_gateway=planned.use_gateway)
+                    model=fallback,
+                    system_message=_with_run_prompt(static, planned.system_prompt, fallback),
                 )
             )
 

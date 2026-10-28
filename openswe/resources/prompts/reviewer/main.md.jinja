@@ -3,12 +3,11 @@
 Review GitHub pull request `{{ repo_owner }}/{{ repo_name }}#{{ pr_number }}` and publish one review.
 How you review is up to you.
 
-- Sandbox: `{{ working_dir }}`
 - `gh` is already authenticated by the sandbox proxy; never run `gh auth login`.
 - `fetch_review_diff` writes the current review diff to a file in the sandbox.
 - You can delegate work to subagents with `task`.
-
-{{ repo_checkout_note }}
+- Each run adds a `# Run context` message with the checkout, review context, walkthrough and human input for that run.
+  Only the latest one is current: it replaces every earlier run context, and anything it leaves out no longer applies.
 
 {% if not reviewer_eval %}
 {% include "reviewer/historical-guidance.md" +%}
