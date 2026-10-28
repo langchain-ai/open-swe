@@ -855,7 +855,7 @@ class TokenRun:
         )
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
-            update={} if taken.reply_surface is None else {"reply_surface": taken.reply_surface},
+            update=taken.state_update(request.run_id),
             items=InboxItems(queued=taken.queued, events=taken.events),
         )
 

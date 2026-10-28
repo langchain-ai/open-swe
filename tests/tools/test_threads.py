@@ -993,3 +993,75 @@ async def test_manage_thread_rejects_plan_format_conversion(
 
     assert result == {"success": False, "error": "existing plan format is html"}
     update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("login", "relayed_from", "action", "queued_run_id", "allowed"),
+    [
+        ("octocat", "coordinator", "send_message", None, True),
+        ("other-user", "coordinator", "send_message", None, False),
+        ("octocat", "unrelated", "send_message", None, False),
+        ("octocat", "coordinator", "cancel", None, False),
+        ("octocat", "coordinator", "send_message", "worker-run", True),
+        ("octocat", "coordinator", "send_message", "previous-run", False),
+        ("octocat", None, "send_message", "worker-run", False),
+    ],
+)
+async def test_public_worker_can_only_reply_to_its_owners_relaying_private_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    login: str,
+    relayed_from: str | None,
+    action: str,
+    queued_run_id: str | None,
+    allowed: bool,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(login=login)))
+    monkeypatch.setattr(
+        threads_tool,
+        "_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "worker",
+                "run_id": "worker-run",
+                "relayed_from_thread_id": relayed_from if queued_run_id is None else None,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "langgraph_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}}))
+        ),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(
+            return_value={"id": "coordinator", "visibility": "private", "ownerLogin": "octocat"}
+        ),
+    )
+    proxy = AsyncMock(return_value=(200, b'{"result":{"run_id":"report-run"}}', "application/json"))
+    monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    state = (
+        {"relay_run_id": queued_run_id, "relayed_from_thread_id": relayed_from}
+        if queued_run_id is not None
+        else None
+    )
+
+    result = await threads_tool.manage_thread(
+        "coordinator",
+        action,
+        message="Pushed the fix" if action == "send_message" else None,
+        state=state,
+    )
+
+    if allowed:
+        assert result == {"success": True, "mode": "started", "run_id": "report-run"}
+    else:
+        assert result == {
+            "success": False,
+            "error": "this private thread can only be reached from its owner's private conversation",
+            "status_code": 403,
+        }
+        proxy.assert_not_awaited()
