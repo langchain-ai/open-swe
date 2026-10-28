@@ -1937,19 +1937,32 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             self._source, resolve_runtime_configurable(runtime), runtime
         )
 
-    def _sandbox(self) -> SandboxDefinition:
-        """The box of the run this backend acts for, as ``_openswe_select`` picks it."""
+    def _selection(self) -> SandboxDefinition | None:
+        """The box of the run this backend acts for, as ``_openswe_select`` picks it, if any."""
         from managed_deepagents.sandbox import selected_for  # noqa: PLC0415
 
         if self._selected is not None:
             return self._selected
         runtime = self._runtime if self._runtime is not None else _ambient_runtime()
         selected = selected_for(self._source.sandbox, runtime)
-        if selected is None:
-            raise RuntimeError("This run has no sandbox")
-        if not self._shared:
+        if selected is not None and not self._shared:
             self._selected = selected
         return selected
+
+    def _sandbox(self) -> SandboxDefinition:
+        selected = self._selection()
+        if selected is None:
+            raise RuntimeError("This run has no sandbox")
+        return selected
+
+    def _without_box(self) -> SandboxBackendProtocol | None:
+        """Where this run acts instead (``_openswe_without_box``) when it has no box."""
+        from managed_deepagents.sandbox import without_box  # noqa: PLC0415
+
+        if self._resolved_backend is not None:
+            return None
+        instead = without_box(self._source.sandbox)
+        return instead if instead is not None and self._selection() is None else None
 
     def _keep(self, backend: SandboxBackendProtocol) -> None:
         if not self._shared:
@@ -2215,6 +2228,9 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     ) -> _ResultT:
         from managed_deepagents._sandbox_proxy import run_sync  # noqa: PLC0415
 
+        instead = self._without_box()
+        if instead is not None:
+            return operation(instead)
         backend = self._backend()
         try:
             if execute:
@@ -2230,18 +2246,24 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         *,
         execute: bool = False,
     ) -> _ResultT:
+        instead = self._without_box()
+        if instead is not None:
+            return await _settled(operation(instead))
         backend = await self._abackend()
         try:
             if execute:
                 await self._sync_sandbox_proxy_config()
-            result = operation(backend)
-            # Provider stand-ins may implement an ``a*`` method synchronously.
-            if inspect.isawaitable(result):
-                return await result
-            return cast("_ResultT", result)
+            return await _settled(operation(backend))
         except Exception as error:
             await asyncio.to_thread(self._recover, backend, error)
             raise
+
+
+async def _settled(result: Awaitable[_ResultT]) -> _ResultT:
+    # Provider stand-ins may implement an ``a*`` method synchronously.
+    if inspect.isawaitable(result):
+        return await result
+    return cast("_ResultT", result)
 
 
 def _managed_sandbox_backend(
