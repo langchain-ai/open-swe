@@ -6,6 +6,24 @@ use serde_json::Value;
 
 use super::{humanize_error_body, Client, REQUEST_TIMEOUT, TENANT_HEADER};
 
+/// A channel setup request that may succeed when made again: it never reached
+/// Trigger Server, or Trigger Server or Slack was busy (a 5xx or 429).
+#[derive(Debug)]
+pub(crate) struct TransientSetupError(pub(crate) String);
+
+impl std::fmt::Display for TransientSetupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TransientSetupError {}
+
+/// Whether a failed channel setup may succeed when asked again.
+pub(crate) fn is_transient_setup_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<TransientSetupError>().is_some()
+}
+
 const SETUP_ERROR_FIELD_MAX_CHARS: usize = 512;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,6 +48,101 @@ pub(crate) struct ChannelSetupTarget {
 pub(crate) struct SlackChannelSetup {
     pub(crate) app: SlackChannelApp,
     pub(crate) options: SlackChannelOptions,
+    /// A Slack app the user owns, instead of one LangSmith creates. Trigger
+    /// Server keeps its credentials, so a redeploy leaves this out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) customer_app: Option<SlackCustomerApp>,
+}
+
+/// The credentials of a Slack app the user owns.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SlackCustomerApp {
+    pub(crate) bot_token: String,
+    pub(crate) signing_secret: String,
+    /// The deployment this app may be moved away from, once the user agreed.
+    /// Trigger Server refuses to take an app another deployment uses otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) move_from_deployment: Option<String>,
+}
+
+impl std::fmt::Debug for SlackCustomerApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SlackCustomerApp")
+            .field("bot_token", &"[REDACTED]")
+            .field("signing_secret", &"[REDACTED]")
+            .field("move_from_deployment", &self.move_from_deployment)
+            .finish()
+    }
+}
+
+/// Channel setup refused the user's Slack app because another deployment in
+/// the workspace uses it. Slack sends an app's events to one place, so it can
+/// serve one deployment at a time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SlackAppInUse {
+    pub(crate) deployment_id: String,
+}
+
+impl std::fmt::Display for SlackAppInUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Slack app is connected to deployment {}.",
+            self.deployment_id
+        )
+    }
+}
+
+impl std::error::Error for SlackAppInUse {}
+
+/// The holder a 409 names when it refuses a Slack app another deployment
+/// uses. Only a well-formed deployment ID is taken from the untrusted body.
+fn slack_app_in_use(status: StatusCode, text: &str) -> Option<SlackAppInUse> {
+    if status != StatusCode::CONFLICT {
+        return None;
+    }
+    let body: Value = serde_json::from_str(text).ok()?;
+    let detail = body.get("detail")?;
+    if detail.get("code")?.as_str()? != "slack_app_in_use" {
+        return None;
+    }
+    let deployment_id = uuid::Uuid::parse_str(detail.get("deployment_id")?.as_str()?).ok()?;
+    Some(SlackAppInUse {
+        deployment_id: deployment_id.to_string(),
+    })
+}
+
+/// Whether LangSmith can create a Slack app for the user, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlackManager {
+    /// The user let LangSmith create apps in this workspace.
+    Authorized { team_name: String },
+    /// Creating one first asks the user to authorize LangSmith in Slack.
+    NotAuthorized,
+    /// This LangSmith cannot create Slack apps.
+    Unavailable,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackManagerResponse {
+    authorized: bool,
+    #[serde(default)]
+    team_id: Option<String>,
+    #[serde(default)]
+    team_name: Option<String>,
+}
+
+/// A channel Trigger Server has registered for a deployment.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct TriggerChannel {
+    pub(crate) provider: String,
+    pub(crate) channel_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TriggerChannelList {
+    channels: Vec<TriggerChannel>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +181,17 @@ pub(crate) enum SlackTriggerMode {
     All,
 }
 
+impl SlackTriggerMode {
+    /// The mode as Trigger Server spells it.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Mention => "mention",
+            Self::Thread => "thread",
+            Self::All => "all",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChannelSetupResponse {
@@ -91,6 +215,129 @@ pub(crate) enum ChannelSetupStatus {
 }
 
 impl Client {
+    /// GET a Trigger Server path under the platform API, with the CLI's key.
+    fn trigger_get(
+        &self,
+        segments: &[&str],
+        query: &[(&str, &str)],
+        what: &str,
+    ) -> Result<reqwest::blocking::Response> {
+        let mut url = Url::parse(&self.public_platform_base()?)
+            .context("LangSmith platform API URL is invalid")?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("{what} URL is invalid."))?
+            .pop_if_empty()
+            .extend(segments);
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        let http = HttpClient::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(redirect::Policy::none())
+            .build()
+            .with_context(|| format!("Failed to initialize the {what} request."))?;
+        let mut request = http
+            .get(url)
+            .header("X-Api-Key", self.api_key().to_string())
+            .header("Accept", "application/json");
+        if let Some(tenant_id) = &self.tenant_id {
+            request = request.header(TENANT_HEADER, tenant_id);
+        }
+        request
+            .send()
+            .with_context(|| format!("{what} request failed."))
+    }
+
+    /// The manifest of a Slack app Trigger Server can receive events from, for
+    /// the user to create or match their own app with.
+    pub(crate) fn slack_app_manifest(
+        &self,
+        app: &SlackChannelApp,
+        options: &SlackChannelOptions,
+    ) -> Result<Value> {
+        let mut query = vec![
+            ("name", app.name.as_str()),
+            ("description", app.description.as_str()),
+            ("background_color", app.background_color.as_str()),
+            (
+                "trigger_on_all_messages",
+                if options.trigger_on_all_messages {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+        ];
+        if let Some(mode) = options.trigger_mode {
+            query.push(("trigger_mode", mode.as_str()));
+        }
+        let response = self.trigger_get(
+            &["v1", "triggers", "slack-custom-app", "manifest"],
+            &query,
+            "Slack manifest",
+        )?;
+        if !response.status().is_success() {
+            bail!(
+                "Slack manifest request failed (HTTP {}).",
+                response.status().as_u16()
+            );
+        }
+        response
+            .json::<Value>()
+            .map_err(|_| anyhow!("Slack manifest request returned invalid JSON."))
+    }
+
+    /// Whether LangSmith can create a Slack app for the user, and in which
+    /// workspace. `None` when this Trigger Server cannot say.
+    pub(crate) fn slack_manager(&self) -> Result<Option<SlackManager>> {
+        let response = self.trigger_get(
+            &["v1", "triggers", "slack-custom-app", "manager"],
+            &[],
+            "Slack app management",
+        )?;
+        match response.status() {
+            StatusCode::NOT_FOUND => return Ok(None),
+            StatusCode::SERVICE_UNAVAILABLE => return Ok(Some(SlackManager::Unavailable)),
+            status if !status.is_success() => bail!(
+                "Slack app management lookup failed (HTTP {}).",
+                status.as_u16()
+            ),
+            _ => {}
+        }
+        let body: SlackManagerResponse = response
+            .json()
+            .map_err(|_| anyhow!("Slack app management lookup returned invalid JSON."))?;
+        if !body.authorized {
+            return Ok(Some(SlackManager::NotAuthorized));
+        }
+        let printable = |value: Option<String>| {
+            value.filter(|value| !value.trim().is_empty() && !value.chars().any(char::is_control))
+        };
+        let team_name = printable(body.team_name)
+            .or_else(|| printable(body.team_id))
+            .unwrap_or_else(|| "your Slack workspace".to_string());
+        Ok(Some(SlackManager::Authorized { team_name }))
+    }
+
+    /// The channels Trigger Server has registered for the deployment.
+    pub(crate) fn trigger_channels(&self, deployment_id: &str) -> Result<Vec<TriggerChannel>> {
+        let response = self.trigger_get(
+            &["v1", "channels"],
+            &[("deployment_id", deployment_id)],
+            "Channel listing",
+        )?;
+        if !response.status().is_success() {
+            bail!(
+                "Channel listing failed (HTTP {}).",
+                response.status().as_u16()
+            );
+        }
+        let list: TriggerChannelList = response
+            .json()
+            .map_err(|_| anyhow!("Channel listing returned an invalid response."))?;
+        Ok(list.channels)
+    }
+
     pub(crate) fn setup_trigger_channel(
         &self,
         payload: &ChannelSetupRequest,
@@ -106,7 +353,7 @@ impl Client {
             .redirect(redirect::Policy::none())
             .build()
             .context("Failed to initialize channel setup.")?;
-        let api_key = self.api_key()?;
+        let api_key = self.api_key().to_string();
         let mut request = http
             .post(url)
             .header("X-Api-Key", api_key.as_str())
@@ -115,11 +362,29 @@ impl Client {
         if let Some(tenant_id) = &self.tenant_id {
             request = request.header(TENANT_HEADER, tenant_id);
         }
-        let response = request.send().context("Channel setup request failed.")?;
+        let response = request.send().map_err(|error| {
+            anyhow::Error::new(error)
+                .context(TransientSetupError("Channel setup request failed.".into()))
+        })?;
         let status = response.status();
         if !status.is_success() {
             let text = response.text().unwrap_or_default();
-            bail!("{}", setup_failure_message(status, &text, api_key.as_str()));
+            if let Some(in_use) = slack_app_in_use(status, &text) {
+                return Err(in_use.into());
+            }
+            let mut message = setup_failure_message(status, &text, api_key.as_str());
+            if let Some(customer_app) = &payload.slack.customer_app {
+                // The server never echoes them, but its detail is untrusted.
+                for secret in [&customer_app.bot_token, &customer_app.signing_secret] {
+                    if !secret.is_empty() {
+                        message = message.replace(secret.as_str(), "[REDACTED]");
+                    }
+                }
+            }
+            if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                return Err(TransientSetupError(message).into());
+            }
+            bail!("{message}");
         }
         let text = response
             .text()
@@ -186,7 +451,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
-    use crate::langsmith::{Client, Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::{ApiKey, Client, REQUEST_TIMEOUT};
 
     fn client(tenant_id: Option<String>, platform_api_url: &Url) -> Client {
         Client {
@@ -194,10 +459,10 @@ mod tests {
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .unwrap(),
-            credential: Credential::ApiKey("resolved-login-key".into()),
+            api_key: ApiKey::new("resolved-login-key"),
             tenant_id,
             host_backend_url: "https://host.invalid".into(),
-            platform_api_url: Some(platform_api_url.to_string()),
+            platform_api_url: platform_api_url.to_string(),
         }
     }
 
@@ -212,10 +477,10 @@ mod tests {
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .unwrap(),
-            credential: Credential::ApiKey("resolved-login-key".into()),
+            api_key: ApiKey::new("resolved-login-key"),
             tenant_id: None,
             host_backend_url: host_backend_url.to_string(),
-            platform_api_url: Some(platform_api_url.to_string()),
+            platform_api_url: platform_api_url.to_string(),
         }
     }
 
@@ -541,5 +806,218 @@ mod tests {
             &json!({ "detail": "Slack failed.", "remedy": "x".repeat(513) }),
         );
         assert_eq!(rendered, "Channel setup failed (HTTP 502): Slack failed.");
+    }
+
+    #[test]
+    fn customer_app_credentials_are_sent_but_never_printed() {
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "xoxb-secret".into(),
+            signing_secret: "signing-secret".into(),
+            move_from_deployment: None,
+        });
+
+        let body = serde_json::to_value(&payload).unwrap();
+        let printed = format!("{payload:?}");
+
+        assert_eq!(
+            body["slack"]["customer_app"],
+            json!({"bot_token": "xoxb-secret", "signing_secret": "signing-secret"})
+        );
+        assert!(!printed.contains("xoxb-secret"));
+        assert!(!printed.contains("signing-secret"));
+        assert!(serde_json::to_value(request()).unwrap()["slack"]
+            .get("customer_app")
+            .is_none());
+    }
+
+    #[test]
+    fn failed_customer_setup_never_echoes_the_credentials() {
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "xoxb-secret".into(),
+            signing_secret: "signing-secret".into(),
+            move_from_deployment: None,
+        });
+        let (origin, _receiver) = serve_once(
+            "400 Bad Request",
+            &[],
+            &json!({"detail": "Token xoxb-secret is invalid"}).to_string(),
+        );
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .unwrap_err()
+            .to_string();
+
+        assert!(!error.contains("xoxb-secret"));
+        assert!(error.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn a_slack_app_another_deployment_uses_is_a_typed_error() {
+        let holder = "b809e66e-0000-4000-8000-000000000002";
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "xoxb-secret".into(),
+            signing_secret: "signing-secret".into(),
+            move_from_deployment: None,
+        });
+        let (origin, _receiver) = serve_once(
+            "409 Conflict",
+            &[],
+            &json!({"detail": {
+                "message": format!("This Slack app is connected to deployment {holder}"),
+                "code": "slack_app_in_use",
+                "deployment_id": holder,
+                "channel_name": "slack",
+            }})
+            .to_string(),
+        );
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .unwrap_err();
+
+        assert_eq!(
+            error.downcast_ref::<SlackAppInUse>(),
+            Some(&SlackAppInUse {
+                deployment_id: holder.into()
+            })
+        );
+    }
+
+    #[test]
+    fn slack_app_in_use_needs_a_conflict_with_a_deployment_id() {
+        let holder = "b809e66e-0000-4000-8000-000000000002";
+        let body = |deployment_id: &str| {
+            json!({"detail": {"code": "slack_app_in_use", "deployment_id": deployment_id}})
+                .to_string()
+        };
+
+        assert!(slack_app_in_use(StatusCode::CONFLICT, &body(holder)).is_some());
+        assert!(slack_app_in_use(StatusCode::BAD_REQUEST, &body(holder)).is_none());
+        assert!(slack_app_in_use(StatusCode::CONFLICT, &body("\u{1b}[2J")).is_none());
+        assert!(slack_app_in_use(
+            StatusCode::CONFLICT,
+            &json!({"detail": "This Slack app is already in use"}).to_string()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn a_move_names_the_deployment_it_releases() {
+        let app = SlackCustomerApp {
+            bot_token: "xoxb-secret".into(),
+            signing_secret: "signing-secret".into(),
+            move_from_deployment: Some("holder-id".into()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(&app).unwrap()["move_from_deployment"],
+            json!("holder-id")
+        );
+        assert!(!format!("{app:?}").contains("xoxb-secret"));
+    }
+
+    #[test]
+    fn slack_manager_names_the_authorized_workspace() {
+        let (origin, receiver) = serve_once(
+            "200 OK",
+            &[],
+            &json!({"authorized": true, "team_id": "T1", "team_name": "Acme"}).to_string(),
+        );
+
+        let manager = client(Some("tenant-id".into()), &origin)
+            .slack_manager()
+            .unwrap();
+        let raw = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(
+            manager,
+            Some(SlackManager::Authorized {
+                team_name: "Acme".into()
+            })
+        );
+        assert!(raw.starts_with("GET /v1/triggers/slack-custom-app/manager HTTP/1.1\r\n"));
+        assert!(raw.to_ascii_lowercase().contains("x-tenant-id: tenant-id"));
+    }
+
+    #[test]
+    fn slack_manager_reads_every_answer() {
+        for (status, body, expected) in [
+            (
+                "200 OK",
+                json!({"authorized": false}).to_string(),
+                Some(SlackManager::NotAuthorized),
+            ),
+            (
+                "200 OK",
+                json!({"authorized": true, "team_id": "T1", "team_name": "\u{1b}[31m"}).to_string(),
+                Some(SlackManager::Authorized {
+                    team_name: "T1".into(),
+                }),
+            ),
+            (
+                "503 Service Unavailable",
+                json!({"detail": "not configured"}).to_string(),
+                Some(SlackManager::Unavailable),
+            ),
+            ("404 Not Found", json!({}).to_string(), None),
+        ] {
+            let (origin, _receiver) = serve_once(status, &[], &body);
+
+            assert_eq!(client(None, &origin).slack_manager().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn trigger_channels_lists_the_deployments_channels() {
+        let (origin, receiver) = serve_once(
+            "200 OK",
+            &[],
+            &json!({"channels": [{
+                "channel_id": "a6190f67-865d-4705-8171-35c90e64c730",
+                "deployment_id": "deployment-id",
+                "provider": "slack",
+                "channel_name": "support",
+                "assistant_id": "agent",
+                "endpoint_url": "https://agent.example/v1/channels/support/events",
+                "status": "active",
+                "created_at": "2026-10-21T00:00:00Z",
+                "updated_at": "2026-10-21T00:00:00Z"
+            }]})
+            .to_string(),
+        );
+
+        let channels = client(None, &origin)
+            .trigger_channels("deployment-id")
+            .unwrap();
+        let raw = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert!(raw.starts_with("GET /v1/channels?deployment_id=deployment-id HTTP/1.1\r\n"));
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].provider, "slack");
+        assert_eq!(channels[0].channel_name, "support");
+    }
+
+    #[test]
+    fn slack_app_manifest_asks_for_the_channels_app() {
+        let manifest = json!({"display_information": {"name": "Support"}});
+        let (origin, receiver) = serve_once("200 OK", &[], &manifest.to_string());
+        let mut options = request().slack.options;
+        options.trigger_mode = Some(SlackTriggerMode::Thread);
+
+        let fetched = client(None, &origin)
+            .slack_app_manifest(&request().slack.app, &options)
+            .unwrap();
+        let raw = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        let path = raw.lines().next().unwrap();
+
+        assert_eq!(fetched, manifest);
+        assert!(path.starts_with("GET /v1/triggers/slack-custom-app/manifest?"));
+        assert!(path.contains("name=Managed+Deep+Agent"));
+        assert!(path.contains("trigger_on_all_messages=false"));
+        assert!(path.contains("trigger_mode=thread"));
     }
 }

@@ -32,6 +32,7 @@ import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -59,7 +60,6 @@ import {
 } from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 
 /** Phosphor has no Linear mark; this is Linear's own logo. */
 function LinearLogoIcon({
@@ -94,6 +94,10 @@ const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
     slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
     linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
     schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+    claude_code: {
+      icon: TerminalWindowIcon,
+      label: "Mirrored from Claude Code",
+    },
   }
 
 const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
@@ -328,7 +332,6 @@ export function SidebarThreadRow({
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const chat = useChatRoutes()
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
   const worktreeThread = useLocalThread(item.id)
@@ -563,7 +566,7 @@ export function SidebarThreadRow({
     </Link>
   ) : (
     <Link
-      to={chat.thread}
+      to="/agents/$threadId"
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}

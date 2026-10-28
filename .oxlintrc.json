@@ -150,7 +150,6 @@
         "ui/src/features/agents/lib/legacyLocal.ts",
         "ui/src/features/agents/lib/prChecks.ts",
         "ui/src/features/agents/lib/queries.ts",
-        "ui/src/features/assistant/AssistantProvider.tsx",
         "ui/src/lib/query.ts",
         "ui/src/routes/admin_.evals.tsx",
         "ui/src/routes/usage.tsx"

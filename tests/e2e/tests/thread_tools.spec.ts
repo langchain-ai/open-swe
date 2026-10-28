@@ -178,12 +178,11 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
   const worked = page.getByRole("button", {
     name: /^Worked(?: for .+| · \d+ actions?)?$/,
   });
-  await expect(worked).toBeVisible();
-  await worked.click();
+  await expect(worked.first()).toBeVisible();
+  for (const fold of await worked.all()) await fold.click();
   await expect(
     page.getByRole("button", { name: "Manage thread" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /previous tool calls$/ }).click();
   await expect(
     page.getByRole("button", { name: "List threads" }),
   ).toBeVisible();

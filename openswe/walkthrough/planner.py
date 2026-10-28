@@ -5,10 +5,16 @@ background, or a review guide that got ahead of it. Opening the workspace
 carries the stored plan to the checkout's head first, so planners only ever
 place hunks that are new there. Only a checkout at the PR's current head may
 carry it; one pinned before a push raises ``PlanMovedError``.
+
+The plan and the diff's index are both line ranges, so planning costs what the
+hunks cost, never what the lines do. The checkout's sandbox indexes the diff
+once per head and renders chunks; the backend never reads the diff's lines.
 """
 
+import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -17,7 +23,8 @@ from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.walkthrough.checkout import PinnedCheckout
-from openswe.walkthrough.diff import FileChange
+from openswe.walkthrough.diff import DiffIndex
+from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_OTHER_SUMMARY_CHARS,
@@ -25,15 +32,18 @@ from openswe.walkthrough.plan import (
     FileHunks,
     FileSplits,
     Hunks,
-    LineRef,
     Plan,
     PlanChunk,
+    PlannedChunk,
     PlanStatus,
     RangeError,
     find_line,
-    line_name,
 )
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
+
+logger = logging.getLogger(__name__)
+
+_MAX_UNPLANNED_FILES = 200
 
 
 class PlannerUnavailableError(RuntimeError):
@@ -55,18 +65,42 @@ class PlanWorkspace:
     pull_request: PullRequest
     checkout: PinnedCheckout
     head_sha: str
-    changes: list[FileChange]
+    merge_base_sha: str
+    index: DiffIndex
     plan: Plan
+    _hunks: dict[tuple[LinePoint, ...], Hunks] = field(default_factory=dict, repr=False)
 
     @classmethod
     async def open(cls, pull_request: PullRequest, checkout: PinnedCheckout) -> Self:
         pinned = await checkout.pinned()
         if pinned is None:
             raise PlannerUnavailableError("the checkout is not ready; try again next turn")
-        head_sha = pinned[1]
-        changes = await checkout.changes()
-        plan = await cls._carry(pull_request, checkout, head_sha, changes)
-        return cls(pull_request, checkout, head_sha, changes, plan)
+        merge_base_sha, head_sha = pinned
+        stored = await Walkthrough.get(pull_request.id, with_index=True)
+        # A plan carried to this head from an older one keeps the older merge base.
+        if stored is not None and (stored.merge_base_sha, stored.head_sha) == pinned:
+            index = stored.diff_index
+            if index is None:
+                index = await checkout.index()
+                await Walkthrough.save_index(pull_request.id, head_sha, index)
+            return cls(pull_request, checkout, head_sha, stored.merge_base_sha, index, stored.plan)
+        # A checkout pinned before a push must not carry a newer plan back to its old head.
+        if stored is not None and await _current_head(pull_request) != head_sha:
+            raise PlanMovedError("the pull request moved on; start from its new head")
+        index = await checkout.index()
+        plan = await cls._carry(stored, checkout, head_sha, index)
+        if not await Walkthrough.install(
+            pull_request.id,
+            plan,
+            merge_base_sha=merge_base_sha,
+            index=index,
+            replacing=stored.head_sha if stored is not None else None,
+        ):
+            moved = await Walkthrough.get(pull_request.id)
+            if moved is None or moved.head_sha != head_sha:
+                raise PlanMovedError("another reader moved the plan to a different head")
+            plan = moved.plan
+        return cls(pull_request, checkout, head_sha, merge_base_sha, index, plan)
 
     @classmethod
     async def locate(
@@ -79,48 +113,53 @@ class PlanWorkspace:
 
     @staticmethod
     async def _carry(
-        pull_request: PullRequest,
-        checkout: PinnedCheckout,
-        head_sha: str,
-        changes: list[FileChange],
+        stored: Walkthrough | None, checkout: PinnedCheckout, head_sha: str, index: DiffIndex
     ) -> Plan:
-        stored = await Walkthrough.get(pull_request.id)
-        if stored is not None and stored.head_sha == head_sha:
-            return stored.plan
-        # A checkout pinned before a push must not carry a newer plan back to its old head.
-        if stored is not None and await _current_head(pull_request) != head_sha:
-            raise PlanMovedError("the pull request moved on; start from its new head")
-        plan = (
-            stored.plan.carried_to(head_sha, changes)
-            if stored is not None
-            else Plan.start(head_sha, changes)
-        )
-        codes = await checkout.render_chunks([chunk.lines for chunk in plan.chunks], changes)
+        if stored is None:
+            return Plan.start(head_sha, index)
+        carry = await checkout.carry(stored.head_sha, stored.merge_base_sha, index)
+        if carry is None:
+            logger.warning(
+                "Could not read a walkthrough's earlier head; planning its new head afresh",
+                extra={"walkthrough_head_sha": stored.head_sha, "pr_head_sha": head_sha},
+            )
+            return Plan.start(head_sha, index)
+        plan = stored.plan.carried_to(head_sha, index, carry)
+        codes = await checkout.render_chunks([chunk.lines for chunk in plan.chunks])
         for chunk, code in zip(plan.chunks, codes, strict=True):
             chunk.code = code
-        if await Walkthrough.install(
-            pull_request.id,
-            plan,
-            merge_base_sha=await checkout.merge_base(),
-            changes=changes,
-            replacing=stored.head_sha if stored is not None else None,
-        ):
-            return plan
-        moved = await Walkthrough.get(pull_request.id)
-        if moved is None or moved.head_sha != head_sha:
-            raise PlanMovedError("another reader moved the plan to a different head")
-        return moved.plan
+        return plan
 
     @property
     def hunks(self) -> Hunks:
-        return self.plan.hunks(self.changes)
+        # The index never changes, so the hunks only change when the plan's splits do.
+        splits = tuple(self.plan.splits)
+        if splits not in self._hunks:
+            self._hunks[splits] = self.plan.hunks(self.index)
+        return self._hunks[splits]
+
+    # Computed once per plan: ``_edit`` drops it when it replaces the plan.
+    @cached_property
+    def unplanned(self) -> LineSet:
+        return self.plan.unplanned(self.index)
 
     @property
     def complete(self) -> bool:
-        return not self.plan.unplanned(self.changes)
+        return not self.unplanned
 
     def status(self) -> PlanStatus:
-        return self.plan.status(self.changes)
+        hunks, unplanned = self.hunks, self.unplanned
+        spans = hunks.spans(unplanned)
+        return PlanStatus(
+            chunks=[
+                PlannedChunk(number=i, title=c.title, hunks=hunks.spans(c.lines))
+                for i, c in enumerate(self.plan.chunks, start=1)
+            ],
+            other_lines=len(self.plan.other),
+            unplanned=hunks.summary(unplanned) if unplanned else "nothing",
+            unplanned_hunks=spans[:_MAX_UNPLANNED_FILES],
+            more_files_unplanned=max(0, len(spans) - _MAX_UNPLANNED_FILES),
+        )
 
     async def _edit(self, change: Callable[[Plan], object]) -> None:
         def apply(plan: Plan) -> Plan:
@@ -128,8 +167,9 @@ class PlanWorkspace:
             return plan
 
         self.plan = await Walkthrough.edit(
-            self.pull_request.id, head_sha=self.head_sha, changes=self.changes, change=apply
+            self.pull_request.id, head_sha=self.head_sha, index=self.index, change=apply
         )
+        self.__dict__.pop("unplanned", None)
 
     async def plan_chunk(
         self,
@@ -153,23 +193,15 @@ class PlanWorkspace:
             for number, chunk in enumerate(self.plan.chunks, start=1)
             if number in numbers
         }
-        released = {ref for chunk in replaced.values() for ref in chunk.lines}
-        planned = self.plan.planned() - released
-        unplanned = [
-            line
-            for change in self.changes
-            for line in change.lines
-            if LineRef.of(line) not in planned
-        ]
-        hunks = self.hunks
-        to_other = hunks.claim(other, unplanned) if other else []
-        taken = set(to_other)
-        lines = hunks.claim(show, [line for line in unplanned if LineRef.of(line) not in taken])
+        released = LineSet.union(chunk.lines for chunk in replaced.values())
+        unplanned = self.index.lines - (self.plan.planned() - released)
+        to_other = self.hunks.claim(other, unplanned) if other else LineSet()
+        lines = self.hunks.claim(show, unplanned - to_other)
         chunk = PlanChunk(
             title=trimmed,
             explanation=explanation.strip()[:MAX_EXPLANATION_CHARS],
             lines=lines,
-            code=await self.checkout.render(lines, self.changes),
+            code=await self.checkout.render(lines),
         )
         number = 0
 
@@ -177,8 +209,7 @@ class PlanWorkspace:
             nonlocal number
             if any(plan.chunk(chunk_id) != original for chunk_id, original in replaced.items()):
                 raise RangeError("another planner changed a chunk to replace; check again")
-            planned = plan.planned() - released
-            if any(ref in planned for ref in [*to_other, *lines]):
+            if (to_other | lines) & (plan.planned() - released):
                 raise RangeError("another planner just placed some of these lines; check again")
             position = after
             if replaced and position is None:
@@ -192,36 +223,32 @@ class PlanWorkspace:
 
     async def move_to_other(self, files: list[FileHunks], *, restore: bool = False) -> None:
         if restore:
-            other = set(self.plan.other)
-            pool = [line for c in self.changes for line in c.lines if LineRef.of(line) in other]
-            refs = self.hunks.claim(files, pool)
-            await self._edit(lambda plan: plan.restore_other(refs))
+            lines = self.hunks.claim(files, self.plan.other)
+            await self._edit(lambda plan: plan.restore_other(lines))
             return
-        refs = self.hunks.claim(files, self.plan.unplanned(self.changes))
+        lines = self.hunks.claim(files, self.unplanned)
 
         def send(plan: Plan) -> None:
-            planned = plan.planned()
-            if any(ref in planned for ref in refs):
+            if lines & plan.planned():
                 raise RangeError("another planner just placed some of these lines; check again")
-            plan.add_other(refs)
+            plan.add_other(lines)
 
         await self._edit(send)
 
     async def split(self, files: list[FileSplits]) -> None:
         """Start a new hunk at each named unplanned line, splitting the hunk it sits in."""
-        unplanned = self.plan.unplanned(self.changes)
-        hunks = self.hunks
-        refs: list[LineRef] = []
+        unplanned = self.unplanned
+        points: list[LinePoint] = []
         for split in files:
             for name in split.at:
-                line = find_line(split.path, name, unplanned)
-                if hunks.key(line) == (line.path, line_name(line)):
-                    raise RangeError(f"`{line.path}` {name} already starts a hunk")
-                refs.append(LineRef.of(line))
-        if not refs:
+                point = find_line(split.path, name, unplanned)
+                hunk = self.hunks.holding(point)
+                if hunk is not None and hunk.name == point.name:
+                    raise RangeError(f"`{point.path}` {name} already starts a hunk")
+                points.append(point)
+        if not points:
             raise RangeError("no lines are named to split at")
-        split_hunks = Hunks.of(self.changes, [*self.plan.splits, *refs])
-        if fragments := split_hunks.fragments(hunks, unplanned):
+        if fragments := await self._fragments(points):
             raise RangeError(
                 "these splits leave hunks of only braces, punctuation or blank lines: "
                 + ", ".join(f"`{path}` {name}" for path, name in fragments)
@@ -230,18 +257,29 @@ class PlanWorkspace:
 
         def split_at(plan: Plan) -> None:
             planned = plan.planned()
-            if any(ref in planned for ref in refs):
+            if any(point in planned for point in points):
                 raise RangeError("another planner just placed some of these lines; check again")
-            plan.split(refs)
+            plan.split(points)
 
         await self._edit(split_at)
 
+    async def _fragments(self, points: list[LinePoint]) -> list[tuple[str, str]]:
+        """Hunks the split at ``points`` would make that hold only braces, punctuation or blank lines."""
+        touched = self.unplanned.only(point.path for point in points)
+        before = {part for _, part in self.hunks.within(touched)}
+        after = Hunks.of(self.index, [*self.plan.splits, *points]).within(touched)
+        new = [(hunk, part) for hunk, part in after if part not in before]
+        wordless = await self.checkout.wordless([part for _, part in new])
+        return [
+            (hunk.path, hunk.name) for (hunk, _), empty in zip(new, wordless, strict=True) if empty
+        ]
+
     async def settle(self) -> int:
         """Send every line still unplanned to Other, completing the plan; how many there were."""
-        refs = [LineRef.of(line) for line in self.plan.unplanned(self.changes)]
-        if refs:
-            await self._edit(lambda plan: plan.add_other(refs))
-        return len(refs)
+        lines = self.unplanned
+        if lines:
+            await self._edit(lambda plan: plan.add_other(lines))
+        return len(lines)
 
     async def describe_other(self, summary: str) -> None:
         trimmed = summary.strip()[:MAX_OTHER_SUMMARY_CHARS]

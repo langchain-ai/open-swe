@@ -1,8 +1,8 @@
-""":func:`define_browser` — browser use for an agent's threads (Python only).
+""":func:`define_browser` — browser use for an agent's threads.
 
 The CLI discovers a root ``browser`` export in ``browser.py``; MDA then gives
-the agent a LangSmith browser and Stagehand's ``run``, ``snapshot`` and
-``screenshot`` tools.
+the agent a LangSmith browser and Stagehand's tools, as ``browser_run``,
+``browser_snapshot`` and ``browser_screenshot``.
 
     # browser.py
     from managed_deepagents import define_browser
@@ -40,7 +40,7 @@ def define_browser(
     Args:
         scope: ``"thread"`` gives each thread its own browser; ``"user"`` shares
             one per signed-in user across their threads, logins included, with
-            a tab per thread. Runs with no person behind them, such as
+            a window per thread. Runs with no person behind them, such as
             scheduled runs, get their thread's browser.
         idle_ttl_seconds: Stop a browser after this long idle (60 to 86,400).
     """

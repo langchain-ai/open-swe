@@ -18,7 +18,9 @@ from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
 from openswe.threads import browser, terminal
 from openswe.threads.background_work import (
+    BackgroundOutput,
     BackgroundWork,
+    get_dashboard_thread_background_output,
     get_dashboard_thread_background_work,
 )
 from openswe.threads.diffs import (
@@ -166,6 +168,7 @@ async def api_list_thread_repos(
     include_automations: bool = False,
     owned: bool = False,
     all: bool = False,
+    exclude_source: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
@@ -177,6 +180,7 @@ async def api_list_thread_repos(
         include_automations=include_automations,
         owned=owned,
         include_all=all,
+        exclude_sources=frozenset(exclude_source or ()),
     )
 
 
@@ -223,6 +227,7 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     owned: bool = False,
+    exclude_source: Annotated[list[str] | None, Query()] = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
@@ -253,6 +258,7 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         owned=owned,
+        exclude_sources=frozenset(exclude_source or ()),
         sort_by=sort_by,
         hierarchy=hierarchy,
     )
@@ -397,6 +403,15 @@ async def api_get_thread_background_work(
 ) -> BackgroundWork:
     return await get_dashboard_thread_background_work(
         thread_id, session["sub"], email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/background-work/{task_id}/output")
+async def api_get_thread_background_output(
+    thread_id: str, task_id: str, session: dict[str, Any] = SESSION_DEP
+) -> BackgroundOutput:
+    return await get_dashboard_thread_background_output(
+        thread_id, task_id, session["sub"], email=session.get("email")
     )
 
 

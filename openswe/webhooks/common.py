@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 from collections.abc import Collection, Mapping, Sequence
@@ -65,11 +66,9 @@ from openswe.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
 )
-from openswe.github.token import (
-    is_bot_token_only_mode,
-)
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import PersonIdentity
+from openswe.linear.comments import get_recent_comments  # noqa: F401
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -81,14 +80,25 @@ from openswe.review.findings import (
 from openswe.review.findings import (
     list_findings as list_reviewer_findings,  # noqa: F401
 )
-from openswe.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
+from openswe.review.publish import (  # noqa: F401
+    fetch_pr_review_threads,
+    post_review_started_comment,
+)
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
-from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
+from openswe.rollout_events import (
+    MERGE_COMMIT_PR_URL,
+    MERGE_COMMIT_SHA,
+    ROLLOUT_CHECK_REQUESTED,
+    ask_to_monitor_rollout,
+    remembered_merge_sha,
+    subscribe_merged_thread,
+)
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
+    add_slack_reaction,
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
     get_slack_permalink,
@@ -98,6 +108,7 @@ from openswe.slack.client import (
     post_slack_ephemeral_message,
     post_slack_thread_reply,
     post_slack_trace_reply,  # noqa: F401
+    remove_slack_reaction,
     resolve_slack_links_in_context,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
     strip_bot_mention,  # noqa: F401
@@ -154,11 +165,16 @@ from openswe.utils.multimodal import (
     fetch_image_block,  # noqa: F401
     vision_not_supported_warning,  # noqa: F401
 )
+from openswe.utils.preview import skip_on_preview
 from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
-from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
+from openswe.workspaces.routing import (
+    is_kitchen_channel,
+    workspace_for_repo,
+    workspace_for_slack_channel,
+)
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 __all__ = [
@@ -171,6 +187,7 @@ __all__ = [
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
     "LANGGRAPH_URL",
+    "LINEAR_WEBHOOK_SECRET",
     "OPEN_SWE_TAGS",
     "REVIEWER_THREAD_KIND",
     "Request",
@@ -244,6 +261,7 @@ __all__ = [
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
+    "get_recent_comments",
     "SlackRepoResolution",
     "get_slack_repo_config",
     "get_slack_user_info",
@@ -251,7 +269,6 @@ __all__ = [
     "get_workspace_settings",
     "get_valid_access_token",
     "has_access_token_record",
-    "is_bot_token_only_mode",
     "is_code_channel",
     "json",
     "list_reviewer_findings",
@@ -286,6 +303,7 @@ __all__ = [
     "update_slack_message",
     "upsert_agent_thread_metadata",
     "verify_github_signature",
+    "verify_linear_signature",
     "verify_slack_signature",
     "workspace_for_repo_config",
 ]
@@ -313,6 +331,7 @@ if ENV.DEBUG_TRACEMALLOC.optional():
     )
 
 
+LINEAR_WEBHOOK_SECRET = ENV.LINEAR_WEBHOOK_SECRET.get()
 GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
 SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
 SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
@@ -975,6 +994,29 @@ async def post_account_link_prompt(
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
 
 
+def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
+    """Verify the Linear webhook signature.
+
+    Args:
+        body: Raw request body bytes
+        signature: The Linear-Signature header value
+        secret: The webhook signing secret
+
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    if not secret:
+        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        return False
+
+    if not signature:
+        return False
+
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
 GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
 SUPPORTED_GH_EVENTS = frozenset(
     [
@@ -1488,9 +1530,21 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
                     metadata_update["pr_state"] = new_state
 
+                previous_tracked_states = (
+                    [record.get("state") for record in pull_requests if isinstance(record, dict)]
+                    if isinstance(pull_requests, list)
+                    else []
+                )
                 tracked_states = [record.get("state") for record in updated_pull_requests]
                 if not tracked_states and metadata.get("pr_url") == pr_url:
+                    previous_tracked_states = [previous_state]
                     tracked_states = [new_state]
+                was_all_merged = bool(previous_tracked_states) and all(
+                    state == "merged" for state in previous_tracked_states
+                )
+                all_merged = bool(tracked_states) and all(
+                    state == "merged" for state in tracked_states
+                )
                 all_terminal = bool(tracked_states) and all(
                     state in _TERMINAL_PR_STATES for state in tracked_states
                 )
@@ -1515,10 +1569,38 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                         metadata_update["auto_resolved_by_prs"] = False
                     if needs_attention:
                         metadata_update["attention_reason"] = None
+                if newly_merged:
+                    merge_sha = remembered_merge_sha(event.pull_request.merge_commit_sha or "")
+                    if merge_sha and any(
+                        record.get("url") == pr_url for record in updated_pull_requests
+                    ):
+                        updated_pull_requests = [
+                            {**record, MERGE_COMMIT_SHA: merge_sha}
+                            if record.get("url") == pr_url
+                            else record
+                            for record in updated_pull_requests
+                        ]
+                        metadata_update["pull_requests"] = updated_pull_requests
+                    if merge_sha and metadata.get("pr_url") == pr_url:
+                        metadata_update[MERGE_COMMIT_SHA] = merge_sha
+                        metadata_update[MERGE_COMMIT_PR_URL] = pr_url
                 if metadata_update:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update
                     )
+                location = SourceContext.from_metadata(metadata).slack_location
+                if (
+                    was_all_merged != all_merged
+                    and location is not None
+                    and not skip_on_preview("kitchen_thread_merge_reaction")
+                    and await is_kitchen_channel(location[0])
+                ):
+                    if all_merged:
+                        if not await add_slack_reaction(*location, "merged"):
+                            await add_slack_reaction(*location, "twisted_rightwards_arrows")
+                    else:
+                        await remove_slack_reaction(*location, "merged")
+                        await remove_slack_reaction(*location, "twisted_rightwards_arrows")
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)
             continue
@@ -1531,21 +1613,26 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
-        if (
-            newly_merged
-            and event.identity is not None
-            and isinstance(metadata, dict)
-            and metadata.get(ROLLOUT_CHECK_REQUESTED) is True
-        ):
+        if newly_merged and event.identity is not None and isinstance(metadata, dict):
             owner, repo, number = event.identity
-            await subscribe_merged_thread(
-                thread_id,
-                owner=owner,
-                repo=repo,
-                number=number,
-                sha=event.pull_request.merge_commit_sha or "",
-                metadata=metadata if isinstance(metadata, dict) else {},
-            )
+            if metadata.get(ROLLOUT_CHECK_REQUESTED) is True:
+                await subscribe_merged_thread(
+                    thread_id,
+                    owner=owner,
+                    repo=repo,
+                    number=number,
+                    sha=event.pull_request.merge_commit_sha or "",
+                    metadata=metadata,
+                )
+            else:
+                await ask_to_monitor_rollout(
+                    thread_id,
+                    owner=owner,
+                    repo=repo,
+                    number=number,
+                    metadata=metadata,
+                    sha=event.pull_request.merge_commit_sha or "",
+                )
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

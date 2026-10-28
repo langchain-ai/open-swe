@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -306,7 +306,66 @@ describe("Messages", () => {
     ).toBeTruthy()
   })
 
+  it("expands a tool call to its arguments as formatted JSON", () => {
+    const { container } = render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "report",
+                title: "report_platform_issue",
+                toolKind: "other",
+                status: "completed",
+                input: {
+                  problem_description: "Sandbox disconnected",
+                  keywords: ["sandbox"],
+                },
+                output: "Recorded",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "ping",
+                title: "ping_service",
+                toolKind: "other",
+                status: "completed",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Worked/ }))
+    expect(screen.getByText("Ping service").closest("[aria-expanded]")).toBe(
+      null
+    )
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Report platform issue Sandbox disconnected",
+      })
+    )
+    expect(container.textContent).toContain(
+      JSON.stringify(
+        {
+          problem_description: "Sandbox disconnected",
+          keywords: ["sandbox"],
+        },
+        null,
+        2
+      )
+    )
+    expect(container.textContent).toContain("Recorded")
+  })
+
   it("folds each stretch of work between the Slack replies around it", () => {
+    vi.useFakeTimers()
     render(
       <Messages
         isStreaming
@@ -346,6 +405,11 @@ describe("Messages", () => {
       { wrapper }
     )
 
+    // A run that ends right after a reply never flashes an activity row under it.
+    expect(screen.queryByRole("button", { name: "Thinking…" })).toBeNull()
+    act(() => vi.advanceTimersByTime(800))
+    vi.useRealTimers()
+
     const inOrder = [
       screen.getByText("On it!"),
       screen.getByRole("button", { name: "Worked · 1 action" }),
@@ -358,6 +422,76 @@ describe("Messages", () => {
           Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
     })
+  })
+
+  it("keeps the agent's commentary between folds and copies only its answer", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    })
+    const shell = (toolCallId: string, timestamp: string) => ({
+      kind: "tool-execution" as const,
+      toolCallId,
+      timestamp,
+      title: "ls",
+      toolKind: "execute" as const,
+      status: "completed" as const,
+    })
+    render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            startedAt: "2026-09-03T10:00:00.000Z",
+            timestamp: "2026-09-03T10:10:00.000Z",
+            chunks: [
+              {
+                kind: "text",
+                text: "Checking the tests first.",
+                timestamp: "2026-09-03T10:00:00.000Z",
+              },
+              shell("first", "2026-09-03T10:00:05.000Z"),
+              {
+                kind: "text",
+                text: "Found the cause.",
+                timestamp: "2026-09-03T10:02:00.000Z",
+              },
+              shell("second", "2026-09-03T10:02:05.000Z"),
+              {
+                kind: "text",
+                text: "Fixed it.",
+                timestamp: "2026-09-03T10:10:00.000Z",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const inOrder = [
+      screen.getByText("Checking the tests first."),
+      screen.getByRole("button", { name: "Worked for 2m 0s · 1 action" }),
+      screen.getByText("Found the cause."),
+      screen.getByRole("button", { name: "Worked for 8m 0s · 1 action" }),
+      screen.getByText("Fixed it."),
+    ]
+    inOrder.slice(1).forEach((later, index) => {
+      expect(
+        inOrder[index]!.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }))
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("Fixed it."))
   })
 
   it("renders unfinished grouped work after its fold row", () => {

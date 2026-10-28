@@ -1,24 +1,17 @@
 """Sandbox capability authorization and server-side tool execution."""
 
-from collections.abc import Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx2
 import jwt
 import pytest
 from fastapi import HTTPException
-from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
-from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
 
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.sandboxes import tool_access
 from openswe.sandboxes.tool_runtime import ToolSurface
 
@@ -79,30 +72,13 @@ async def integration_echo(value: str) -> str:
     return value
 
 
-class DenyValue(OpenSWEMiddleware):
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
-        if request.tool_call["args"].get("value") == "denied":
-            return ToolMessage(
-                content="blocked", status="error", tool_call_id=request.tool_call["id"]
-            )
-        return await handler(request)
-
-
 def surface() -> ToolSurface:
     dynamic = DynamicToolMiddleware(
         {
             "MCP": [StructuredTool.from_function(coroutine=integration_echo)],
         }
     )
-    graph = create_agent(
-        FakeListChatModel(responses=[]),
-        middleware=cast(list[AgentMiddleware], [dynamic, DenyValue()]),
-    )
-    return ToolSurface(graph=graph, dynamic=dynamic)
+    return ToolSurface(dynamic=dynamic, middleware=cast(list[AgentMiddleware], [dynamic]))
 
 
 async def test_capability_carries_binding_and_is_revoked_on_rebinding(
@@ -157,6 +133,16 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
+    proxy_client = MagicMock()
+    proxy_client.get = AsyncMock(
+        return_value=httpx2.Response(
+            200, json={"proxy_config": {}}, request=httpx2.Request("GET", "https://sandbox.test")
+        )
+    )
+    client_context = MagicMock()
+    client_context.__aenter__ = AsyncMock(return_value=proxy_client)
+    client_context.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(langsmith.httpx2, "AsyncClient", MagicMock(return_value=client_context))
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
     client = MagicMock()
@@ -196,26 +182,15 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["headers"][0]["value"] == first_token
 
 
-async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() -> None:
+async def test_mcp_discovery_without_a_model_call() -> None:
     tools = surface()
-    state: dict[str, object] = {"messages": []}
-    await tools.prepare(state)
+    await tools.prepare()
     assert "mcp_provenance" not in tools.catalog()[0].model_dump()
     properties = tools.catalog()[0].parameters["properties"]
     assert isinstance(properties, dict) and set(properties) == {"value"}
-    config: RunnableConfig = {"configurable": {"thread_id": "thread-a"}}
-    response = await tools.run(config, state, "integration_echo", {"value": "hello"})
-    assert (response.message.status, response.content) == ("success", "hello")
-    assert state == {"messages": []}
-    blocked = await tools.run(config, state, "integration_echo", {"value": "denied"})
-    assert (blocked.message.status, blocked.content) == ("error", "blocked")
-    with pytest.raises(HTTPException):
-        await tools.run(config, state, "integration_echo", {"value": "hello", "runtime": {}})
-    for name in ("enter_plan_mode", "approve_plan", "load_integration_tools"):
-        with pytest.raises(HTTPException):
-            await tools.run(config, state, name, {})
-    await tools.prepare({"plan_mode": True})
     assert "integration_echo" in tools.tools
+    # The surface lists the integration tools themselves, so it never offers their loader.
+    assert "load_integration_tools" not in tools.tools
 
 
 @pytest.mark.parametrize(
@@ -258,40 +233,10 @@ async def test_invalid_claims_never_reach_thread_lookup(
 def test_agent_factory_is_accepted_by_langgraph() -> None:
     from langgraph_api._factory_utils import FACTORY_KWARGS, classify_factory
 
-    from openswe.server import traced_agent
+    from openswe.graphs.agent import traced_agent
 
     graph_id = "sandbox-tools-factory-test"
     try:
         classify_factory(traced_agent, graph_id)
     finally:
         FACTORY_KWARGS.pop(graph_id, None)
-
-
-async def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
-    from openswe.tools.search_tools import search_tools_tool
-
-    def make(name: str, description: str) -> StructuredTool:
-        async def run(query: str) -> str:
-            return query
-
-        return StructuredTool.from_function(coroutine=run, name=name, description=description)
-
-    surface = ToolSurface(
-        tools={
-            tool.name: tool
-            for tool in (
-                make("searchDatadogLogs", "Search raw Datadog log entries."),
-                make("get_datadog_metric", "Query metrics from Datadog."),
-                make("save_issue", "Create or update a Linear issue."),
-                make("slack_reply", "Reply in Slack."),
-            )
-        }
-    )
-    search = search_tools_tool(surface, lambda name: None if name == "slack_reply" else name)
-
-    results = await search.ainvoke({"query": "datadog logs", "limit": 2})
-
-    assert [result["name"] for result in results] == ["searchDatadogLogs", "get_datadog_metric"]
-    assert results[0]["parameters"]["properties"].keys() == {"query"}
-    assert results[0]["code_name"] == "searchDatadogLogs"
-    assert await search.ainvoke({"query": "kubernetes"}) == []

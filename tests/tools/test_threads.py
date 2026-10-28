@@ -91,6 +91,108 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     assert awaited.kwargs["admin_threads"] is True
 
 
+@pytest.mark.parametrize(
+    ("scope", "summary_only", "compact"),
+    [
+        ("automation", None, True),
+        ("automation", False, False),
+        ("interactive", None, False),
+        ("all", None, False),
+        ("interactive", True, True),
+    ],
+)
+async def test_list_threads_outcomes_and_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+    scope: threads_tool.ThreadScope,
+    summary_only: bool | None,
+    compact: bool,
+) -> None:
+    outcome = "Backport investigation. " * 30 + (
+        "source=org/repo#123 target=release-2 attempts=3 "
+        "last_attempt=2026-10-23T08:00:00Z status=terminal"
+    )
+    records = [
+        {
+            "id": f"thread-{index}",
+            "status": "idle",
+            "title": "Backport",
+            "createdAt": "2026-10-23T07:00:00Z",
+            "updatedAt": "2026-10-23T08:00:00Z",
+            "messages": [],
+            "plan": {"content": "large dashboard detail" * 200},
+            "pr": {
+                "url": "https://github.com/org/repo/pull/123",
+                "number": 123,
+                "state": "merged",
+                "title": "Extra PR metadata",
+            },
+        }
+        for index in range(50)
+    ]
+
+    async def page(*args: object, **kwargs: object) -> dict[str, object]:
+        offset = kwargs["offset"]
+        limit = kwargs["limit"]
+        assert isinstance(offset, int) and isinstance(limit, int)
+        return {
+            "items": records[offset : offset + limit],
+            "limit": limit,
+            "offset": offset,
+            "hasMore": offset + limit < len(records),
+        }
+
+    records[0]["final_message"] = outcome
+    records[1]["messages"] = [{"role": "assistant", "content": outcome}]
+
+    async def get_state(thread_id: str) -> dict[str, object] | None:
+        assert thread_id not in {"thread-0", "thread-1"}
+        if thread_id == "thread-48":
+            return None
+        return {
+            "values": {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": outcome if thread_id == "thread-2" else "No eligible backports.",
+                    },
+                    {"role": "assistant", "content": "", "tool_calls": [{"name": "read_file"}]},
+                    {"role": "tool", "content": "tool output"},
+                ]
+                if thread_id != "thread-49"
+                else []
+            }
+        }
+
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setattr(threads_tool.THREADS, "state", get_state)
+    result = await threads_tool.list_threads(scope=scope, summary_only=summary_only, limit=50)
+    assert result["success"] is True
+    assert result["offset"] == 0
+    assert result["limit"] == 50
+    assert result["has_more"] is False
+    collected = result["items"]
+    assert len(collected) == 50
+    if compact:
+        assert len(json.dumps(result)) < 20_000
+        assert collected[0] == {
+            **{key: records[0][key] for key in ("id", "status", "createdAt", "updatedAt", "title")},
+            "webUrl": threads_tool.dashboard_thread_url("thread-0"),
+            "pr": {"url": "https://github.com/org/repo/pull/123", "number": 123, "state": "merged"},
+            "final_message": outcome[:500],
+        }
+        assert collected[1]["final_message"] == outcome[:500]
+        assert collected[2]["final_message"] == outcome[:500]
+        assert collected[3]["final_message"] == "No eligible backports."
+        assert collected[-2]["final_message"] is None
+        assert collected[-1]["final_message"] is None
+    else:
+        assert collected[0]["plan"] == records[0]["plan"]
+        assert collected[0]["pr"] == records[0]["pr"]
+        assert collected[0]["final_message"] == outcome
+        assert "final_message" not in collected[2]
+
+
 _AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
 
 
@@ -340,6 +442,85 @@ def test_transcript_filters_private_and_tool_content() -> None:
     assert transcript["message_count"] == 5
     assert transcript["omitted_count"] == 3
     assert transcript["truncated"] is True
+
+
+@pytest.mark.parametrize("role", ["ai", "assistant"])
+@pytest.mark.parametrize("outcome", ["Done", "x" * 5_000 + "\nretry ledger: complete"])
+async def test_get_thread_exposes_latest_outcome(
+    monkeypatch: pytest.MonkeyPatch, role: str, outcome: str
+) -> None:
+    client = _DetailClient()
+    timestamp = "2026-08-20T12:01:00Z"
+    client.threads.get_state.return_value = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "instructions" * 1_000},
+                {"type": "ai", "content": "Older outcome"},
+                {"role": role, "content": outcome, "created_at": timestamp},
+                {"type": "ai", "content": [{"type": "reasoning", "text": "hidden"}]},
+                {"type": "tool", "content": "tool output"},
+            ]
+        }
+    }
+    monkeypatch.setattr(threads_tool, "_reader", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "_authorized_locator",
+        AsyncMock(return_value=("thread-1", {"id": "thread-1", "status": "finished"})),
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "_queued_message_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None))
+
+    result = await threads_tool.get_thread("thread-1")
+
+    assert result["last_assistant_message"] == {
+        "text": outcome[-4_000:],
+        "truncated": len(outcome) > 4_000,
+        "timestamp": timestamp,
+    }
+
+
+def test_latest_outcome_without_nonempty_assistant_message() -> None:
+    state = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "request"},
+                {"type": "ai", "content": "   "},
+                {"type": "assistant", "content": [{"type": "reasoning", "text": "hidden"}]},
+            ]
+        }
+    }
+
+    assert threads_tool._last_assistant_message(state) is None
+
+
+@pytest.mark.parametrize("count, width, retained", [(105, 10, 100), (15, 4_000, 13)])
+def test_transcript_budgets_keep_newest_messages(count: int, width: int, retained: int) -> None:
+    messages = [
+        {"type": "ai", "id": str(index), "content": str(index).zfill(width)}
+        for index in range(count)
+    ]
+
+    transcript = threads_tool._transcript({"values": {"messages": messages}})
+    returned = transcript["messages"]
+
+    assert [message["id"] for message in returned] == [
+        str(index) for index in range(count - retained, count)
+    ]
+    assert returned[-1]["text"] == messages[-1]["content"]
+    assert transcript["omitted_count"] == count - retained
+    assert transcript["returned_count"] == retained
+    assert transcript["message_count"] == count
+    assert transcript["truncated"] is True
+    assert sum(len(message["text"]) for message in returned) <= 50_000
+    if width == 4_000:
+        assert returned[0]["truncated"] is True
+        assert returned[0]["text"] == messages[count - retained]["content"][-2_000:]
+        assert all(not message["truncated"] for message in returned[1:])
 
 
 def test_admin_thread_actions_require_admin() -> None:

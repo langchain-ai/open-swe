@@ -3,13 +3,10 @@
 Both keep a copy of the thread's metadata for their runs and traces; the index in
 PostgreSQL answers every thread read. A thread starts on the local Agent Server,
 which also runs the graphs Managed Deep Agents does not host.
-
-MDA scopes threads by owner. The backend reads through a second client that also
-says ``x-auth-scheme: langsmith``, as LangSmith Studio does, so it can read the
-threads an MDA channel owns too; every write goes through the owner-scoped one.
 """
 
 import logging
+import time
 from collections.abc import Mapping
 from typing import Final
 
@@ -21,13 +18,14 @@ from langsmith.utils import get_tracer_project
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe import dispatch
-from openswe.remote_runtime.client import (
+from openswe.agent_api.client import (
     MDA_GRAPH_ID,
-    MDA_STUDIO_READ_HEADERS,
     mda_runtime_api_key,
     mda_runtime_url,
     remote_run_context,
 )
+from openswe.source_context import SourceContext
+from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 
 logger = logging.getLogger(__name__)
@@ -45,6 +43,10 @@ _HOOK_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier")
 _object = TypeAdapter(dict[str, JsonValue])
 
 
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
 class _RunError(BaseModel):
     """The exception LangGraph records on a thread whose latest run failed."""
 
@@ -60,21 +62,20 @@ class _ErroredThread(BaseModel):
 
 
 class _SdkThreads:
-    """A runtime reached through the LangGraph SDK: ``client`` writes, ``reads`` reads."""
+    """A runtime reached through the LangGraph SDK."""
 
-    def __init__(self, client: LangGraphClient, reads: LangGraphClient | None = None) -> None:
+    def __init__(self, client: LangGraphClient) -> None:
         self.client = client
-        self.reads = reads or client
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         try:
-            return _object.validate_python(dict(await self.reads.threads.get(thread_id)))
+            return _object.validate_python(dict(await self.client.threads.get(thread_id)))
         except NotFoundError:
             return None
 
     async def indexed(self, thread_id: str) -> IndexedThread | None:
         """The thread as the index keeps it, read without its values."""
-        found = await self.reads.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
+        found = await self.client.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
         return next(
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
@@ -112,39 +113,20 @@ class MdaRuntime:
         self.url = url
         self._mda_threads: set[str] = set()
         self._http: httpx.AsyncClient | None = None
-        self._read_http: httpx.AsyncClient | None = None
-
-    def _client(self, extra: Mapping[str, str]) -> httpx.AsyncClient:
-        headers = dict(extra)
-        if api_key := mda_runtime_api_key():
-            headers["x-api-key"] = api_key
-        return httpx.AsyncClient(
-            base_url=self.url, headers=headers, timeout=httpx.Timeout(30.0, read=None)
-        )
 
     @property
     def http(self) -> httpx.AsyncClient:
-        """For writes: thread changes, runs, cancels, answers to interrupts."""
         if self._http is None:
-            self._http = self._client({})
+            headers = {}
+            if api_key := mda_runtime_api_key():
+                headers["x-api-key"] = api_key
+            self._http = httpx.AsyncClient(
+                base_url=self.url, headers=headers, timeout=httpx.Timeout(30.0, read=None)
+            )
         return self._http
 
-    @property
-    def read_http(self) -> httpx.AsyncClient:
-        """For reads: threads, state, history, runs and their streams, channel threads too."""
-        if self._read_http is None:
-            self._read_http = self._client(MDA_STUDIO_READ_HEADERS)
-        return self._read_http
-
     def sdk(self) -> LangGraphClient:
-        """For writes, scoped to the threads the backend owns."""
         return get_client(url=self.url, api_key=mda_runtime_api_key())
-
-    def read_sdk(self) -> LangGraphClient:
-        """For reads, of any thread on the deployment."""
-        return get_client(
-            url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
-        )
 
     async def ensure_remote_thread(self, thread_id: str) -> None:
         if thread_id in self._mda_threads:
@@ -152,14 +134,52 @@ class MdaRuntime:
         await self.sdk().threads.create(thread_id=thread_id, if_exists="do_nothing")
         self._mda_threads.add(thread_id)
 
+    async def interrupt_if_stopped(self, thread_id: str, run_id: str, *, starting_ms: int) -> None:
+        """Interrupt a run whose thread was stopped while it was starting, at ``starting_ms``.
+
+        Until MDA has the run, which takes as long as working out its catalog, a stop
+        finds nothing to cancel.
+        """
+        thread = await index.get(thread_id)
+        if thread is None or not thread.stopped_since(starting_ms):
+            return
+        extra = {"thread_id": thread_id, "run_id": run_id}
+        logger.info("Interrupting a run its thread was stopped while it started", extra=extra)
+        try:
+            response = await self.http.post(
+                f"/threads/{thread_id}/runs/{run_id}/cancel", params={"action": "interrupt"}
+            )
+        except httpx.HTTPError:
+            logger.warning("Could not interrupt a stopped run", extra=extra, exc_info=True)
+            return
+        if response.is_error:
+            # A stop that came once MDA had the run may have cancelled it already.
+            logger.warning(
+                "Could not interrupt a stopped run",
+                extra={**extra, "status_code": response.status_code},
+            )
+
     async def run_payload(
-        self, thread_id: str, payload: dict[str, JsonValue], *, graph_id: str = MDA_GRAPH_ID
+        self,
+        thread_id: str,
+        payload: dict[str, JsonValue],
+        *,
+        thread_metadata: Mapping[str, JsonValue],
+        graph_id: str = MDA_GRAPH_ID,
     ) -> dict[str, JsonValue]:
         """Rewrite a run-create body for the thread's MDA graph: configurable becomes context."""
         raw_metadata = payload.get("metadata")
-        run_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        run_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
         config = payload.get("config")
         config = dict(config) if isinstance(config, dict) else {}
+        slack_thread = SourceContext.from_metadata(thread_metadata).slack_thread
+        if slack_thread is not None and (permalink := slack_thread.permalink.strip()):
+            run_metadata["slack_thread_url"] = permalink
+            raw_config_metadata = config.get("metadata")
+            config["metadata"] = {
+                **(raw_config_metadata if isinstance(raw_config_metadata, dict) else {}),
+                "slack_thread_url": permalink,
+            }
         raw_configurable = config.pop("configurable", None)
         configurable = dict(raw_configurable) if isinstance(raw_configurable, dict) else {}
         streaming = configurable.pop(_V3_STREAMING_KEY, None)
@@ -177,7 +197,12 @@ class MdaRuntime:
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
-        rewritten = {**payload, "assistant_id": graph_id, "context": context}
+        rewritten = {
+            **payload,
+            "assistant_id": graph_id,
+            "context": context,
+            "metadata": run_metadata,
+        }
         if not payload.get("langsmith_tracer"):
             # Traced into this deployment's project, beside its in-process runs.
             rewritten["langsmith_tracer"] = {"project_name": get_tracer_project()}
@@ -193,12 +218,14 @@ class MdaRuntime:
         command: Mapping[str, JsonValue],
         params: Mapping[str, JsonValue],
         *,
+        thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
         """
+        starting_ms = now_ms()
         config = params.get("config")
         configurable = config.get("configurable") if isinstance(config, dict) else None
         run_config: dict[str, JsonValue] = {
@@ -217,7 +244,8 @@ class MdaRuntime:
             "metadata": params.get("metadata"),
             "stream_mode": list(_V3_RUN_STREAM_MODES),
             "stream_subgraphs": True,
-            "stream_resumable": True,
+            # A client that reads the transcript instead of this stream opts out.
+            "stream_resumable": params.get("stream_resumable") is not False,
             "on_completion": "keep",
             "if_not_exists": "create",
             "multitask_strategy": strategy if isinstance(strategy, str) else "reject",
@@ -226,7 +254,9 @@ class MdaRuntime:
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
         await self.ensure_remote_thread(thread_id)
-        rewritten = await self.run_payload(thread_id, payload, graph_id=graph_id)
+        rewritten = await self.run_payload(
+            thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
+        )
         response = await self.http.post(f"/threads/{thread_id}/runs", json=rewritten)
         if response.is_error:
             logger.warning(
@@ -240,10 +270,12 @@ class MdaRuntime:
                 "message": response.text[:500],
             }
         run = _object.validate_python(response.json())
+        run_id = str(run.get("run_id") or "")
+        await self.interrupt_if_stopped(thread_id, run_id, starting_ms=starting_ms)
         return {
             "type": "success",
             "id": command.get("id", 0),
-            "result": {"run_id": str(run.get("run_id") or "")},
+            "result": {"run_id": run_id},
         }
 
 
@@ -267,8 +299,7 @@ class Runtimes:
 
     @property
     def mda(self) -> _SdkThreads:
-        runtime = self.mda_runtime
-        return _SdkThreads(runtime.sdk(), runtime.read_sdk())
+        return _SdkThreads(self.mda_runtime.sdk())
 
     def runs_on(self, runtime: Runtime) -> _SdkThreads:
         return self.mda if runtime == "mda" else self.local

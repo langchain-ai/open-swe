@@ -9,11 +9,6 @@ This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
 manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
-
-Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
-the backend hands the channel with the run. The channel answers in its own
-conversation, failures included, and starts every run on its threads, so a
-channel run gets no failure reply and starts no follow-up runs.
 """
 
 import hmac
@@ -25,7 +20,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
-from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
+from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
@@ -43,7 +38,7 @@ from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -196,7 +191,13 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 
 
 async def _post_failure_reply(
-    thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
+    thread_id: str,
+    metadata: dict[str, Any],
+    status: str,
+    reason_code: str | None = None,
+    *,
+    invocation_id: str | None = None,
+    terminal_error: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -205,7 +206,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_trace_url(thread_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
@@ -426,6 +427,8 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
     """
     if status == "success":
         outcome: TurnOutcome = "completed"
+    elif status == "interrupted":
+        outcome = "interrupted"
     elif status in _TERMINAL_FAILURE_STATUSES:
         outcome = "failed"
     else:
@@ -498,11 +501,6 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
     )
 
 
-# MDA channels that report a run's failure in their conversation themselves. The
-# GitHub channel doesn't, so its issues still get Open SWE's failure reply.
-_CHANNELS_REPORTING_FAILURES = frozenset({"linear"})
-
-
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Settle a completed run, enqueue cost refreshes, and post failure replies."""
     status = payload.get("status")
@@ -533,20 +531,13 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
-    # The channel starts every run on its threads and answers failures there itself.
-    channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
-    if (
-        status == "success"
-        and channel is None
-        and not (
-            isinstance(payload_metadata, dict)
-            and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
-        )
+    if status == "success" and not (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
     ):
         pickup_allowed = True
         if is_worker:
@@ -561,7 +552,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
-    if channel is None and (status == "success" or status in _TERMINAL_FAILURE_STATUSES):
+    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
         await TaskMessage.deliver_to(thread_id)
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
@@ -602,9 +593,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
 
-    if channel in _CHANNELS_REPORTING_FAILURES:
-        return {"status": "ignored", "reason": "the channel reports the failure"}
-
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.
     event_woken = isinstance(payload_metadata, dict) and payload_metadata.get("kind") in {
@@ -633,7 +621,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "repeated failures"}
 
     reason_code = _failure_reason_code(error, metadata, run_id)
-    posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
+    error_message = error.get("message") if isinstance(error, dict) else error
+    posted = await _post_failure_reply(
+        thread_id,
+        metadata,
+        status,
+        reason_code,
+        invocation_id=_invocation_id(payload),
+        terminal_error=error_message if isinstance(error_message, str) else None,
+    )
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 

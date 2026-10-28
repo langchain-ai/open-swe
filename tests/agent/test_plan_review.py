@@ -15,20 +15,20 @@ async def _seed_plan(thread_id: str, value: dict[str, Any]) -> None:
         session.add(ThreadPlan(thread_id=thread_id, value=value))
 
 
-async def test_save_plan_rejects_html_outside_plans_dir() -> None:
-    from openswe.tools.save_plan import save_plan
+async def test_publish_artifact_rejects_html_outside_plans_dir() -> None:
+    from openswe.tools.publish_artifact import publish_artifact
 
-    result = await save_plan("/workspace/plan.html")
+    result = await publish_artifact("/workspace/plan.html")
     assert result["success"] is False
     assert "/workspace/plans" in result["error"]
 
 
-async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
+async def test_publish_artifact_wraps_a_fragment_with_a_title_from_the_filename(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import importlib
 
-    save_plan_tool = importlib.import_module("openswe.tools.save_plan")
+    publish_artifact_tool = importlib.import_module("openswe.tools.publish_artifact")
 
     saved: dict[str, Any] = {}
 
@@ -50,10 +50,12 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
     monkeypatch.setattr(
         "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
-    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
-    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
+    monkeypatch.setattr(publish_artifact_tool, "get_sandbox_backend", fake_backend)
+    monkeypatch.setattr(publish_artifact_tool, "save_plan_content", fake_save_content)
 
-    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-add-webhook-retries.html")
+    result = await publish_artifact_tool.publish_artifact(
+        artifact_file_path="/workspace/plans/2026-06-29-add-webhook-retries.html"
+    )
 
     assert result["success"] is True
     assert saved["html"].startswith("<!doctype html>")

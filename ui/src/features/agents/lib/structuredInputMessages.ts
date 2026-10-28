@@ -1,5 +1,9 @@
 import { taskEventMetadata } from "./taskEventMetadata"
 import type { TaskEventMetadata } from "./taskEventMetadata"
+import type {
+  PassageReply,
+  PassageSource,
+} from "@/features/agents/utils/passageReply"
 
 export type { TaskEventMetadata } from "./taskEventMetadata"
 
@@ -9,6 +13,7 @@ export type StructuredSenderKind = "person" | "system"
 const SILENT_SENDERS = new Set([
   "system:sender-context",
   "system:dashboard-handoff",
+  "system:slack-note",
 ])
 
 export function isSilentSender(sender: string): boolean {
@@ -32,6 +37,7 @@ export type ParsedStructuredInput =
       senderKind: StructuredSenderKind
       surface?: string
       taskEvent?: TaskEventMetadata
+      replies?: Array<PassageReply>
     }
   | { type: "legacy"; content: string }
 
@@ -178,6 +184,36 @@ function splitContent(
   return { content: unwrapEnvelopeText(body), remainder: "" }
 }
 
+const REPLY_ELEMENT_PATTERN = /(?:^|\n)<reply>\n([\s\S]*?)\n<\/reply>/g
+const PASSAGE_SOURCES = new Set<string>(["conversation", "terminal", "file"])
+
+function isPassageSource(value: string | undefined): value is PassageSource {
+  return value !== undefined && PASSAGE_SOURCES.has(value)
+}
+
+/** The `<reply>` elements a message carries: passages its sender replied to. */
+function replyElements(data: string): Array<PassageReply> {
+  return [...data.matchAll(REPLY_ELEMENT_PATTERN)].flatMap(([, body]) => {
+    const fields = entityFields(body ?? "")
+    const source = fields.get("source")
+    const selection = fields.get("selection")
+    if (!isPassageSource(source) || !selection) return []
+    const file = fields.get("file")
+    const lines = fields.get("lines")
+    return [
+      {
+        source,
+        ...(file ? { file } : {}),
+        ...(lines ? { lines } : {}),
+        before: fields.get("before") ?? "",
+        selection,
+        after: fields.get("after") ?? "",
+        comment: fields.get("comment") ?? "",
+      },
+    ]
+  })
+}
+
 // An entity body is `field: value` lines; a value spanning lines puts nothing
 // after the colon and indents each of its lines by two spaces.
 function entityFields(body: string): Map<string, string> {
@@ -251,9 +287,11 @@ export function parseStructuredInput(
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
       const taskEvent = taskEventMetadata(attributes)
+      const replies = replyElements(split.remainder)
       return {
         type: "message",
         content: decodeXmlText(split.content),
+        ...(replies.length ? { replies } : {}),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,

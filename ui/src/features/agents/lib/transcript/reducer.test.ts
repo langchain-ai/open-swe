@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
+import { fetchToolOutput } from "./api"
 import {
   applyEvent,
   applySnapshot,
@@ -27,8 +28,8 @@ import type {
   TranscriptTurnRow,
 } from "./types"
 
-// The reducer only reaches the network to lazily load a tool's full output,
-// which no test here expands; attachment URLs are built, never fetched.
+// The reducer only reaches the network to lazily load a tool's full output;
+// attachment URLs are built, never fetched.
 vi.mock(import("./api"), async (importOriginal) => ({
   ...(await importOriginal()),
   fetchToolOutput: vi.fn(),
@@ -435,6 +436,36 @@ describe("transcript events", () => {
     expect(inRecord(started)).toBe(true)
   })
 
+  it("shows a steered turn's message once when the run that continues it reopens with it", () => {
+    // After a steer the server records the follow-on run as a new turn that
+    // opens with the steered turn's own message id; the message stays in the
+    // turn that first recorded it, as the server's projection keeps it.
+    const ended = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.completed",
+      payload: { turn_id: "turn-2" },
+    })
+    const reopened = applyEvent(ended, {
+      ...appended(12, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-2",
+        text: "second ask",
+        attachments: [],
+      },
+    })
+    const continued = applyEvent(reopened, {
+      ...appended(13, {}),
+      event_type: "turn.started",
+      payload: { turn_id: "turn-3" },
+    })
+
+    expect(
+      toMessages(continued).filter((message) => message.id === "human-2")
+    ).toHaveLength(1)
+  })
+
   it("stays running while a queued follow-up waits behind the turn that ended", () => {
     const base = fromSnapshot(twoTurnSnapshot())
     const running = applyEvent(base, {
@@ -485,6 +516,30 @@ describe("transcript events", () => {
       payload: { turn_id: "turn-2" },
     })
     expect(ended.status).toBe("idle")
+
+    // A later turn runs: the orphan never will, so it is not shown as queued
+    // behind it.
+    const later = applyEvent(
+      applyEvent(ended, {
+        ...appended(13, {}),
+        occurred_at: "2026-01-01T00:05:00Z",
+        event_type: "turn.requested",
+        payload: {
+          turn_id: "turn-4",
+          message_id: "human-4",
+          text: "a later ask",
+          attachments: [],
+        },
+      }),
+      {
+        ...appended(14, {}),
+        occurred_at: "2026-01-01T00:05:01Z",
+        event_type: "turn.started",
+        payload: { turn_id: "turn-4" },
+      }
+    )
+    expect(later.status).toBe("running")
+    expect(queuedTurns(later)).toEqual([])
   })
 })
 
@@ -766,6 +821,33 @@ describe("tool output", () => {
     )
 
     expect(readChunk(settled)?.loadOutput).toBeTypeOf("function")
+  })
+
+  it("fetches a call's output once while its turn keeps changing", async () => {
+    vi.mocked(fetchToolOutput).mockResolvedValue({ output: "full" })
+    const settled = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { output_preview: "x".repeat(2000) })
+    )
+    const streamed = applyEvent(settled, {
+      version: 12,
+      occurred_at: "2026-01-01T00:02:00Z",
+      event_type: "message.appended",
+      payload: {
+        turn_id: "turn-1",
+        message_id: "ai-1",
+        namespace: [],
+        text: " more",
+        reasoning: null,
+      },
+    })
+
+    expect(toMessages(streamed)).not.toBe(toMessages(settled))
+    const before = readChunk(settled)?.loadOutput
+    const after = readChunk(streamed)?.loadOutput
+    expect(after).toBe(before)
+    expect(await Promise.all([before?.(), after?.()])).toEqual(["full", "full"])
+    expect(fetchToolOutput).toHaveBeenCalledTimes(1)
   })
 })
 

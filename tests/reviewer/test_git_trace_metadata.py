@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -5,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import JsonValue
 
-from openswe.remote_runtime.git_metadata import GitCheckout, GitSnapshot, GitTarget, TurnGitMetadata
+from openswe.agent_api.git_metadata import GitCheckout, GitSnapshot, GitTarget, TurnGitMetadata
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from tests.tools.test_monitor import LocalShell
 
@@ -113,7 +114,7 @@ async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order
 async def test_invalid_optional_evidence_does_not_discard_valid_pr_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = "openswe.remote_runtime.git_metadata"
+    module = "openswe.agent_api.git_metadata"
     monkeypatch.setattr(f"{module}.get_sandbox_backend", AsyncMock())
     monkeypatch.setattr(f"{module}.resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))
     monkeypatch.setattr(
@@ -179,5 +180,15 @@ async def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path
     assert first.repo == second.repo == "org/actual"
     assert first.branch == second.branch == "work"
     assert first.dirty != second.dirty
+
+    broken = tmp_path / "broken"
+    shutil.copytree(repo, broken)
+    (broken / ".git" / "index").write_bytes(b"corrupt")
+    answer = await script.run(backend, {"root": str(tmp_path)})
+    before = GitSnapshot.model_validate(answer)
+    assert list(before.repos) == [str(repo)]
+    assert list(before.skipped) == [str(broken)]
+    recovered = GitSnapshot(repos={str(broken): GitCheckout(repo="org/actual", branch="work")})
+    assert recovered.changes_since(before) == []
     with pytest.raises(SandboxScriptError, match="Could not inspect workspace git state"):
         await script.run(backend, {"root": str(tmp_path / "missing")})

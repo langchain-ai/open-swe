@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import {
   GlobeRegularIcon,
   PlusIcon,
@@ -22,6 +23,7 @@ import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
+import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import type {
@@ -59,9 +61,12 @@ interface RightPanelTabsProps {
   onAddFiles: () => void
   /** Offered only where a thread can have a browser window. */
   onAddBrowser?: () => void
+  /** Offered only where a thread can run commands and monitors in the background. */
+  onAddBackgroundWork?: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
   browserAvailable?: boolean
+  backgroundWorkAvailable?: boolean
   children: ReactNode
 }
 
@@ -88,9 +93,11 @@ type SurfaceLauncherProps = Pick<
   | "onAddDiff"
   | "onAddFiles"
   | "onAddBrowser"
+  | "onAddBackgroundWork"
   | "terminalAvailable"
   | "diffAvailable"
   | "browserAvailable"
+  | "backgroundWorkAvailable"
 >
 
 /** A surface the panel can open, as the add menu and the empty state offer it. */
@@ -98,7 +105,7 @@ interface SurfaceLauncher {
   label: string
   description: string
   icon: typeof TerminalWindowIcon
-  shortcut: string
+  shortcut?: string
   available: boolean
   /** Why it is unavailable, as the add menu's tooltip says it. */
   disabledReason: string
@@ -113,7 +120,6 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       label: "Terminal",
       description: "Start a shell in this workspace.",
       icon: TerminalWindowIcon,
-      shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: "Terminals are only available from a running workspace.",
       unavailableHint: "Available once the workspace is running.",
@@ -123,7 +129,6 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       label: "Changes",
       description: "Review changes in this thread.",
       icon: GitDiffIcon,
-      shortcut: "D",
       available: props.diffAvailable,
       disabledReason:
         "Changes are only available for threads with a repository.",
@@ -156,6 +161,20 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
           },
         ]
       : []),
+    ...(props.onAddBackgroundWork
+      ? [
+          {
+            label: "Background work",
+            description: "Commands and monitors running for this thread.",
+            icon: PulseIcon,
+            available: props.backgroundWorkAvailable ?? false,
+            disabledReason:
+              "Nothing is running in the background for this thread.",
+            unavailableHint: "Available while a command or monitor runs.",
+            onClick: props.onAddBackgroundWork,
+          },
+        ]
+      : []),
   ]
 }
 
@@ -165,7 +184,7 @@ type SurfaceShortcutEvent = Pick<
 >
 
 export function surfaceShortcutActionForKey<
-  const TAction extends { available: boolean; shortcut: string },
+  const TAction extends { available: boolean; shortcut?: string },
 >(
   actions: ReadonlyArray<TAction>,
   event: SurfaceShortcutEvent
@@ -176,7 +195,7 @@ export function surfaceShortcutActionForKey<
     actions.find(
       (action) =>
         action.available &&
-        action.shortcut.toLowerCase() === event.key.toLowerCase()
+        action.shortcut?.toLowerCase() === event.key.toLowerCase()
     ) ?? null
   )
 }
@@ -184,7 +203,7 @@ export function surfaceShortcutActionForKey<
 function SurfaceMenuItem(props: {
   available: boolean
   disabledReason?: string
-  shortcut: string
+  shortcut?: string
   onSelect: () => void
   children: ReactNode
 }) {
@@ -202,7 +221,7 @@ function SurfaceMenuItem(props: {
         size="sm"
       >
         {props.children}
-        <Kbd className="ml-auto">{props.shortcut}</Kbd>
+        {props.shortcut && <Kbd className="ml-auto">{props.shortcut}</Kbd>}
       </DropdownMenuItem>
     </Tooltip>
   )
@@ -345,7 +364,11 @@ function RightPanelEmptyState({
         <div className="grid grid-cols-2 gap-space-2">
           {actions.map((action) =>
             action.available ? (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={action.label}
                 key={action.label}
                 type="button"
                 onClick={action.onClick}
@@ -358,12 +381,17 @@ function RightPanelEmptyState({
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
+                  "h-auto justify-start whitespace-normal",
+                  "relative w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                {action.shortcut && (
+                  <Kbd className="absolute top-3 right-3">
+                    {action.shortcut}
+                  </Kbd>
+                )}
                 <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
@@ -371,7 +399,7 @@ function RightPanelEmptyState({
                 <span className="mt-space-1 text-xs leading-relaxed text-secondary">
                   {action.description}
                 </span>
-              </button>
+              </Button>
             ) : (
               <div
                 key={action.label}
@@ -380,7 +408,11 @@ function RightPanelEmptyState({
                   cardShellClass
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                {action.shortcut && (
+                  <Kbd className="absolute top-3 right-3">
+                    {action.shortcut}
+                  </Kbd>
+                )}
                 <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
@@ -416,6 +448,8 @@ export function surfaceTitle(
       return "Agents"
     case "preview":
       return "Browser"
+    case "background":
+      return "Background work"
   }
 }
 
@@ -426,6 +460,7 @@ const SURFACE_ICONS = {
   file: FileIcon,
   terminal: TerminalWindowIcon,
   agents: RobotIcon,
+  background: PulseIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
@@ -520,9 +555,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           : "text-secondary hover:bg-surface-level-1-hover hover:text-primary"
                       )}
                     >
-                      <button
+                      <Button
+                        color="secondary"
+                        variant="plain"
+                        size="sm"
                         type="button"
-                        className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-surface-level-2"
+                        className="group/close relative size-4 shrink-0 cursor-pointer justify-center p-0 text-inherit hover:bg-surface-level-2"
                         aria-label={`Close ${title}`}
                         onClick={() => props.onCloseSurface(surface)}
                       >
@@ -539,17 +577,21 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           className="hidden size-3 group-hover/tab:block group-focus-visible/close:block"
                           weight="bold"
                         />
-                      </button>
+                      </Button>
                       <Tooltip title={title}>
-                        <button
+                        <Button
+                          color="secondary"
+                          variant="plain"
+                          size="sm"
+                          aria-label={title}
                           type="button"
                           role="tab"
                           aria-selected={active}
-                          className="flex min-w-0 cursor-pointer items-center"
+                          className="h-auto min-w-0 shrink cursor-pointer px-0 text-inherit hover:bg-transparent dark:hover:bg-transparent"
                           onClick={() => props.onActivate(surface)}
                         >
                           <span className="truncate">{title}</span>
-                        </button>
+                        </Button>
                       </Tooltip>
                     </div>
                   </ContextMenuTrigger>

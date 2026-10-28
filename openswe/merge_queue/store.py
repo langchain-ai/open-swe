@@ -1,25 +1,28 @@
 """Transactional queue storage; callers supply an already authorized workspace.
 
-Every operation rechecks the repository binding. The binding and queue row are
-locked in that order, serializing ordering, budgets and lease changes. No GitHub
-calls, admission decisions or job registration live here.
+Every operation rechecks the repository binding. Mutations lock the binding and
+queue row in that order; status reads use a consistent, non-locking snapshot.
+No GitHub calls, admission decisions or job registration live here.
 """
 
+import base64
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from pydantic import JsonValue
-from sqlalchemy import BigInteger, ForeignKey, delete, func, select
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
+from sqlalchemy import BigInteger, ForeignKey, Text, delete, func, or_, select, true, tuple_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
+from openswe.github.queue import NativeCandidate, NativeEntry, NativeQueueSnapshot
 from openswe.github.repositories import Repository
 from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy
 from openswe.merge_queue.git import Candidate
@@ -42,10 +45,34 @@ class LeaseLost(ValueError):
     """This controller no longer owns the queue."""
 
 
+class QueueItemNotFound(ValueError):
+    """The requested item does not exist in this queue."""
+
+
 @dataclass(frozen=True)
 class QueueEntry:
     request: MergeRequest
     number: int
+
+
+class QueueCursor(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    queue_id: UUID
+    priority: int = Field(strict=True, ge=-(2**31), lt=2**31)
+    created_at: AwareDatetime
+    id: UUID
+
+    def encode(self) -> str:
+        return base64.urlsafe_b64encode(self.model_dump_json().encode()).decode().rstrip("=")
+
+    @classmethod
+    def decode(cls, value: str, queue_id: UUID) -> Self:
+        payload = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+        cursor = cls.model_validate_json(payload)
+        if cursor.queue_id != queue_id:
+            raise ValueError("Cursor belongs to another queue")
+        return cursor
 
 
 @dataclass(frozen=True)
@@ -66,12 +93,45 @@ class ValidationWork:
     dispatch: bool = False
 
 
+class NativeSelection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    entries: tuple[NativeEntry, ...]
+
+    def candidate(self, snapshot: NativeQueueSnapshot) -> NativeCandidate | None:
+        current = (
+            {entry.id: entry for entry in snapshot.queue.entries.nodes} if snapshot.queue else {}
+        )
+        survivors = [entry for entry in self.entries if entry.id in current]
+        if not survivors:
+            return None
+        expected = [(entry.pull.number, entry.pull.head_sha) for entry in survivors]
+        for candidate in snapshot.candidates.values():
+            if [(pull.number, pull.head_sha) for pull in candidate.members] == expected and all(
+                not pull.draft and pull.review_decision == "APPROVED" for pull in candidate.members
+            ):
+                return candidate
+        return None
+
+
+@dataclass(frozen=True)
+class NativeWork:
+    batch: Batch
+    attempt: Attempt
+    request: ValidationRequest
+    run_id: int | None
+    dispatch: bool = False
+
+
 class MergeQueue(Record):
     __tablename__ = "merge_queue"
 
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id, ondelete="CASCADE"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey(Repository.id))
     target_branch: Mapped[str]
+    mode: Mapped[Literal["custom", "native"]] = mapped_column(Text, default="custom")
+    native_snapshot: Mapped[dict[str, JsonValue] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
     paused: Mapped[bool] = mapped_column(default=True)
     fence: Mapped[int] = mapped_column(BigInteger, default=0)
     lease_owner: Mapped[UUID | None] = mapped_column(default=None)
@@ -154,6 +214,8 @@ class MergeQueue(Record):
             )
             if queue is None:
                 raise ValueError("Queue not found")
+            if queue.mode != self.mode:
+                raise LeaseLost("Queue mode changed")
             now = (await session.execute(select(func.clock_timestamp()))).scalar_one()
             if lease is not None and (
                 queue.lease_owner != lease.owner
@@ -163,6 +225,285 @@ class MergeQueue(Record):
             ):
                 raise LeaseLost("Queue lease expired or was replaced")
             yield session, queue, now
+
+    async def enable_native_observation(self) -> None:
+        async with self._locked() as (session, queue, now):
+            if queue.mode == "native":
+                return
+            if not queue.paused or (queue.lease_until is not None and queue.lease_until > now):
+                raise ValueError("Pause and drain the custom queue before enabling native mode")
+            requests = await session.scalar(
+                select(MergeRequest.id)
+                .where(MergeRequest.queue_id == self.id, MergeRequest.finished_at.is_(None))
+                .limit(1)
+            )
+            batches = await session.scalar(
+                select(Batch.id)
+                .where(
+                    Batch.queue_id == self.id,
+                    or_(
+                        Batch.state == "active",
+                        (Batch.candidate.is_not(None) & Batch.ref_deleted_at.is_(None)),
+                        select(Attempt.id)
+                        .where(Attempt.batch_id == Batch.id, Attempt.state == "running")
+                        .exists(),
+                    ),
+                )
+                .limit(1)
+            )
+            if requests is not None or batches is not None:
+                raise ValueError("Drain custom requests, attempts, and retained refs first")
+            queue.mode = "native"
+            queue.fence += 1
+            queue.lease_owner = queue.lease_until = None
+            queue.updated_by = None
+        self.mode = "native"
+
+    async def record_native_snapshot(self, snapshot: NativeQueueSnapshot, lease: Lease) -> None:
+        async with self._locked(lease) as (_, queue, now):
+            if queue.mode != "native" or snapshot.branch != queue.target_branch:
+                raise ValueError("Queue is not observing this native target")
+            queue.native_snapshot = snapshot.model_copy(update={"observed_at": now}).model_dump(
+                mode="json"
+            )
+            queue.updated_by = None
+
+    async def prepare_native_validation(
+        self,
+        snapshot: NativeQueueSnapshot,
+        timeout_seconds: int,
+        lease: Lease,
+        *,
+        policy: QueuePolicy,
+        trust: str,
+    ) -> NativeWork | None:
+        async with self._locked(lease) as (session, queue, now):
+            if queue.mode != "native" or snapshot.branch != queue.target_branch:
+                raise ValueError("Queue is not validating this native target")
+            batch = await session.scalar(
+                select(Batch).where(Batch.queue_id == queue.id, Batch.state == "active")
+            )
+            saved_policy: dict[str, JsonValue] = {
+                "policy": policy.model_dump(mode="json"),
+                "trust": trust,
+                "timeout_seconds": timeout_seconds,
+            }
+            if batch is not None:
+                selection = NativeSelection.model_validate(batch.candidate)
+                current_ids = (
+                    {entry.id for entry in snapshot.queue.entries.nodes}
+                    if snapshot.queue
+                    else set()
+                )
+                if (
+                    batch.policy != saved_policy
+                    or batch.base_sha != snapshot.main_sha
+                    or not any(entry.id in current_ids for entry in selection.entries)
+                ):
+                    await self._invalidate(session, batch, now, None)
+                    return None
+                if batch.deadline <= now:
+                    return None
+            else:
+                if queue.paused or snapshot.queue is None:
+                    return None
+                entries = tuple(
+                    sorted(snapshot.queue.entries.nodes, key=lambda entry: entry.position)
+                )
+                if not entries:
+                    return None
+                selected = entries[: policy.max_batch_size]
+                oldest = min(entry.enqueued_at for entry in selected)
+                if len(selected) < policy.max_batch_size and now < oldest + timedelta(
+                    seconds=policy.collection_seconds
+                ):
+                    return None
+                selection = NativeSelection(entries=selected)
+                if selection.candidate(snapshot) is None:
+                    return None
+                deadline = now + timedelta(
+                    seconds=min(timeout_seconds - 30, policy.deadline_seconds)
+                )
+                if deadline <= now:
+                    return None
+                batch = Batch(
+                    queue_id=queue.id,
+                    request_key=f"native:{uuid7()}",
+                    base_sha=snapshot.main_sha,
+                    policy=saved_policy,
+                    candidate=selection.model_dump(mode="json"),
+                    deadline=deadline,
+                    max_attempts=policy.max_attempts,
+                    max_plans=policy.max_plans,
+                )
+                session.add(batch)
+                await session.flush()
+            if queue.paused:
+                return None
+            candidate = selection.candidate(snapshot)
+            if candidate is None:
+                return None
+            attempts = list(
+                await session.scalars(
+                    select(Attempt).where(Attempt.batch_id == batch.id).order_by(Attempt.number)
+                )
+            )
+            for attempt in attempts:
+                references = {
+                    row.key: row.reference
+                    for row in await session.scalars(
+                        select(Evidence).where(Evidence.attempt_id == attempt.id)
+                    )
+                }
+                request = ValidationRequest.model_validate(references["native-request"])
+                if request.candidate_sha != candidate.head_sha:
+                    if attempt.state == "running":
+                        attempt.state, attempt.finished_at = "cancelled", now
+                    continue
+                if attempt.deadline <= now:
+                    if attempt.state == "running":
+                        attempt.state, attempt.finished_at = "timed_out", now
+                    return None
+                if attempt.state not in {"running", "succeeded"}:
+                    return None
+                run_id = references.get("validation-run", {}).get("run_id")
+                if run_id is not None and type(run_id) is not int:
+                    raise ValueError("Invalid saved validation run")
+                return NativeWork(batch, attempt, request, run_id)
+            if len(attempts) >= batch.max_attempts:
+                return None
+            validation = policy.validation
+            assert validation is not None
+            attempt = Attempt(
+                batch_id=batch.id,
+                request_key=candidate.head_sha,
+                number=len(attempts) + 1,
+                deadline=min(batch.deadline, now + timedelta(seconds=validation.deadline_seconds)),
+            )
+            session.add(attempt)
+            await session.flush()
+            request = ValidationRequest(
+                repository=snapshot.repository,
+                batch_id=batch.id,
+                attempt_id=attempt.id,
+                candidate_sha=candidate.head_sha,
+                workflow_sha=batch.base_sha,
+                dispatch_actor_id=validation.dispatch_actor_id,
+            )
+            await self._save_evidence(
+                session, attempt, "native-request", request.model_dump(mode="json")
+            )
+            return NativeWork(batch, attempt, request, None, dispatch=True)
+
+    async def finish_native_validation(
+        self, work: NativeWork, evidence: dict[str, JsonValue], lease: Lease, *, succeeded: bool
+    ) -> None:
+        async with self._locked(lease) as (session, _, now):
+            attempt = await self._attempt(session, work.attempt.id)
+            batch = await self._batch(session, attempt.batch_id)
+            if batch.state != "active" or attempt.state != "running":
+                return
+            if min(attempt.deadline, batch.deadline) <= now:
+                attempt.state, attempt.finished_at = "timed_out", now
+                return
+            if succeeded:
+                run = await session.scalar(
+                    select(Evidence).where(
+                        Evidence.attempt_id == attempt.id, Evidence.key == "validation-run"
+                    )
+                )
+                if (
+                    run is None
+                    or evidence.get("run_id") != run.reference["run_id"]
+                    or evidence.get("run_attempt") != 1
+                    or evidence.get("tested_sha") != work.request.candidate_sha
+                    or any(
+                        evidence.get(key) != value
+                        for key, value in work.request.model_dump(mode="json").items()
+                    )
+                ):
+                    raise ValueError("Validation evidence does not match its saved request and run")
+            await self._save_evidence(session, attempt, "validation-result", evidence)
+            attempt.state, attempt.finished_at = "succeeded" if succeeded else "failed", now
+
+    async def native_validation_work(self, lease: Lease) -> NativeWork | None:
+        async with self._locked(lease) as (session, _, _):
+            batch = await session.scalar(
+                select(Batch).where(Batch.queue_id == self.id, Batch.state == "active")
+            )
+            if batch is None:
+                return None
+            attempt = await session.scalar(
+                select(Attempt)
+                .where(Attempt.batch_id == batch.id)
+                .order_by(Attempt.number.desc())
+                .limit(1)
+            )
+            if attempt is None:
+                return None
+            references = {
+                row.key: row.reference
+                for row in await session.scalars(
+                    select(Evidence).where(Evidence.attempt_id == attempt.id)
+                )
+            }
+            request = ValidationRequest.model_validate(references["native-request"])
+            run_id = references.get("validation-run", {}).get("run_id")
+            if run_id is not None and type(run_id) is not int:
+                raise ValueError("Invalid saved validation run")
+            return NativeWork(batch, attempt, request, run_id)
+
+    async def record_native_landing(self, work: NativeWork, lease: Lease) -> None:
+        async with self._locked(lease) as (session, _, now):
+            batch = await self._batch(session, work.batch.id)
+            attempt = await self._attempt(session, work.attempt.id)
+            if batch.state == "active" and attempt.state == "succeeded":
+                batch.state, batch.finished_at = "landed", now
+
+    async def authorize_native_result(
+        self, work: NativeWork, snapshot: NativeQueueSnapshot, lease: Lease
+    ) -> bool:
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, work.batch.id)
+            attempt = await self._attempt(session, work.attempt.id)
+            candidate = NativeSelection.model_validate(batch.candidate).candidate(snapshot)
+            if (
+                queue.paused
+                or batch.state != "active"
+                or attempt.state != "succeeded"
+                or min(batch.deadline, attempt.deadline) <= now
+                or batch.base_sha != snapshot.main_sha
+                or candidate is None
+                or candidate.head_sha != work.request.candidate_sha
+            ):
+                return False
+            await self._save_evidence(
+                session, attempt, "gate-intent", work.request.model_dump(mode="json")
+            )
+            return True
+
+    @asynccontextmanager
+    async def _read_snapshot(self) -> AsyncIterator[tuple[AsyncSession, Self]]:
+        async with (
+            postgres.snapshot_transaction() as conn,
+            AsyncSession(bind=conn, expire_on_commit=False) as session,
+        ):
+            queue = await session.scalar(
+                select(type(self))
+                .join(
+                    WorkspaceRepositoryRow,
+                    (WorkspaceRepositoryRow.workspace_id == type(self).workspace_id)
+                    & (WorkspaceRepositoryRow.repository_id == type(self).repository_id),
+                )
+                .where(
+                    type(self).id == self.id,
+                    type(self).workspace_id == self.workspace_id,
+                    type(self).repository_id == self.repository_id,
+                )
+            )
+            if queue is None:
+                raise QueueItemNotFound("Queue not found or repository binding changed")
+            yield session, queue
 
     async def claim(self, owner: UUID, ttl: timedelta) -> Lease | None:
         if ttl <= timedelta(0):
@@ -278,7 +619,7 @@ class MergeQueue(Record):
             )
         )
         if request is None:
-            raise ValueError("Merge request not found")
+            raise QueueItemNotFound("Merge request not found")
         return request
 
     async def refresh_head(self, request_id: UUID, head_sha: str, lease: Lease) -> None:
@@ -319,9 +660,17 @@ class MergeQueue(Record):
                 raise ValueError("Only unbatched requests can be reordered")
             request.priority, request.updated_by = priority, actor
 
-    async def withdraw(self, request_id: UUID, *, actor: UUID | None = None) -> None:
+    async def set_paused(self, paused: bool, *, actor: UUID) -> None:
+        async with self._locked() as (_, queue, _):
+            queue.paused, queue.updated_by = paused, actor
+
+    async def withdraw(
+        self, request_id: UUID, *, actor: UUID | None = None, operator: bool = False
+    ) -> None:
         async with self._locked() as (session, _, now):
             request = await self._request(session, request_id)
+            if actor is not None and request.created_by != actor and not operator:
+                raise PermissionError("Only the requester or a queue operator may withdraw")
             if request.state == "withdrawn":
                 return
             if request.state == "merged":
@@ -432,7 +781,7 @@ class MergeQueue(Record):
             select(Batch).where(Batch.id == batch_id, Batch.queue_id == self.id)
         )
         if batch is None:
-            raise ValueError("Batch not found")
+            raise QueueItemNotFound("Batch not found")
         return batch
 
     async def _active_batch(self, session: AsyncSession) -> Batch:
@@ -745,7 +1094,7 @@ class MergeQueue(Record):
             return decision
 
     async def history(self, batch_id: UUID) -> BatchHistory:
-        async with self._locked() as (session, _, _):
+        async with self._read_snapshot() as (session, _):
             batch = await self._batch(session, batch_id)
             return BatchHistory(
                 batch=batch,
@@ -792,7 +1141,9 @@ class MergeQueue(Record):
                     .where(
                         Batch.queue_id == self.id,
                         Batch.finished_at < before,
-                        (Batch.candidate.is_(None) | Batch.ref_deleted_at.is_not(None)),
+                        true()
+                        if self.mode == "native"
+                        else or_(Batch.candidate.is_(None), Batch.ref_deleted_at.is_not(None)),
                         ~select(Attempt.id)
                         .where(Attempt.batch_id == Batch.id, Attempt.state == "running")
                         .exists(),
@@ -825,13 +1176,38 @@ class MergeQueue(Record):
             )
             return len(batches) + len(requests)
 
-    async def _entries(self, session: AsyncSession) -> list[QueueEntry]:
-        rows = await session.execute(
+    async def snapshot(
+        self, *, limit: int, cursor: QueueCursor | None = None
+    ) -> tuple[bool, list[QueueEntry], UUID | None]:
+        async with self._read_snapshot() as (session, queue):
+            entries = await self._entries(session, limit=limit, cursor=cursor)
+            batch_id = await session.scalar(
+                select(Batch.id).where(Batch.queue_id == queue.id, Batch.state == "active")
+            )
+            return queue.paused, entries, batch_id
+
+    async def _entries(
+        self, session: AsyncSession, *, limit: int | None = None, cursor: QueueCursor | None = None
+    ) -> list[QueueEntry]:
+        query = (
             select(MergeRequest, PullRequest.number)
             .join(PullRequest)
             .where(MergeRequest.queue_id == self.id, MergeRequest.finished_at.is_(None))
             .order_by(MergeRequest.priority.desc(), MergeRequest.created_at, MergeRequest.id)
+            .limit(limit)
         )
+        if cursor is not None:
+            query = query.where(
+                (MergeRequest.priority < cursor.priority)
+                | (
+                    (MergeRequest.priority == cursor.priority)
+                    & (
+                        tuple_(MergeRequest.created_at, MergeRequest.id)
+                        > (cursor.created_at, cursor.id)
+                    )
+                )
+            )
+        rows = await session.execute(query)
         return [QueueEntry(request, number) for request, number in rows.tuples()]
 
     async def entries(self, lease: Lease) -> list[QueueEntry]:

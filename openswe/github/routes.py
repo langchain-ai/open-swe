@@ -2,10 +2,10 @@
 
 from fastapi import APIRouter, Response
 
-from openswe.github import forwarding
 from openswe.github import webhook as service
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
+from openswe.merge_queue.controller import wake_native_queue
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.ui_invalidations import Topic
@@ -14,18 +14,6 @@ from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
-
-
-def _start_issue_run(
-    request: common.Request, body: bytes, background_tasks: common.BackgroundTasks
-) -> None:
-    """Hand an issue mention to MDA's GitHub channel, which owns the issue's conversation.
-
-    The channel asks ``/github/channel/events`` what to start.
-    """
-    background_tasks.add_task(
-        forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
-    )
 
 
 async def _launch_automations(
@@ -76,7 +64,7 @@ async def github_webhook(
         },
     )
 
-    if event_type not in common.SUPPORTED_GH_EVENTS:
+    if event_type not in common.SUPPORTED_GH_EVENTS and event_type != "merge_group":
         common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
@@ -114,6 +102,20 @@ async def github_webhook(
                 extra={"repository": repository},
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
+    if event_type == "merge_group":
+        queued = await wake_native_queue(payload)
+        return {"status": "accepted" if queued else "ignored"}
+
+    if event_type in {"push", "pull_request", "pull_request_review"}:
+        try:
+            await wake_native_queue(payload)
+        except Exception:
+            # The minute job recovers missed wakeups without blocking other handlers.
+            common.logger.exception(
+                "Failed to wake native merge queue",
+                extra={"github_delivery": delivery_id, "github_event": event_type},
+            )
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
@@ -225,7 +227,7 @@ async def github_webhook(
             return gate_rejection
 
         common.logger.info("Accepted GitHub issue webhook, scheduling background task")
-        _start_issue_run(request, body, background_tasks)
+        background_tasks.add_task(service.process_github_issue, payload, event_type)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     action = payload.get("action", "")
@@ -297,7 +299,7 @@ async def github_webhook(
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 
     if is_issue_comment:
-        _start_issue_run(request, body, background_tasks)
+        background_tasks.add_task(service.process_github_issue, payload, event_type)
         return {"status": "accepted", "message": "Processing GitHub issue comment event"}
 
     common.logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)

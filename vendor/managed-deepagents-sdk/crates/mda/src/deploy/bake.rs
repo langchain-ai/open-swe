@@ -18,11 +18,12 @@ use crate::langsmith::{
 use super::helpers::{
     bake_snapshot_list_prefix, intermediate_snapshot_name, is_deployment_intermediate_snapshot,
     is_deployment_recipe_snapshot, recipe_digest, recipe_snapshot_name, recipe_snapshot_reference,
-    sandbox_registry_name, HOST_SANDBOX_NAME_LIMIT, SANDBOX_NAME_SEPARATOR,
+    sandbox_deployment_component, sandbox_registry_name, HOST_SANDBOX_NAME_LIMIT,
+    SANDBOX_NAME_SEPARATOR,
 };
 
-/// 1 GiB filesystem capacity when building a snapshot from a Docker image.
-const DOCKER_FS_CAPACITY_BYTES: u64 = 1 << 30;
+/// Default filesystem capacity when building a snapshot from a Docker image.
+const DEFAULT_DOCKER_FS_CAPACITY_BYTES: u64 = 1 << 30;
 
 /// Bound for create-from-docker-image readiness.
 const DOCKER_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -49,6 +50,15 @@ pub struct RecipeSpec {
     pub docker_image: Option<String>,
     /// Secret-safe private registry declaration.
     pub registry: Option<SandboxRegistryManifest>,
+    /// Filesystem capacity for a snapshot built from `docker_image`.
+    pub fs_capacity_bytes: Option<u64>,
+}
+
+impl RecipeSpec {
+    fn docker_fs_capacity_bytes(&self) -> u64 {
+        self.fs_capacity_bytes
+            .unwrap_or(DEFAULT_DOCKER_FS_CAPACITY_BYTES)
+    }
 }
 
 /// Coarse stages of a bake, reported so a multi-minute cold bake shows which
@@ -125,6 +135,7 @@ pub fn bake_recipe(
         spec.snapshot_id.as_deref(),
         spec.docker_image.as_deref(),
         registry_digest.as_deref(),
+        spec.fs_capacity_bytes,
     );
     let recipe_name = recipe_snapshot_name(deployment, &digest);
 
@@ -150,7 +161,7 @@ pub fn bake_recipe(
         let snapshot = client.create_snapshot_from_docker_image(
             &recipe_name,
             image,
-            DOCKER_FS_CAPACITY_BYTES,
+            spec.docker_fs_capacity_bytes(),
             DOCKER_SNAPSHOT_TIMEOUT,
             registry_id.as_deref(),
         )?;
@@ -287,7 +298,7 @@ fn resolve_builder_base(
         let snapshot = client.create_snapshot_from_docker_image(
             &base_name,
             image,
-            DOCKER_FS_CAPACITY_BYTES,
+            spec.docker_fs_capacity_bytes(),
             DOCKER_SNAPSHOT_TIMEOUT,
             registry_id,
         )?;
@@ -343,9 +354,9 @@ fn truncate_for_error(text: &str) -> String {
 
 fn builder_sandbox_name(deployment: &str, digest: &str) -> String {
     let suffix = format!("{SANDBOX_NAME_SEPARATOR}bake-{digest}");
-    let prefix_length = HOST_SANDBOX_NAME_LIMIT.saturating_sub(suffix.len());
-    let prefix: String = deployment.chars().take(prefix_length).collect();
-    format!("{prefix}{suffix}")
+    let component =
+        sandbox_deployment_component(deployment, HOST_SANDBOX_NAME_LIMIT - suffix.len());
+    format!("{component}{suffix}")
 }
 
 fn delete_snapshot_by_name(client: &Client, name: &str) -> Result<()> {
@@ -439,7 +450,6 @@ pub fn delete_stale_recipe_snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::Credential;
     use serde_json::json;
     use std::cell::RefCell;
     use std::io::{Read, Write};
@@ -483,19 +493,10 @@ mod tests {
         String::from_utf8_lossy(&data).to_string()
     }
 
-    fn client_for(platform: String) -> Client {
-        Client::with_credential_and_platform(
-            "http://unused.invalid",
-            Some(platform.as_str()),
-            Credential::ApiKey("key".into()),
-            Some("tenant".into()),
-        )
-        .unwrap()
-    }
-
     #[test]
     fn bake_skips_when_recipe_already_ready() {
-        let recipe = recipe_snapshot_name("agent", &recipe_digest(b"", None, None, None, None));
+        let recipe =
+            recipe_snapshot_name("agent", &recipe_digest(b"", None, None, None, None, None));
         let list = json!({
             "snapshots": [
                 { "id": "1", "name": recipe, "status": "ready" }
@@ -504,7 +505,7 @@ mod tests {
         .to_string();
         let (url, _rx) = serve(vec![(200, list)]);
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec::default(),
             &BTreeMap::new(),
@@ -520,7 +521,7 @@ mod tests {
     fn bake_skip_keeps_the_tag_of_a_docker_built_recipe() {
         // Every run after the first cold bake takes the skip path, so it has to
         // re-derive the tag or the recipe pointer breaks again.
-        let digest = recipe_digest(b"", None, None, Some("acme/base:0.1.1"), None);
+        let digest = recipe_digest(b"", None, None, Some("acme/base:0.1.1"), None, None);
         let recipe = recipe_snapshot_name("agent", &digest);
         let list = json!({
             "snapshots": [
@@ -530,7 +531,7 @@ mod tests {
         .to_string();
         let (url, _rx) = serve(vec![(200, list)]);
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("acme/base:0.1.1".into()),
@@ -546,7 +547,7 @@ mod tests {
 
     #[test]
     fn empty_docker_image_creates_recipe_directly() {
-        let digest = recipe_digest(b"", None, None, Some("python:3.12-slim"), None);
+        let digest = recipe_digest(b"", None, None, Some("python:3.12-slim"), None, None);
         let recipe = recipe_snapshot_name("agent", &digest);
         let building = json!({
             "id": "snap-1",
@@ -567,7 +568,7 @@ mod tests {
         let (url, rx) = serve(vec![(200, empty_list), (200, building), (200, ready)]);
         let phases = RefCell::new(Vec::new());
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("python:3.12-slim".into()),
@@ -591,6 +592,7 @@ mod tests {
         let create = rx.recv().unwrap();
         assert!(create.contains("POST /v2/sandboxes/snapshots"));
         assert!(create.contains("python:3.12-slim"));
+        assert!(create.contains(r#""fs_capacity_bytes":1073741824"#));
     }
 
     #[test]
@@ -607,6 +609,7 @@ mod tests {
             None,
             Some("ghcr.io/acme/base:1"),
             Some(&registry_digest),
+            None,
         );
         let recipe = recipe_snapshot_name("agent", &digest);
         let registry = json!({
@@ -641,7 +644,7 @@ mod tests {
         let password = format!("{}-{}", "fixture", "credential");
         let env_vars = BTreeMap::from([("GHCR_TOKEN".into(), password.clone())]);
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("ghcr.io/acme/base:1".into()),
@@ -671,7 +674,7 @@ mod tests {
         let empty_list = json!({ "snapshots": [] }).to_string();
         let (url, _rx) = serve(vec![(200, empty_list)]);
         let error = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("ghcr.io/acme/base:1".into()),
@@ -707,15 +710,16 @@ mod tests {
             "status": "ready"
         })
         .to_string();
-        let (url, _rx) = serve(vec![(200, building), (200, ready)]);
+        let (url, rx) = serve(vec![(200, building), (200, ready)]);
         let mut intermediate = None;
         let (name, id) = resolve_builder_base(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             "abc",
             &RecipeSpec {
                 docker_image: Some("python:3.12-slim".into()),
                 setup_script: "pip install requests".into(),
+                fs_capacity_bytes: Some(2 << 30),
                 ..RecipeSpec::default()
             },
             None,
@@ -725,6 +729,10 @@ mod tests {
         .unwrap();
         assert_eq!(name, None);
         assert_eq!(id.as_deref(), Some("snap-base"));
+        assert!(rx
+            .recv()
+            .unwrap()
+            .contains(r#""fs_capacity_bytes":2147483648"#));
         // The name is still kept so the intermediate base gets cleaned up.
         assert_eq!(
             intermediate.as_deref(),
@@ -751,6 +759,17 @@ mod tests {
     }
 
     #[test]
+    fn builder_sandbox_name_distinguishes_long_names_with_a_shared_prefix() {
+        let digest = "27f7518029b14543";
+        let first = builder_sandbox_name("mda-integ-sandbox-recipe-ts-pr-971-ecc3e2", digest);
+        let second = builder_sandbox_name("mda-integ-sandbox-recipe-ts-pr-971-ecc3e2-del", digest);
+
+        assert_ne!(first, second);
+        assert!(first.len() <= HOST_SANDBOX_NAME_LIMIT);
+        assert!(second.len() <= HOST_SANDBOX_NAME_LIMIT);
+    }
+
+    #[test]
     fn stale_recipe_cleanup_preserves_only_the_active_recipe() {
         let snapshots = json!({
             "snapshots": [
@@ -762,9 +781,12 @@ mod tests {
         .to_string();
         let (url, rx) = serve(vec![(200, snapshots), (204, String::new())]);
 
-        let cleanup =
-            delete_stale_recipe_snapshots(&client_for(url), "agent", Some("agent--setup-active"))
-                .unwrap();
+        let cleanup = delete_stale_recipe_snapshots(
+            &Client::for_test(&url),
+            "agent",
+            Some("agent--setup-active"),
+        )
+        .unwrap();
         assert!(cleanup.in_use.is_empty());
 
         let _ = rx.recv().unwrap();
@@ -787,7 +809,8 @@ mod tests {
             (500, r#"{"detail":"delete failed"}"#.to_string()),
         ]);
 
-        let err = delete_stale_recipe_snapshots(&client_for(url), "agent", None).unwrap_err();
+        let err =
+            delete_stale_recipe_snapshots(&Client::for_test(&url), "agent", None).unwrap_err();
         let _ = rx.recv().unwrap();
         let _ = rx.recv().unwrap();
 
@@ -811,7 +834,8 @@ mod tests {
         .to_string();
         let (url, rx) = serve(vec![(200, snapshots), (409, conflict)]);
 
-        let cleanup = delete_stale_recipe_snapshots(&client_for(url), "agent", None).unwrap();
+        let cleanup =
+            delete_stale_recipe_snapshots(&Client::for_test(&url), "agent", None).unwrap();
         let _ = rx.recv().unwrap();
         let _ = rx.recv().unwrap();
 
@@ -843,9 +867,12 @@ mod tests {
             (204, String::new()),
         ]);
 
-        let cleanup =
-            delete_stale_recipe_snapshots(&client_for(url), "agent", Some("agent--setup-active"))
-                .unwrap();
+        let cleanup = delete_stale_recipe_snapshots(
+            &Client::for_test(&url),
+            "agent",
+            Some("agent--setup-active"),
+        )
+        .unwrap();
         assert_eq!(cleanup, StaleRecipeCleanup::default());
 
         let list = rx.recv().unwrap();
@@ -881,7 +908,8 @@ mod tests {
             (409, conflict),
         ]);
 
-        let cleanup = delete_stale_recipe_snapshots(&client_for(url), "agent", None).unwrap();
+        let cleanup =
+            delete_stale_recipe_snapshots(&Client::for_test(&url), "agent", None).unwrap();
         let _ = rx.recv().unwrap();
         assert!(rx.recv().unwrap().contains("docker-id"));
         assert!(rx.recv().unwrap().contains("source-id"));

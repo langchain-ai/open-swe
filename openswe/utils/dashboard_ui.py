@@ -25,7 +25,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.requests import Request
-from starlette.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
+from starlette.responses import (
+    FileResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Match, Route, get_route_path
 from starlette.types import Scope
 
@@ -236,6 +242,22 @@ class DashboardDevProxyRoute(DashboardCatchAll):
         return response
 
 
+async def desktop_ui_descriptor(request: Request) -> Response:
+    """Select the UI release matching this backend's build."""
+    from openswe.utils.build_info import backend_build_info
+
+    commit = backend_build_info()["commit"] or ""
+    descriptor = _REPO_BUILD_DIR.parent / "desktop" / "descriptor.json"
+    if not commit and descriptor.is_file():
+        return FileResponse(descriptor, headers={"Cache-Control": "no-store"})
+    if len(commit) != 40 or any(char not in "0123456789abcdef" for char in commit):
+        return PlainTextResponse("Desktop UI build identity unavailable", status_code=503)
+    return RedirectResponse(
+        f"https://github.com/langchain-ai/open-swe/releases/download/desktop-ui-{commit}/descriptor.json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 def mount_dashboard_ui(app: FastAPI) -> Path | None:
     """Serve the dashboard at ``/``: a build when one exists, or the Vite dev
     server named by ``DASHBOARD_DEV_SERVER_URL``. Returns the build directory.
@@ -245,6 +267,7 @@ def mount_dashboard_ui(app: FastAPI) -> Path | None:
     route must not look at the live route table instead: the LangGraph server
     rewrites the app's routes to append its own catch-all after this one.
     """
+    app.router.routes.append(Route("/desktop-ui.json", desktop_ui_descriptor, methods=["GET"]))
     dev_server = ENV.DASHBOARD_DEV_SERVER_URL.optional()
     if dev_server:
         app.router.routes.append(DashboardDevProxyRoute(dev_server))

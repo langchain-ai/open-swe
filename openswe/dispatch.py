@@ -13,12 +13,10 @@ busy-check and the custom store-queue) with one function that uses:
   step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
-- ``stream_resumable=True`` — the run's event stream is retained so a client that
-  attaches later can replay it. Without this the dashboard cannot observe a run
-  it did not start: the v3 protocol only synthesizes the ``lifecycle: running``
-  event that drives ``stream.isLoading`` when it can replay the run's events, so
-  a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
-  until it happened to emit its next event.
+- ``stream_resumable=False`` — nothing replays these runs' streams: the dashboard
+  reads a thread from its transcript, so keeping every event in the Agent
+  Server's Redis only costs it memory. A client streaming the thread through the
+  SDK sees a run's events from when it joins.
 - the v3 run shape — the same ``stream_mode`` set, ``stream_subgraphs`` and
   compatibility marker that ``langgraph_api``'s ``run.start`` command applies
   when the dashboard submits a run. The server fixes a run's streaming protocol
@@ -95,19 +93,6 @@ class RunMetadata(BaseModel):
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
-#: Names the MDA channel (``linear``, ``github``, ...) that owns a thread or started a
-#: run, in run metadata and in the thread index's metadata alike. The channel answers
-#: in its conversation, failures included, and starts every run on its threads, so the
-#: backend neither replies there nor starts runs on them.
-CHANNEL_METADATA_KEY = "channel"
-
-
-def channel_of(metadata: Mapping[str, Any] | None) -> str | None:
-    """The MDA channel ``metadata`` (a run's or a thread's) names, whatever the provider."""
-    channel = (metadata or {}).get(CHANNEL_METADATA_KEY)
-    return channel if isinstance(channel, str) and channel else None
-
-
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (
@@ -366,30 +351,6 @@ async def _run_user_metadata(
     return metadata
 
 
-async def prepare_durable_run(
-    assistant_id: str,
-    config: LangGraphRunConfig | None,
-    metadata: dict[str, Any] | None,
-    *,
-    source: str,
-) -> LangGraphRunConfig:
-    """The config and metadata a durable run starts with, wherever it is created."""
-    recorded = RunMetadata.of_run(assistant_id, config)
-    run_metadata = {
-        key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
-    } | recorded.model_dump(exclude_none=True)
-    run_metadata.update(await _run_user_metadata(config, source=source))
-    conversation_type = _slack_conversation_type(source, config)
-    if conversation_type is not None:
-        run_metadata["slack_conversation_type"] = conversation_type
-    run_config = prepare_run_config(config, run_metadata)
-    if "user_id" not in run_metadata:
-        configurable = run_config["configurable"]
-        if isinstance(configurable, dict):
-            configurable.pop("user_id", None)
-    return run_config
-
-
 async def create_durable_run(
     thread_id: str,
     assistant_id: str,
@@ -403,7 +364,6 @@ async def create_durable_run(
     multitask_strategy: str = "interrupt",
     durability: Durability = "async",
     if_not_exists: str = "create",
-    stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
 ) -> Run:
@@ -417,8 +377,19 @@ async def create_durable_run(
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
-    run_config = await prepare_durable_run(assistant_id, config, metadata, source=source)
     recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = {
+        key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
+    } | recorded.model_dump(exclude_none=True)
+    run_metadata.update(await _run_user_metadata(config, source=source))
+    conversation_type = _slack_conversation_type(source, config)
+    if conversation_type is not None:
+        run_metadata["slack_conversation_type"] = conversation_type
+    run_config = prepare_run_config(config, run_metadata)
+    if "user_id" not in run_metadata:
+        configurable = run_config["configurable"]
+        if isinstance(configurable, dict):
+            configurable.pop("user_id", None)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,
@@ -428,7 +399,7 @@ async def create_durable_run(
         "if_not_exists": if_not_exists,
         "stream_mode": list(V3_RUN_STREAM_MODES),
         "stream_subgraphs": True,
-        "stream_resumable": stream_resumable,
+        "stream_resumable": False,
     }
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL

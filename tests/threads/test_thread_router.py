@@ -1,16 +1,15 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.remote_runtime.runs import run_config
-from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
-from openswe.threads import index, router, runtimes
+from openswe.agent_api.runs import run_config
+from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
+from openswe.threads import index, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -95,30 +94,26 @@ class _Runtimes:
 class _Harness:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.forwarded: list[tuple[str, dict[str, JsonValue]]] = []
-        # Calls that reached MDA through its read client, as (method, path).
-        self.read: list[tuple[str, str]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
+        self.while_starting: Callable[[], Awaitable[object]] | None = None
 
         def mda(request: httpx.Request) -> httpx.Response:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
-            return httpx.Response(200, json={"run_id": "remote-run"})
+            return httpx.Response(
+                200,
+                json={"run_id": "remote-run"},
+                headers={"content-location": f"/threads/{THREAD}/runs/remote-run"},
+            )
 
         mda_runtime = runtimes.MdaRuntime("http://mda.test")
         mda_runtime._http = httpx.AsyncClient(
             base_url=mda_runtime.url, transport=httpx.MockTransport(mda)
         )
-
-        def mda_reads(request: httpx.Request) -> httpx.Response:
-            self.read.append((request.method, request.url.path))
-            return httpx.Response(200, json={})
-
-        mda_runtime._read_http = httpx.AsyncClient(
-            base_url=mda_runtime.url, transport=httpx.MockTransport(mda_reads)
-        )
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
         monkeypatch.setattr(router, "RUNTIMES", self.runtimes)
+        monkeypatch.setattr(store, "RUNTIMES", self.runtimes)
 
         async def context(
             configurable: dict[str, JsonValue],
@@ -127,6 +122,8 @@ class _Harness:
             assistant_id: str,
             metadata: dict[str, JsonValue] | None = None,
         ) -> dict[str, JsonValue]:
+            if self.while_starting is not None:
+                await self.while_starting()
             run = RemoteRun(
                 thread_id=thread_id,
                 assistant_id=assistant_id,
@@ -207,6 +204,7 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
     assert missed == 0
     assert counted == 1
+    await store.THREADS.copies.settled(THREAD)
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []
@@ -237,7 +235,9 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
     harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    # A stop before this run asked to start leaves it be.
+    stopped = {index.STOPPED_AT_KEY: runtimes.now_ms() - 1000}
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada", **stopped})
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -252,6 +252,30 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     assert harness.reached_here == []
     [(path, sent)] = harness.forwarded
     assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/runs", {"assistant_id": "agent"}),
+        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
+    ],
+)
+async def test_a_stop_while_a_run_starts_interrupts_it_once_mda_has_it(
+    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: dict[str, JsonValue]
+) -> None:
+    # Working out the run takes a while, and a stop meanwhile finds no run to cancel.
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    harness.while_starting = lambda: index.update(THREAD, {index.STOPPED_AT_KEY: runtimes.now_ms()})
+
+    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
+
+    assert status == 200
+    assert [path for path, _ in harness.forwarded] == [
+        f"/threads/{THREAD}/runs",
+        f"/threads/{THREAD}/runs/remote-run/cancel",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -345,143 +369,40 @@ async def test_a_new_thread_runs_on_mda(
     }
 
 
-async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-
-    await router.adopt_channel_run(THREAD, "linear")
-    # The session's metadata is written after, as a create that finds the thread.
-    await harness.request(
-        "POST",
-        "/threads",
-        {"thread_id": THREAD, "metadata": {"source": "linear"}, "if_exists": "do_nothing"},
-    )
-
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.runtime == "mda"
-    assert indexed.metadata["channel"] == "linear"
-    assert harness.runtimes.local.threads[THREAD]["metadata"]["runtime"] == "mda"
-    # MDA's channel creates it as its conversation's own thread; a copy made
-    # here first would belong to the backend and keep the channel out.
-    assert THREAD not in harness.runtimes.mda.threads
-
-
-async def _channel_thread(harness: _Harness) -> None:
-    await router.adopt_channel_run(THREAD, "linear")
-    await harness.request(
-        "POST",
-        "/threads",
-        {"thread_id": THREAD, "metadata": {"source": "linear"}, "if_exists": "do_nothing"},
-    )
-    harness.runtimes.mda_runtime._mda_threads.discard(THREAD)
-
-
+@pytest.mark.parametrize("command", [False, True], ids=["rest", "command"])
 @pytest.mark.parametrize(
-    ("method", "path", "body"),
-    [
-        ("POST", "/runs", {"assistant_id": "agent", "input": {}}),
-        ("POST", "/runs/stream", {"assistant_id": "agent", "input": {}}),
-        ("POST", "/state", {"values": {}}),
-        ("POST", "/copy", {}),
-        ("POST", "/runs/run-1/cancel", None),
-        ("POST", "/commands", {"id": 1, "method": "input.respond", "params": {}}),
-    ],
+    "permalink", ["https://langchain.slack.com/archives/C123/p1234567890000000", ""]
 )
-async def test_a_channel_thread_refuses_writes(
-    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
+async def test_runs_include_the_current_slack_thread_link(
+    monkeypatch: pytest.MonkeyPatch, secret: None, command: bool, permalink: str
 ) -> None:
     harness = _Harness(monkeypatch)
-    await _channel_thread(harness)
-
-    status, reply = await harness.request(method, f"/threads/{THREAD}{path}", body)
-
-    # The channel starts its threads' runs; the backend can't, and says so.
-    assert status == 409
-    assert isinstance(reply, dict) and "linear channel" in str(reply["detail"])
-    assert harness.forwarded == [] and harness.read == []
-    indexed = await index.get(THREAD)
-    assert indexed is not None and indexed.runtime == "mda"
-
-
-async def test_a_channel_thread_refuses_a_run_started_by_command(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    await _channel_thread(harness)
-    command = {"id": 7, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
-
-    status, reply = await harness.request("POST", f"/threads/{THREAD}/commands", command)
-
-    assert status == 200
-    assert isinstance(reply, dict) and (reply["type"], reply["id"]) == ("error", 7)
-    assert harness.forwarded == []
-
-
-async def test_a_cancel_of_every_run_on_a_channel_thread_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    await _channel_thread(harness)
-
-    status, _ = await harness.request("POST", "/runs/cancel", {"thread_id": THREAD})
-
-    assert status == 409
-    assert harness.forwarded == []
-
-
-@pytest.mark.parametrize(
-    ("method", "path", "body"),
-    [
-        ("GET", "/state", None),
-        ("GET", "/runs", None),
-        ("GET", "/runs/run-1/join", None),
-        ("POST", "/history", {"limit": 10}),
-        ("POST", "/commands", {"id": 1, "method": "subscription.subscribe", "params": {}}),
-    ],
-)
-async def test_reads_reach_mda_as_studio_for_channel_and_own_threads(
-    monkeypatch: pytest.MonkeyPatch, method: str, path: str, body: JsonValue
-) -> None:
-    harness = _Harness(monkeypatch)
-    await _channel_thread(harness)
-
-    status, _ = await harness.request(method, f"/threads/{THREAD}{path}", body)
-
-    assert status == 200
-    assert harness.read == [(method, f"/threads/{THREAD}{path}")]
-    assert harness.forwarded == []
-    # The channel created the thread on MDA; the backend creates no copy of its own.
-    assert THREAD not in harness.runtimes.mda_runtime._mda_threads
-
-
-async def test_a_channel_threads_metadata_is_copied_only_here(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    await _channel_thread(harness)
-
-    status, _ = await harness.request(
-        "PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Renamed"}}
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    await harness.request(
+        "PATCH",
+        f"/threads/{THREAD}",
+        {"metadata": {"source_context": {"slack_thread": {"permalink": permalink}}}},
     )
+    params: dict[str, JsonValue] = {
+        "assistant_id": "agent",
+        "input": {},
+        "metadata": {"kind": "follow_up"},
+        "config": {"metadata": {"invocation_id": "turn-1"}},
+    }
+    if command:
+        status, _ = await harness.request(
+            "POST",
+            f"/threads/{THREAD}/commands",
+            {"id": 1, "method": "run.start", "params": params},
+        )
+    else:
+        status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
 
     assert status == 200
-    assert harness.runtimes.local.threads[THREAD]["metadata"]["title"] == "Renamed"
-    # On MDA the thread is the channel's; the backend writes nothing there.
-    assert THREAD not in harness.runtimes.mda.threads
-
-
-async def test_writes_to_the_backends_own_mda_threads_go_through_the_owner_scoped_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="mda")
-
-    await harness.request("POST", f"/threads/{THREAD}/runs/run-1/cancel")
-    await harness.request("GET", f"/threads/{THREAD}/state")
-
-    assert [path for path, _ in harness.forwarded] == [f"/threads/{THREAD}/runs/run-1/cancel"]
-    assert harness.read == [("GET", f"/threads/{THREAD}/state")]
+    [(_, sent)] = harness.forwarded
+    expected: dict[str, JsonValue] = {"slack_thread_url": permalink} if permalink else {}
+    assert sent["metadata"] == {"kind": "follow_up", **expected}
+    assert sent["config"] == {"metadata": {"invocation_id": "turn-1", **expected}}
 
 
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,6 +439,24 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     assert path == f"/threads/{THREAD}/runs"
     assert sent["assistant_id"] == graph
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
+
+
+@pytest.mark.parametrize(
+    ("params", "resumable"),
+    [({}, True), ({"stream_resumable": False}, False)],
+    ids=["streaming-client", "transcript-reader"],
+)
+async def test_a_run_started_by_command_keeps_its_stream_unless_the_client_opts_out(
+    monkeypatch: pytest.MonkeyPatch, secret: None, params: dict[str, JsonValue], resumable: bool
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", **params}}
+
+    await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    [(_, sent)] = harness.forwarded
+    assert sent["stream_resumable"] is resumable
 
 
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -563,107 +502,3 @@ async def test_under_custom_auth_only_the_backend_is_answered_from_the_index(
     # Anyone else's call reaches the Agent Server, whose rules show ada only her own threads.
     assert harness.reached_here == ([] if from_index else [f"/threads/{THREAD}"])
     assert (isinstance(read, dict) and read.get("metadata") == {"owner_login": "bob"}) is from_index
-
-
-_CHANNEL_CONVERSATION: list[dict[str, JsonValue]] = [
-    {"type": "human", "id": "h1", "content": "Fix MYT-18"},
-    {
-        "type": "ai",
-        "id": "a1",
-        "content": "",
-        "tool_calls": [{"id": "call-1", "name": "open_pr", "args": {}}],
-    },
-    {"type": "tool", "id": "t1", "tool_call_id": "call-1", "content": "PR #7 opened"},
-    {"type": "ai", "id": "a2", "content": "Opened PR #7."},
-]
-
-
-@pytest.mark.parametrize("channel", ["linear", "github"])
-async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
-    monkeypatch: pytest.MonkeyPatch, secret: None, channel: str
-) -> None:
-    """A review on a PR a channel conversation opened runs on the PR's own thread,
-    through the real router, starting with the conversation: the channel's thread
-    refuses the backend's runs (409)."""
-    from langgraph_sdk.client import LangGraphClient
-
-    from openswe import dispatch
-    from openswe.github import webhook
-    from openswe.thread_ids import pr_comment_thread_id
-    from openswe.users import User
-    from openswe.webhooks import common
-
-    harness = _Harness(monkeypatch)
-    await router.adopt_channel_run(THREAD, channel)
-
-    def reads(request: httpx.Request) -> httpx.Response:
-        harness.read.append((request.method, request.url.path))
-        if request.url.path == f"/threads/{THREAD}/state":
-            return httpx.Response(200, json={"values": {"messages": _CHANNEL_CONVERSATION}})
-        return httpx.Response(200, json={"values": {}})
-
-    harness.runtimes.mda_runtime._read_http = httpx.AsyncClient(
-        base_url=harness.runtimes.mda_runtime.url, transport=httpx.MockTransport(reads)
-    )
-    # MDA creates the PR's thread as the backend's own, through the recorded transport.
-    mda = harness.runtimes.mda_runtime
-    monkeypatch.setattr(mda, "sdk", lambda: LangGraphClient(mda._http))
-    backend = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=harness.router), base_url="http://backend"
-    )
-    monkeypatch.setattr(common, "get_client", lambda **kwargs: LangGraphClient(backend))
-    monkeypatch.setattr(dispatch, "get_client", lambda **kwargs: LangGraphClient(backend))
-    # GitHub itself stands in: the PR, its review, and who wrote it.
-    monkeypatch.setattr(
-        common,
-        "extract_pr_context",
-        AsyncMock(
-            return_value=(
-                {"owner": "o", "name": "r"},
-                7,
-                f"open-swe/{THREAD}",
-                "ada",
-                "https://github.com/o/r/pull/7",
-                42,
-                None,
-            )
-        ),
-    )
-    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="ada@example.com"))
-    monkeypatch.setattr(User, "known_logins", AsyncMock(return_value=frozenset({"ada"})))
-    monkeypatch.setattr(common, "get_or_resolve_thread_github_token", AsyncMock(return_value="t"))
-    review = {"body": "Rename the helper", "author": "ada", "type": "review"}
-    monkeypatch.setattr(common, "fetch_pr_event_comments", AsyncMock(return_value=[review]))
-    react = AsyncMock()
-    monkeypatch.setattr(common, "react_to_github_comment", react)
-
-    await webhook.process_github_pr_comment(
-        {
-            "action": "submitted",
-            "sender": {"login": "ada", "id": 1},
-            "review": {
-                "body": "Rename the helper",
-                "user": {"login": "ada"},
-                "state": "changes_requested",
-                "submitted_at": "2026-01-01T00:00:00Z",
-            },
-        },
-        "pull_request_review",
-        agent_thread_id=THREAD,
-    )
-
-    pr_thread = pr_comment_thread_id("o", "r", 7)
-    runs = [body for path, body in harness.forwarded if path.endswith("/runs")]
-    assert [path for path, _ in harness.forwarded if path.endswith("/runs")] == [
-        f"/threads/{pr_thread}/runs"
-    ]
-    input = runs[0]["input"]
-    assert isinstance(input, dict) and isinstance(messages := input["messages"], list)
-    # The conversation first, then the review.
-    assert messages[: len(_CHANNEL_CONVERSATION)] == _CHANNEL_CONVERSATION
-    assert "Rename the helper" in json.dumps(messages[len(_CHANNEL_CONVERSATION) :])
-    pr_metadata = (await index.get(pr_thread)).metadata  # type: ignore[union-attr]
-    assert pr_metadata["continues_thread"] == THREAD
-    # The channel's thread got no run, and the review its 👀 only once one started.
-    assert all(f"/threads/{THREAD}/runs" not in path for path, _ in harness.forwarded)
-    react.assert_awaited_once()

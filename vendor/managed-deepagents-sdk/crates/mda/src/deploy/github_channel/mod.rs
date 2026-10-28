@@ -36,8 +36,8 @@ use cliclack::log;
 
 use crate::connection::wait_for_oauth_session;
 use crate::deploy::channel_app::{
-    self, agent_auth, find_connection, is_interactive, override_value, AppSlugs, SetupUi,
-    AGENT_AUTH_URL_ENV,
+    self, agent_auth, env_app_notice, find_connection, is_interactive, override_value, AppSlugs,
+    SetupUi, WaitTick, AGENT_AUTH_URL_ENV,
 };
 use crate::error::is_cancellation;
 use crate::github::{validate_login, PrivateKeyPem};
@@ -63,9 +63,16 @@ const INSTALL_WAIT_LIMIT: Duration = Duration::from_secs(30 * 60);
 const SYNC_ATTEMPTS: usize = 6;
 const SYNC_RETRY_DELAY: Duration = Duration::from_secs(5);
 
-/// Env override for the App's webhook secret. The runtime reads the secret
-/// and the bot user ID from Agent Auth unless the env sets them.
-const WEBHOOK_SECRET_ENV: &str = "GH_WEBHOOK_SECRET";
+/// CLI-only: a brought App's webhook secret, which deploy stores in Agent
+/// Auth. The runtime reads it from there, unless the deployment's own
+/// `GH_WEBHOOK_SECRET` overrides it; deploy never reads that one.
+const WEBHOOK_SECRET_ENV: &str = "MDA_GITHUB_WEBHOOK_SECRET";
+/// CLI-only: an existing App to bring instead of creating one, with
+/// [`WEBHOOK_SECRET_ENV`], and the installation it uses when GitHub reports
+/// none or several.
+const APP_ID_ENV: &str = "MDA_GITHUB_APP_ID";
+const PRIVATE_KEY_FILE_ENV: &str = "MDA_GITHUB_APP_PRIVATE_KEY_FILE";
+const INSTALLATION_ID_ENV: &str = "MDA_GITHUB_APP_INSTALLATION_ID";
 
 /// Secret connections next to the App's, which the runtime reads. Agent Auth
 /// stores the webhook secret ([`WEBHOOK_SECRET_SUFFIX`]) with the App; deploy
@@ -92,13 +99,98 @@ const SKIPPED_SETUP: &str = "Continuing without the GitHub channel. The deployme
 const APP_OWNER_ENV: &str = "MDA_GITHUB_APP_OWNER";
 const PERSONAL_OWNER: &str = "@me";
 
-const OWNER_REQUIRED: &str = "This agent's GitHub channel needs a GitHub App, and without a terminal deploy cannot ask where to create it. Set MDA_GITHUB_APP_OWNER in the shell or .env to the GitHub organization that should own the App, or to @me for the personal account of whoever creates it, then run `mda deploy` again.";
+const OWNER_REQUIRED: &str = "This agent's GitHub channel needs a GitHub App, and without a terminal deploy cannot ask for it. Set MDA_GITHUB_APP_OWNER in the shell or .env to the GitHub organization that should own a new App, or to @me for the personal account of whoever creates it. To use an existing App, set MDA_GITHUB_APP_ID, MDA_GITHUB_APP_PRIVATE_KEY_FILE and MDA_GITHUB_WEBHOOK_SECRET instead. Then run `mda deploy` again.";
 
 const APP_ID_HINT: &str = "Enter the numeric App ID from the App's settings page.";
 const INSTALLATION_ID_HINT: &str =
     "Enter the numeric installation ID from the end of the installation's settings URL.";
 
-const EXISTING_APP_NEEDS_TERMINAL: &str = "This agent's GitHub App was brought in by its ID and key and is not installed in exactly one account yet. Install it on GitHub, or run `mda deploy` in a terminal once to choose or install it.";
+const EXISTING_APP_NEEDS_TERMINAL: &str = "This agent's GitHub App was brought in by its ID and key and is not installed in exactly one account yet. Install it on GitHub, or set MDA_GITHUB_APP_INSTALLATION_ID in the shell or .env to the installation this agent uses, then run `mda deploy` again. Or run `mda deploy` in a terminal once to choose or install it.";
+
+const MISSING_WEBHOOK_SECRET: &str = "Agent Auth has no webhook secret for this GitHub App, so the channel rejects its events unless the deployment sets GH_WEBHOOK_SECRET. Set MDA_GITHUB_WEBHOOK_SECRET in the shell or .env, or run `mda deploy` in a terminal, to add it.";
+
+/// An existing App from the CLI-only env vars.
+#[derive(Clone)]
+pub(crate) struct ExistingAppEnv {
+    app_id: String,
+    private_key: PrivateKeyPem,
+    webhook_secret: String,
+}
+
+impl std::fmt::Debug for ExistingAppEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExistingAppEnv")
+            .field("app_id", &self.app_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// [`APP_ID_ENV`] and [`PRIVATE_KEY_FILE_ENV`], both or neither, checked,
+/// with [`WEBHOOK_SECRET_ENV`], which bringing an App needs.
+fn existing_app_env(env_vars: &BTreeMap<String, String>) -> Result<Option<ExistingAppEnv>> {
+    let (app_id, key_file) = match (
+        override_value(APP_ID_ENV, env_vars),
+        override_value(PRIVATE_KEY_FILE_ENV, env_vars),
+    ) {
+        (Some(app_id), Some(key_file)) => (app_id, key_file),
+        (None, None) => return Ok(None),
+        _ => bail!("Set both {APP_ID_ENV} and {PRIVATE_KEY_FILE_ENV}, or neither."),
+    };
+    let app_id = parse_github_id(&app_id, APP_ID_HINT)
+        .with_context(|| format!("{APP_ID_ENV} is not valid"))?
+        .to_string();
+    let private_key = read_private_key(Path::new(key_file.trim()))
+        .with_context(|| format!("{PRIVATE_KEY_FILE_ENV} does not name a usable private key"))?;
+    let Some(webhook_secret) = webhook_secret_env(env_vars) else {
+        bail!("{APP_ID_ENV} brings an existing GitHub App, which needs its webhook secret too: set {WEBHOOK_SECRET_ENV}.");
+    };
+    Ok(Some(ExistingAppEnv {
+        app_id,
+        private_key,
+        webhook_secret,
+    }))
+}
+
+fn webhook_secret_env(env_vars: &BTreeMap<String, String>) -> Option<String> {
+    override_value(WEBHOOK_SECRET_ENV, env_vars)
+        .map(|secret| secret.trim().to_string())
+        .filter(|secret| !secret.is_empty())
+}
+
+/// [`INSTALLATION_ID_ENV`], checked.
+fn installation_id_env(env_vars: &BTreeMap<String, String>) -> Result<Option<String>> {
+    override_value(INSTALLATION_ID_ENV, env_vars)
+        .map(|id| {
+            parse_github_id(&id, INSTALLATION_ID_HINT)
+                .with_context(|| format!("{INSTALLATION_ID_ENV} is not valid"))
+                .map(|id| id.to_string())
+        })
+        .transpose()
+}
+
+/// What the CLI-only env vars say about the App, all checked: a new App's
+/// owner, or an existing App, never both.
+#[derive(Debug, Default)]
+struct AppEnv {
+    owner: Option<AppOwner>,
+    existing: Option<ExistingAppEnv>,
+    installation_id: Option<String>,
+}
+
+fn app_env(env_vars: &BTreeMap<String, String>) -> Result<AppEnv> {
+    let owner = override_value(APP_OWNER_ENV, env_vars)
+        .map(|owner| parse_owner(&owner))
+        .transpose()?;
+    let existing = existing_app_env(env_vars)?;
+    if owner.is_some() && existing.is_some() {
+        bail!("Set {APP_OWNER_ENV} to create a new GitHub App, or {APP_ID_ENV} and {PRIVATE_KEY_FILE_ENV} to use an existing one, not both.");
+    }
+    Ok(AppEnv {
+        owner,
+        existing,
+        installation_id: installation_id_env(env_vars)?,
+    })
+}
 
 /// The `github_app` connection that holds a deployment's App, and the values
 /// stored next to it. One App belongs to one connection, so the slug is per
@@ -131,12 +223,6 @@ pub(crate) struct AppConnection {
     pub(crate) kept_webhooks: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WaitTick {
-    Elapsed,
-    Interrupted,
-}
-
 /// Everything setup does that touches the terminal, the network or Agent
 /// Auth, so the flow itself is testable.
 pub(crate) trait SetupEnv: SetupUi {
@@ -156,10 +242,17 @@ pub(crate) trait SetupEnv: SetupUi {
     fn choose_owner(&mut self) -> Result<AppOwner>;
     /// Ask for the installation of an App the user brought.
     fn ask_installation_id(&mut self) -> Result<String>;
+    /// The installation `MDA_GITHUB_APP_INSTALLATION_ID` picks, so nobody is
+    /// asked, with or without a terminal.
+    fn installation_from_env(&self) -> Option<String>;
     /// Pick one of several installations of an App the user brought.
     fn choose_installation(&mut self, installations: &[GitHubInstallation]) -> Result<String>;
-    /// The webhook secret of an App the user brought: `GH_WEBHOOK_SECRET`
-    /// when set, else asked for. `None` when neither is possible.
+    /// Whether the CLI-only env vars choose a new App (its owner) or an
+    /// existing one, so nobody is asked.
+    fn app_source_from_env(&self) -> Option<AppSource>;
+    /// The webhook secret of an App the user brought:
+    /// `MDA_GITHUB_WEBHOOK_SECRET` when set, else asked for. `None` when
+    /// neither is possible.
     fn webhook_secret(&mut self) -> Result<Option<String>>;
     /// Store a value the runtime reads as the secret connection next to the
     /// App's, e.g. [`WEBHOOK_SECRET_SUFFIX`].
@@ -211,6 +304,11 @@ pub(crate) fn setup(
     if let Some(url) = override_value(AGENT_AUTH_URL_ENV, env_vars) {
         log::info(format!("Using Agent Auth at {url}"))?;
     }
+    let AppEnv {
+        owner,
+        existing,
+        installation_id,
+    } = app_env(env_vars)?;
     let mut env = LiveSetup {
         agent_auth,
         deployment_id,
@@ -219,18 +317,20 @@ pub(crate) fn setup(
         project_root,
         interactive: is_interactive(),
         app_id: None,
-        webhook_secret_override: override_value(WEBHOOK_SECRET_ENV, env_vars),
-        owner_override: override_value(APP_OWNER_ENV, env_vars),
+        webhook_secret_override: webhook_secret_env(env_vars),
+        owner_override: owner,
+        existing_override: existing,
+        installation_override: installation_id,
         webhook_elsewhere_override: override_value(WEBHOOK_ELSEWHERE_ENV, env_vars),
     };
     run_setup(&mut env, channel)
 }
 
 /// Check, before anything is deployed, that GitHub App setup will be able to
-/// finish. A malformed `MDA_GITHUB_APP_OWNER` always fails here. Without a
-/// terminal, setup that would need an answer nobody can give fails here too,
-/// instead of after the deployment is live. `deployment_id` is the existing
-/// deployment, if any.
+/// finish. Malformed or incomplete CLI-only env vars always fail here.
+/// Without a terminal, setup that would need an answer nobody can give fails
+/// here too, instead of after the deployment is live. `deployment_id` is the
+/// existing deployment, if any.
 pub(crate) fn preflight(
     client: &langsmith::Client,
     channel: &GitHubChannel,
@@ -238,15 +338,13 @@ pub(crate) fn preflight(
     runtime_url: Option<&str>,
     env_vars: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let owner = override_value(APP_OWNER_ENV, env_vars)
-        .map(|owner| parse_owner(&owner))
-        .transpose()?;
+    let app_env = app_env(env_vars)?;
     let interactive = is_interactive();
     if interactive || channel.handled.is_empty() {
         return Ok(());
     }
     let Some(deployment_id) = deployment_id else {
-        return match unattended_setup_problem(None, owner.is_some()) {
+        return match unattended_setup_problem(None, &app_env) {
             Some(problem) => bail!(problem),
             None => Ok(()),
         };
@@ -254,7 +352,7 @@ pub(crate) fn preflight(
     let agent_auth = agent_auth(client, env_vars)?;
     let connection = lookup_app_connection(&agent_auth, deployment_id)
         .context("failed to check the GitHub App before deploying")?;
-    if let Some(problem) = unattended_setup_problem(connection.as_ref(), owner.is_some()) {
+    if let Some(problem) = unattended_setup_problem(connection.as_ref(), &app_env) {
         bail!(problem);
     }
     // A brought App whose webhook points elsewhere would fail the deploy
@@ -433,18 +531,20 @@ fn explain_refused_token(error: anyhow::Error) -> anyhow::Error {
 /// Why setup without a terminal cannot finish, if it cannot.
 fn unattended_setup_problem(
     connection: Option<&AppConnection>,
-    owner_set: bool,
+    app_env: &AppEnv,
 ) -> Option<&'static str> {
     match connection {
         Some(connection) if connection.installed => None,
         // The install page only needs a link.
         Some(connection) if connection.state == GitHubAppState::Created => None,
-        Some(connection) if connection.state == GitHubAppState::External => {
-            Some(EXISTING_APP_NEEDS_TERMINAL)
-        }
-        // A new App, or one GitHub has not created yet.
-        _ if owner_set => None,
-        _ => Some(OWNER_REQUIRED),
+        Some(connection) if connection.state == GitHubAppState::External => app_env
+            .installation_id
+            .is_none()
+            .then_some(EXISTING_APP_NEEDS_TERMINAL),
+        // An App GitHub has not created yet needs its owner.
+        Some(_) => app_env.owner.is_none().then_some(OWNER_REQUIRED),
+        None if app_env.owner.is_some() || app_env.existing.is_some() => None,
+        None => Some(OWNER_REQUIRED),
     }
 }
 
@@ -608,9 +708,7 @@ fn store_app_values(
     if !connection.webhook_secret_stored && connection.state == GitHubAppState::External {
         match store_webhook_secret(env) {
             Ok(true) => {}
-            Ok(false) => env.warning(
-                "Agent Auth has no webhook secret for this GitHub App, so the channel rejects its events. Run `mda deploy` in a terminal to add it.",
-            )?,
+            Ok(false) => env.warning(MISSING_WEBHOOK_SECRET)?,
             Err(error) if is_cancellation(&error) => env.warning(
                 "Skipped adding the GitHub App's webhook secret. The channel rejects its events until you run `mda deploy` again and add it.",
             )?,
@@ -811,7 +909,7 @@ fn set_up_app(
     // leaves no App behind.
     let (current, created) = match connection {
         Some(current) => (current, None),
-        None => match env.choose_app_source()? {
+        None => match choose_app_source(env)? {
             AppSource::New => {
                 let owner = env.choose_owner()?;
                 let (created, session) = env.create_app(channel, &owner)?;
@@ -849,6 +947,17 @@ fn set_up_app(
     env.success("The GitHub App is set up for this agent.")?;
     // GitHub created the App, or the agent now holds its credential.
     Ok(env.app_connection()?.unwrap_or(current))
+}
+
+/// Where a deployment without an App gets one: what the env says, else asked
+/// in a terminal. An existing App needs its key, which only a prompt or the
+/// env gives, so without either deploy creates a new one.
+fn choose_app_source(env: &mut dyn SetupEnv) -> Result<AppSource> {
+    match env.app_source_from_env() {
+        Some(source) => Ok(source),
+        None if !env.interactive() => Ok(AppSource::New),
+        None => env.choose_app_source(),
+    }
 }
 
 /// Follow a setup session until GitHub has created (when needed) and
@@ -935,6 +1044,13 @@ fn brought_app_session(
     env: &mut dyn SetupEnv,
     connection: &AppConnection,
 ) -> Result<OAuthAuthorizationSession> {
+    if let Some(installation) = env.installation_from_env() {
+        return start_session(
+            env,
+            connection,
+            &GitHubAppSessionStart::Installation(installation),
+        );
+    }
     let installation = match sync_with_retry(env)? {
         GitHubSyncOutcome::Synced(status) => match active_installations(&status).as_slice() {
             [installation] => installation.id.to_string(),
@@ -1138,10 +1254,15 @@ struct LiveSetup<'a> {
     interactive: bool,
     /// The App's ID in Agent Auth once known, so reports need no lookup.
     app_id: Option<String>,
-    /// `GH_WEBHOOK_SECRET` from the shell or `.env`, for a brought App.
+    /// `MDA_GITHUB_WEBHOOK_SECRET` from the shell or `.env`, for a brought App.
     webhook_secret_override: Option<String>,
     /// `MDA_GITHUB_APP_OWNER` from the shell or `.env`.
-    owner_override: Option<String>,
+    owner_override: Option<AppOwner>,
+    /// `MDA_GITHUB_APP_ID` and `MDA_GITHUB_APP_PRIVATE_KEY_FILE`, with the
+    /// webhook secret, from the shell or `.env`.
+    existing_override: Option<ExistingAppEnv>,
+    /// `MDA_GITHUB_APP_INSTALLATION_ID` from the shell or `.env`.
+    installation_override: Option<String>,
     /// `MDA_GITHUB_WEBHOOK_ELSEWHERE` from the shell or `.env`.
     webhook_elsewhere_override: Option<String>,
 }
@@ -1199,6 +1320,25 @@ impl LiveSetup<'_> {
             "Released GitHub App {app_id} from deployment {deployment_id}."
         ))?;
         Ok(())
+    }
+
+    /// Ask for an existing App's ID, private key and webhook secret.
+    fn ask_existing_app(&mut self) -> Result<(String, PrivateKeyPem, String)> {
+        let app_id: String = cliclack::input("GitHub App ID")
+            .placeholder("shown under About on the App's settings page")
+            .validate(|value: &String| parse_github_id(value, APP_ID_HINT).map(|_| ()))
+            .interact()
+            .context("failed to read the GitHub App ID")?;
+        let path: String = cliclack::input("Path to the App's private key (.pem)")
+            .validate(|value: &String| read_private_key(Path::new(value.trim())).map(|_| ()))
+            .interact()
+            .context("failed to read the private key path")?;
+        let app_id = parse_github_id(&app_id, APP_ID_HINT)?.to_string();
+        let key = read_private_key(Path::new(path.trim()))?;
+        let Some(webhook_secret) = self.webhook_secret()? else {
+            bail!("The GitHub App's webhook secret is required.");
+        };
+        Ok((app_id, key, webhook_secret))
     }
 
     /// Where to register the new App. No GitHub lookup: the user says whether
@@ -1277,10 +1417,6 @@ impl SetupEnv for LiveSetup<'_> {
     }
 
     fn choose_app_source(&mut self) -> Result<AppSource> {
-        // An existing App needs its private key, which only a prompt takes.
-        if !self.interactive {
-            return Ok(AppSource::New);
-        }
         cliclack::select("This agent's GitHub channel needs a GitHub App")
             .item(AppSource::New, "Create a new GitHub App", "recommended")
             .item(
@@ -1313,19 +1449,21 @@ impl SetupEnv for LiveSetup<'_> {
     }
 
     fn store_existing_app(&mut self) -> Result<AppConnection> {
-        let app_id: String = cliclack::input("GitHub App ID")
-            .placeholder("shown under About on the App's settings page")
-            .validate(|value: &String| parse_github_id(value, APP_ID_HINT).map(|_| ()))
-            .interact()
-            .context("failed to read the GitHub App ID")?;
-        let path: String = cliclack::input("Path to the App's private key (.pem)")
-            .validate(|value: &String| read_private_key(Path::new(value.trim())).map(|_| ()))
-            .interact()
-            .context("failed to read the private key path")?;
-        let app_id = parse_github_id(&app_id, APP_ID_HINT)?.to_string();
-        let key = read_private_key(Path::new(path.trim()))?;
-        let Some(webhook_secret) = self.webhook_secret()? else {
-            bail!("The GitHub App's webhook secret is required.");
+        let (app_id, key, webhook_secret) = match self.existing_override.clone() {
+            Some(existing) => {
+                log::info(env_app_notice(
+                    "GitHub App",
+                    "Agent Auth",
+                    &[APP_ID_ENV, PRIVATE_KEY_FILE_ENV, WEBHOOK_SECRET_ENV],
+                ))?;
+                (
+                    existing.app_id,
+                    existing.private_key,
+                    existing.webhook_secret,
+                )
+            }
+            None if !self.interactive => bail!(OWNER_REQUIRED),
+            None => self.ask_existing_app()?,
         };
         // The token starts with the App's permissions; the scope sync after
         // setup narrows it to the channel's once the installation grants them.
@@ -1349,10 +1487,20 @@ impl SetupEnv for LiveSetup<'_> {
         Ok(self.track(app, true))
     }
 
+    fn app_source_from_env(&self) -> Option<AppSource> {
+        if self.existing_override.is_some() {
+            Some(AppSource::Existing)
+        } else if self.owner_override.is_some() {
+            Some(AppSource::New)
+        } else {
+            None
+        }
+    }
+
     fn webhook_secret(&mut self) -> Result<Option<String>> {
         if let Some(secret) = self.webhook_secret_override.clone() {
             log::info(format!(
-                "Storing {WEBHOOK_SECRET_ENV} in Agent Auth. You can remove it from .env."
+                "Using the GitHub App's webhook secret from {WEBHOOK_SECRET_ENV}. Agent Auth keeps it, so you can remove {WEBHOOK_SECRET_ENV} afterwards."
             ))?;
             return Ok(Some(secret));
         }
@@ -1388,7 +1536,7 @@ impl SetupEnv for LiveSetup<'_> {
 
     fn choose_owner(&mut self) -> Result<AppOwner> {
         if let Some(owner) = &self.owner_override {
-            return parse_owner(owner);
+            return Ok(owner.clone());
         }
         if !self.interactive {
             bail!(OWNER_REQUIRED);
@@ -1396,7 +1544,14 @@ impl SetupEnv for LiveSetup<'_> {
         self.ask_owner()
     }
 
+    fn installation_from_env(&self) -> Option<String> {
+        self.installation_override.clone()
+    }
+
     fn ask_installation_id(&mut self) -> Result<String> {
+        if let Some(id) = &self.installation_override {
+            return Ok(id.clone());
+        }
         if !self.interactive {
             bail!(EXISTING_APP_NEEDS_TERMINAL);
         }
@@ -1407,7 +1562,6 @@ impl SetupEnv for LiveSetup<'_> {
             .context("failed to read the installation ID")?;
         Ok(parse_github_id(&id, INSTALLATION_ID_HINT)?.to_string())
     }
-
     fn choose_installation(&mut self, installations: &[GitHubInstallation]) -> Result<String> {
         let mut prompt = cliclack::select(
             "The GitHub App is installed in several accounts. Which one should this agent use?",
@@ -1526,16 +1680,7 @@ impl SetupEnv for LiveSetup<'_> {
     }
 
     fn wait(&mut self, duration: Duration) -> WaitTick {
-        let Ok(interrupt) = Interrupt::install() else {
-            std::thread::sleep(duration);
-            return WaitTick::Elapsed;
-        };
-        interrupt.sleep_until_interrupted(duration);
-        if interrupt.is_requested() {
-            WaitTick::Interrupted
-        } else {
-            WaitTick::Elapsed
-        }
+        channel_app::wait(duration)
     }
 }
 

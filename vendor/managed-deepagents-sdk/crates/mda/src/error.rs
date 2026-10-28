@@ -1,3 +1,6 @@
+use std::fmt::Display;
+use std::process::Output;
+
 use anyhow::Error;
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -26,6 +29,54 @@ pub fn categorized(category: ErrorCategory, message: impl Into<String>) -> Error
     })
 }
 
+/// `err` with `category`, leaving its message and causes as they were. Unlike
+/// [`categorized`], the chain survives, so a cancellation or a child's stderr
+/// below it is still found.
+pub fn with_category(category: ErrorCategory, err: Error) -> Error {
+    Error::new(Recategorized {
+        category,
+        inner: err,
+    })
+}
+
+/// `err` with `category` unless it already has one, as a cancellation or a
+/// LangSmith API status would.
+pub fn categorize_unclassified(category: ErrorCategory, err: Error) -> Error {
+    if is_cancellation(&err) || category_of(&err) != ErrorCategory::Unclassified {
+        return err;
+    }
+    with_category(category, err)
+}
+
+/// The error for a child process that exited unsuccessfully: `message`, caused
+/// by the child's stderr when it wrote any. The stderr is its own link in the
+/// chain, so reporters can tell it apart from our messages.
+pub fn child_failed(output: &Output, message: impl Into<String>) -> Error {
+    stderr_failed(&output.stderr, message)
+}
+
+/// [`child_failed`] for a child whose `stderr` was collected some other way.
+pub fn stderr_failed(stderr: &[u8], message: impl Into<String>) -> Error {
+    let message = message.into();
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    if stderr.is_empty() {
+        return Error::msg(message);
+    }
+    Error::new(ChildStderr(stderr)).context(message)
+}
+
+/// What a failed child process wrote to stderr.
+#[derive(Debug)]
+pub struct ChildStderr(String);
+
+impl Display for ChildStderr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ChildStderr {}
+
 pub fn is_cancellation(err: &Error) -> bool {
     err.chain().any(|cause| {
         cause
@@ -37,6 +88,9 @@ pub fn is_cancellation(err: &Error) -> bool {
 pub fn category_of(err: &Error) -> ErrorCategory {
     err.chain()
         .find_map(|cause| {
+            if let Some(recategorized) = cause.downcast_ref::<Recategorized>() {
+                return Some(recategorized.category);
+            }
             if let Some(named) = cause.downcast_ref::<Categorized>() {
                 return Some(named.category);
             }
@@ -63,6 +117,26 @@ impl std::fmt::Display for Categorized {
 }
 
 impl std::error::Error for Categorized {}
+
+/// Stands in for the error it wraps: the same message and the same causes.
+#[derive(Debug)]
+struct Recategorized {
+    category: ErrorCategory,
+    inner: Error,
+}
+
+impl std::fmt::Display for Recategorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The top message only, never `{:#}`: the causes come from `source`.
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl std::error::Error for Recategorized {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
 
 fn api_category(status: StatusCode) -> ErrorCategory {
     match status {
@@ -181,6 +255,83 @@ mod tests {
 
         assert_eq!(format!("{err:#}"), ". is not a Managed Deep Agent project");
         assert!(err.source().is_none());
+    }
+
+    fn failed_output(stderr: &str) -> Output {
+        Output {
+            status: failed_status(),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn failed_status() -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(1 << 8)
+    }
+
+    #[cfg(windows)]
+    fn failed_status() -> std::process::ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(1)
+    }
+
+    #[test]
+    fn a_failed_child_carries_its_stderr_in_the_chain() {
+        let err = child_failed(&failed_output("Traceback\nImportError: x\n"), "emit failed");
+
+        assert_eq!(format!("{err:#}"), "emit failed: Traceback\nImportError: x");
+        assert_eq!(
+            err.chain()
+                .find_map(|cause| cause.downcast_ref::<ChildStderr>())
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("Traceback\nImportError: x")
+        );
+    }
+
+    #[test]
+    fn a_silent_failed_child_adds_no_stderr_link() {
+        let err = child_failed(&failed_output("  \n"), "emit failed");
+
+        assert_eq!(format!("{err:#}"), "emit failed");
+        assert!(err.chain().all(|cause| !cause.is::<ChildStderr>()));
+    }
+
+    #[test]
+    fn a_recategorized_error_keeps_its_text_and_its_causes() {
+        let child = child_failed(&failed_output("ImportError: x\n"), "emit failed");
+        let err = with_category(ErrorCategory::Compilation, child.context("compile failed"));
+
+        assert_eq!(
+            format!("{err:#}"),
+            "compile failed: emit failed: ImportError: x"
+        );
+        assert_eq!(category_of(&err), ErrorCategory::Compilation);
+        assert!(err.chain().any(|cause| cause.is::<ChildStderr>()));
+    }
+
+    #[test]
+    fn only_an_unclassified_error_takes_a_new_category() {
+        let unclassified = categorize_unclassified(ErrorCategory::Project, Error::msg("x"));
+        let named = categorize_unclassified(
+            ErrorCategory::Project,
+            categorized(ErrorCategory::Authentication, "x"),
+        );
+
+        assert_eq!(category_of(&unclassified), ErrorCategory::Project);
+        assert_eq!(category_of(&named), ErrorCategory::Authentication);
+    }
+
+    #[test]
+    fn a_recategorized_cancellation_is_still_a_cancellation() {
+        let interrupted = Error::new(std::io::Error::from(std::io::ErrorKind::Interrupted));
+
+        assert!(is_cancellation(&with_category(
+            ErrorCategory::Compilation,
+            interrupted.context("failed to run npm")
+        )));
     }
 
     #[test]

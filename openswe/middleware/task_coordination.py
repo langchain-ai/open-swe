@@ -1,19 +1,19 @@
 import logging
-from collections.abc import Awaitable, Callable
 from typing import Self
 from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
-from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token
-from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
+from openswe.input_messages import (
+    RunMessage,
+    dynamic_context_hash,
+    run_context,
+    visible_dynamic_context_hashes,
+)
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.tasks.messages import TaskMessage
 from openswe.tasks.schemas import Thread
 from openswe.tasks.store import TaskContext, TaskDelegation, TaskMembership
 from openswe.utils.thread_reads import read_thread
@@ -26,10 +26,14 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         self.thread_id = thread_id
         self.enabled = enabled
         self.context = context
-        self.instructions = prompt(
-            "tasks/role",
-            role=context.membership.role if context else "coordinator",
-            delegation_enabled=self.can_delegate,
+        # The thread's role, told in the conversation so the system prompt never changes.
+        self.instructions = run_context(
+            "task-role",
+            prompt(
+                "tasks/role",
+                role=context.membership.role if context else "coordinator",
+                delegation_enabled=self.can_delegate,
+            ),
         )
 
     @classmethod
@@ -54,12 +58,13 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     def can_delegate(self) -> bool:
         return self.enabled and not self.is_worker
 
-    async def abefore_model(
-        self, state: AgentState, runtime: Runtime
-    ) -> dict[str, list[RunMessage]] | None:
+    async def context_message(self) -> str | None:
+        """The task's context, as the model is told it; a worker's coordinator's proxy kept fresh."""
         if self.context is None:
             self.context = await TaskMembership.context_for_thread(self.thread_id)
-        if self.context is not None and self.is_worker:
+        if self.context is None:
+            return None
+        if self.is_worker:
             try:
                 await maybe_refresh_proxy_token(self.context.task.require_coordinator())
             except Exception:
@@ -68,28 +73,23 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                     exc_info=True,
                     extra={"thread_id": self.thread_id},
                 )
-        messages: list[RunMessage] = []
-        if self.context is not None:
-            content = prompt(
-                "tasks/context",
-                task_id=str(self.context.task.id),
-                title=self.context.task.title,
-                coordinator_thread_id=self.context.task.coordinator_thread_id,
-            )
-            if dynamic_context_hash(content) not in visible_dynamic_context_hashes(state):
-                messages.append(
-                    {"role": "user", "id": f"task-context:{uuid4()}", "content": content}
-                )
-        if postgres.configured():
-            owed = await TaskMessage.owed(self.thread_id, state["messages"])
-            messages.extend(TaskMessage.messages(owed))
-        return {"messages": messages} if messages else None
+        return prompt(
+            "tasks/context",
+            task_id=str(self.context.task.id),
+            title=self.context.task.title,
+            coordinator_thread_id=self.context.task.coordinator_thread_id,
+        )
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        blocks = list(request.system_message.content_blocks) if request.system_message else []
-        blocks.append({"type": "text", "text": self.instructions})
-        return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
+    async def abefore_model(
+        self, state: AgentState, runtime: Runtime
+    ) -> dict[str, list[RunMessage]] | None:
+        visible = visible_dynamic_context_hashes(state)
+        added: list[RunMessage] = [
+            {"role": "user", "id": f"{prefix}{uuid4()}", "content": content}
+            for prefix, content in (
+                ("task-role:", self.instructions),
+                ("task-context:", await self.context_message()),
+            )
+            if content is not None and dynamic_context_hash(content) not in visible
+        ]
+        return {"messages": added} if added else None

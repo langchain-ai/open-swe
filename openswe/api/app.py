@@ -10,6 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.routing import Route
 
+from openswe.agent_api import server as agent_api_server
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
 from openswe.api.request_ids import add_request_ids
@@ -17,12 +18,10 @@ from openswe.api.tracing import add_trace_resource_names, configure_datadog_envi
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
-from openswe.github.channel import router as github_channel_router
 from openswe.github.routes import router as github_webhook_router
-from openswe.linear.channel import router as linear_channel_router
+from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
-from openswe.remote_runtime import server as remote_runtime_server
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
@@ -32,7 +31,7 @@ from openswe.threads.router import ThreadRouter
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
-from openswe.utils.event_loop import pin_single_event_loop
+from openswe.utils.event_loop import pin_single_event_loop, watch_for_stalls
 from openswe.utils.http_pool import close_pool as close_http_pool
 
 logger = logging.getLogger(__name__)
@@ -47,6 +46,7 @@ AGENT_MCP = agent_mcp_server.build_mount()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe import database
+    from openswe.agent_api.client import validate_mda_startup_config
     from openswe.analytics.worker import start_worker, stop_worker
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
@@ -55,7 +55,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.jobs.kinds import start_jobs
-    from openswe.remote_runtime.client import validate_mda_startup_config
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.transcript import listener as transcript_listener
@@ -112,6 +111,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Warming the agent build failed", exc_info=True)
     try:
         async with AsyncExitStack() as stack:
+            stack.enter_context(watch_for_stalls())
             if AGENT_MCP is not None:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
@@ -162,18 +162,17 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
-    app.include_router(linear_channel_router)
+    app.include_router(linear_webhook_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
-    app.include_router(github_channel_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
     app.include_router(reviewer_eval_report_router)
-    # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
+    # Routed at the exact path so no redirect sits between MDA and the agent API.
     app.router.routes.append(
-        Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
+        Route(agent_api_server.API_PATH, agent_api_server.API, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server
