@@ -335,3 +335,77 @@ it("refreshes terminal progress when the worker finishes before the enqueue resp
   expect(screen.queryByText("Frontend review queued…")).toBeNull()
   client.clear()
 })
+
+it("keeps interaction coverage separate and preserves PR-only states without a false comparison", () => {
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("fixture image"))
+  const media =
+    "/dashboard/api/reviews/acme/widgets/7/frontend-reviews/00000000-0000-0000-0000-000000000001/media/state.png"
+  const baseline: FrontendScenario = {
+    id: "route",
+    title: "Projects",
+    path: "/projects",
+    status: "complete",
+    before_url: media,
+    after_url: media,
+    diff_url: media,
+    mask_url: media,
+    before_video_url: null,
+    after_video_url: null,
+    width: 100,
+    height: 100,
+    metrics: {
+      changed_pixels: 0,
+      total_pixels: 10000,
+      changed_ratio: 0,
+      threshold: 18,
+    },
+    regions: [],
+    mask_rects: [],
+    annotations: [],
+    tile_size: 32,
+    min_region_pixels: 4,
+    error: null,
+  }
+  render(
+    <FrontendReportView
+      run={{
+        ...run,
+        status: "complete",
+        auth_mode: "none",
+        paths: ["/projects"],
+        error: null,
+        report: {
+          ...run.report!,
+          scenarios: [
+            baseline,
+            {
+              ...baseline,
+              id: "dialog",
+              title: "Create dialog · Filled",
+              interaction: true,
+              status: "blocked",
+              before_url: null,
+              metrics: null,
+              before_error: "Control missing on base",
+              actions: ["click #create", "type #name"],
+              layout_warnings: ["PR: Dialog extends beyond viewport"],
+            },
+          ],
+        },
+      }}
+    />
+  )
+  expect(screen.getByText("Coverage: 1/1 routes captured")).toBeTruthy()
+  expect(screen.getByText("Interactions: 0/1 states paired")).toBeTruthy()
+  fireEvent.click(screen.getByText("Interaction states · 0/1 paired"))
+  fireEvent.click(
+    screen.getByRole("button", { name: /Create dialog · Filled/ })
+  )
+  expect(screen.getByText("Base: Control missing on base")).toBeTruthy()
+  expect(screen.getByAltText("PR interaction state")).toBeTruthy()
+  expect(
+    screen.getByText("PR state only · No pixel comparison available")
+  ).toBeTruthy()
+  expect(screen.getByText("PR: Dialog extends beyond viewport")).toBeTruthy()
+  expect(screen.queryByRole("region", { name: "Visual comparison" })).toBeNull()
+})

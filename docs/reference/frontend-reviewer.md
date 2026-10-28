@@ -28,6 +28,18 @@ Expand **Ignore noisy areas** to draw up to twenty local exclusion rectangles, o
 
 The route list shows recorded change percentages, independent of viewer adjustments. **Changes and incomplete** hides completed paired captures with recorded zero differences, while retaining blocked, failed, missing, and fully excluded comparisons.
 
+## Interaction coverage
+
+Agent-created reviews can include short interaction journeys selected from the PR diff and affected components. The capture tool accepts at most three journeys and five saved states across the run. It replays identical steps against base and PR in fresh contexts, in addition to the static route screenshots. No additional browser dependencies are required.
+
+The supported actions are hover, press (capture while the mouse is held down), click (capture the resulting selected/open state), focus, type synthetic text, and Escape. Steps may name content that must become visible before capture. Setup steps do not need screenshots. The runner waits for rendering to settle, refuses missing/ambiguous/disabled/obscured targets, and records the planned action prefix and per-side blocker. Press releases away from the button to avoid accidentally clicking it. Only ordinary text/search/url inputs and textareas accept synthetic typing; password/file inputs and read-only controls are excluded. This is planned interaction replay, not unconstrained autonomous browsing or an accessibility audit.
+
+Prefer one changed flow: for example button hover/pressed, open dialog, and filled input. Inspect dialog boundaries, clipped controls, long content, and the resulting selected state when relevant to the diff. Geometry warnings flag possible clipping by hidden/clip containers or an off-viewport dialog; they require visual assessment and are not bug verdicts. Do not submit consequential forms or mutate real customer data. Each journey starts from its requested route rather than inheriting another journey's state.
+
+The report keeps **Interactions: Not captured** explicit for static captures. Interaction screenshots use the existing pixel comparison viewer and live in a collapsed **Interaction states** group. Opening a state reveals its planned replay steps and any blockers/clipping warnings. Missing base controls preserve PR-only evidence without inventing a baseline or pixel comparison; subsequent dependent states on that side remain incomplete. Historical static reports still work.
+
+Journeys are supplied by the `review_frontend` agent tool, not automatically inferred by the dashboard's URL-only start form. Both static and interactive live capture remain disabled by the same provider network-isolation gate. The local fixture demonstrates saved state presentation, not authenticated LangSmith navigation or production capture.
+
 After a successful dashboard capture, Open SWE starts an MDA assessment of the saved before/after images. The model receives each scenario's screenshots, original dimensions, and pixel metrics. Its summary and annotations are saved alongside the immutable capture. The dedicated assessment run can only read that report and submit an assessment; it cannot edit source, recapture pages, publish a code review, or post GitHub comments. Its screenshot-bearing thread is private to the initiating person under the app's existing private-thread policy and stays out of general thread lists.
 
 Capture status, AI assessment, build verification, and video availability are separate report fields. The interface links to the assessment thread and shows when the model is running or fails. An assessment failure retains all screenshots and pixel evidence. Missing recordings or a review that has not run are shown explicitly. The viewer can render paired recordings when a capture adapter supplies them; the current browser adapter does not record video.
@@ -60,7 +72,7 @@ Ordinary agent/reviewer runs also have typed `review_frontend`, `read_frontend_r
 1. Apply the feature's database migration with the normal Open SWE deployment process, and deploy the backend, MDA runtime, and UI together.
 2. Integrate and verify the browser provider's complete network-isolation contract before replacing the capture blocker. Confirm private-network, metadata, loopback, worker, popup, WebSocket, and DNS-rebinding attempts cannot reach their destinations. Then verify one anonymous paired capture and one dummy-auth blocker.
 3. Connect the existing QA harness's disposable identity and seeded workspace before enabling private LangSmith navigation.
-4. Add full served-SHA verification and deterministic route readiness, interaction journeys, flags, and data. Keep incomplete coverage visible.
+4. Add full served-SHA verification and deterministic application readiness, seeded flags/data, and automatic journey planning from dashboard starts. Keep incomplete coverage visible.
 5. Pilot a few stable surfaces before adding automatic PR/deployment triggers or a required check.
 
 This implementation does not create a custom domain, deploy the application, submit a real login, or enable automatic review for every PR.

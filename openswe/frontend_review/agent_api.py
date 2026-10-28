@@ -12,6 +12,7 @@ from runtime_api.frontend_review import (
     SUBMIT_FRONTEND_REVIEW,
     CapturedFrontendReview,
     CaptureFrontendReview,
+    FrontendInteractionEvidence,
     FrontendPageResult,
     FrontendScreenshot,
     ReadFrontendReview,
@@ -117,6 +118,21 @@ async def _view(review: FrontendReviewRun) -> CapturedFrontendReview:
         summary=report.summary if report else None,
         ai_review_status=report.ai_review_status if report else "not_run",
         build_verification=report.build_verification if report else "unverified",
+        interactions=[
+            FrontendInteractionEvidence(
+                scenario_id=s.id,
+                title=s.title,
+                status=s.status,
+                actions=s.actions,
+                before_error=s.before_error,
+                after_error=s.after_error,
+                layout_warnings=s.layout_warnings,
+            )
+            for s in report.scenarios
+            if s.interaction
+        ]
+        if report
+        else [],
         pages=[
             FrontendPageResult(
                 id=scenario.id,

@@ -343,9 +343,17 @@ export function FrontendReportView({
   const scenario =
     visibleScenarios.find((item) => item.id === scenarioId) ??
     visibleScenarios[0]
+  const interactions = scenarios.filter((item) => item.interaction)
+  const pairedInteractions = interactions.filter(
+    (item) => item.status === "complete" && item.before_url && item.after_url
+  ).length
   const complete =
     report?.scenarios.filter(
-      (item) => item.status === "complete" && item.before_url && item.after_url
+      (item) =>
+        !item.interaction &&
+        item.status === "complete" &&
+        item.before_url &&
+        item.after_url
     ).length ?? 0
   const statusColor =
     run.status === "failed"
@@ -401,6 +409,12 @@ export function FrontendReportView({
             Coverage: {complete}/{run.paths.length} routes captured
           </span>
           <span>
+            Interactions:{" "}
+            {interactions.length > 0
+              ? `${pairedInteractions}/${interactions.length} states paired`
+              : "Not captured"}
+          </span>
+          <span>
             AI review:{" "}
             {report?.ai_review_status === "complete"
               ? "Complete"
@@ -421,6 +435,12 @@ export function FrontendReportView({
             {report?.video_status === "recorded" ? "Recorded" : "Not captured"}
           </span>
         </div>
+        {pairedInteractions < interactions.length && (
+          <p role="status" className="text-xs text-warning-secondary">
+            Some interaction states are incomplete. This run does not cover the
+            whole planned flow.
+          </p>
+        )}
         {report?.assessment_error && (
           <p role="status" className="text-sm text-warning-secondary">
             AI review: {report.assessment_error}. Captured evidence is still
@@ -482,33 +502,60 @@ export function FrontendReportView({
               onCheckedChange={(checked) => setChangesOnly(checked === true)}
             />
             <p role="status" className="text-xs text-secondary">
-              Showing {visibleScenarios.length}/{scenarios.length} routes
+              Showing {visibleScenarios.length}/{scenarios.length}{" "}
+              {interactions.length > 0 ? "captures" : "routes"}
             </p>
           </div>
-          <div
-            className="flex flex-wrap gap-space-2"
-            aria-label="Captured routes"
-          >
-            {visibleScenarios.map((item) => {
-              const recordedChange =
-                item.metrics && item.metrics.total_pixels > 0
-                  ? `${(item.metrics.changed_ratio * 100).toFixed(2)}% recorded change`
-                  : "Not compared"
-              return (
-                <Button
-                  key={item.id}
-                  color="secondary"
-                  variant={item.id === scenario?.id ? "outlined" : "plain"}
-                  size="sm"
-                  onClick={() => setScenarioId(item.id)}
-                  aria-pressed={item.id === scenario?.id}
-                  aria-label={`${item.title} · ${item.status} · ${recordedChange}`}
-                >
-                  {item.title} · {item.status} · {recordedChange}
-                </Button>
-              )
-            })}
-          </div>
+          {[false, true].map((interaction) => {
+            const items = visibleScenarios.filter(
+              (item) => Boolean(item.interaction) === interaction
+            )
+            if (items.length === 0) return null
+            const buttons = (
+              <div
+                className="flex flex-wrap gap-space-2"
+                aria-label={
+                  interaction
+                    ? "Captured interaction states"
+                    : "Captured routes"
+                }
+              >
+                {items.map((item) => {
+                  const recordedChange =
+                    item.metrics && item.metrics.total_pixels > 0
+                      ? `${(item.metrics.changed_ratio * 100).toFixed(2)}% recorded change`
+                      : "Not compared"
+                  return (
+                    <Button
+                      key={item.id}
+                      color="secondary"
+                      variant={item.id === scenario?.id ? "outlined" : "plain"}
+                      size="sm"
+                      onClick={() => setScenarioId(item.id)}
+                      aria-pressed={item.id === scenario?.id}
+                      aria-label={`${item.title} · ${item.status} · ${recordedChange}`}
+                    >
+                      {item.title} · {item.status} · {recordedChange}
+                    </Button>
+                  )
+                })}
+              </div>
+            )
+            return interaction ? (
+              <details
+                key="interactions"
+                className="rounded-md border border-default p-space-3"
+              >
+                <summary className="cursor-pointer text-sm font-medium">
+                  Interaction states · {pairedInteractions}/
+                  {interactions.length} paired
+                </summary>
+                <div className="pt-space-3">{buttons}</div>
+              </details>
+            ) : (
+              <div key="routes">{buttons}</div>
+            )
+          })}
           <p className="text-xs text-secondary">
             Route percentages use the saved capture settings. Viewer settings
             apply only to the open screenshot comparison.
@@ -526,6 +573,37 @@ export function FrontendReportView({
             <h3 className="text-sm font-medium">{scenario.title}</h3>
             <span className="text-xs text-secondary">{scenario.path}</span>
           </div>
+          {scenario.interaction && (
+            <div className="mb-space-3 flex flex-col gap-space-2 text-xs text-secondary">
+              <p>
+                Interaction checkpoint ·{" "}
+                {scenario.status === "complete"
+                  ? "Replayed on base and PR"
+                  : "Incomplete comparison"}
+              </p>
+              {scenario.before_error && (
+                <p role="status">Base: {scenario.before_error}</p>
+              )}
+              {scenario.after_error && (
+                <p role="status">PR: {scenario.after_error}</p>
+              )}
+              {scenario.layout_warnings?.map((warning) => (
+                <p key={warning} className="text-warning-secondary">
+                  {warning}
+                </p>
+              ))}
+              <details>
+                <summary className="cursor-pointer">
+                  Planned replay steps
+                </summary>
+                <ol className="mt-space-2 list-inside list-decimal">
+                  {scenario.actions?.map((action, index) => (
+                    <li key={index}>{action}</li>
+                  ))}
+                </ol>
+              </details>
+            </div>
+          )}
           <EvidenceViewer
             key={`${run.id}:${scenario.id}`}
             scenario={scenario}

@@ -13,6 +13,7 @@ from runtime_api.frontend_review import (
     CapturedFrontendReview,
     CaptureFrontendReview,
     FrontendAssessmentArguments,
+    FrontendJourney,
     FrontendReviewArguments,
     ReadFrontendReview,
     ReadFrontendReviewArguments,
@@ -50,6 +51,7 @@ def frontend_review_tool(backend: OpenSweBackend, description: str) -> Structure
         head_url: str,
         paths: list[str] | None = None,
         auth_mode: str = "dummy",
+        journeys: list[FrontendJourney] | None = None,
     ) -> list[dict[str, JsonValue]]:
         arguments = FrontendReviewArguments.model_validate(
             {
@@ -57,6 +59,7 @@ def frontend_review_tool(backend: OpenSweBackend, description: str) -> Structure
                 "head_url": head_url,
                 "paths": paths or ["/"],
                 "auth_mode": auth_mode,
+                "journeys": journeys or [],
             }
         )
         result = await call(

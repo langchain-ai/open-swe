@@ -12,6 +12,8 @@ from PIL import Image
 from runtime_api.frontend_review import (
     CaptureFrontendReview,
     FrontendAssessmentArguments,
+    FrontendInteractionStep,
+    FrontendJourney,
     FrontendReviewArguments,
     ReadFrontendReview,
     ReadFrontendReviewArguments,
@@ -93,7 +95,18 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
         "repo",
         7,
         StartFrontendReview(
-            base_url="https://base.vercel.app", head_url="https://head.vercel.app", auth_mode="none"
+            base_url="https://base.vercel.app",
+            head_url="https://head.vercel.app",
+            auth_mode="none",
+            journeys=[
+                FrontendJourney(
+                    title="Open dialog",
+                    path="/",
+                    steps=[
+                        FrontendInteractionStep(action="click", selector="#open", checkpoint="Open")
+                    ],
+                )
+            ],
         ),
     )
     assert (run.base_sha, run.head_sha) == ("a" * 40, "b" * 40)
@@ -109,6 +122,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
     )
     restored = await service.get_review("acme", "repo", 7, run.id)
     assert restored is not None and restored.status == "complete"
+    assert restored.journeys == run.journeys and restored.journeys[0]["title"] == "Open dialog"
     running = await service.set_assessment_state(restored, "running", thread_id="review-thread")
     assert running.report is not None and running.report["ai_review_status"] == "running"
     failed = await service.set_assessment_state(

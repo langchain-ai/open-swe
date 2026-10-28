@@ -38,6 +38,7 @@ class FrontendReviewRun(EvidenceRecord):
     paths: Mapped[list[str]] = mapped_column(JSONB)
     auth_mode: Mapped[AuthMode] = mapped_column(Text)
     status: Mapped[RunStatus] = mapped_column(Text, default="pending")
+    journeys: Mapped[list[dict[str, JsonValue]]] = mapped_column(JSONB, default_factory=list)
     error: Mapped[str | None] = mapped_column(default=None)
     report: Mapped[dict[str, JsonValue] | None] = mapped_column(
         JSONB(none_as_null=True), default=None

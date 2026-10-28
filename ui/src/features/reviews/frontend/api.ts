@@ -41,6 +41,11 @@ export interface FrontendScenario {
   tile_size: number
   min_region_pixels: number
   annotations: FrontendAnnotation[]
+  interaction?: boolean
+  actions?: string[]
+  before_error?: string | null
+  after_error?: string | null
+  layout_warnings?: string[]
   error: string | null
 }
 

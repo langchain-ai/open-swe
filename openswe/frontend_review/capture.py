@@ -8,17 +8,21 @@ import logging
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from io import BytesIO
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import uuid7
 
 import httpx2
+from PIL import Image
 from pydantic import JsonValue, TypeAdapter
+from runtime_api.frontend_review import FrontendJourney
 from websockets.asyncio.client import ClientConnection, connect
 
 from openswe.sandboxes.browsers import LangSmithBrowser
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 
+from .interactions import InteractionCapture, InteractionReplay
 from .models import FrontendReviewRun
 from .pixels import compare
 from .schemas import FrontendReport, FrontendScenario
@@ -170,6 +174,26 @@ class _CDP:
         return _object.validate_python(reply.get("result", {})).get("value")
 
     async def screenshot(self, url: str) -> bytes:
+        async with self.page(url) as session:
+            shot = await self.call(
+                "Page.captureScreenshot",
+                {"format": "png", "captureBeyondViewport": False},
+                session=session,
+            )
+            data = shot.get("data")
+            if not isinstance(data, str):
+                raise RuntimeError("Preview browser returned no screenshot")
+            return base64.b64decode(data, validate=True)
+
+    async def interact(self, url: str, journey: FrontendJourney) -> list[InteractionCapture]:
+        try:
+            async with self.page(url) as session:
+                return await InteractionReplay(self, session, url).capture(journey.steps)
+        except (RuntimeError, TimeoutError) as exc:
+            return [InteractionCapture(error=str(exc)) for s in journey.steps if s.checkpoint]
+
+    @asynccontextmanager
+    async def page(self, url: str) -> AsyncIterator[str]:
         context = await self.call("Target.createBrowserContext")
         context_id = context.get("browserContextId")
         if not isinstance(context_id, str):
@@ -249,15 +273,7 @@ class _CDP:
                 )
             if self._checked_document_status(session, frame) is None:
                 raise RuntimeError("Preview main document response is unavailable")
-            shot = await self.call(
-                "Page.captureScreenshot",
-                {"format": "png", "captureBeyondViewport": False},
-                session=session,
-            )
-            data = shot.get("data")
-            if not isinstance(data, str):
-                raise RuntimeError("Preview browser returned no screenshot")
-            return base64.b64decode(data, validate=True)
+            yield session
         finally:
             self._document_status = {
                 key: status for key, status in self._document_status.items() if key[0] != session
@@ -349,9 +365,62 @@ async def capture_run(run: FrontendReviewRun) -> None:
                         regions=pixels.regions,
                     )
                 )
+            for journey_index, raw in enumerate(run.journeys):
+                journey = FrontendJourney.model_validate(raw)
+                before_states = await browser.interact(f"{run.base_url}{journey.path}", journey)
+                after_states = await browser.interact(f"{run.head_url}{journey.path}", journey)
+                actions: list[str] = []
+                checkpoint = 0
+                for step in journey.steps:
+                    actions.append(f"{step.action} {step.selector}")
+                    if not step.checkpoint:
+                        continue
+                    before_state, after_state = before_states[checkpoint], after_states[checkpoint]
+                    scenario_id = f"journey-{journey_index}-{checkpoint}"
+                    scenario = FrontendScenario(
+                        id=scenario_id,
+                        title=f"{journey.title} · {step.checkpoint}",
+                        path=journey.path,
+                        status="blocked",
+                        interaction=True,
+                        actions=list(actions),
+                        before_error=before_state.error,
+                        after_error=after_state.error,
+                        layout_warnings=[
+                            *(f"Base: {w}" for w in before_state.warnings),
+                            *(f"PR: {w}" for w in after_state.warnings),
+                        ],
+                    )
+                    for role, state in (("before", before_state), ("after", after_state)):
+                        if state.image is not None:
+                            with Image.open(BytesIO(state.image)) as image:
+                                scenario.width, scenario.height = image.size
+                            name = f"{scenario_id}-{role}.png"
+                            setattr(scenario, f"{role}_url", name)
+                            assets.append(
+                                EvidenceAsset(
+                                    name=name, content_type="image/png", content=state.image
+                                )
+                            )
+                    if before_state.image and after_state.image:
+                        pixels = await asyncio.to_thread(
+                            compare, before_state.image, after_state.image
+                        )
+                        scenario.status = "complete"
+                        scenario.metrics, scenario.regions = pixels.metrics, pixels.regions
+                        for kind, content in (("diff", pixels.difference), ("mask", pixels.mask)):
+                            name = f"{scenario_id}-{kind}.png"
+                            setattr(scenario, f"{kind}_url", name)
+                            assets.append(
+                                EvidenceAsset(name=name, content_type="image/png", content=content)
+                            )
+                    scenarios.append(scenario)
+                    checkpoint += 1
         report = FrontendReport(
             summary=(
-                f"Captured {len(scenarios)} paired routes anonymously. Pixel highlights show "
+                f"Captured {len(run.paths)} paired routes and "
+                f"{sum(s.interaction and s.status == 'complete' for s in scenarios)} paired interaction states. "
+                "Missing interaction states remain explicitly incomplete. Pixel highlights show "
                 "visual changes; AI design review has not run. Preview builds are not attested "
                 "to the recorded Git revisions. Video recording is unavailable."
             ),

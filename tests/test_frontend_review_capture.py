@@ -410,3 +410,170 @@ async def test_dedicated_assessment_never_prepares_the_regular_code_reviewer(
         "jump_to": None,
         "events": [],
     }
+
+
+async def test_interaction_replay_captures_pressed_before_release_and_keeps_missing_states_explicit() -> (
+    None
+):
+    from runtime_api.frontend_review import FrontendInteractionStep
+
+    from openswe.frontend_review.interactions import InteractionReplay
+
+    class Browser:
+        def __init__(self) -> None:
+            self.pressed = False
+            self.open = False
+            self.text = ""
+            self.frames: list[tuple[bool, bool, str]] = []
+            self.clicks = 0
+
+        async def evaluate(self, expression: str, session: str) -> JsonValue:
+            if expression == "location.href":
+                return "https://head.vercel.app/"
+            if expression.startswith("Boolean("):
+                return False
+            if expression.startswith("(selector =>"):
+                if '"#missing"' in expression:
+                    return None
+                if "const dialog" in expression:
+                    return (
+                        ["Dialog bounds extend beyond the captured viewport"] if self.open else []
+                    )
+                return {"x": 40, "y": 30}
+            return True
+
+        async def call(
+            self,
+            method: str,
+            params: dict[str, JsonValue] | None = None,
+            *,
+            session: str | None = None,
+        ) -> dict[str, JsonValue]:
+            params = params or {}
+            if method == "Input.dispatchMouseEvent":
+                if params["type"] == "mousePressed":
+                    self.pressed = True
+                elif params["type"] == "mouseReleased":
+                    if self.pressed and params["x"] == 40:
+                        self.clicks += 1
+                        self.open = True
+                    self.pressed = False
+            elif method == "Input.insertText":
+                assert isinstance(params["text"], str)
+                self.text = params["text"]
+            elif method == "Page.captureScreenshot":
+                self.frames.append((self.pressed, self.open, self.text))
+                return {"data": base64.b64encode(_png(Image.new("RGB", (2, 1)))).decode()}
+            return {}
+
+    browser = Browser()
+    states = await InteractionReplay(browser, "session", "https://head.vercel.app").capture(
+        [
+            FrontendInteractionStep(action="hover", selector="#open", checkpoint="Hover"),
+            FrontendInteractionStep(action="press", selector="#open", checkpoint="Pressed"),
+            FrontendInteractionStep(action="click", selector="#open"),
+            FrontendInteractionStep(
+                action="type",
+                selector="#name",
+                text="Design QA example",
+                checkpoint="Dialog filled",
+                expect_visible="#dialog",
+            ),
+            FrontendInteractionStep(
+                action="click", selector="#missing", checkpoint="Missing control"
+            ),
+            FrontendInteractionStep(action="focus", selector="#name", checkpoint="Dependent state"),
+        ]
+    )
+    assert browser.frames == [
+        (False, False, ""),
+        (True, False, ""),
+        (False, True, "Design QA example"),
+    ]
+    assert browser.clicks == 1  # Releasing the pressed-state capture must not activate the button.
+    assert states[2].warnings == ["Dialog bounds extend beyond the captured viewport"]
+    assert states[3].image is None and "missing" in (states[3].error or "")
+    assert states[4].image is None and "Earlier step" in (states[4].error or "")
+
+
+async def test_interaction_capture_keeps_route_pair_and_pr_only_state_when_control_is_new(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from runtime_api.frontend_review import FrontendJourney
+
+    from openswe.frontend_review.interactions import InteractionCapture
+    from openswe.frontend_review.service import _validate_report
+
+    png = _png(Image.new("RGB", (2, 1)))
+
+    class Browser:
+        async def screenshot(self, url: str) -> bytes:
+            return png
+
+        async def interact(self, url: str, journey: FrontendJourney) -> list[InteractionCapture]:
+            return (
+                [InteractionCapture(image=png)]
+                if "head" in url
+                else [InteractionCapture(error="New control missing on base")]
+            )
+
+    @asynccontextmanager
+    async def browser(_name: str) -> AsyncIterator[Browser]:
+        yield Browser()
+
+    run = FrontendReviewRun(
+        id=uuid7(),
+        pull_request_id=uuid7(),
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        base_url="https://base.vercel.app",
+        head_url="https://head.vercel.app",
+        paths=["/"],
+        auth_mode="none",
+        journeys=[
+            {
+                "title": "New dialog",
+                "path": "/",
+                "steps": [{"action": "click", "selector": "#open", "checkpoint": "Dialog open"}],
+            }
+        ],
+    )
+    run.pull_request = PullRequest(owner="acme", repo="widgets", number=7)
+    finish = AsyncMock()
+    monkeypatch.setattr(capture, "_browser", browser)
+    monkeypatch.setattr(capture, "finish_review", finish)
+    await capture.capture_run(run)
+    report = finish.call_args.kwargs["report"]
+    assert finish.call_args.kwargs["status"] == "complete"
+    assert report.scenarios[0].status == "complete"
+    state = report.scenarios[1]
+    assert state.interaction and state.status == "blocked" and state.metrics is None
+    assert state.before_url is None and state.after_url is not None
+    assert state.before_error == "New control missing on base"
+    _validate_report(report, finish.call_args.kwargs["assets"], complete=True)
+
+
+@pytest.mark.parametrize("outside_route", [False, True])
+def test_capture_rejects_excess_or_out_of_scope_interaction_work(outside_route: bool) -> None:
+    from pydantic import ValidationError
+
+    from openswe.frontend_review.schemas import StartFrontendReview
+
+    step = {"action": "hover", "selector": "#changed", "checkpoint": "Hover"}
+    with pytest.raises(
+        ValidationError, match="requested routes" if outside_route else "at most five"
+    ):
+        StartFrontendReview.model_validate(
+            {
+                "base_url": "https://base.vercel.app",
+                "head_url": "https://head.vercel.app",
+                "paths": ["/projects"],
+                "journeys": [
+                    {
+                        "title": "Changed control",
+                        "path": "/settings" if outside_route else "/projects",
+                        "steps": [step] if outside_route else [step] * 6,
+                    }
+                ],
+            }
+        )

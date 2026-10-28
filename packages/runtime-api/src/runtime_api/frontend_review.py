@@ -1,12 +1,38 @@
 """A PR-bound anonymous visual capture, answered by Open SWE's evidence service."""
 
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from runtime_api.endpoint import Endpoint
 from runtime_api.operations import RunRequest
+
+
+class FrontendInteractionStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["hover", "press", "click", "focus", "type", "escape"]
+    selector: str = Field(min_length=1, max_length=300)
+    text: str | None = Field(default=None, max_length=200)
+    checkpoint: str | None = Field(default=None, min_length=1, max_length=100)
+    expect_visible: str | None = Field(default=None, min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def typed_text(self) -> Self:
+        if (self.action == "type") != (self.text is not None):
+            raise ValueError("Only type steps require synthetic text")
+        if self.action == "press" and self.checkpoint is None:
+            raise ValueError("A press step must capture its transient active state")
+        return self
+
+
+class FrontendJourney(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=100)
+    path: str = Field(min_length=1, max_length=500)
+    steps: list[FrontendInteractionStep] = Field(min_length=1, max_length=8)
 
 
 class FrontendReviewArguments(BaseModel):
@@ -16,6 +42,18 @@ class FrontendReviewArguments(BaseModel):
     head_url: str = Field(max_length=2000)
     paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=5)
     auth_mode: Literal["dummy", "none"] = "dummy"
+    journeys: list[FrontendJourney] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def bounded_journeys(self) -> Self:
+        if any(journey.path not in self.paths for journey in self.journeys):
+            raise ValueError("Interaction journeys must use requested routes")
+        checkpoints = sum(step.checkpoint is not None for j in self.journeys for step in j.steps)
+        if self.journeys and not all(any(s.checkpoint for s in j.steps) for j in self.journeys):
+            raise ValueError("Each interaction journey needs a checkpoint")
+        if checkpoints > 5:
+            raise ValueError("Choose at most five meaningful interaction checkpoints per review")
+        return self
 
 
 class CaptureFrontendReview(RunRequest):
@@ -40,6 +78,16 @@ class FrontendScreenshot(BaseModel):
     png_base64: str = Field(max_length=2_500_000)
 
 
+class FrontendInteractionEvidence(BaseModel):
+    scenario_id: str
+    title: str
+    status: Literal["complete", "blocked", "failed"]
+    actions: list[str]
+    before_error: str | None = None
+    after_error: str | None = None
+    layout_warnings: list[str] = Field(default_factory=list)
+
+
 class CapturedFrontendReview(BaseModel):
     review_id: str
     status: Literal["pending", "running", "complete", "blocked", "failed"]
@@ -49,7 +97,8 @@ class CapturedFrontendReview(BaseModel):
     build_verification: Literal["unverified", "verified"] = "unverified"
     ai_review_status: Literal["not_run", "running", "complete", "failed"] = "not_run"
     pages: list[FrontendPageResult] = Field(default_factory=list)
-    screenshots: list[FrontendScreenshot] = Field(default_factory=list, max_length=10)
+    interactions: list[FrontendInteractionEvidence] = Field(default_factory=list)
+    screenshots: list[FrontendScreenshot] = Field(default_factory=list, max_length=20)
 
 
 class ReadFrontendReviewArguments(BaseModel):

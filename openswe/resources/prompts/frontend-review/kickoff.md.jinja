@@ -1,6 +1,6 @@
 Review captured frontend evidence {{ review_id }} for this run's pull request and commits.
 
-First call `read_frontend_review` with that review id. Inspect every supplied before/after screenshot, alongside the changed-pixel metrics and the capture's coverage limits. Assess layout, hierarchy, readability, consistency, and visible regressions. Keep intended changes, design suggestions, and directly observed defects distinct. A screenshot does not prove interaction, keyboard, accessibility, or backend behavior.
+First call `read_frontend_review` with that review id. Inspect every supplied before/after screenshot, alongside the changed-pixel metrics and the capture's coverage limits. Assess layout, hierarchy, readability, consistency, and visible regressions. Keep intended changes, design suggestions, and directly observed defects distinct. Read the interaction metadata and replay steps alongside state screenshots. Check hover/pressed/focus/filled/selected states and dialogs for clipping or obscured controls when captured. Claim only the recorded states; static images do not establish unrecorded interactions, keyboard traversal, accessibility, or backend correctness.
 
 Call `submit_frontend_review` once with a concise, useful summary and scenario-specific annotations in original screenshot coordinates. Keep annotations precise and grounded in visible evidence. Mention missing build attestation or other material coverage gaps. Do not invent recordings or successful authentication. If there is no supported concern, explain that without inventing a finding.
 

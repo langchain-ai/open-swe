@@ -309,9 +309,24 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
     )
   if (!beforeUrl || !afterUrl)
     return (
-      <Card className="p-space-5 text-sm text-secondary">
-        {scenario.error ??
-          "This scenario has no paired screenshots. It does not count as visually reviewed."}
+      <Card className="flex flex-col gap-space-3 p-space-5 text-sm text-secondary">
+        <p>
+          {scenario.error ??
+            "This scenario has no paired screenshots. It does not count as visually reviewed."}
+        </p>
+        {(beforeUrl || afterUrl) && (
+          <figure>
+            <figcaption className="mb-space-2 text-xs">
+              {afterUrl ? "PR state only" : "Base state only"} · No pixel
+              comparison available
+            </figcaption>
+            <img
+              src={evidenceMediaUrl((afterUrl || beforeUrl)!)}
+              alt={afterUrl ? "PR interaction state" : "Base interaction state"}
+              className="h-auto max-w-full rounded-md border border-default"
+            />
+          </figure>
+        )}
       </Card>
     )
   if (!loaded || !comparison)

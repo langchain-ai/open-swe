@@ -4,7 +4,8 @@ from typing import Literal, Self
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+from runtime_api.frontend_review import FrontendReviewArguments
 
 RunStatus = Literal["pending", "running", "complete", "blocked", "failed"]
 AuthMode = Literal["dummy", "none"]
@@ -20,9 +21,7 @@ MEDIA_FIELDS = (
 )
 
 
-class StartFrontendReview(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class StartFrontendReview(FrontendReviewArguments):
     base_url: str = Field(max_length=2000)
     head_url: str = Field(max_length=2000)
     paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=5)
@@ -112,6 +111,11 @@ class FrontendScenario(BaseModel):
     mask_rects: list[Rectangle] = Field(default_factory=list, max_length=100)
     tile_size: int = Field(default=32, ge=1, le=256)
     min_region_pixels: int = Field(default=4, ge=1)
+    interaction: bool = False
+    actions: list[str] = Field(default_factory=list, max_length=8)
+    before_error: str | None = Field(default=None, max_length=1000)
+    after_error: str | None = Field(default=None, max_length=1000)
+    layout_warnings: list[str] = Field(default_factory=list, max_length=10)
     error: str | None = Field(default=None, max_length=3000)
 
 
@@ -122,7 +126,7 @@ class FrontendReport(BaseModel):
     assessment_error: str | None = Field(default=None, max_length=3000)
     build_verification: Literal["unverified", "verified"] = "unverified"
     video_status: Literal["unavailable", "recorded"] = "unavailable"
-    scenarios: list[FrontendScenario] = Field(default_factory=list, max_length=5)
+    scenarios: list[FrontendScenario] = Field(default_factory=list, max_length=10)
 
 
 class FrontendReviewView(BaseModel):

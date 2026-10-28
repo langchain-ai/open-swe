@@ -109,6 +109,9 @@ async def create_review(
         base_url=request.base_url,
         head_url=request.head_url,
         paths=request.paths,
+        journeys=[
+            _JSON_OBJECT.validate_python(j.model_dump(mode="json")) for j in request.journeys
+        ],
         auth_mode=request.auth_mode,
         status=(
             "blocked"
@@ -225,7 +228,7 @@ def _validate_report(
         or report.assessment_error is not None
     ):
         raise ValueError("Capture cannot publish an AI assessment")
-    if len(assets) > 30 or sum(len(asset.content) for asset in assets) > MAX_RUN_BYTES:
+    if len(assets) > 40 or sum(len(asset.content) for asset in assets) > MAX_RUN_BYTES:
         raise ValueError("Frontend evidence exceeds the per-run limit")
     by_name = {asset.name: asset for asset in assets}
     if len(by_name) != len(assets):
@@ -234,7 +237,10 @@ def _validate_report(
     referenced: set[str] = set()
     if report.build_verification != "unverified":
         raise ValueError("Preview build verification is not configured")
-    if complete and (not report.scenarios or any(s.status != "complete" for s in report.scenarios)):
+    if complete and (
+        not report.scenarios
+        or any(s.status != "complete" for s in report.scenarios if not s.interaction)
+    ):
         raise ValueError("A complete run requires completed capture scenarios")
     if len({scenario.id for scenario in report.scenarios}) != len(report.scenarios):
         raise ValueError("Capture scenario ids must be unique")
@@ -298,7 +304,11 @@ async def finish_review(
         if run.auth_mode == "dummy" and status != "blocked":
             raise ValueError("Dummy authentication cannot produce a completed capture")
         if report is not None:
-            captured_paths = [scenario.path for scenario in report.scenarios]
+            captured_paths = [
+                scenario.path for scenario in report.scenarios if not scenario.interaction
+            ]
+            if any(s.path not in run.paths for s in report.scenarios):
+                raise ValueError("Interaction states must use the requested routes")
             if not set(captured_paths).issubset(run.paths) or (
                 status == "complete" and sorted(captured_paths) != sorted(run.paths)
             ):
