@@ -148,7 +148,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         "anthropic:claude-opus-5-5", "high", max_tokens=64_000
     )
     # A thread in no task gets no task context.
-    assert context == {"instructions": "", "message": None}
+    assert context == {"instructions": None, "message": None}
     assert refreshed == {"expires_at": None}
     refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
 
@@ -223,7 +223,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
-    assert [prompt["working_dir"] for prompt in prompts] == ["/workspace"]
+    assert len(prompts) == 1
     bound.assert_awaited_once_with("thread-1", "box-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()

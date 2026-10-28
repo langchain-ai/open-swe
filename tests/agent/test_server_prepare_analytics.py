@@ -1,18 +1,23 @@
-"""Analytics wiring in ``record_agent_run``, which records an agent turn's start.
+"""An agent turn's preparation and the record of its start, with the services they read faked.
 
-Covers the identity data it hands to ``record_agent_invocation_usage`` across public
-and private thread scopes, including the public GitHub profile lookup hit / null-name /
-failure / cache paths.
+Covers the identity data ``record_agent_run`` hands to ``record_agent_invocation_usage``
+across public and private thread scopes, including the public GitHub profile lookup
+hit / null-name / failure / cache paths, and the system prompt a thread keeps from
+one turn to the next.
 """
 
 import json
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.runtime import Runtime
 
 import openswe.server as server
 from openswe.agent_api.tokens import AgentTurnSettings
+from openswe.middleware.prepare_run import PrepareRunState
+from openswe.prompt import construct_system_prompt
 from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
@@ -45,6 +50,14 @@ class _FakeGitHubClient:
         return self._responses.pop(0)
 
 
+class _ReadyProxy:
+    def follow(self, _sandbox_id: object) -> None:
+        pass
+
+    async def ready(self) -> Any:
+        return MagicMock()
+
+
 @pytest.fixture(autouse=True)
 def _clear_public_profile_cache() -> None:
     ttl_cache.clear()
@@ -67,6 +80,12 @@ def _turn(config: dict[str, Any], *, credential_login: str | None = None) -> Age
     )
 
 
+def _middleware(config: dict[str, Any]) -> server.PrepareAgentRunMiddleware:
+    return server.PrepareAgentRunMiddleware(
+        cast(Any, config), _turn(config), repo_instructions=None
+    )
+
+
 @pytest.fixture
 def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     # Public threads resolve the bot installation token; private threads resolve
@@ -82,6 +101,22 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         harness["recorded"] = kwargs
 
     monkeypatch.setattr(server, "record_agent_invocation_usage", fake_record_agent_invocation_usage)
+    monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
+
+    monkeypatch.setattr(
+        server, "get_or_create_sandbox_backend_proxy", lambda thread_id: _ReadyProxy()
+    )
+    monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
+
+    async def fake_work_dir(backend: Any) -> str:
+        return "/workspace"
+
+    monkeypatch.setattr(server, "resolve_sandbox_work_dir", fake_work_dir)
+    monkeypatch.setattr(server, "load_workspace", _async_none)
+    monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
+    monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
+    monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
+    monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:
         async def get(self, thread_id: str) -> dict[str, Any]:
@@ -92,6 +127,14 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(server, "client", MagicMock(threads=_Threads()))
     return harness
+
+
+async def _async_none(*args: Any, **kwargs: Any) -> None:
+    return None
+
+
+async def _async_list(*args: Any, **kwargs: Any) -> list[Any]:
+    return []
 
 
 def _slack_config(**extra: Any) -> dict[str, Any]:
@@ -176,3 +219,62 @@ async def test_public_scope_resolves_profile_via_installation_token(
         "https://api.github.com/user",
     ]
     assert prepare_harness["recorded"]["github_user_id"] == 99
+
+
+async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_came_from(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any change to the system prompt misses the model provider's cache for the whole thread."""
+    monkeypatch.setattr(server, "construct_system_prompt", construct_system_prompt)
+    monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
+    prepare_harness["thread_metadata"] = {}
+    runtime = cast(Runtime[Any], MagicMock())
+    asked = HumanMessage(content="Fix the login", id="human-1")
+
+    from_slack = await _middleware(_slack_config())._prepare(
+        cast(PrepareRunState, {"messages": [asked]}), runtime
+    )
+    said = cast(list[dict[str, str]], from_slack["messages"])
+    told = [HumanMessage(content=message["content"]) for message in said]
+    later = cast(
+        PrepareRunState,
+        {
+            **{key: value for key, value in from_slack.items() if key != "messages"},
+            "messages": [asked, *told, AIMessage(content="Done."), HumanMessage("And signup?")],
+        },
+    )
+    dashboard = {"thread_id": "thread-1", "source": "dashboard", "invocation_id": "inv-2"}
+    from_dashboard = await _middleware({"configurable": dashboard})._prepare(later, runtime)
+
+    system_prompt = cast(str, from_slack["rendered_system_prompt"])
+    assert "triggered from Slack" not in system_prompt and "/workspace" not in system_prompt
+    assert [message["content"] for message in said] == [
+        AnyContext("environment", "/workspace"),
+        AnyContext("source", "triggered from Slack"),
+    ]
+    # Only what changed is told again, and the prompt is not rendered again.
+    assert "rendered_system_prompt" not in from_dashboard
+    assert [
+        message["content"] for message in cast(list[dict[str, str]], from_dashboard["messages"])
+    ] == [AnyContext("source", "handled in the dashboard")]
+
+    # A thread whose prompt came from before it was fixed for good renders it once more.
+    legacy = {**later, "system_prompt_fixed": None}
+    rerendered = await _middleware({"configurable": dashboard})._prepare(
+        cast(PrepareRunState, legacy), runtime
+    )
+    assert rerendered["rendered_system_prompt"] == system_prompt
+
+
+class AnyContext:
+    """A ``run`` context block with ``context_id`` that says ``text``."""
+
+    def __init__(self, context_id: str, text: str) -> None:
+        self._opening = f'<dynamic-context kind="run" id="{context_id}">'
+        self._text = text
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and other.startswith(self._opening) and self._text in other
+
+    def __repr__(self) -> str:
+        return f"AnyContext({self._opening!r}, {self._text!r})"

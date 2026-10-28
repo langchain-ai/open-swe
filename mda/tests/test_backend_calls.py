@@ -63,6 +63,7 @@ from rt.backend import (
     OpenSweBackend,
     Run,
     RunContext,
+    held_state,
 )
 from rt.file_tools import FileToolsMiddleware
 from rt.git_evidence import TurnGit, turn_git
@@ -1915,3 +1916,13 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
     tools = [run for run in created if run["run_type"] == "tool" and run["name"] == "look"]
     assert models and tools
     assert all(run["inputs"] for run in [*models, *tools])
+
+
+def test_the_backend_hears_where_summarization_cut_the_conversation() -> None:
+    """Context the model no longer sees past the cut is sent again; the summary stays here."""
+    state = {
+        "open_swe_state": {"reply_surface": "slack"},
+        "_summarization_event": {"cutoff_index": 4, "summary_message": HumanMessage("Earlier")},
+    }
+
+    assert held_state(state) == {"reply_surface": "slack", "visible_from": 4}

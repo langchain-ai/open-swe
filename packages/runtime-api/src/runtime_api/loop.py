@@ -19,6 +19,7 @@ until a run receives it.
 """
 
 from datetime import datetime
+from typing import Final
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
@@ -26,6 +27,10 @@ from pydantic import BaseModel, JsonValue
 from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
+
+# Held state a call carries once summarization replaced the conversation's start: the
+# index of the first message the model still sees.
+VISIBLE_FROM: Final = "visible_from"
 
 
 class RunCall(RunRequest):
@@ -200,8 +205,9 @@ class ChosenModel(RunRequest):
 class TaskContext(BaseModel):
     """The task the thread belongs to, as each model call tells the model."""
 
-    # Added to each call's system prompt: the thread's role in the task.
-    instructions: str = ""
+    # The thread's role in the task, added to the conversation when it differs from the
+    # role the model last saw there.
+    instructions: str | None = None
     # The task's context, added to the conversation where the model no longer sees it.
     message: str | None = None
 

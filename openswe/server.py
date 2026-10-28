@@ -133,7 +133,7 @@ from openswe.model_request import (
     model_selection_trace,
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
-from openswe.prompt import construct_system_prompt
+from openswe.prompt import TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
@@ -1072,7 +1072,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
             raise ValueError("An agent run needs a thread")
-        linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
         self._config = config
         self._turn = turn
         self._thread_id = cfg.thread_id
@@ -1091,8 +1090,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._effort = cfg.resolved_agent_effort
         self._source = cfg.source or "dashboard"
         self._user_email = cfg.user_email or ""
-        self._linear_project_id = linear_issue.get("linear_project_id", "")
-        self._linear_issue_number = linear_issue.get("linear_issue_number", "")
         self._draft_prs = cfg.draft_prs is True
         self._admin_workspaces = turn.admin_workspaces
         self._sole_writer = turn.sole_writer
@@ -1100,6 +1097,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             turn.routing.route_model_ids, routing_mode=turn.routing.mode
         )
         self._routing_defaults = dict(turn.route_models)
+        self._tool_catalog_note = catalog_note(turn.tool_discovery_failures)
 
     @cached_property
     def _title_model(self) -> BaseChatModel:
@@ -1360,10 +1358,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
+        # A thread's system prompt is rendered on its first run and never again.
+        render_prompt = not (
+            state.get("system_prompt_fixed") and state.get("rendered_system_prompt")
+        )
         async with aphase(self._thread_id, "prepare.github_token"):
             github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
-        async with aphase(self._thread_id, "prepare.default_repo"):
-            prompt_default_repo = await _resolve_prompt_default_repo(cfg)
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
@@ -1390,26 +1390,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         if stale_workspace := take_stale_boot(self._thread_id):
             queue_stale_workspace_notice(self._thread_id, stale_workspace)
-        async with aphase(self._thread_id, "prepare.workspace"):
-            workspace = await load_workspace(workspace_slug(cfg))
+        rendered_prompt = (
+            asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
+        )
         async with aphase(self._thread_id, "prepare.participants"):
-            recent_context_audience = self._recent_context_audience(cfg)
-            recent_context_task = (
-                asyncio.create_task(
-                    recent_thread_context_section(
-                        audience=recent_context_audience,
-                        login=self._profile_login,
-                        email=self._user_email or None,
-                        exclude_thread_id=self._thread_id,
-                        slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
-                        slack_channel_id=(
-                            cfg.slack_thread.channel_id if cfg.slack_thread else None
-                        ),
-                    )
-                )
-                if recent_context_audience is not None
-                else None
-            )
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
@@ -1459,46 +1443,72 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
-        recent_thread_context = await recent_context_task if recent_context_task is not None else ""
+        audience = self._recent_context_audience(cfg)
+        recent_threads = (
+            await recent_thread_context_section(
+                audience=audience,
+                login=self._profile_login,
+                email=self._user_email or None,
+                exclude_thread_id=self._thread_id,
+                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
+                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
+            )
+            if audience is not None
+            else ""
+        )
+        turn = TurnContext(
+            working_dir=work_dir,
+            source="background_task" if cfg.background_task_completion else self._source,
+            slack_context=_slack_tools_enabled(cfg),
+            slack_ask=_slack_ask_mode(cfg),
+            slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
+            slack_breakout=cfg.slack_breakout is True,
+            slack_follow_up_suggestions=_slack_concierge_run(cfg)
+            or (await cached_workspace_settings(workspace_slug(cfg))).get(
+                "slack_follow_up_suggestions"
+            )
+            is True,
+            sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
+            local_checkout=bridged,
+            local_checkout_client=self._bridge_client or "cli",
+            tool_catalog_note=self._tool_catalog_note,
+            recent_threads=recent_threads,
+        )
+        added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
+        system_prompt = (
+            {"rendered_system_prompt": await rendered_prompt, "system_prompt_fixed": True}
+            if rendered_prompt is not None
+            else {}
+        )
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,
             "requested_effort": requested_effort,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
-            **({"messages": sender_messages} if sender_messages else {}),
+            **({"messages": added} if added else {}),
             **({"model_route": attribution_route} if attribution_route is not None else {}),
-            "rendered_system_prompt": construct_system_prompt(
-                working_dir=work_dir,
-                dashboard_base_url=dashboard_base_url(),
-                artifact_url=dashboard_plan_url(self._thread_id),
-                linear_project_id=self._linear_project_id,
-                linear_issue_number=self._linear_issue_number,
-                default_repo=prompt_default_repo,
-                repo_custom_instructions=self._repo_instructions,
-                workspace_name=workspace.name if workspace else None,
-                workspace_instructions=workspace.instructions if workspace else None,
-                workspace_repos=workspace.repos if workspace else None,
-                admin_workspaces=self._admin_workspaces,
-                sole_writer=self._sole_writer,
-                source="background_task" if cfg.background_task_completion else self._source,
-                slack_context=_slack_tools_enabled(cfg),
-                slack_ask=_slack_ask_mode(cfg),
-                slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
-                slack_breakout=cfg.slack_breakout is True,
-                slack_follow_up_suggestions=_slack_concierge_run(cfg)
-                or (await cached_workspace_settings(workspace_slug(cfg))).get(
-                    "slack_follow_up_suggestions"
-                )
-                is True,
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
-                continued_from_collaborative=bool(cfg.continued_from_thread_id),
-                local_checkout=bridged,
-                local_checkout_client=self._bridge_client or "cli",
-                recent_thread_context=recent_thread_context,
-            )
-            + catalog_note(self._turn.tool_discovery_failures),
+            **system_prompt,
         }
+
+    async def _render_system_prompt(self, cfg: RunConfig) -> str:
+        """The thread's system prompt, from what holds for it as its first run starts."""
+        async with aphase(self._thread_id, "prepare.default_repo"):
+            default_repo = await _resolve_prompt_default_repo(cfg)
+        async with aphase(self._thread_id, "prepare.workspace"):
+            workspace = await load_workspace(workspace_slug(cfg))
+        return construct_system_prompt(
+            dashboard_base_url=dashboard_base_url(),
+            artifact_url=dashboard_plan_url(self._thread_id),
+            default_repo=default_repo,
+            repo_custom_instructions=self._repo_instructions,
+            workspace_name=workspace.name if workspace else None,
+            workspace_instructions=workspace.instructions if workspace else None,
+            workspace_repos=workspace.repos if workspace else None,
+            admin_workspaces=self._admin_workspaces,
+            sole_writer=self._sole_writer,
+            continued_from_collaborative=bool(cfg.continued_from_thread_id),
+        )
 
 
 async def record_agent_run(
@@ -1566,9 +1576,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
-    guide = await ReviewGuideSession.get(thread_id)
-    if guide is not None and guide.closed:
-        guide = None
+    walkthrough = await ReviewGuideSession.get(thread_id)
+    guide = walkthrough if walkthrough is not None and not walkthrough.closed else None
     profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -1981,9 +1990,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 main_model, files.backend, manual=cfg.offload_conversation is True
             ),
             run_preparation,
+            # Installed after a walkthrough closes too, to tell the model its rules ended.
             *(
                 [ReviewGuideMiddleware(thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts)]
-                if guide is not None
+                if walkthrough is not None
                 else []
             ),
             TranscriptMiddleware(),
@@ -2045,7 +2055,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
             if cli_result_required
             else None,
-            review_guide=guide is not None,
             task_coordination=task_coordination is not None,
             client_tools=client_tools is not None,
             refresh_github_proxy=not (task_coordination and task_coordination.is_worker),

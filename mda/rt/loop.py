@@ -88,6 +88,10 @@ _GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
 # does not hold up every model call.
 _GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
+# Starts the id of each message that tells the model its role in the thread's task.
+_ROLE: Final = "task-role:"
+# Starts the id of the message holding what the backend worked out for this run.
+_RUN_CONTEXT: Final = "run-context:"
 
 
 def content_text(content: object) -> str:
@@ -145,13 +149,25 @@ def _json_payload(message: ToolMessage) -> object:
         return None
 
 
+def _messages(state: Mapping[str, object]) -> list[AnyMessage]:
+    messages = state.get("messages")
+    return list(messages) if isinstance(messages, list) else []
+
+
 def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
     """The messages the model still sees: summarization drops those before its cutoff."""
-    messages = state.get("messages")
-    listed = list(messages) if isinstance(messages, list) else []
+    listed = _messages(state)
     event = state.get(_SUMMARIZATION_EVENT)
     cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
     return listed[cutoff:] if isinstance(cutoff, int) and cutoff >= 0 else listed
+
+
+def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
+    """The text of the last of ``messages`` whose id starts with ``prefix``."""
+    for message in reversed(messages):
+        if isinstance(message.id, str) and message.id.startswith(prefix):
+            return content_text(message.content)
+    return None
 
 
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
@@ -261,9 +277,15 @@ class RunLoop:
             return BeforeModel(jump_to="end")
         update = await self._github_proxy(held)
         context = await self._task_context()
+        visible = _visible(state)
         added: list[BaseMessage] = []
+        if context.instructions and context.instructions != _latest(visible, _ROLE):
+            added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
+        run_context = _latest(_messages(state), _RUN_CONTEXT)
+        if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
+            added.append(HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"))
         if context.message is not None and not any(
-            content_text(message.content) == context.message for message in _visible(state)
+            content_text(message.content) == context.message for message in visible
         ):
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
         route = await self._route(held, [*_visible(state), *added])
@@ -275,7 +297,7 @@ class RunLoop:
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
-                system_prompt=self._system_prompt(current, context),
+                system_prompt=self._system_prompt(current),
                 hidden_tools=self._hidden(current),
                 model=model,
                 vision=None if model.reads_images else self._models.vision,
@@ -372,15 +394,10 @@ class RunLoop:
             return await self._chosen_model(selected, held.get("selected_effort"))
         return self._models.model
 
-    def _system_prompt(self, held: Mapping[str, object], context: TaskContext) -> str:
+    def _system_prompt(self, held: Mapping[str, object]) -> str:
+        """Only parts fixed for the thread's life: a changed byte misses the provider's cache."""
         rendered = held.get("rendered_system_prompt")
-        guide = held.get("review_guide_rules") if self.rules.review_guide else None
-        sections = [
-            self.rules.deployment_prompt,
-            rendered if isinstance(rendered, str) else "",
-            guide if isinstance(guide, str) else "",
-            context.instructions,
-        ]
+        sections = [self.rules.deployment_prompt, rendered if isinstance(rendered, str) else ""]
         return "\n\n".join(section for section in sections if section)
 
     def _hidden(self, held: Mapping[str, object]) -> list[str]:
