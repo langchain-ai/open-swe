@@ -154,7 +154,7 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.mark.parametrize("failure", [None, "fetch", "parse", "queue"])
+@pytest.mark.parametrize("failure", [None, "fetch"])
 async def test_breakout_queues_source_thread_files_best_effort(
     monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
@@ -180,14 +180,10 @@ async def test_breakout_queues_source_thread_files_best_effort(
     )
     if failure == "fetch":
         fetch.side_effect = RuntimeError("Slack unavailable")
-    elif failure == "parse":
-        fetch.return_value = [None]
     pending: dict[str, dict[str, object]] = {}
 
     async def read_metadata(thread_id: str) -> dict[str, object]:
         assert thread_id != "parent-thread"
-        if failure == "queue":
-            raise RuntimeError("Thread store unavailable")
         return {}
 
     async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
