@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 MAX_THREAD_TITLE_CHARS = 80
 MAX_TITLE_INPUT_CHARS = 8_000
 TITLE_GENERATION_MAX_TOKENS = 256
+ANTHROPIC_TITLE_GENERATION_MAX_TOKENS = 1024
 TITLE_GENERATION_TIMEOUT_SECONDS = 10
 _background_tasks: set[asyncio.Task[None]] = set()
 _inflight_thread_ids: set[str] = set()

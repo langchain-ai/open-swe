@@ -9,7 +9,7 @@ from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 from langchain_anthropic import ChatAnthropic
 from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
 from openswe.thread_title import (
     _ThreadTitle,
@@ -275,11 +275,9 @@ async def test_title_generation_never_inherits_the_runs_context() -> None:
     assert threads.metadata["title"] == "Review thread title generation"
 
 
-@pytest.mark.parametrize("retry_fails", [False, True])
 async def test_title_extraction_retries_once_and_preserves_seed_on_failure(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    retry_fails: bool,
 ) -> None:
     threads = _Threads({"source": "dashboard", "title": "fix it", "title_seed": "fix it"})
     structured = SimpleNamespace(
@@ -287,10 +285,7 @@ async def test_title_extraction_retries_once_and_preserves_seed_on_failure(
             side_effect=OutputParserException("Forced tool calling is unsupported with thinking")
         )
     )
-    completion = AsyncMock(
-        return_value=AIMessage(content='  "Repair   thread titles."  '),
-        side_effect=OutputParserException("Retry failed") if retry_fails else None,
-    )
+    completion = AsyncMock(side_effect=OutputParserException("Retry failed"))
     model = SimpleNamespace(with_structured_output=lambda schema: structured, ainvoke=completion)
     mirror = AsyncMock()
     monkeypatch.setattr("openswe.thread_title.mirror_thread_metadata", mirror)
@@ -306,18 +301,13 @@ async def test_title_extraction_retries_once_and_preserves_seed_on_failure(
     await asyncio.gather(*tuple(_background_tasks))
 
     assert completion.await_count == 1
-    if retry_fails:
-        assert threads.metadata == {
-            "source": "dashboard",
-            "title": "fix it",
-            "title_seed": "fix it",
-        }
-        mirror.assert_not_awaited()
-        assert "Thread title generation failed" in caplog.text
-    else:
-        assert threads.metadata["title"] == "Repair thread titles"
-        assert threads.metadata["title_seed"] is None
-        mirror.assert_awaited_once_with("thread-123", {"title": "Repair thread titles"})
+    assert threads.metadata == {
+        "source": "dashboard",
+        "title": "fix it",
+        "title_seed": "fix it",
+    }
+    mirror.assert_not_awaited()
+    assert "Thread title generation failed" in caplog.text
 
 
 async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
@@ -345,7 +335,8 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
         return SimpleNamespace(parse=lambda: response)
 
     monkeypatch.setattr(ChatAnthropic, "_acreate", create)
-    monkeypatch.setattr("openswe.thread_title.mirror_thread_metadata", AsyncMock())
+    mirror = AsyncMock()
+    monkeypatch.setattr("openswe.thread_title.mirror_thread_metadata", mirror)
     await generate_and_store_thread_title(
         thread_id="thread-123",
         conversation="fix it",
@@ -354,3 +345,4 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
     )
     assert threads.metadata["title"] == "Repair thread titles"
     assert threads.metadata["title_seed"] is None
+    mirror.assert_awaited_once_with("thread-123", {"title": "Repair thread titles"})
