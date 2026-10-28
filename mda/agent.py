@@ -183,7 +183,7 @@ class _Parts:
 
 
 def _code_mode(
-    graph: Graph, backend: OpenSweBackend, toolsets: RunToolsets, files: FileToolsMiddleware
+    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware, found: FoundOperations
 ) -> RunCodeInterpreter:
     """The graph's code mode, with every tool the run offers from code callable from it:
     those its catalog lists, and those ``search_tools`` finds on the backend."""
@@ -203,7 +203,7 @@ def _code_mode(
         active=lambda tools: bool(tools.from_code) or tools.catalog.search_tools,
         subagents=False,
         mode="turn",
-        found=FoundOperations(backend),
+        found=found,
     )
 
 
@@ -222,6 +222,8 @@ def _parts(graph: Graph) -> _Parts:
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     toolsets = RunToolsets(backend, files)
+    # What the run calls that its catalog leaves out, as the backend names it.
+    found = FoundOperations(backend)
     skills = RunSkillsMiddleware(backend, skill_files)
     replace_sandbox = ReplaceSandboxMiddleware(backend)
     # The backend's transcript and usage see every reply and every tool call.
@@ -262,8 +264,8 @@ def _parts(graph: Graph) -> _Parts:
             skills,
             files,
             task_retry(),
-            RunToolsMiddleware(toolsets),
-            _code_mode(graph, backend, toolsets, files),
+            RunToolsMiddleware(toolsets, found=found),
+            _code_mode(graph, toolsets, files, found),
             DescribedToolsMiddleware(backend),
             # The coding agent's browser, a LangSmith browser per thread the dashboard
             # shows; the deployment's workspace needs the LangSmith browser beta.

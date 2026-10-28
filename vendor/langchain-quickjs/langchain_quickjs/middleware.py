@@ -202,8 +202,9 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
             when `ptc` installed none by that name, so code can call tools
             the agent never lists, such as those a tool search found. It
             gets the camelCase name and returns the tool, or `None`, which
-            the call raises as a `TypeError`. The prompt's API reference
-            still lists only the installed tools.
+            the call raises as a `TypeError`; a tool that only finds out once
+            called raises `UnresolvedToolError` for the same. The prompt's API
+            reference still lists only the installed tools.
         mode: REPL state persistence mode.
             - `"thread"`: state persists across calls and across turns.
             - `"turn"`: state persists across calls within a turn only.

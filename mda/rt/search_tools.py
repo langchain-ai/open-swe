@@ -2,8 +2,8 @@
 
 Code mode keeps most tools off the model's list, so the model finds them here, with
 the schemas it needs to call them and the name code mode calls them by. The run's
-catalog lists only the operations the model or a subagent is offered; the backend
-keeps every one of them, so the search runs there (``runtime_api.tool_search``).
+catalog leaves its integrations out; the backend keeps every operation, so the
+search runs there (``runtime_api.tool_search``).
 """
 
 from langchain_core.tools import BaseTool, StructuredTool

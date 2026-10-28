@@ -2,13 +2,15 @@
 
 **Verdict: upstream as-is.** A generic hook for any agent whose tools are found by search instead of listed.
 
-**Changed:** `langchain_quickjs/middleware.py`, `langchain_quickjs/_repl.py`, `langchain_quickjs/_ptc.py`, `langchain_quickjs/__init__.py`.
+**Changed:** `langchain_quickjs/middleware.py`, `langchain_quickjs/_repl.py`, `langchain_quickjs/_ptc.py`, `langchain_quickjs/__init__.py` (exports `ToolResolver` and `UnresolvedToolError`).
 
 ## What
 
 `CodeInterpreterMiddleware(resolve_tool=...)` takes a `ToolResolver`, `Callable[[str], BaseTool | None]`.
 With one, `globalThis.tools` is a `Proxy` over the installed tools: `tools.<name>` for a name `ptc` installed none by asks the resolver, with the camelCase name, and calls the tool it returns as it calls an installed one (the same call budget, injected runtime and outer loop).
-A name it returns `None` for throws `TypeError: tools.<name> is not a function` in JavaScript; `then` stays undefined, so `await tools` is not taken for a promise.
+A name it returns `None` for throws `TypeError: tools.<name> is not a function` in JavaScript.
+A resolver that can only find out by calling something returns a tool that looks itself up when called; that tool raises `UnresolvedToolError` for a name that turns out to name nothing, and the call throws `TypeError` with its message.
+`then` and `toJSON` stay undefined, so `await tools` is not taken for a promise and `JSON.stringify(tools)` calls no tool.
 The prompt's API reference still lists only the installed tools.
 
 ## Why

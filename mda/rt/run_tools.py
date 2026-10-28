@@ -112,31 +112,32 @@ class RunToolsets:
 
 
 class FoundOperations:
-    """The operations code mode calls that the run's catalog leaves out, as the backend names them.
+    """The operations the run calls that its catalog leaves out, as the backend names them.
 
     Code mode resolves a name it has no tool for from the REPL's own thread, outside
-    any run, so the tool it gets is the same for every run and finds its run when called.
+    any run, so the tool it gets is the same for every run and finds its run when called;
+    a call by name the run's tools don't have gets the same tool.
     """
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
         self._tools: dict[str, BaseTool] = {}
 
-    def tool(self, code_name: str) -> BaseTool:
-        """``tools.<code_name>``, whichever run calls it."""
-        if code_name not in self._tools:
-            self._tools[code_name] = found_operation_tool(code_name, self._backend, self.find)
-        return self._tools[code_name]
+    def tool(self, name: str) -> BaseTool:
+        """The tool called as ``name``, whichever run calls it."""
+        if name not in self._tools:
+            self._tools[name] = found_operation_tool(name, self._backend, self.find)
+        return self._tools[name]
 
-    async def find(self, code_name: str) -> OperationSpec | None:
-        """The operation the calling run's code mode calls as ``tools.<code_name>``, once per run."""
+    async def find(self, name: str) -> OperationSpec | None:
+        """The operation the calling run calls as ``name``, looked up once per run."""
         run = current_run()
         if not run.catalog.search_tools:
             return None
-        if code_name not in run.found:
-            lookup = OperationLookup(run_id=run_id(), code_name=code_name)
-            run.found[code_name] = (await call(self._backend, FIND, lookup)).operation
-        return run.found[code_name]
+        if name not in run.found:
+            lookup = OperationLookup(run_id=run_id(), name=name)
+            run.found[name] = (await call(self._backend, FIND, lookup)).operation
+        return run.found[name]
 
 
 class RunToolsMiddleware(AgentMiddleware):
@@ -146,14 +147,22 @@ class RunToolsMiddleware(AgentMiddleware):
     filesystem middleware drops one it cannot back itself, such as ``execute``. Hidden
     tools still run when called by name, as in-process; the backend names the ones its
     middleware hides from each call. ``subagent`` names the subagent this middleware
-    serves; the agent itself otherwise.
+    serves; the agent itself otherwise. A call by a name the run's tools don't have
+    goes to ``found``, for an operation the catalog leaves out.
     """
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
-    def __init__(self, toolsets: RunToolsets, *, subagent: str | None = None) -> None:
+    def __init__(
+        self,
+        toolsets: RunToolsets,
+        *,
+        subagent: str | None = None,
+        found: FoundOperations | None = None,
+    ) -> None:
         self._toolsets = toolsets
         self._subagent = subagent
+        self._found = found
         # The ``task`` tool as each run describes its subagents, by the description.
         self._task_tools = RunLocal[dict[tuple[int, str], BaseTool]](dict)
 
@@ -197,7 +206,11 @@ class RunToolsMiddleware(AgentMiddleware):
         self, request: ToolCallRequest, handler: ToolHandler
     ) -> ToolMessage | Command:
         if request.tool is None:
-            tool = self._toolsets.get().by_name.get(request.tool_call["name"])
+            tools = self._toolsets.get()
+            name = request.tool_call["name"]
+            tool = tools.by_name.get(name)
+            if tool is None and self._found is not None and tools.catalog.search_tools:
+                tool = self._found.tool(name)
             if tool is not None:
                 request = request.override(tool=tool)
         return await handler(request)

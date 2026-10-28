@@ -2,8 +2,9 @@
 
 A run's catalog lists only the operations the model is offered as tools. The rest,
 such as every connected integration's, stay on the backend: the run's
-``search_tools`` finds them by what they do (``SEARCH``), and code mode calls one by
-the name a search gave it, once the backend has said what it is (``FIND``).
+``search_tools`` finds them by what they do (``SEARCH``), and the run calls one by
+the name a search gave it, from code mode or directly, once the backend has said
+what it is (``FIND``).
 """
 
 from pydantic import BaseModel, JsonValue
@@ -33,8 +34,8 @@ class ToolMatches(BaseModel):
 
 
 class OperationLookup(RunRequest):
-    # The name code mode called it by.
-    code_name: str
+    # The name the run called it by: its own, or the one code mode calls it by.
+    name: str
 
 
 class FoundOperation(BaseModel):

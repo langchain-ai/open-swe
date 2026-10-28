@@ -16,6 +16,7 @@ from uuid import uuid4
 from langchain.tools import ToolRuntime
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langchain_core.tools import StructuredTool
+from langchain_quickjs import UnresolvedToolError
 from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
@@ -265,32 +266,30 @@ _ANY_ARGUMENTS: Final[dict[str, JsonValue]] = {"type": "object", "additionalProp
 
 
 def found_operation_tool(
-    code_name: str,
+    name: str,
     backend: OpenSweBackend,
     find: Callable[[str], Awaitable[OperationSpec | None]],
 ) -> StructuredTool:
-    """``tools.<code_name>`` for an operation the run's catalog leaves out.
+    """The tool for an operation the run's catalog leaves out, called as ``name``.
 
-    Code mode calls it by the name ``search_tools`` gave; ``find`` asks the backend
-    which operation that is, with the run's grant of it. Made for no run in
-    particular: the call finds its run.
+    The run calls it by the name ``search_tools`` gave, from code mode or directly;
+    ``find`` asks the backend which operation that is, with the run's grant of it.
+    Made for no run in particular: the call finds its run.
     """
 
     async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
-        spec = await find(code_name)
+        spec = await find(name)
         if spec is None:
-            return ToolMessage(
-                content=f"Error: tools.{code_name} is not one of this run's tools; "
-                "find the tool you want with search_tools.",
-                tool_call_id=runtime.tool_call_id or "",
-                status="error",
+            # Code mode throws it as a TypeError, as for any name that is not a function.
+            raise UnresolvedToolError(
+                f"{name} is not one of this run's tools; find the tool you want with search_tools"
             )
         cites_evidence = backend.run.catalog.incident_evidence
         return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
 
     return StructuredTool.from_function(
         coroutine=operate,
-        name=code_name,
-        description=f"The run's operation code mode calls as tools.{code_name}.",
+        name=name,
+        description=f"The run's operation it calls as {name}.",
         args_schema=_ANY_ARGUMENTS,
     )

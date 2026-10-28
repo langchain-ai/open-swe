@@ -48,6 +48,7 @@ from langchain_quickjs._format import (
 )
 from langchain_quickjs._ptc import (
     ToolResolver,
+    UnresolvedToolError,
     is_valid_js_identifier,
     to_camel_case,
 )
@@ -335,6 +336,9 @@ def _bridge_symbol_name(tool_name: str) -> str:
 # whether the resolver finds it, then the call itself.
 _RESOLVES_TOOL_SYMBOL = "__tools_resolves"
 _RESOLVED_TOOL_SYMBOL = "__tools_resolved"
+# Marks what `_RESOLVED_TOOL_SYMBOL` answers for a tool that raised
+# `UnresolvedToolError`, which the call then throws as a `TypeError`.
+_UNRESOLVED_KEY = "__tools_unresolved"
 
 
 def _render_tools_namespace_assignment(
@@ -343,7 +347,9 @@ def _render_tools_namespace_assignment(
     """Return JS that atomically rebuilds `globalThis.tools` from bridges.
 
     With `resolves`, `tools` is a proxy: a name it has no bridge for is a
-    function that asks the resolver for the tool by that name.
+    function that asks the resolver for the tool by that name. It throws a
+    `TypeError` when the resolver finds none, or when the tool it found raises
+    `UnresolvedToolError`.
     """
     statements = ["const installed = {};"]
     for tool_name, bridge_symbol in sorted(bridges.items()):
@@ -355,15 +361,23 @@ def _render_tools_namespace_assignment(
     if resolves:
         found = json.dumps(_RESOLVES_TOOL_SYMBOL)
         resolved = json.dumps(_RESOLVED_TOOL_SYMBOL)
-        # `then` stays undefined, so `await tools` is not mistaken for a promise.
+        unresolved = json.dumps(_UNRESOLVED_KEY)
+        # `then` and `toJSON` stay undefined, so `await tools` is not mistaken for
+        # a promise and `JSON.stringify(tools)` calls no tool.
         statements.append(
             "globalThis.tools = new Proxy(installed, { get(target, name) {"
-            " if (typeof name !== 'string' || name in target || name === 'then')"
+            " if (typeof name !== 'string' || name in target"
+            " || name === 'then' || name === 'toJSON')"
             " return target[name];"
             " return (input) => {"
             f" if (!globalThis[{found}](name))"
             " throw new TypeError(`tools.${name} is not a function`);"
-            f" return globalThis[{resolved}](name, input);"
+            f" return globalThis[{resolved}](name, input).then((result) => {{"
+            " if (result !== null && typeof result === 'object'"
+            f" && Object.prototype.hasOwnProperty.call(result, {unresolved}))"
+            f" throw new TypeError(result[{unresolved}]);"
+            " return result;"
+            " });"
             " };"
             " } });"
         )
@@ -745,7 +759,10 @@ class _ThreadREPL:
                 # `_resolves` said it was there: a resolver that changed its mind.
                 msg = f"tool '{camel}' no longer resolves"
                 raise RuntimeError(msg)
-            return await self._acall_tool(camel, tool, raw_input)
+            try:
+                return await self._acall_tool(camel, tool, raw_input)
+            except UnresolvedToolError as exc:
+                return {_UNRESOLVED_KEY: str(exc) or f"tools.{camel} is not a function"}
 
         ctx.register(_RESOLVES_TOOL_SYMBOL, _resolves)
         ctx.register(_RESOLVED_TOOL_SYMBOL, _resolved, is_async=True)

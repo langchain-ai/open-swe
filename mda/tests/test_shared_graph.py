@@ -12,6 +12,7 @@ import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -143,7 +144,7 @@ def backend_calls(
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
         if hook == "find_operation":
-            calls[-1] = (hook, headers["Authorization"], str(json["code_name"]))
+            calls[-1] = (hook, headers["Authorization"], str(json["name"]))
             found = FoundOperation(
                 operation=OperationSpec(
                     name="withheld_lookup",
@@ -152,7 +153,7 @@ def backend_calls(
                     code_name="withheldLookup",
                     grant="found-grant",
                 )
-                if json["code_name"] == "withheldLookup"
+                if json["name"] == "withheldLookup"
                 else None
             )
             return httpx2.Response(200, request=request, json=found.model_dump(mode="json"))
@@ -370,15 +371,35 @@ async def test_finished_runs_release_their_tools_and_interpreters(
 async def test_code_mode_calls_operations_its_catalog_leaves_out(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
-    """The backend names what ``tools.<name>`` is, with the run's grant; a name it has none for runs nothing."""
+    """The backend names what ``tools.<name>`` is, with the run's grant; a name it has none for throws."""
     code = "await tools.withheldLookup({}); await tools.withheldLookup({}); await tools.notOne({})"
-    monkeypatch.setattr(
-        agent, "_DEFAULT_MODEL", _calling(ToolCall(name="eval", args={"code": code}, id="eval"))
-    )
+    seen: list[BaseMessage] = []
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen[:] = messages
+        return await generate(model, messages, stop, run_manager)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    replies = [
+        AIMessage(content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]),
+        # Called directly too, by the name a search gave.
+        AIMessage(content="", tool_calls=[ToolCall(name="withheldLookup", args={}, id="direct")]),
+        AIMessage(content="done"),
+    ]
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(replies)))
     catalog = _catalog("lookup", "grant").model_copy(update={"search_tools": True})
 
     await _run(InMemoryStore(), "withheld", _context("agent", "token", catalog))
 
+    [evaluated] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "eval"]
+    assert '<error type="TypeError">notOne is not one of this run' in evaluated.text
     called = [(hook, detail) for hook, _, detail in backend_calls if detail]
     # Found once for the run, then called with the grant the backend gave.
     assert called == [
@@ -386,6 +407,7 @@ async def test_code_mode_calls_operations_its_catalog_leaves_out(
         ("operation", "withheld_lookup:found-grant"),
         ("operation", "withheld_lookup:found-grant"),
         ("find_operation", "notOne"),
+        ("operation", "withheld_lookup:found-grant"),
     ]
 
 

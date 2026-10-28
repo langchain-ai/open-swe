@@ -1,11 +1,11 @@
 """Every operation an MDA run started with, kept by content for the run tokens that name it.
 
-A run's catalog lists only the operations the model is offered as tools: the rest,
-such as every connected integration's, would put a megabyte in each run's context,
-which the Agent Server copies into every checkpoint and every read of the run. The
-backend keeps them all here as it starts the run, once per distinct set, and signs
-their digest into the run's token (``RunSettings.operations``); the run's
-``search_tools`` and code mode reach them through ``runtime_api.tool_search``.
+A run's catalog leaves its integrations out: hundreds of them would put a megabyte
+in each run's context, which the Agent Server copies into every checkpoint and every
+read of the run. The backend keeps every operation here as it starts the run, once
+per distinct set, and signs their digest into the run's token
+(``RunSettings.operations``); the run's ``search_tools`` and code mode reach them
+through ``runtime_api.tool_search``.
 """
 
 import hashlib
@@ -163,10 +163,15 @@ class RunOperations:
         )
         return [operation for operation, _ in best[: max(1, min(limit, _MAX_RESULTS))]]
 
-    def called_from_code_as(self, code_name: str) -> OperationSpec | None:
-        """The operation code mode calls as ``tools.<code_name>``."""
+    def called(self, name: str) -> OperationSpec | None:
+        """The operation a run calls as ``name``: its own name, or ``tools.<name>`` from code mode."""
         return next(
-            (operation for operation in self.operations if operation.code_name == code_name), None
+            (
+                operation
+                for operation in self.operations
+                if name in {operation.name, operation.code_name}
+            ),
+            None,
         )
 
 

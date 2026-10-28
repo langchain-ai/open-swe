@@ -39,6 +39,16 @@ PTCOption = list[str | BaseTool]
 # that name; `None` when there is none, which the call raises as a `TypeError`.
 ToolResolver = Callable[[str], BaseTool | None]
 
+
+class UnresolvedToolError(LookupError):
+    """Raised by a tool a `ToolResolver` returned before it knew the tool exists.
+
+    A resolver that can only find out by calling something, such as a remote
+    catalog, returns a tool that looks itself up when called; it raises this when
+    the name turns out to name no tool, and the call throws `TypeError` in
+    JavaScript with this message, as if the resolver had returned `None`.
+    """
+
 _RESERVED_SUBAGENT_TASK_NAME = "task"
 
 _TASK_IN_PTC_MSG = (

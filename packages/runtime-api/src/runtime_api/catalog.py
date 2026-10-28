@@ -177,9 +177,8 @@ class LoopRules(BaseModel):
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
-    # Those the model or a subagent is offered as tools. The run's other operations,
-    # such as its integrations', stay on the backend: found with ``search_tools`` and
-    # called from code mode (``runtime_api.tool_search``).
+    # All but the run's integrations, which stay on the backend: found with
+    # ``search_tools`` and called from code mode (``runtime_api.tool_search``).
     operations: list[OperationSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None

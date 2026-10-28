@@ -244,8 +244,8 @@ class Run:
         self._planned: Catalog | None = None
         # The worker's own catalog, once it adopted a run token.
         self.adopted: Catalog | None = None
-        # Operations its catalog leaves out that code mode called, as the backend named
-        # each with the run's grant, by the name code mode called it by; None for none.
+        # Operations its catalog leaves out that it called, as the backend named each
+        # with the run's grant, by the name it called it by; None for none.
         self.found: dict[str, OperationSpec | None] = {}
         self.backend = OpenSweBackend(self)
         # What the run tells the backend happened, until the backend takes it.

@@ -9,8 +9,8 @@ import (``runtime_api``):
   the rules of its middleware around each model call. It is worked out once as the
   run starts and rides in the run's context (``RemoteGraph.start_run``); the
   settings later calls read are signed into the run's token (``RunSettings``). It
-  lists only the operations the model or a subagent is offered: every operation is
-  kept by digest (``run_operations``), which ``search_tools`` and ``find_operation`` read
+  lists every operation but the run's integrations: every operation is kept by
+  digest (``run_operations``), which ``search_tools`` and ``find_operation`` read
 - ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
   prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
   plans the run again
@@ -225,7 +225,6 @@ from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
     SurfaceModels,
-    SurfaceSubagent,
     ToolSurface,
     tool_parameters,
 )
@@ -400,9 +399,6 @@ class RunSession:
             if described.name in operations
         ]
 
-    def _subagents(self) -> Sequence[SurfaceSubagent]:
-        return () if self._delegates else self.surface.subagents
-
     def operations(self) -> RunOperations:
         """Every operation the run may call, which the backend keeps for ``search_tools``.
 
@@ -421,11 +417,10 @@ class RunSession:
             if code_only(name)
             and (self.surface.code_mode or name in self.surface.integration_names)
         }
-        # Those no subagent is offered either stay on the backend, which finds them for
-        # the run's search and its code mode: listing them all, integrations included,
-        # would put about a megabyte in every run's context.
-        named = {name for subagent in self._subagents() for name in subagent.tools or ()}
-        withheld = {name for name in from_code_only if name not in named}
+        # Integrations stay on the backend, which finds them for the run's search and its
+        # code mode: listing hundreds of them would put about a megabyte in every run's
+        # context. The graph's own tools stay listed, so the model knows them unsearched.
+        withheld = from_code_only & set(self.surface.integration_names)
         searches = self.surface.code_mode or bool(withheld)
         offered = operations.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
         # Code mode calls tools past the model's list, so what the graph excludes stays out.
@@ -441,7 +436,7 @@ class RunSession:
                     if subagent.tools is None
                     else [name for name in subagent.tools if name in offered],
                 )
-                for subagent in self._subagents()
+                for subagent in (() if self._delegates else self.surface.subagents)
             ],
             models=self.start_models(),
             # Hidden from the model, as the in-process graph hides them.
@@ -1021,8 +1016,8 @@ class TokenRun:
         )
 
     async def find_operation(self, request: OperationLookup) -> FoundOperation:
-        """The operation code mode calls as ``tools.<code_name>``, with the run's grant of it."""
-        operation = (await self._operations()).called_from_code_as(request.code_name)
+        """The operation the run calls as ``request.name``, with the run's grant of it."""
+        operation = (await self._operations()).called(request.name)
         if operation is None:
             return FoundOperation()
         return FoundOperation(
