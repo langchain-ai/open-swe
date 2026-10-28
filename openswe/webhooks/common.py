@@ -879,16 +879,15 @@ class ThreadRecord:
 
 
 async def thread_exists(thread_id: str) -> bool:
-    """Return whether a LangGraph thread already exists."""
+    """Return whether a LangGraph thread already exists; raise when that can't be read."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
         await langgraph_client.threads.get(thread_id)
-        return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if is_not_found_error(exc):
             return False
-        logger.warning("Failed to fetch thread %s, assuming it exists", thread_id)
-        return True
+        raise
+    return True
 
 
 async def ensure_thread_exists_for_metadata(
