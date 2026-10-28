@@ -317,9 +317,6 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
-STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
-    {"delete", "edit_file", "execute", "task", "write_file"}
-)
 # Each posts to the reader and ends the walkthrough's turn as surely as a final reply.
 GUIDE_REPLY_TOOLS = frozenset(
     {
@@ -987,12 +984,12 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
+def _sandbox_file_downloads_enabled(*, bridged: bool) -> bool:
     """Return whether signed sandbox file downloads are available for this run.
 
     They are served by the LangSmith box itself, which a bridged thread does not have.
     """
-    return cfg.stop_summary is not True and not bridged
+    return not bridged
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
@@ -1449,7 +1446,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
-            sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
+            sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
@@ -1567,13 +1564,12 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     except Exception:
         logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
-    stop_summary_mode = cfg.stop_summary is True
     workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
     # MCP loading needs only who the run acts for and where, and it is the slowest
     # lookup here, so it overlaps the settings and access lookups below.
     mcp_tools_task = (
         asyncio.ensure_future(_run_mcp_tools(thread_id, credential_login, workspace))
-        if not stop_summary_mode and credential_scope_known
+        if credential_scope_known
         else None
     )
     task_coordination = await TaskCoordinationMiddleware.for_thread(thread_id)
@@ -1792,8 +1788,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.tool_access"):
         tool_access = await resolve_access(cfg, login=profile_login)
 
-    cli_result_required = not stop_summary_mode and bridge_client == "cli"
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
+    cli_result_required = bridge_client == "cli"
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
     managed_gateway, mcp_tools = (
         await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
     )
@@ -1825,7 +1821,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             else (output_iframe, create_sandbox_file_download_url, expose_port)
         ),
         *(() if cli_result_required else (cli_result,)),
-        *(() if bridge_client == "desktop" and not stop_summary_mode else (worktree_handoff,)),
+        *(() if bridge_client == "desktop" else (worktree_handoff,)),
         *(() if _writes_database_rows() else (write_database_rows,)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
@@ -1871,13 +1867,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
-    if stop_summary_mode:
-        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
-        STOP_SUMMARY_EXCLUDED_TOOLS
-        if stop_summary_mode
-        else _slack_ask_excluded_tools(cfg)
+        _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         if incident_automatic
@@ -1909,7 +1901,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         if (adaptive_model_routing or source == "slack")
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
-        and not stop_summary_mode
         and incident_session is None
         and not cfg.background_task_completion
         and not cfg.continued_from_thread_id
@@ -2056,15 +2047,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
         )
     )
-    surface.inbox = (
-        None
-        if stop_summary_mode
-        else InboxSpec(
-            events=True,
-            surface=initial_surface,
-            model_id=model_id,
-            image_fallback=vision_model is not None,
-        )
+    surface.inbox = InboxSpec(
+        events=True,
+        surface=initial_surface,
+        model_id=model_id,
+        image_fallback=vision_model is not None,
     )
     surface.files = files.backend
     surface.artifacts_root = files.artifacts_root
@@ -2114,9 +2101,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.code_mode = True
     surface.excluded = (
-        STOP_SUMMARY_EXCLUDED_TOOLS
-        if stop_summary_mode
-        else _slack_ask_excluded_tools(cfg)
+        _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         if incident_automatic
