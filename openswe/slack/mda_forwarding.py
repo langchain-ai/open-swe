@@ -43,7 +43,7 @@ from openswe.threads import index
 from openswe.threads.router import adopt_channel_run
 from openswe.threads.runtimes import RUNTIMES
 from openswe.utils.http_pool import pooled_transport
-from openswe.webhooks.common import SlackRepoResolution
+from openswe.webhooks.common import PROVISIONAL_VISIBILITY_KEY, SlackRepoResolution
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +140,13 @@ async def claim_conversation(
         await bind_slack_thread_id(channel_id, root_ts, thread_id)
     except SlackThreadMappingError:
         return None
-    # Private to the person who started it until the run's metadata says who may see it.
-    metadata: dict[str, JsonValue] = {"visibility": "private", "source": "slack"}
+    # Private to the person who started it until the thread's first metadata write, by the
+    # channel's run or by the backend taking the conversation back, says who may see it.
+    metadata: dict[str, JsonValue] = {
+        "visibility": "private",
+        PROVISIONAL_VISIBILITY_KEY: True,
+        "source": "slack",
+    }
     if owner_login:
         metadata["owner_login"] = owner_login
     await adopt_channel_run(thread_id, CHANNEL, metadata=metadata)

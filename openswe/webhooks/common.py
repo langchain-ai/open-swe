@@ -34,7 +34,7 @@ from openswe.dashboard.profiles import (  # noqa: F401
     has_access_token_record,
 )
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.dispatch import channel_of, dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import (
     get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
@@ -513,6 +513,16 @@ async def _source_context_with_slack_permalink(
     return enriched
 
 
+#: Marks a stub's visibility as a placeholder its first metadata write replaces, such as
+#: the private one a Slack conversation claimed for MDA starts with.
+PROVISIONAL_VISIBILITY_KEY = "provisional_visibility"
+
+
+def visibility_is_settled(metadata: Mapping[str, object]) -> bool:
+    """Whether a thread's visibility was chosen, rather than absent or a stub's placeholder."""
+    return "visibility" in metadata and metadata.get(PROVISIONAL_VISIBILITY_KEY) is not True
+
+
 async def upsert_agent_thread_metadata(
     thread_id: str,
     *,
@@ -637,13 +647,13 @@ async def upsert_agent_thread_metadata(
         metadata["title_seed"] = metadata["title"]
 
     # A helper may have pre-created a bare stub this request; it still needs the
-    # creation stamps. Legacy threads carry created_at_ms and are left alone. A
-    # channel's adopted stub is private only until this first write says who sees it.
+    # creation stamps. Legacy threads carry created_at_ms and are left alone.
     if existing is None or (
-        existing_meta.get("created_at_ms") is None
-        and ("visibility" not in existing_meta or channel_of(existing_meta) is not None)
+        existing_meta.get("created_at_ms") is None and not visibility_is_settled(existing_meta)
     ):
         metadata["visibility"] = visibility
+        if PROVISIONAL_VISIBILITY_KEY in existing_meta:
+            metadata[PROVISIONAL_VISIBILITY_KEY] = None
         metadata["owner_type"] = owner_type
         starting_bot = source_context.slack_thread if source_context else None
         if owner_type == "system" and starting_bot and starting_bot.triggering_bot_id:

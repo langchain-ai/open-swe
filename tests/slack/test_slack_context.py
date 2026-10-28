@@ -130,8 +130,24 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 @pytest.mark.parametrize(
     ("stub", "visibility"),
     [
-        # A channel's adopted stub is private only until its first write.
-        ({"channel": "slack", "visibility": "private", "source": "slack"}, "public"),
+        # A stub's provisional visibility lasts only until its first write, whether the
+        # channel still holds it or handed it back to the backend.
+        (
+            {
+                "channel": "slack",
+                "visibility": "private",
+                webhook_common.PROVISIONAL_VISIBILITY_KEY: True,
+            },
+            "public",
+        ),
+        (
+            {
+                "channel": None,
+                "visibility": "private",
+                webhook_common.PROVISIONAL_VISIBILITY_KEY: True,
+            },
+            "public",
+        ),
         # Any other thread that already chose its visibility keeps it.
         ({"visibility": "private"}, "private"),
     ],
