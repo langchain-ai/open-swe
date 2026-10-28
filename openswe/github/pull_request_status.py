@@ -462,6 +462,21 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without a head commit")
         return sha
 
+    async def merge_base(self, head_sha: str) -> str:
+        """Where ``head_sha`` meets the base branch: as it is now while the pull is open.
+
+        An open pull's ``base.sha`` can predate ``head_sha``: read right after a push
+        that merged the base branch in, it still names the older base. A closed pull's
+        base branch may already contain ``head_sha``, so its last ``base.sha`` is used.
+        """
+        pull = await self.pull()
+        base = pull.get("base")
+        ref, sha = (base.get("ref"), base.get("sha")) if isinstance(base, dict) else (None, None)
+        against = ref if pull.get("state") == "open" else sha
+        if not isinstance(against, str) or not against:
+            raise ValueError("GitHub answered the pull request without its base")
+        return await self.repo.merge_base(against, head_sha)
+
     async def files(self, *, max_pages: int = 1, count: int | None = None) -> list[dict[str, Any]]:
         """Changed files, up to ``max_pages`` pages of 100.
 

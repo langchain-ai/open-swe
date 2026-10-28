@@ -78,7 +78,6 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         if await checkout.pin(
             full_name=pr.repo_full_name,
             pr_number=pr.number,
-            base_sha=head.base.sha,
             head_sha=head.head.sha,
         ):
             try:
