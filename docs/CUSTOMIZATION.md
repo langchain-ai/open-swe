@@ -77,7 +77,7 @@ Either variable can be set independently.
 When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used.
 The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
-These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults.
+These defaults apply below explicit run, thread, workspace, and instance selections, including inherited reviewer and subagent defaults.
 Existing selections are not overwritten.
 Restart the backend after changing its environment.
 
@@ -132,7 +132,7 @@ Routing is independent of the provider-proxy gateway toggle below.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
 Jev receives the latest human task text (up to 8,000 characters).
-Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off.
+Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or workspace default), the same model used when routing is off.
 The confidence cutoff is an initial heuristic, not a calibrated correctness probability.
 Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 

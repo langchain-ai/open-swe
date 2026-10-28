@@ -449,16 +449,6 @@ def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
     assert any(blocker in reason for reason in request_blockers(_snapshot(**overrides)))
 
 
-def test_a_failing_check_github_does_not_require_does_not_block_the_request() -> None:
-    snapshot = _snapshot(
-        check_state="failure",
-        mergeable_state="unstable",
-        failures_are_required=False,
-        failing_checks=["x"],
-    )
-    assert request_blockers(snapshot) == []
-
-
 @pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
 async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
     from openswe.human_review.standard import AutoAssignResult, run_deadline

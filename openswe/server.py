@@ -169,7 +169,11 @@ from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files
-from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from openswe.thread_title import (
+    ANTHROPIC_TITLE_GENERATION_MAX_TOKENS,
+    TITLE_GENERATION_MAX_TOKENS,
+    schedule_thread_title_generation,
+)
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -998,7 +1002,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     metadata, never from the client, and keeping the tools registered across a
     surface switch is what keeps the prompt prefix cacheable.
     """
-    if cfg.source not in {"slack", "schedule", "incidents_agent", DASHBOARD_SOURCE}:
+    if cfg.source not in {"slack", "schedule", "incidents_agent", "github", DASHBOARD_SOURCE}:
         return False
     if cfg.slack_thread is None:
         return False
@@ -1009,7 +1013,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
     """Where this run owes its answer, before anything moves mid-run."""
-    if cfg.source == DASHBOARD_SOURCE or not _slack_tools_enabled(cfg):
+    if cfg.source in {DASHBOARD_SOURCE, "github"} or not _slack_tools_enabled(cfg):
         return WEB_REPLY_SURFACE
     return SLACK_REPLY_SURFACE
 
@@ -1756,8 +1760,14 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     title_model_kwargs = provider_model_kwargs(
         title_model_id,
         title_effort,
-        max_tokens=TITLE_GENERATION_MAX_TOKENS,
+        max_tokens=(
+            ANTHROPIC_TITLE_GENERATION_MAX_TOKENS
+            if title_model_id.startswith("anthropic:")
+            else TITLE_GENERATION_MAX_TOKENS
+        ),
     )
+    if title_model_id.startswith("anthropic:"):
+        title_model_kwargs.pop("thinking", None)
 
     def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
         fallback = fallback_model_choice(primary_model_id)
@@ -1787,6 +1797,13 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     managed_gateway, mcp_tools = (
         await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
     )
+    if incident_session is not None:
+        # incident.io refuses publishing from this MCP client (surface_cannot_publish).
+        mcp_tools = [
+            tool
+            for tool in mcp_tools
+            if (tool.metadata or {}).get("mcp_tool_name") != "status_page_update"
+        ]
 
     slack_tools = [
         manage_code_channel,
