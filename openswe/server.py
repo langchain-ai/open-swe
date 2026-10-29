@@ -1470,14 +1470,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             if rendered_prompt is not None
             else {}
         )
-        _detach(
-            self._record_run(
-                cfg,
-                triggering_user_identity,
-                model_id=attribution_model_id,
-                effort=attribution_effort,
-                route=attribution_route,
-            )
+        await self._record_run(
+            cfg,
+            triggering_user_identity,
+            model_id=attribution_model_id,
+            effort=attribution_effort,
+            route=attribution_route,
         )
 
         return {
@@ -1514,22 +1512,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         effort: str | None,
         route: str | None,
     ) -> None:
-        """Record who ran the turn on what model, for the thread list and usage.
-
-        Nothing in the run reads it back, so the run does not wait for it.
-        """
+        """Record the start before the model can finish; save thread metadata separately."""
+        _detach(self._record_thread_metadata(model_id=model_id, effort=effort, route=route))
         try:
             with apm_span("agent.record_run", {"thread_id": self._thread_id}):
-                await client.threads.update(
-                    thread_id=self._thread_id,
-                    metadata={
-                        "agent_kind": "agent",
-                        "model": model_id,
-                        "effort": effort,
-                        "source": self._source,
-                        **({"model_route": route} if route is not None else {}),
-                    },
-                )
                 if cfg.invocation_id:
                     await record_agent_invocation_usage(
                         invocation_id=cfg.invocation_id,
@@ -1555,6 +1541,29 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         except Exception:
             logger.warning(
                 "Failed to record the agent run",
+                extra={"thread_id": self._thread_id},
+                exc_info=True,
+            )
+
+    async def _record_thread_metadata(
+        self, *, model_id: str, effort: str | None, route: str | None
+    ) -> None:
+        """Save display metadata without delaying the run or its usage record."""
+        try:
+            with apm_span("agent.record_thread_metadata", {"thread_id": self._thread_id}):
+                await client.threads.update(
+                    thread_id=self._thread_id,
+                    metadata={
+                        "agent_kind": "agent",
+                        "model": model_id,
+                        "effort": effort,
+                        "source": self._source,
+                        **({"model_route": route} if route is not None else {}),
+                    },
+                )
+        except Exception:
+            logger.warning(
+                "Failed to record agent thread metadata",
                 extra={"thread_id": self._thread_id},
                 exc_info=True,
             )
