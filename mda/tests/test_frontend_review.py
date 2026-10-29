@@ -28,6 +28,7 @@ async def test_dedicated_review_reads_images_and_publishes_without_coding_hooks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr(mda_runtime._SharedDefinitions, "_built", OrderedDict())
     monkeypatch.setattr(mda_runtime._SharedGraphs, "_built", OrderedDict())
     review_id = uuid4()
     image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jEioAAAAASUVORK5CYII="
@@ -76,7 +77,7 @@ async def test_dedicated_review_reads_images_and_publishes_without_coding_hooks(
     model = GenericFakeChatModel(messages=iter([]))
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", model)
+    monkeypatch.setattr(agent, "build_model", lambda *args, **kwargs: model)
     monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
     monkeypatch.setattr("rt.run_tools.build_model", lambda *args, **kwargs: model)
     spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})

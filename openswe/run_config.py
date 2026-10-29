@@ -161,7 +161,6 @@ class RunConfig(BaseModel):
     # Behavior toggles
     draft_prs: bool | None = None
     admin_thread: bool | None = None
-    stop_summary: bool | None = None
     slack_ask: bool | None = None
     slack_kickoff_eligible: bool | None = None
     # First run of a thread broken out from another Slack thread.

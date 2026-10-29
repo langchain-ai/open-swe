@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -179,5 +180,15 @@ async def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path
     assert first.repo == second.repo == "org/actual"
     assert first.branch == second.branch == "work"
     assert first.dirty != second.dirty
+
+    broken = tmp_path / "broken"
+    shutil.copytree(repo, broken)
+    (broken / ".git" / "index").write_bytes(b"corrupt")
+    answer = await script.run(backend, {"root": str(tmp_path)})
+    before = GitSnapshot.model_validate(answer)
+    assert list(before.repos) == [str(repo)]
+    assert list(before.skipped) == [str(broken)]
+    recovered = GitSnapshot(repos={str(broken): GitCheckout(repo="org/actual", branch="work")})
+    assert recovered.changes_since(before) == []
     with pytest.raises(SandboxScriptError, match="Could not inspect workspace git state"):
         await script.run(backend, {"root": str(tmp_path / "missing")})

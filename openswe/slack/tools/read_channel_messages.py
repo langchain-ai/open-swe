@@ -1,11 +1,9 @@
-from typing import Any
-
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     format_slack_messages_for_prompt,
     get_slack_user_names,
 )
-from openswe.tools.access import Policy, access
+from openswe.tools import access as tool_access
 
 DEFAULT_CHANNEL_MESSAGE_LIMIT = 30
 
@@ -16,12 +14,19 @@ _NOT_PUBLIC = (
 )
 
 
-@access(Policy(trusted="private"))
-async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[str, Any]:
+@tool_access.access(tool_access.Policy(trusted="channel_history"))
+async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[str, object]:
     """Implement the `slack_read_channel_messages` tool."""
     if not channel_id or not channel_id.strip():
         return {"success": False, "error": "channel_id is required"}
-    channel = await SlackChannel.load(channel_id.strip())
+    channel_id = channel_id.strip()
+    current_access = await tool_access.resolve_access()
+    if not current_access.private and current_access.slack_bot_channel != channel_id:
+        return {
+            "success": False,
+            "error": "Bot-triggered runs can read only their current channel.",
+        }
+    channel = await SlackChannel.load(channel_id)
     if channel is None or not channel.public:
         return {"success": False, "error": _NOT_PUBLIC}
 

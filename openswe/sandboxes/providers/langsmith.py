@@ -286,6 +286,9 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
 
 
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
+    # A stalled create may have succeeded server-side; an orphan its idle TTL stops beats failing.
+    if isinstance(exc, httpx2.TransportError):
+        return True
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
     if isinstance(status_code, int):
@@ -340,9 +343,8 @@ async def _create_sandbox_with_retry(
                 min(attempt, len(SANDBOX_CREATE_RETRY_DELAYS_SECONDS) - 1)
             ]
             logger.warning(
-                "Failed to create LangSmith sandbox (%s); retrying in %.1fs",
-                type(exc).__name__,
-                delay,
+                "Failed to create LangSmith sandbox; retrying",
+                extra={"error_type": type(exc).__name__, "attempt": attempt + 1, "delay_s": delay},
             )
             await asyncio.sleep(delay)
     raise RuntimeError("unreachable sandbox retry state")

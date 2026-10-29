@@ -91,6 +91,12 @@ class SandboxBackendProxy(BaseSandbox):
     def id(self) -> str:
         return self._get_backend().id
 
+    def get_work_dir(self) -> str | None:
+        """Expose the current backend's declared directory once connected."""
+        from openswe.sandboxes.paths import declared_work_dir
+
+        return declared_work_dir(self._backend) if self._backend is not None else None
+
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
         self._startup_task = None
