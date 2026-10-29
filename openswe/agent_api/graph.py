@@ -12,9 +12,9 @@ import (``runtime_api``):
   lists every tool but the run's integrations, and the context names them only:
   every tool is kept by digest (``run_tool_sets``), which
   ``tool_specs``, ``search_tools`` and ``resolve_tool`` read
-- ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
-  prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
-  plans the run again
+- ``prepare`` readies the run: the thread's sandbox, checkout and prompt, the
+  transcript turn, skills and reply bookkeeping. Agent runs carry immutable
+  preparation inputs in their signed settings; older runs rebuild their plan
 - every other call is a ``TokenRun``, answered from the token and the request with
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
   named calls MDA's middleware makes around a model call (``route_model``,
@@ -1208,7 +1208,13 @@ class RemoteGraph:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
         tools = await session.tool_set().keep()
-        settings = session.settings().model_copy(update={"tools": tools})
+        cfg = RunConfig.from_config(session.config)
+        preparation = (
+            None if self.parts.legacy(cfg) else self.parts.preparation_plan(session.surface)
+        )
+        settings = session.settings().model_copy(
+            update={"tools": tools, "preparation": preparation}
+        )
         return RunStart(catalog=await session.plan(), settings=settings)
 
     async def session(
@@ -1240,6 +1246,20 @@ class RemoteGraph:
                 return await TOOL_CALLS.dispatch(endpoint, call, raw)
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
+        if endpoint == PREPARE.name and run.settings.preparation is not None:
+            call = TokenRun(self, run, run_id)
+            if not call.legacy:
+                surface = await self.parts.preparation(call.config, run.settings.preparation)
+                if surface is not None:
+                    session = RunSession(
+                        surface,
+                        call.config,
+                        self.parts.restore,
+                        started_here=True,
+                        assistant_id=self.assistant_id,
+                        run=run,
+                    )
+                    return await API.dispatch(endpoint, session, raw)
         # Preparation starts the run's session; the end of the run closes it.
         session = await self.session(run, run_id, fresh=endpoint == PREPARE.name)
         try:
