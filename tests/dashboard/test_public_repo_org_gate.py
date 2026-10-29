@@ -38,6 +38,17 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     register_github_logins(monkeypatch, "stranger", "insider")
 
 
+@pytest.mark.parametrize("sender", ["Configured[bot]", "CONFIGURED[BOT]"])
+async def test_gate_recognizes_internal_bots_case_insensitively(
+    monkeypatch: pytest.MonkeyPatch, sender: str
+) -> None:
+    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", "langchain-ai")
+    monkeypatch.setattr(webhook_common, "INTERNAL_BOT_LOGINS", frozenset({"configured[bot]"}))
+    assert await webhook_common._is_sender_allowed_for_public_repo(
+        {"repository": {"private": False}, "sender": {"login": sender}}
+    )
+
+
 async def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})

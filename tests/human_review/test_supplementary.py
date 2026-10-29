@@ -428,6 +428,7 @@ def test_invalid_policies_are_dropped_without_discarding_other_settings() -> Non
     settings = RepoSettings.model_validate_json(
         """{
             "reviewChannel": "#eng-reviews",
+            "reviewAllowedAuthors": ["langsmith-engine[bot]"],
             "supplementaryReviews": [
                 {"id": "Design", "label": "Design review", "team": "a/b", "paths": ["*"],
                  "criteria": "x"},
@@ -440,4 +441,5 @@ def test_invalid_policies_are_dropped_without_discarding_other_settings() -> Non
         }"""
     )
     assert settings.review_channel == "#eng-reviews"
+    assert settings.review_allowed_authors == ["langsmith-engine[bot]"]
     assert [(p.id, p.criteria) for p in settings.supplementary_reviews] == [("design", "first")]

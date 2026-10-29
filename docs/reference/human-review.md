@@ -22,6 +22,21 @@ The value is a channel name or id.
 It is read from the pull request's head commit, falling back to the default branch when the head has no settings file.
 The `request_human_review` tool accepts a `channel` that overrides it or stands in when the repository sets none.
 
+PR authors must have an Open SWE account or be one of Open SWE's own bots.
+To also accept specific GitHub users or apps, add their exact logins to `reviewAllowedAuthors`:
+
+```json
+{
+  "reviewChannel": "#eng-reviews",
+  "reviewAllowedAuthors": ["langsmith-engine[bot]"]
+}
+```
+
+Logins match case-insensitively; wildcards are not supported.
+The allow-list is read only from the repository's default branch, never from the PR head, and unreadable or invalid settings block unregistered authors.
+It only permits requesting standard human review; it does not grant an Open SWE account or trusted-comment status, bypass draft or closed-PR checks, or relax merge requirements.
+`EXTRA_INTERNAL_BOT_LOGINS` controls trusted comments separately and does not grant review eligibility.
+
 For monorepos, add ordered path rules:
 
 ```json

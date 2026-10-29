@@ -94,6 +94,14 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert not set(surface.skill_sources) & set(surface.backend_paths)
 
 
+@pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])
+async def test_monitor_is_available_without_opt_in(profile: dict[str, object] | None) -> None:
+    captured = await _plan_agent(profile=profile)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert "monitor" in {_registered_tool_name(tool) for tool in tools}
+
+
 async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
     from deepagents.backends.store import StoreBackend
 

@@ -81,6 +81,7 @@ class RepoSettings(BaseModel):
     supplementary_reviews: list[SupplementaryReviewPolicy] = Field(
         default_factory=list, alias="supplementaryReviews"
     )
+    review_allowed_authors: list[str] = Field(default_factory=list, alias="reviewAllowedAuthors")
     review_channel: str = Field("", alias="reviewChannel")
     review_channel_rules: list[ReviewChannelRule] = Field(
         default_factory=list, alias="reviewChannelRules"
