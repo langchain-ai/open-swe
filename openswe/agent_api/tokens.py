@@ -16,6 +16,7 @@ from typing import Final, Self
 import jwt
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
+from openswe.agent_api.preparation import AgentPreparation
 from openswe.config import ENV
 
 _ISSUER: Final = "open-swe"
@@ -52,6 +53,7 @@ class RunSettings(BaseModel):
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
+    preparation: AgentPreparation | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""

@@ -95,6 +95,7 @@ class SandboxDefinition:
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
         "_openswe_per_thread",
         "_openswe_thread_id",
+        "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
         "_openswe_select",
@@ -158,6 +159,10 @@ _RESERVED_CREATE_FIELDS = frozenset(
 )
 
 
+class BoundSandboxMissingError(RuntimeError):
+    """The provider confirmed that the thread's bound workspace no longer exists."""
+
+
 @dataclass(frozen=True)
 class SandboxReplacement:
     """A thread's box replaced by a fresh one under its name; the old box is kept, renamed."""
@@ -179,7 +184,7 @@ async def open_sandbox(backend: object) -> str:
 
 
 async def replace_sandbox(
-    backend: object, sandbox: SandboxDefinition | None = None
+    backend: object, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
 ) -> SandboxReplacement:
     """Give the run's thread a fresh managed sandbox under the same name.
 
@@ -189,7 +194,7 @@ async def replace_sandbox(
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox)
+    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
 
 
 def owning_thread(options: Mapping[str, object]) -> str | None:

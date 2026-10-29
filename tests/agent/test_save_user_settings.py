@@ -311,6 +311,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
                 "goal_mode": False,
+                "experimental_fleet": False,
             },
             "preferences": {
                 "default_workspace": "mine",

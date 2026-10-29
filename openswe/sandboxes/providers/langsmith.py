@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import secrets
 import shlex
 from abc import ABC, abstractmethod
 from typing import Any, Literal, NotRequired, TypedDict
@@ -13,6 +14,7 @@ from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import (
     DeleteResult,
     ExecuteResponse,
+    FileDownloadResponse,
     FileInfo,
     LsResult,
     ReadResult,
@@ -31,10 +33,11 @@ from langsmith.sandbox import (
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.config import ENV
-from openswe.sandboxes.paths import WORKSPACE_DIR
+from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
+from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
 from openswe.workspaces.cloud_identity import federated_cloud
@@ -69,6 +72,7 @@ _LS_MAX_ENTRIES = 1000
 # Above this, a file API read would pull the whole file into the worker to return
 # one page; the base class's read script pages inside the sandbox instead.
 _FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
+_DOWNLOAD_CONCURRENCY = 16
 
 
 def service_identity_jwks_url() -> str:
@@ -619,9 +623,34 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    _git_identity_pending: str | None = None
+    _git_identity_lock: asyncio.Lock | None = None
+
     @property
     def sandbox(self) -> Any:
         return self._sandbox
+
+    def reset_git_identity(self) -> None:
+        """Apply the fallback identity before the next command, without another connection."""
+        self._git_identity_pending = f"__open_swe_git_identity_{secrets.token_hex(16)}__\n"
+        forget_work_dir(self)
+
+    async def ensure_git_identity(self) -> None:
+        """Attempt a pending reset without making a failed identity write fail preparation."""
+        if self._git_identity_pending is not None:
+            try:
+                result = await self.aexecute(":", timeout=30)
+                if result.exit_code != 0:
+                    logger.warning(
+                        "Failed to write the bot Git identity",
+                        extra={"sandbox_id": self.id, "log_tail": result.output[-2000:]},
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to write the bot Git identity",
+                    extra={"sandbox_id": self.id},
+                    exc_info=True,
+                )
 
     def get_work_dir(self) -> str:
         """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
@@ -712,6 +741,30 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return await super().als(path)
         return LsResult(entries=[FileInfo(path=m.path, is_dir=m.is_dir) for m in listing.matches])
 
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
+        """Read every file at once, where the base class reads them one request at a time.
+
+        A reviewer reads every trusted ``SKILL.md`` before its first model call,
+        dozens on a skill-heavy repo.
+        """
+        sandbox = self._aget_sandbox()
+        limit = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
+
+        async def download(path: str) -> FileDownloadResponse:
+            if not path.startswith("/"):
+                return FileDownloadResponse(path=path, content=None, error="invalid_path")
+            try:
+                async with limit:
+                    content = await sandbox.read(path)
+            except ResourceNotFoundError:
+                return FileDownloadResponse(path=path, content=None, error="file_not_found")
+            except SandboxClientError as exc:
+                error = "is_directory" if "is a directory" in str(exc).lower() else "file_not_found"
+                return FileDownloadResponse(path=path, content=None, error=error)
+            return FileDownloadResponse(path=path, content=content, error=None)
+
+        return list(await asyncio.gather(*(download(path) for path in paths)))
+
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         """Upload through the sandbox file API, which creates missing parent directories.
 
@@ -741,6 +794,52 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         *,
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded semantic timeout, not an asyncio contract
     ) -> ExecuteResponse:
+        if self._git_identity_pending is None:
+            return await self._aretried_execute(command, timeout)
+        if self._git_identity_lock is None:
+            self._git_identity_lock = asyncio.Lock()
+        async with self._git_identity_lock:
+            marker = self._git_identity_pending
+            if marker is None:
+                return await self._aretried_execute(command, timeout)
+            work_dir_ready = f"{marker}work-dir\n"
+            identity_ready = f"{marker}identity\n"
+            command_started = f"{marker}command\n"
+            prepared = (
+                f"{{ if mkdir -p {shlex.quote(WORKSPACE_DIR)} && test -w {shlex.quote(WORKSPACE_DIR)}; "
+                f"then printf %s {shlex.quote(work_dir_ready)}; fi; }} 2>&1; "
+                f"{{ if git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
+                f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)}; "
+                f"then printf %s {shlex.quote(identity_ready)}; fi; }} 2>&1; "
+                f"printf %s {shlex.quote(command_started)}; "
+                f"exec /bin/bash -c {shlex.quote(command)}"
+            )
+            try:
+                result = await self._aretried_execute(prepared, timeout)
+            finally:
+                if self._git_identity_pending == marker:
+                    self._git_identity_pending = None
+            setup, started, output = result.output.partition(command_started)
+            if not started:
+                return result
+            if work_dir_ready in setup:
+                remember_work_dir(self, WORKSPACE_DIR)
+            else:
+                logger.warning(
+                    "Could not ready the sandbox work directory", extra={"sandbox_id": self.id}
+                )
+            if identity_ready not in setup:
+                logger.warning(
+                    "Failed to write the bot Git identity",
+                    extra={"sandbox_id": self.id, "log_tail": setup[-2000:]},
+                )
+            return ExecuteResponse(
+                output=output,
+                exit_code=result.exit_code,
+                truncated=result.truncated,
+            )
+
+    async def _aretried_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
         return await retry_transient_sandbox_errors(
             lambda: self._aexecute_once(command, timeout=timeout),
             description="Sandbox command",
