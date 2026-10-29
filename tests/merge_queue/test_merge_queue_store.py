@@ -1617,6 +1617,9 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
     "fault",
     [
         "replay",
+        "slow_dispatch",
+        "dispatch_tuning",
+        "dispatch_response_lost",
         "rerun_after_success",
         "report_rejected",
         "issuer",
@@ -1678,8 +1681,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     )
     sent: list[httpx2.Request] = []
     report_status = 502
+    tuned = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
 
-    def deliver(request: httpx2.Request) -> httpx2.Response:
+    async def deliver(request: httpx2.Request) -> httpx2.Response:
         sent.append(request)
         report = request.url.path.endswith("/check-reports")
         prefix = b"check-report:" if report else b""
@@ -1694,6 +1698,12 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             )
             if body["state"] == "success":
                 return httpx2.Response(report_status)
+        elif fault == "slow_dispatch":
+            await asyncio.sleep(6)
+        elif fault == "dispatch_tuning":
+            await save_configuration(tuned)
+        elif fault == "dispatch_response_lost":
+            raise httpx2.ReadTimeout("Dispatch response lost", request=request)
         return httpx2.Response(204)
 
     monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(deliver))
@@ -1726,7 +1736,16 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             await reconcile()
         assert sent == []
         return
-    await reconcile()
+    if fault == "dispatch_tuning":
+        with pytest.raises(LeaseLost, match="configuration changed"):
+            await reconcile()
+        config = tuned
+        assert len(sent) == 1
+    elif fault == "dispatch_response_lost":
+        with pytest.raises(httpx2.ReadTimeout):
+            await reconcile()
+    else:
+        await reconcile()
     request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
     run = ValidationRun(
         id=42,
@@ -1799,7 +1818,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     assert successes[0].content == successes[1].content
 
 
-async def test_configuration_fences_stale_workers_and_serializes_external_actions(
+async def test_configuration_fences_stale_workers_and_serializes_check_publication(
     queue_controller: QueueController,
 ) -> None:
     queue = queue_controller.queue
@@ -1828,14 +1847,14 @@ async def test_configuration_fences_stale_workers_and_serializes_external_action
     updated = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
     async with asyncio.timeout(10):
         with pytest.raises(TimeoutError):
-            async with queue.native_action(lease):
+            async with queue.native_publication(lease):
                 change = asyncio.create_task(save_configuration(updated))
                 done, _ = await asyncio.wait({change}, timeout=0.05)
                 assert not done
                 await asyncio.Event().wait()
         await change
     with pytest.raises(LeaseLost, match="configuration changed"):
-        async with queue.native_action(lease):
+        async with queue.native_publication(lease):
             pytest.fail("A stale controller could publish a check")
     with pytest.raises(LeaseLost, match="configuration changed"):
         await queue.finish_native_validation(work, {"error": "old worker"}, lease, succeeded=False)
@@ -1865,8 +1884,8 @@ async def test_configuration_fences_stale_workers_and_serializes_external_action
             .values(merge_queue_config={"repository": "invalid"})
         )
     with pytest.raises(LeaseLost, match="disabled or invalid"):
-        async with queue.native_action(new_lease):
-            pytest.fail("Invalid configuration allowed dispatch or check publication")
+        async with queue.native_publication(new_lease):
+            pytest.fail("Invalid configuration allowed check publication")
     await queue.release(new_lease)
     with pytest.raises(LeaseLost, match="disabled or invalid"):
         await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)

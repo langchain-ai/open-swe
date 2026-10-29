@@ -118,14 +118,15 @@ class NativeQueueRuntime:
         if work.dispatch:
             await queue.renew(lease, timedelta(seconds=60))
             try:
-                async with queue.native_action(lease):
-                    await dispatcher.dispatch(work.request, work.attempt.deadline)
+                # The saved intent authorizes tests, not merging. Do not hold database
+                # locks during dispatch; publication below rechecks current authority.
+                await dispatcher.dispatch(work.request, work.attempt.deadline)
             except DispatchRejected as exc:
                 await queue.finish_native_validation(
                     work, {"error": str(exc)}, lease, succeeded=False
                 )
                 return
-            async with queue.native_action(lease):
+            async with queue.native_publication(lease):
                 await dispatcher.report(work.request, work.attempt.deadline, "in_progress")
             return
         run_id = work.run_id
@@ -154,7 +155,7 @@ class NativeQueueRuntime:
             raise ValueError("Native queue deadline changed during validation")
         await queue.renew(lease, timedelta(seconds=60))
         if await queue.authorize_native_result(work, snapshot, lease):
-            async with queue.native_action(lease):
+            async with queue.native_publication(lease):
                 await dispatcher.report(
                     work.request, work.attempt.deadline, "success", run_id=run_id
                 )

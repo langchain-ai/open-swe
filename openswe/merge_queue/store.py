@@ -264,8 +264,8 @@ class MergeQueue(Record):
             yield session, queue, now
 
     @asynccontextmanager
-    async def native_action(self, lease: Lease) -> AsyncIterator[None]:
-        """Serialize external effects with configuration changes and queue pauses."""
+    async def native_publication(self, lease: Lease) -> AsyncIterator[None]:
+        """Serialize check publication with configuration changes and queue pauses."""
         # Bound lock waits and network I/O so a slow gateway cannot stall workspace writes.
         async with asyncio.timeout(5), self._locked(lease) as (_, queue, _):
             if queue.paused or queue.mode != "native":
