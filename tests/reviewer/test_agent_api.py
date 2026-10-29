@@ -136,7 +136,11 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
-    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    parts = agent.AgentParts()
+    monkeypatch.setattr(
+        parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
+    )
+    graph = RemoteGraph("agent", never_planned, parts)
     run = RUN.model_copy(update={"assistant_id": "agent"})
     asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
 
@@ -160,6 +164,63 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     assert context == {"instructions": None, "message": None}
     assert refreshed == {"expires_at": None}
     refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
+
+
+async def test_task_context_rechecks_membership_and_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware import task_coordination
+    from openswe.tasks import store
+
+    task = store.Task(title="Repair login", workspace_id=uuid4(), coordinator_thread_id="owner")
+    context = store.TaskContext(
+        task, store.TaskMembership(thread_id=RUN.thread_id, task_id=task.id, role="worker")
+    )
+    membership = AsyncMock(return_value=None)
+    delegation = store.TaskDelegation(
+        worker_thread_id=RUN.thread_id,
+        task_id=task.id,
+        coordinator_thread_id="owner",
+        instructions="Fix login",
+        model="openai:gpt-5.5",
+        effort="high",
+    )
+    thread = AsyncMock(return_value={"metadata": {}})
+    refresh = AsyncMock()
+    monkeypatch.setattr(task_coordination, "read_thread", thread)
+    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
+    monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
+    graph = RemoteGraph("agent", AsyncMock())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+
+    absent = await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert isinstance(absent, dict) and absent["message"] is None
+    membership.assert_awaited_once_with(run.thread_id)
+
+    membership.return_value = context
+    for _ in range(2):
+        joined = await graph.api(run, "task_context", {"run_id": "run-1"})
+        assert isinstance(joined, dict)
+        assert str(task.id) in str(joined["message"])
+    assert membership.await_count == 3
+    assert refresh.await_count == 2
+    refresh.assert_awaited_with("owner")
+
+    delegation.cancelled = True
+    with pytest.raises(PermissionError, match="This worker was cancelled"):
+        await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert membership.await_count == 4
+    assert refresh.await_count == 2
+
+    thread.side_effect = PermissionError("Thread access revoked")
+    with pytest.raises(PermissionError, match="Thread access revoked"):
+        await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert membership.await_count == 4
 
 
 @pytest.mark.usefixtures("registry_db")
