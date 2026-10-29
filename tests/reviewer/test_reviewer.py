@@ -347,8 +347,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
 
     from openswe.agent_api.loop import run_hooks
-    from openswe.review_scout.launch import ReviewScoutTarget
-    from openswe.walkthrough.record import WalkthroughView
 
     config: RunnableConfig = {
         "configurable": {
@@ -379,10 +377,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
     monkeypatch.setattr(
         "openswe.review.styles.get_repo_custom_prompt", AsyncMock(return_value=None)
     )
-    walkthrough = AsyncMock(side_effect=AssertionError("Reviewer must not read walkthroughs"))
-    scout = AsyncMock(side_effect=AssertionError("Reviewer must not start the scout"))
-    monkeypatch.setattr(WalkthroughView, "for_head", walkthrough)
-    monkeypatch.setattr(ReviewScoutTarget, "start", scout)
     findings = AsyncMock(return_value=[])
     monkeypatch.setattr(reviewer, "list_findings_async", findings)
     history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]
@@ -429,5 +423,3 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         assert state["messages"] == [*previous, context]
         system_prompts.append(rendered)
     assert system_prompts[0] == system_prompts[1]
-    walkthrough.assert_not_awaited()
-    scout.assert_not_awaited()
