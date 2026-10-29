@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from langgraph_sdk import get_client
 from runtime_api.catalog import InboxSpec, LoopRules
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
@@ -91,6 +90,7 @@ from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_revi
 from openswe.sandboxes.state import SandboxHandedOverError, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
+from openswe.threads.store import THREADS
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -604,9 +604,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         cfg = RunConfig.from_config(self._config)
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
-                await get_client().threads.update(
-                    thread_id=self._thread_id,
-                    metadata={
+                await THREADS.update(
+                    self._thread_id,
+                    {
                         "agent_kind": "reviewer",
                         "model": self._model.model_id,
                         "effort": self._model.effort,

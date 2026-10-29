@@ -1124,7 +1124,9 @@ class TokenRun:
                 message=await coordination.context_message(),
             )
 
-        return await self.in_run("task_context", read)
+        return await in_graph_context(
+            {**self.config, "run_name": "task_context"}, lambda _runtime: read()
+        )
 
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
