@@ -113,6 +113,18 @@ def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
     return expires_at, recorded_at, repositories, permission_key
 
 
+def proxy_token_set_since(thread_id: str | None, since: datetime) -> datetime | None:
+    """When the token this process put on ``thread_id``'s box at or after ``since`` expires.
+
+    None when it put none there since, or does not know when that one expires.
+    """
+    record = _PROXY_TOKEN_EXPIRY.get(thread_id) if thread_id else None
+    if record is None:
+        return None
+    expires_at, recorded_at, _scope, _permissions = _unpack_proxy_token_record(record)
+    return expires_at if recorded_at >= since else None
+
+
 def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = None) -> bool:
     """Whether the recorded proxy token is at/near expiry and should be refreshed."""
     if not thread_id:

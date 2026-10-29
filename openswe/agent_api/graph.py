@@ -39,6 +39,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
@@ -135,6 +136,7 @@ from runtime_api.loop import (
     ModelResult,
     PhaseResult,
     Prepare,
+    Prepared,
     ReplyOnBehalf,
     Report,
     Route,
@@ -205,6 +207,7 @@ from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.github.proxy import proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -647,7 +650,8 @@ class RunSession:
         answered = await in_graph_context({**self.config, "run_name": phase}, run, events=events)
         return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
 
-    async def prepare(self, request: Prepare) -> PhaseResult:
+    async def prepare(self, request: Prepare) -> Prepared:
+        started = datetime.now(UTC)
         # MDA opened the box before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
@@ -655,11 +659,16 @@ class RunSession:
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(cfg.thread_id).receive(events=_carried_events(self.config))
 
-        async def begun(state: dict[str, object], runtime: Runtime) -> PhaseResult:
+        async def begun(state: dict[str, object], runtime: Runtime) -> Prepared:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
-            # The turn's git trace starts afresh; MDA asks for its baseline (``git_baseline``)
-            # alongside the first model call.
-            return result.model_copy(update={"update": {**result.update, BASELINE: None}})
+            expires_at = proxy_token_set_since(cfg.thread_id, started)
+            return Prepared(
+                **result.model_dump(exclude={"update"}),
+                update={**result.update, BASELINE: None},
+                github_proxy=None
+                if expires_at is None
+                else GitHubProxyRefreshed(expires_at=expires_at),
+            )
 
         return await self._answer_phase("before_agent", request, begun)
 
@@ -886,9 +895,9 @@ class TokenRun:
     async def inbox(self, request: InboxRead) -> Inbox:
         if request.spec is None:
             return Inbox()
-        taken = await ThreadInbox(self.run.thread_id).read(
-            request.run_id or str(uuid4()), request.spec
-        )
+        inbox = ThreadInbox(self.run.thread_id)
+        await inbox.receive(request.received.queued, request.received.events)
+        taken = await inbox.read(request.run_id or str(uuid4()), request.spec)
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
             update=taken.state_update(request.run_id),
@@ -1072,7 +1081,9 @@ class TokenRun:
                 message=await coordination.context_message(),
             )
 
-        return await self.in_run("task_context", read)
+        return await in_graph_context(
+            {**self.config, "run_name": "task_context"}, lambda _runtime: read()
+        )
 
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
@@ -1223,9 +1234,9 @@ class RemoteGraph:
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        tools = await session.tool_set().keep()
+        tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
         settings = session.settings().model_copy(update={"tools": tools})
-        return RunStart(catalog=await session.plan(), settings=settings)
+        return RunStart(catalog=catalog, settings=settings)
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
