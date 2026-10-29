@@ -536,6 +536,44 @@ async def test_streamed_partial_output_is_not_retried_or_sent_to_fallback(
     assert attempts == 1
 
 
+@pytest.mark.parametrize("jitter", ["lower", "upper"])
+async def test_retry_backoff_allows_a_temporary_provider_outage_to_recover(
+    monkeypatch: pytest.MonkeyPatch, jitter: str
+) -> None:
+    elapsed = 0.0
+    attempts = 0
+    events: list[dict[str, object]] = []
+
+    async def sleep(delay: float) -> None:
+        nonlocal elapsed
+        elapsed += delay
+
+    async def provider(request: ModelRequest) -> ModelResponse:
+        nonlocal attempts
+        attempts += 1
+        if elapsed < 20:
+            raise httpx.ReadError("provider temporarily unavailable")
+        return ModelResponse(result=[AIMessage(content="recovered")])
+
+    monkeypatch.setattr("rt.model_retries.asyncio.sleep", sleep)
+    monkeypatch.setattr(
+        "rt.model_retries.random.uniform",
+        lambda lower, upper: lower if jitter == "lower" else upper,
+    )
+    monkeypatch.setattr("rt.model_retries.get_stream_writer", lambda: events.append)
+    request = ModelRequest(
+        model=ChatOpenAI(model="test", api_key="test", max_retries=0),
+        messages=[HumanMessage(content="go")],
+    )
+
+    response = await ModelRetriesMiddleware().awrap_model_call(request, provider)
+
+    assert response.result[0].content == "recovered"
+    assert attempts <= 6
+    assert 20 <= elapsed <= 60
+    assert len(events) == attempts - 1
+
+
 async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -130,7 +130,7 @@ class ModelRetriesMiddleware(AgentMiddleware):
                     raise
                 delay = _retry_after(exc)
                 if delay is None:
-                    delay = random.uniform(0.0, min(10.0, 0.2 * 2**attempt))
+                    delay = min(16.0, 2.0**attempt) * random.uniform(0.75, 1.0)
                 if delay > MAX_RETRY_SLEEP_SECONDS - spent:
                     logger.warning("Model retry would exceed its sleep budget")
                     raise
