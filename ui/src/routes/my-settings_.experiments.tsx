@@ -20,6 +20,11 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <StreamPreference />
+        <ProfileSwitchRow
+          field="experimental_fleet"
+          label="Fleet chats"
+          description="Add an Open SWE / Fleet switch to the sidebar to chat with Fleet in your LangSmith workspace, as you. Needs a LangSmith connection."
+        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
