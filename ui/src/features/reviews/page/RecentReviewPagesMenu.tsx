@@ -6,16 +6,18 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
-import { Spinner } from "@langchain/macaw-components/Spinner"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
-import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
-import type { PullRequestRef } from "./queries"
+import {
+  readRecentReviewPages,
+  recordRecentReviewPage,
+} from "@/features/reviews/lib/recentReviewPages"
+import { reviewQueries, type PullRequestRef } from "./queries"
 import { RelativeTimestamp } from "./RelativeTimestamp"
 
 /** The PR's name in the header, opening the other review pages this person opened lately. */
@@ -26,12 +28,28 @@ export function RecentReviewPagesMenu({
   pr: PullRequestRef
   children: ReactNode
 }) {
-  const login = useSession().data?.login?.toLowerCase()
+  const login = useSession().data?.login?.toLowerCase() ?? ""
+  const queryClient = useQueryClient()
+  const detail = useQuery(reviewQueries.detail(pr)).data
+  const recentKey = ["reviews", "recent", login]
   const recent = useQuery({
-    queryKey: ["reviews", "recent"],
-    queryFn: () => api.recentReviewPages(),
+    queryKey: recentKey,
+    queryFn: () => readRecentReviewPages(login),
+    enabled: Boolean(login),
   })
-  const others = (recent.data?.reviews ?? []).filter(
+  useEffect(() => {
+    if (!login || !detail) return
+    queryClient.setQueryData(
+      ["reviews", "recent", login],
+      recordRecentReviewPage(login, {
+        ...pr,
+        title: detail.pr.title,
+        author: detail.pr.author?.login ?? detail.author,
+        opened_at: new Date().toISOString(),
+      })
+    )
+  }, [login, pr, detail, queryClient])
+  const others = (recent.data ?? []).filter(
     (review) =>
       `${review.owner}/${review.repo}#${review.number}`.toLowerCase() !==
       `${pr.owner}/${pr.repo}#${pr.number}`.toLowerCase()
@@ -58,15 +76,7 @@ export function RecentReviewPagesMenu({
         <DropdownMenuLabel className="px-space-2 py-space-1 text-xxs text-tertiary">
           Recently opened
         </DropdownMenuLabel>
-        {recent.isLoading ? (
-          <div className="flex justify-center py-space-4">
-            <Spinner size="xs" />
-          </div>
-        ) : recent.isError ? (
-          <p className="px-space-2 py-space-2 text-xs text-error-secondary">
-            {recent.error.message}
-          </p>
-        ) : others.length === 0 ? (
+        {others.length === 0 ? (
           <p className="px-space-2 py-space-2 text-xs text-secondary">
             Other review pages you open show up here.
           </p>

@@ -370,9 +370,6 @@ export function markReviewViewed(
   if (threadId) markAgentThreadViewed(queryClient, threadId)
   api
     .markReviewViewed(review.owner, review.repo, review.number)
-    .then(() =>
-      queryClient.invalidateQueries({ queryKey: ["reviews", "recent"] })
-    )
     .catch((error: unknown) =>
       console.warn("Could not mark the review read", { review, error })
     )

@@ -76,7 +76,8 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const walkthroughSha = detail.data?.walkthrough?.head_sha
   const detailLoaded = detail.isSuccess
   useEffect(() => {
-    if (detailLoaded) markReviewViewed(queryClient, pr, chatThreadId)
+    if (chatThreadId && detailLoaded)
+      markReviewViewed(queryClient, pr, chatThreadId)
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
   useCollapseAppSidebar(pr)
