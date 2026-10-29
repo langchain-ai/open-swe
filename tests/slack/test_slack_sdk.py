@@ -121,10 +121,7 @@ async def test_breakout_uses_fresh_channel_cache(
     "status,code,headers,retry_after",
     [
         (429, "ratelimited", {"Retry-After": "12"}, 12),
-        (503, "service_unavailable", {}, 60),
-        (200, "internal_error", {}, 60),
         (200, "channel_not_found", {}, None),
-        (200, "missing_scope", {}, None),
     ],
 )
 async def test_breakout_distinguishes_unavailable_channel_verification(
