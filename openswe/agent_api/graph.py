@@ -18,7 +18,7 @@ import (``runtime_api``):
 - every other call is a ``TokenRun``, answered from the token and the request with
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
   named calls MDA's middleware makes around a model call (``route_model``,
-  ``model_choice``, ``task_context``, ``refresh_github_proxy``,
+  ``model_choice``, ``task_context``, ``refresh_github_proxy``, ``git_baseline``,
   ``reply_on_behalf``) and at the run's end (``run_ended``,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
   reports of each reply and tool call, which arrive with those notices in ordered
@@ -105,6 +105,7 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     BROWSER,
     FINISH_SCOUT_PLAN,
+    GIT_BASELINE,
     INBOX,
     INBOX_RECEIVED,
     MODEL_CHOICE,
@@ -126,6 +127,7 @@ from runtime_api.loop import (
     BrowserReport,
     ChosenModel,
     Done,
+    GitBaseline,
     GitHubProxyRefreshed,
     Inbox,
     InboxItems,
@@ -245,6 +247,7 @@ from openswe.server import (
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
+from openswe.utils.startup_trace import apm_span
 
 logger = logging.getLogger(__name__)
 
@@ -657,11 +660,10 @@ class RunSession:
 
         async def begun(state: dict[str, object], runtime: Runtime) -> Prepared:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
-            begin = await TurnGitMetadata(self.config).begin()
             expires_at = proxy_token_set_since(cfg.thread_id, started)
             return Prepared(
                 **result.model_dump(exclude={"update"}),
-                update={**result.update, **begin},
+                update={**result.update, BASELINE: None},
                 github_proxy=None
                 if expires_at is None
                 else GitHubProxyRefreshed(expires_at=expires_at),
@@ -1087,6 +1089,17 @@ class TokenRun:
         )
         return GitHubProxyRefreshed(expires_at=expires_at)
 
+    async def git_baseline(self, _request: RunRequest) -> GitBaseline:
+        """The thread's checkouts as the turn starts, snapshotted as the run, which a
+        bridged machine checks."""
+
+        async def begin(_runtime: Runtime) -> dict[str, JsonValue]:
+            return await TurnGitMetadata(self.config).begin()
+
+        with apm_span("agent.git_baseline", {"thread_id": self.run.thread_id}):
+            update = await in_graph_context({**self.config, "run_name": "git_baseline"}, begin)
+        return GitBaseline(update=update)
+
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
         state = call_state(request, self.parts.restore)
@@ -1438,6 +1451,7 @@ RUN_CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 RUN_CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
+RUN_CALLS.serve(GIT_BASELINE, TokenRun.git_baseline)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)

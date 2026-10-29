@@ -94,6 +94,7 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
+from rt.git_baseline import TurnBaseline
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
 from rt.model_calls import PROMPT_CACHE_TTL
@@ -130,7 +131,8 @@ def _merge(
     left: dict[str, JsonValue] | None, right: dict[str, JsonValue] | None
 ) -> dict[str, JsonValue]:
     held = left or {}
-    if right is not None and "git_trace_baseline" in right:
+    # A cleared baseline starts the turn's git trace afresh; the baseline itself joins it.
+    if right is not None and "git_trace_baseline" in right and right["git_trace_baseline"] is None:
         held = {key: value for key, value in held.items() if not key.startswith("git_trace_")}
     return {**held, **(right or {})}
 
@@ -183,6 +185,12 @@ def _decode(value: object) -> object:
     if isinstance(value, list):
         return [_decode(v) for v in value]
     return value
+
+
+def _holding(values: Mapping[str, object], held: Mapping[str, JsonValue]) -> dict[str, object]:
+    """``values``, with ``held`` added to the graph state the backend keeps."""
+    prior = values.get(STATE_KEY)
+    return {**values, STATE_KEY: {**(prior if isinstance(prior, Mapping) else {}), **held}}
 
 
 def _apply(reply: PhaseResult) -> dict[str, object]:
@@ -333,6 +341,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
+        self._baselines = RunLocal(TurnBaseline)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
 
@@ -424,6 +433,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if self._loop is not None:
             prepared.update.update(self._loop.prepared(prepared))
+        self._baselines.get(self._backend.run).start(self._backend, run_id())
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
@@ -562,7 +572,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         self._backend.outbox.adopt(state)
-        return self._carrying(state, await self._after_model(state))
+        # Before any tool the model called runs.
+        baseline = await self._baselines.get(self._backend.run).taken()
+        update = await self._after_model(state)
+        return self._carrying(state, _holding(update or {}, baseline) if baseline else update)
 
     async def _after_model(self, state: RunState) -> dict[str, object] | None:
         if self._loop is None:
@@ -578,9 +591,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # What the backend has not taken by now waits in the thread's state for its next run.
         return self._carrying(state, await self._after_agent(state))
 
-    async def _after_agent(self, state: RunState) -> dict[str, object] | None:
+    async def _after_agent(self, run_state: RunState) -> dict[str, object] | None:
         metadata = self._trace_metadata()
         trace = self._traces.get(self._backend.run)
+        # A run that ended before its first model call answered reconciles against it too.
+        state = _holding(run_state, await self._baselines.get(self._backend.run).taken())
         try:
             if self._loop is not None:
                 ended = await self._loop.after_agent(state, trace.evidence)
