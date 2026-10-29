@@ -150,7 +150,7 @@ from openswe.sandboxes.lifecycle import (
     take_stale_boot,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
-from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox, service_identity_jwks_url
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from openswe.sandboxes.state import (
     SandboxHandedOverError,
@@ -1363,13 +1363,19 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 handed_to_mda=isinstance(exc, SandboxHandedOverError),
             )
             raise
+        if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
+            sandbox_backend.reset_git_identity()
         del github_token
         async with aphase(self._thread_id, "prepare.slack_files"):
             await deliver_slack_files(self._thread_id, bound, sandbox_backend)
         if stale_workspace := take_stale_boot(self._thread_id):
             queue_stale_workspace_notice(self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.work_dir"):
-            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            work_dir = (
+                sandbox_backend.get_work_dir()
+                if isinstance(sandbox_backend, TimeoutLangSmithSandbox)
+                else await resolve_sandbox_work_dir(sandbox_backend)
+            )
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
         if bridged and self._bridge_client == "desktop":
             schedule_worktree_branch_rename(

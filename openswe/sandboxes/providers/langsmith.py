@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import secrets
 import shlex
 from abc import ABC, abstractmethod
 from typing import Any, Literal, NotRequired, TypedDict
@@ -31,10 +32,11 @@ from langsmith.sandbox import (
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.config import ENV
-from openswe.sandboxes.paths import WORKSPACE_DIR
+from openswe.sandboxes.paths import WORKSPACE_DIR, remember_work_dir
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
+from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
 from openswe.workspaces.cloud_identity import federated_cloud
@@ -619,15 +621,21 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    _git_identity_pending: str | None = None
+    _git_identity_lock: asyncio.Lock | None = None
+
     @property
     def sandbox(self) -> Any:
         return self._sandbox
 
-    @property
-    def box_uid(self) -> str | None:
-        """The box itself, where ``id`` is its name: a box recreated under that name has a new one."""
-        uid = self._sandbox.id
-        return uid if isinstance(uid, str) and uid else None
+    def reset_git_identity(self) -> None:
+        """Apply the fallback identity before the next command, without another connection."""
+        self._git_identity_pending = f"__open_swe_git_identity_{secrets.token_hex(16)}__\n"
+
+    async def ensure_git_identity(self) -> None:
+        """Finish a pending reset when no other startup command completed it."""
+        if self._git_identity_pending is not None:
+            await self.aexecute(":")
 
     def get_work_dir(self) -> str:
         """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
@@ -747,6 +755,37 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         *,
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded semantic timeout, not an asyncio contract
     ) -> ExecuteResponse:
+        if self._git_identity_pending is None:
+            return await self._aretried_execute(command, timeout)
+        if self._git_identity_lock is None:
+            self._git_identity_lock = asyncio.Lock()
+        async with self._git_identity_lock:
+            marker = self._git_identity_pending
+            if marker is None:
+                return await self._aretried_execute(command, timeout)
+            prepared = (
+                f"mkdir -p {shlex.quote(WORKSPACE_DIR)} && test -w {shlex.quote(WORKSPACE_DIR)} || exit $?; "
+                f"git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
+                f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)} || exit $?; "
+                f"printf %s {shlex.quote(marker)}; "
+                f"exec /bin/bash -c {shlex.quote(command)}"
+            )
+            result = await self._aretried_execute(prepared, timeout)
+            if not result.output.startswith(marker):
+                raise RuntimeError(
+                    f"Failed to configure sandbox Git identity (exit code {result.exit_code}): "
+                    f"{result.output}"
+                )
+            if self._git_identity_pending == marker:
+                self._git_identity_pending = None
+            remember_work_dir(self, WORKSPACE_DIR)
+            return ExecuteResponse(
+                output=result.output.removeprefix(marker),
+                exit_code=result.exit_code,
+                truncated=result.truncated,
+            )
+
+    async def _aretried_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
         return await retry_transient_sandbox_errors(
             lambda: self._aexecute_once(command, timeout=timeout),
             description="Sandbox command",

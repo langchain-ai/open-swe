@@ -1,20 +1,21 @@
-"""The bot's git identity is written while the GitHub proxy is being configured.
-
-The identity needs the sandbox, not the proxy, so running it after the proxy
-chain put a full sandbox round trip on the critical path before the run's first
-model call. Every connection to the box MDA opened does both.
-"""
+"""Reset the fallback Git identity each run without a separate LangSmith command."""
 
 import asyncio
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
+from runtime_api.loop import Prepare
 
+from openswe.agent_api.git_metadata import TurnGitMetadata
+from openswe.agent_api.graph import RunSession
 from openswe.github.sandbox_access import SandboxGitHubAccess
-from openswe.sandboxes.lifecycle import BoxSetup, _connect_existing_sandbox
+from openswe.sandboxes.lifecycle import _connect_existing_sandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy, SandboxUnreachableError
+from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 async def _connect(backend: MagicMock, thread_id: str) -> object:
@@ -103,30 +104,40 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("work_dir", ["/workspace", None])
-async def test_box_setup_retries_failures_and_only_repeats_when_recreated(
-    work_dir: str | None,
+@pytest.mark.parametrize("offloaded", [False, True])
+async def test_identity_is_reset_each_run_in_the_first_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offloaded: bool
 ) -> None:
-    sandbox = MagicMock(id="box-1")
-    sandbox.name = "sandbox-mda"
-    backend = TimeoutLangSmithSandbox(sandbox)
-    output = "__open_swe_work_dir_ready__\n" if work_dir else ""
-    execute = AsyncMock(
-        return_value=ExecuteResponse(output=f"{output}could not lock config file", exit_code=1)
-    )
-    records: list[dict[str, object]] = []
+    backend = TimeoutLangSmithSandbox(SimpleNamespace(name="sandbox-mda"))
+    commands: list[str] = []
+    home = tmp_path / "home"
+    home.mkdir()
 
-    async def record(_thread_id: str, metadata: dict[str, object]) -> None:
-        records.append(metadata)
-
-    async def connect(setup: BoxSetup | None) -> None:
-        await _connect_existing_sandbox(
-            "thread-setup", cached=backend, sandbox_id="sandbox-mda", setup=setup
+    async def execute(command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        commands.append(command)
+        process = await asyncio.create_subprocess_exec(
+            "bash",
+            "-c",
+            f"export HOME={home}; {command}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
+        output, _ = await process.communicate()
+        return ExecuteResponse(output=output.decode(), exit_code=process.returncode)
+
+    monkeypatch.setattr(backend, "_aexecute_once", execute)
+    monkeypatch.setattr("openswe.sandboxes.providers.langsmith.WORKSPACE_DIR", str(tmp_path))
+
+    async def run(command: str) -> ExecuteResponse:
+        if not offloaded:
+            return await backend.aexecute(command)
+        result = await backend.aexecute_with_offload(
+            command, str(tmp_path / "capture.txt"), max_inline_bytes=10000
+        )
+        assert result.response is not None
+        return result.response
 
     with (
-        patch.object(backend, "aexecute", execute),
-        patch("openswe.sandboxes.lifecycle.declared_work_dir", return_value=work_dir),
         patch(
             "openswe.sandboxes.lifecycle.workspace_token",
             new_callable=AsyncMock,
@@ -134,20 +145,47 @@ async def test_box_setup_retries_failures_and_only_repeats_when_recreated(
         ),
         patch("openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock),
         patch("openswe.sandboxes.lifecycle.record_proxy_token_expiry"),
-        patch("openswe.sandboxes.lifecycle.THREADS.update", side_effect=record),
     ):
-        with pytest.raises(RuntimeError, match="could not lock config file"):
-            await connect(None)
-        assert records == []
+        await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)
+        assert commands == []
+        result = await run("git config --global user.email")
+        assert result.exit_code == 0
+        assert result.output.strip() == "open-swe@users.noreply.github.com"
+        assert len(commands) == 1
+        await backend.ensure_git_identity()
+        assert len(commands) == 1
+        await backend.aexecute("git config --global user.email wrong@example.com")
+        await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)
+        result = await run("git config --global user.email")
+        assert result.output.strip() == "open-swe@users.noreply.github.com"
+        assert len(commands) == 3
+        await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)
+        failed = await backend.aexecute("printf user-output; exit 7")
+        assert failed.output == "user-output"
+        assert failed.exit_code == 7
+        result = await run("printf next-command")
+        assert result.output == "next-command"
 
-        execute.return_value = ExecuteResponse(output=output, exit_code=0)
-        await connect(None)
-        setup = BoxSetup.recorded(records[-1])
-        assert setup is not None
-        await connect(setup)
-        assert execute.await_count == 2
+        await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)
+        (home / ".gitconfig.lock").touch()
+        target = tmp_path / "command-ran"
+        with pytest.raises(RuntimeError, match="Failed to configure sandbox Git identity"):
+            await run(f"touch {target}")
+        assert not target.exists()
 
-        sandbox.id = "box-2"
-        await connect(setup)
+        session = RunSession(
+            ToolSurface(), {"configurable": {"thread_id": "thread-reset"}}, None, started_here=True
+        )
+        monkeypatch.setitem(
+            SANDBOX_BACKENDS, "thread-reset", SandboxBackendProxy(backend, thread_id="thread-reset")
+        )
+        monkeypatch.setattr(session, "bind_sandbox", AsyncMock())
+        monkeypatch.setattr(TurnGitMetadata, "begin", AsyncMock(return_value={}))
+        with pytest.raises(RuntimeError, match="Failed to configure sandbox Git identity"):
+            await session.prepare(Prepare())
 
-    assert execute.await_count == 3
+        (home / ".gitconfig.lock").unlink()
+        await session.prepare(Prepare())
+        result = await run(f"touch {target}")
+        assert result.exit_code == 0
+        assert target.exists()

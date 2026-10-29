@@ -224,7 +224,8 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -654,6 +655,11 @@ class RunSession:
         async def begun(state: dict[str, object], runtime: Runtime) -> PhaseResult:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
             begin = await TurnGitMetadata(self.config).begin()
+            sandbox = SANDBOX_BACKENDS.get(cfg.thread_id or "")
+            if sandbox is not None and sandbox.has_backend:
+                backend = sandbox.current
+                if isinstance(backend, TimeoutLangSmithSandbox):
+                    await backend.ensure_git_identity()
             return result.model_copy(update={"update": {**result.update, **begin}})
 
         return await self._answer_phase("before_agent", request, begun)

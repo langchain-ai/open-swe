@@ -18,7 +18,6 @@ from typing import Any, Literal
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
-from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
@@ -55,7 +54,6 @@ from openswe.sandboxes.state import (
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
-from openswe.threads.store import THREADS
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
 from openswe.utils.time import parse_iso
@@ -271,17 +269,10 @@ async def refresh_thread_github_proxy(
 
 
 _WORK_DIR_READY = "__open_swe_work_dir_ready__"
-_GIT_IDENTITY = f"{OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
-_SETUP_METADATA_KEY = "sandbox_setup"
 
 
-async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> str | None:
-    """Write the bot identity, and ready the provider's work dir in the same round trip.
-
-    Creating the work dir and proving it writable is the check the work-dir probe
-    makes, so every connection that runs this spares the run that probe. Returns
-    the work dir it readied.
-    """
+async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
+    """Write the bot identity and ready the provider's work dir in one command."""
     identity = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
@@ -298,86 +289,23 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> str
         raise RuntimeError(
             f"Failed to configure sandbox Git identity (exit code {result.exit_code}): {result.output}"
         )
-    if work_dir is None or _WORK_DIR_READY not in result.output:
-        return None
-    remember_work_dir(sandbox_backend, work_dir)
-    return work_dir
-
-
-def _box_uid(sandbox_backend: SandboxBackendProtocol) -> str | None:
-    current = unwrap_sandbox_backend(sandbox_backend)
-    return current.box_uid if isinstance(current, TimeoutLangSmithSandbox) else None
-
-
-class BoxSetup(BaseModel):
-    """What setting up a thread's box wrote, kept on the thread so no replica repeats it.
-
-    ``box`` is the provider's id for the box, which a box recreated under the same
-    name does not share, so a new box is set up again; so is one set up under
-    another identity.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    box: str
-    git_identity: str
-    work_dir: str | None = None
-
-    @classmethod
-    def recorded(cls, metadata: Mapping[str, object]) -> BoxSetup | None:
-        raw = metadata.get(_SETUP_METADATA_KEY)
-        if raw is None:
-            return None
-        try:
-            return cls.model_validate(raw)
-        except ValidationError:
-            logger.warning("Ignoring an unreadable sandbox setup record", exc_info=True)
-            return None
-
-    def covers(self, sandbox_backend: SandboxBackendProtocol) -> bool:
-        return self.box == _box_uid(sandbox_backend) and self.git_identity == _GIT_IDENTITY
-
-    def remember(self, sandbox_backend: SandboxBackendProtocol) -> None:
-        """Know the work dir this setup readied, as the setup itself would have."""
-        if self.work_dir is not None and self.work_dir == declared_work_dir(sandbox_backend):
-            remember_work_dir(sandbox_backend, self.work_dir)
-
-    async def record(self, thread_id: str) -> None:
-        await THREADS.update(thread_id, {_SETUP_METADATA_KEY: self.model_dump(mode="json")})
+    if work_dir is not None and _WORK_DIR_READY in result.output:
+        remember_work_dir(sandbox_backend, work_dir)
 
 
 @asynccontextmanager
-async def box_setup(
-    thread_id: str | None,
-    sandbox_backend: SandboxBackendProtocol,
-    recorded: BoxSetup | None = None,
+async def git_identity(
+    thread_id: str | None, sandbox_backend: SandboxBackendProtocol
 ) -> AsyncIterator[None]:
-    """Set the box up while the body configures the proxy, once per box.
-
-    The setup needs the box, not the proxy, and the cost is the round trip rather
-    than the two `git config` calls: on a cold sandbox that round trip is over a
-    second of the critical path before the first model call. A body that raises
-    has lost the sandbox, so the write is dropped rather than joined.
-    """
-    if recorded is not None and recorded.covers(sandbox_backend):
-        recorded.remember(sandbox_backend)
+    """Reset identity with the next LangSmith command, or alongside proxy setup elsewhere."""
+    if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
+        sandbox_backend.reset_git_identity()
         yield
         return
 
     async def run() -> None:
         async with aphase(thread_id, "sandbox.git_identity"):
-            work_dir = await configure_git_identity(sandbox_backend)
-        box = _box_uid(sandbox_backend)
-        if thread_id is None or box is None:
-            return
-        setup = BoxSetup(box=box, git_identity=_GIT_IDENTITY, work_dir=work_dir)
-        try:
-            await setup.record(thread_id)
-        except Exception:
-            # The next connection only sets the box up again.
-            logger.warning(
-                "Could not record the sandbox setup", extra={"thread_id": thread_id}, exc_info=True
-            )
+            await configure_git_identity(sandbox_backend)
 
     task = asyncio.create_task(run())
     try:
@@ -399,14 +327,12 @@ async def _connect_existing_sandbox(
     github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
-    setup: BoxSetup | None = None,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
     A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
     pings the box first: refreshing the proxy below has to reach it anyway, and
-    raises the same unreachable error when it cannot. ``setup`` is the thread's
-    record of the box it last set up.
+    raises the same unreachable error when it cannot.
     """
     if cached is not None:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -421,7 +347,7 @@ async def _connect_existing_sandbox(
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
-    async with box_setup(thread_id, sandbox_backend, setup):
+    async with git_identity(thread_id, sandbox_backend):
         refreshed = await _refresh_github_proxy_or_fail(
             sandbox_backend,
             thread_id,
@@ -572,11 +498,9 @@ async def ensure_sandbox_for_thread(
     ``require_existing`` is for a task worker attaching to its coordinator's box,
     which it must never hand over.
 
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth, and writes
-    the git identity to each box it has not recorded writing it to (``BoxSetup``):
-    a box the thread was moved to, or recreated under its name, may carry another
-    identity, and Vercel preview deploys reject commits whose author email can't
-    be resolved to a GitHub account.
+    For LangSmith sandboxes, also refreshes the GitHub App proxy auth and schedules
+    a git identity reset before the next command. Reused boxes can lose their global
+    config, and Vercel rejects commits whose email cannot resolve to a GitHub account.
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
@@ -627,7 +551,6 @@ async def ensure_sandbox_for_thread(
             github_proxy_permissions=github_proxy_permissions,
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
-            setup=BoxSetup.recorded(sandbox_metadata),
         )
     except (SandboxGoneError, SandboxUnreachableError) as exc:
         if require_existing:
@@ -751,12 +674,16 @@ async def reconnect_replaced_sandbox(
     sandbox_id = metadata.get("sandbox_id")
     if isinstance(sandbox_id, str):
         SANDBOX_CONNECTIONS.pop(sandbox_id, None)
-    return await ensure_sandbox_for_thread(
+    backend = await ensure_sandbox_for_thread(
         thread_id,
         workspace_slug=workspace_slug,
         github_proxy_repositories=github_proxy_repositories,
         github_proxy_permissions=github_proxy_permissions,
     )
+    current = unwrap_sandbox_backend(backend)
+    if isinstance(current, TimeoutLangSmithSandbox):
+        await current.ensure_git_identity()
+    return backend
 
 
 async def hand_gone_sandbox_to_mda(thread_id: str, sandbox_id: str) -> bool:
