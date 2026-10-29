@@ -5,16 +5,13 @@ from this deployment's environment, and gateway routing mirrors the backend's.
 """
 
 import json
-import logging
 import os
 from functools import lru_cache
 from typing import Final
 
 from langchain.chat_models import init_chat_model
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_fireworks import ChatFireworks
-from langchain_openai import ChatOpenAI
+from managed_deepagents.model_calls import disable_sdk_retries
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ModelSpec
 
@@ -26,15 +23,8 @@ _GATEWAY_PROVIDER_PATHS: Final = {
     "fireworks": "/fireworks",
     "google_genai": "/gemini",
 }
-_SDK_RETRY_DISABLE: Final = {
-    "openai": 0,
-    "anthropic": 0,
-    "fireworks": 0,
-    "google_genai": 1,
-}
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 600.0
 _kwargs = TypeAdapter(dict[str, JsonValue])
-logger = logging.getLogger(__name__)
 
 
 def _gateway_overrides(provider: str) -> dict[str, JsonValue]:
@@ -51,14 +41,7 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
     kwargs = _kwargs.validate_python(json.loads(kwargs_json))
     kwargs.setdefault("timeout", _DEFAULT_REQUEST_TIMEOUT_SECONDS)
     provider = model_id.split(":", 1)[0]
-    if provider in _SDK_RETRY_DISABLE:
-        disabled = _SDK_RETRY_DISABLE[provider]
-        if "max_retries" in kwargs and kwargs["max_retries"] != disabled:
-            logger.warning(
-                "Ignoring SDK retry override because model middleware owns retries",
-                extra={"provider": provider},
-            )
-        kwargs["max_retries"] = disabled
+    disable_sdk_retries(provider, kwargs)
     if provider == "anthropic":
         kwargs.setdefault("streaming", True)
     if provider == "openai":
@@ -70,21 +53,6 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
         kwargs.update(_gateway_overrides(provider))
     return init_chat_model(
         model_id, model_provider=None, configurable_fields=None, config_prefix=None, **kwargs
-    )
-
-
-def middleware_retries(model: object) -> bool:
-    """Whether this model's provider retry control is known and disabled."""
-    for _ in range(10):
-        bound = getattr(model, "bound", None)
-        if bound is None or bound is model:
-            break
-        model = bound
-    if isinstance(model, ChatOpenAI | ChatAnthropic | ChatFireworks):
-        return model.max_retries == 0
-    return (
-        type(model).__module__.startswith("langchain_google_genai.")
-        and getattr(model, "max_retries", None) == 1
     )
 
 

@@ -26,7 +26,7 @@ describe("streamMessagesToUi", () => {
         new AIMessageChunk({
           id: "interrupted",
           content: "",
-          response_metadata: { open_swe_superseded: true },
+          response_metadata: { mda_superseded: true },
         })
       ),
       new AIMessage({ id: "replacement", content: "Recovered answer" }),

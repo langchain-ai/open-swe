@@ -8,8 +8,8 @@ import httpx
 import httpx2
 import openai
 import pytest
-from langchain.agents import create_agent
 from deepagents.middleware._utils import append_to_system_message
+from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import (
     AgentState,
@@ -30,18 +30,17 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from managed_deepagents.model_calls import (
+    SUPERSEDED,
+    ModelCallTimeoutError,
+    ModelCallTimeoutMiddleware,
+    ModelRetriesMiddleware,
+)
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.middleware import BackendRunMiddleware, ModelCall
-from rt.model_calls import (
-    ModelCallTimeoutError,
-    ModelCallTimeoutMiddleware,
-    ReplayableHistoryMiddleware,
-    model_call_guards,
-)
-from rt.model_retries import ModelRetriesMiddleware
+from rt.model_calls import ReplayableHistoryMiddleware, model_call_guards
 from rt.models import ModelSpec, build_model
-from rt.models import ModelSpec
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from runtime_api.catalog import Catalog
 
@@ -207,7 +206,7 @@ async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None
     handler = AsyncMock(side_effect=error)
 
     with pytest.raises(TimeoutError) as raised:
-        await ModelCallTimeoutMiddleware().awrap_model_call(
+        await ModelCallTimeoutMiddleware(timeout_seconds=60).awrap_model_call(
             cast(ModelRequest, MagicMock()), handler
         )
 
@@ -501,9 +500,8 @@ async def test_provider_http_retries_are_owned_by_model_middleware(
     "retry_after,budget,expected_attempts", [("61", 60.0, 1), ("0.03", 0.05, 2)]
 )
 async def test_retry_after_beyond_sleep_budget_is_not_retried_early(
-    monkeypatch: pytest.MonkeyPatch, retry_after: str, budget: float, expected_attempts: int
+    retry_after: str, budget: float, expected_attempts: int
 ) -> None:
-    monkeypatch.setattr("rt.model_retries.MAX_RETRY_SLEEP_SECONDS", budget)
     attempts = 0
 
     def respond(request: httpx2.Request) -> httpx2.Response:
@@ -520,7 +518,9 @@ async def test_retry_after_beyond_sleep_budget_is_not_retried_early(
         model = ChatOpenAI(
             model="test", api_key="test", max_retries=0, async_client=sdk.chat.completions
         )
-        graph = create_agent(model=model, middleware=model_call_guards())
+        graph = create_agent(
+            model=model, middleware=[ModelRetriesMiddleware(max_retry_sleep_seconds=budget)]
+        )
         with pytest.raises(openai.RateLimitError):
             await graph.ainvoke({"messages": [HumanMessage(content="go")]})
     assert attempts == expected_attempts
@@ -536,7 +536,7 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     from langchain_core.outputs import ChatGenerationChunk
 
     attempts = 0
-    monkeypatch.setattr("rt.model_retries.random.uniform", lambda *args: 0.0)
+    monkeypatch.setattr("managed_deepagents.model_calls.random.uniform", lambda *args: 0.0)
 
     async def partial(
         self: ChatOpenAI,
@@ -601,9 +601,7 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
         expected = 7 if outcome == "exhausted" else 1 if outcome == "continues" else 2
         assert attempts == expected
         superseded = {
-            message.id
-            for message, _ in chunks
-            if message.response_metadata.get("open_swe_superseded")
+            message.id for message, _ in chunks if message.response_metadata.get(SUPERSEDED)
         }
         assert superseded == {f"attempt-{index}" for index in range(1, expected)}
         if expected > 1:
@@ -633,12 +631,12 @@ async def test_retry_backoff_allows_a_temporary_provider_outage_to_recover(
             raise httpx.ReadError("provider temporarily unavailable")
         return ModelResponse(result=[AIMessage(content="recovered")])
 
-    monkeypatch.setattr("rt.model_retries.asyncio.sleep", sleep)
+    monkeypatch.setattr("managed_deepagents.model_calls.asyncio.sleep", sleep)
     monkeypatch.setattr(
-        "rt.model_retries.random.uniform",
+        "managed_deepagents.model_calls.random.uniform",
         lambda lower, upper: lower if jitter == "lower" else upper,
     )
-    monkeypatch.setattr("rt.model_retries.get_stream_writer", lambda: events.append)
+    monkeypatch.setattr("managed_deepagents.model_calls.get_stream_writer", lambda: events.append)
     request = ModelRequest(
         model=ChatOpenAI(model="test", api_key="test", max_retries=0),
         messages=[HumanMessage(content="go")],
@@ -656,9 +654,9 @@ async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backing_off = asyncio.Event()
-    monkeypatch.setattr("rt.model_retries.random.uniform", lambda *args: 10.0)
+    monkeypatch.setattr("managed_deepagents.model_calls.random.uniform", lambda *args: 10.0)
     monkeypatch.setattr(
-        "rt.model_retries.get_stream_writer", lambda: lambda event: backing_off.set()
+        "managed_deepagents.model_calls.get_stream_writer", lambda: lambda event: backing_off.set()
     )
     request = ModelRequest(
         model=ChatOpenAI(model="test", api_key="test", max_retries=0),
