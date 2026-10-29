@@ -449,11 +449,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             messages = update.get("messages", [])
             update["messages"] = [
                 *(messages if isinstance(messages, list) else []),
-                SystemMessage(
+                HumanMessage(
+                    id=f"run-guidance:workspace-lost:{invocation}",
                     content="The sandbox provider confirmed that this thread's bound workspace "
                     "was deleted. A fresh workspace was created under the same name. "
                     "Tell the user that local files and unpushed work from the deleted "
-                    "workspace are unavailable; do not claim they were recovered."
+                    "workspace are unavailable; do not claim they were recovered.",
                 ),
             ]
         return update
