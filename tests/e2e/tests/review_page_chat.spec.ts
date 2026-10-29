@@ -165,17 +165,22 @@ test.describe("review page", () => {
     await expect(page).toHaveURL(target);
   });
 
-  test("puts the state pill on the title line and links the title to GitHub", async ({
+  test("keeps the state pill beside the title menu and a separate GitHub link", async ({
     page,
   }) => {
     await openReview(page, pr);
     const title = page
       .locator("h1")
-      .filter({ has: page.locator('svg[aria-label="GitHub"]') });
-    const link = title.getByRole("link");
-    await expect(link).toContainText("Add constant modules");
-    await expect(link).toContainText(`#${pr.number}`);
-    await expect(link.locator('svg[aria-label="GitHub"]')).toBeVisible();
+      .filter({ hasText: "Add constant modules" });
+    const menu = title.getByRole("button");
+    await expect(menu).toContainText("Add constant modules");
+    await expect(menu).toContainText(`#${pr.number}`);
+    const link = title.getByRole("link", { name: "Open on GitHub" });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/pull/${pr.number}`,
+    );
 
     const pill = title.locator("xpath=preceding-sibling::span[1]");
     await expect(pill).toHaveText("Reviewable");
