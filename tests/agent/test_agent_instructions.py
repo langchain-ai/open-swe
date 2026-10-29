@@ -22,6 +22,23 @@ async def test_create_agent_instructions_is_idempotent() -> None:
     assert await get_repo_agent_instructions("acme", "REPO") == "rules"
 
 
+@pytest.mark.parametrize("character", ["a", "😀"])
+async def test_update_agent_instructions_limits_utf8_bytes(monkeypatch, character: str) -> None:
+    monkeypatch.setattr(instructions_api, "require_repo_access_for_user", AsyncMock())
+    monkeypatch.setattr(AGENT_INSTRUCTIONS, "set_instructions", AsyncMock())
+    body = instructions_api.AgentInstructionsUpdate(
+        instructions=character * (32 * 1024 // len(character.encode("utf-8")))
+    )
+    await instructions_api.api_update_agent_instructions("acme/repo", body, {"sub": "octocat"})
+    body.instructions += "a"
+    with pytest.raises(HTTPException) as exc:
+        await instructions_api.api_update_agent_instructions("acme/repo", body, {"sub": "octocat"})
+    assert exc.value.status_code == 422
+    assert exc.value.detail == (
+        "Repository custom instructions must not exceed 32 KiB (32,768 UTF-8 bytes)"
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_agent_instructions_filters_inaccessible_repos(monkeypatch) -> None:
     monkeypatch.setattr(
