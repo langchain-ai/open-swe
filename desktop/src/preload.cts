@@ -13,10 +13,6 @@ function isDesktopCommandId(value) {
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
-  fleetStatus: () => ipcRenderer.invoke("desktop:fleet-status"),
-  fleetConnect: (input: { apiKey: string; workspaceId: string }) =>
-    ipcRenderer.invoke("desktop:fleet-connect", input),
-  fleetDisconnect: () => ipcRenderer.invoke("desktop:fleet-disconnect"),
   onCommand: (callback) => {
     const listener = (_event, commandId) => {
       if (isDesktopCommandId(commandId)) callback(commandId);

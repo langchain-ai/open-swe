@@ -255,7 +255,6 @@ function sidebarRowClassName({
 
 export function SidebarConversationRow({
   title,
-  workspaceId,
   threadId,
   active,
   compact,
@@ -267,7 +266,6 @@ export function SidebarConversationRow({
   onArchive,
 }: {
   title: string
-  workspaceId: string
   threadId: string
   active: boolean
   compact: boolean
@@ -287,7 +285,7 @@ export function SidebarConversationRow({
     >
       <Link
         to="/agents/chat"
-        search={{ workspace: workspaceId, chat: threadId }}
+        search={{ chat: threadId }}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
         className={sidebarRowClassName({

@@ -1,13 +1,10 @@
+import { useCallback } from "react"
 import { createFileRoute } from "@tanstack/react-router"
-import { FleetDesktop } from "@/features/agents/components/FleetDesktop"
+import { FleetHome } from "@/features/agents/components/FleetHome"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/chat")({
-  validateSearch: (
-    search: Record<string, unknown>
-  ): { workspace?: string; chat?: string } => ({
-    workspace:
-      typeof search.workspace === "string" ? search.workspace : undefined,
+  validateSearch: (search: Record<string, unknown>): { chat?: string } => ({
     chat: typeof search.chat === "string" ? search.chat : undefined,
   }),
   component: ChatPage,
@@ -15,16 +12,11 @@ export const Route = createFileRoute("/agents/chat")({
 })
 
 function ChatPage() {
-  const search = Route.useSearch()
+  const { chat } = Route.useSearch()
   const navigate = Route.useNavigate()
-  return (
-    <FleetDesktop
-      key={search.workspace}
-      workspaceId={search.workspace}
-      threadId={search.chat}
-      onSelect={(workspace, chat) => {
-        void navigate({ search: { workspace, chat } })
-      }}
-    />
+  const select = useCallback(
+    (thread: string) => void navigate({ search: { chat: thread } }),
+    [navigate]
   )
+  return <FleetHome threadId={chat} onThreadCreated={select} />
 }

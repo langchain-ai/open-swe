@@ -27,8 +27,6 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
-const { FleetConnection } = require("./fleet-connection.cjs");
-const fleetConnection = new FleetConnection();
 const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
@@ -614,18 +612,6 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
-  ipcMain.handle("desktop:fleet-status", (event) => {
-    requireTrustedDesktopIpc(event);
-    return fleetConnection.status();
-  });
-  ipcMain.handle("desktop:fleet-connect", async (event, input: unknown) => {
-    requireTrustedDesktopIpc(event);
-    return fleetConnection.connect(input);
-  });
-  ipcMain.handle("desktop:fleet-disconnect", (event) => {
-    requireTrustedDesktopIpc(event);
-    fleetConnection.disconnect();
-  });
   ipcMain.handle("desktop:write-clipboard", (event, value) => {
     requireTrustedDesktopIpc(event);
     if (typeof value === "string") clipboard.writeText(value);
@@ -1111,7 +1097,6 @@ async function loadAlternativeEnvironments() {
 /** Point the app at `url` and reload it there, dropping the last backend's page state. */
 async function connectToBackend(url) {
   const previousUrl = backendUrl;
-  if (previousUrl && previousUrl !== url) fleetConnection.disconnect();
   backendUrl = url;
   if (previousUrl && previousUrl !== url)
     await session.defaultSession.clearStorageData({ origin: APP_URL });
@@ -1284,8 +1269,6 @@ async function clearBackendCookies(url) {
 }
 
 async function serveDesktopUi(request: Request) {
-  if (new URL(request.url).pathname.startsWith("/fleet-api/"))
-    return fleetConnection.proxy(request);
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);

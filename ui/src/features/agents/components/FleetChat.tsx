@@ -17,28 +17,27 @@ import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import {
   fleetClient,
   FLEET_ASSISTANT_ID,
+  FLEET_THREADS_KEY,
 } from "@/features/agents/lib/fleetChat"
 
 export function FleetChat({
-  workspaceId,
   threadId,
-  onSelect,
+  onThreadCreated,
 }: {
-  workspaceId: string
   threadId?: string
-  onSelect: (workspace?: string, thread?: string) => void
+  onThreadCreated: (threadId: string) => void
 }) {
   const cache = useQueryClient()
-  const client = useMemo(() => fleetClient(workspaceId), [workspaceId])
+  const client = useMemo(() => fleetClient(), [])
   const stream = useStream<{ messages: Message[] }>({
     client,
     assistantId: FLEET_ASSISTANT_ID,
     threadId: threadId ?? null,
     fetchStateHistory: false,
     reconnectOnMount: true,
-    onThreadId: (id) => onSelect(workspaceId, id),
+    onThreadId: onThreadCreated,
     onFinish: () => {
-      void cache.invalidateQueries({ queryKey: ["fleet-threads", workspaceId] })
+      void cache.invalidateQueries({ queryKey: FLEET_THREADS_KEY })
     },
   })
   const [addedReply, setAddedReply] =
