@@ -269,7 +269,9 @@ def script_log_path(label: str) -> str:
     return f"{script_root()}/logs/{label}.log"
 
 
-def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
+def script_command(
+    script: str, label: str, repos: Sequence[str] = (), *, work_dir: str = "/workspace"
+) -> str:
     """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
@@ -291,11 +293,22 @@ def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
     log_path = script_log_path(label)
     encoded = base64.b64encode(script.encode()).decode()
     workspace_repos = " ".join(repos)
+    commands = []
+    if label == "update":
+        for repo in repos:
+            checkout = shlex.quote(f"{work_dir}/{repo.rsplit('/', 1)[-1]}")
+            url = shlex.quote(f"https://github.com/{repo}.git")
+            commands.append(
+                f"if [ ! -e {checkout} ] && [ ! -L {checkout} ]; then "
+                f"git clone --quiet -- {url} {checkout} || exit $?; fi"
+            )
+    commands.append(f"exec bash -x {shlex.quote(path)}")
+    invocation = shlex.quote("\n".join(commands))
     return (
         f"mkdir -p {shlex.quote(f'{root}/logs')} "
         f"&& printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)} "
         f"&& {{ {WORKSPACE_REPOS_ENV_VAR}={shlex.quote(workspace_repos)} "
-        f"bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
+        f"GIT_TERMINAL_PROMPT=0 bash -xc {invocation} > {shlex.quote(log_path)} 2>&1; }}; "
         f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
     )
 
