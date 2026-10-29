@@ -83,7 +83,7 @@ class QueueController:
             )
             config = None
         if config is not None and (
-            config.repository != self.config.repository
+            config.repository.lower() != self.config.repository.lower()
             or config.repository_id != self.config.repository_id
             or config.mode != self.config.mode
         ):

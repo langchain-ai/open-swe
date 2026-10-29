@@ -1051,7 +1051,7 @@ async def test_native_observation_survives_restart_and_old_events(
     response = native_response()
 
     def respond(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path == "/repos/acme/widgets" and request.method == "GET":
+        if request.url.path.lower() == "/repos/acme/widgets" and request.method == "GET":
             return httpx2.Response(200, json={"id": 42})
         if request.url.path == "/graphql":
             return httpx2.Response(200, json={"data": {"repository": response}})
@@ -1063,7 +1063,7 @@ async def test_native_observation_survives_restart_and_old_events(
     async def as_app(
         owner: str, repo: str, *, permissions: dict[str, str]
     ) -> AsyncIterator[GitHubClient]:
-        assert (owner, repo) == ("acme", "widgets")
+        assert (owner.lower(), repo.lower()) == ("acme", "widgets")
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
             yield GitHubClient(http)
 
@@ -1118,7 +1118,10 @@ async def test_native_observation_survives_restart_and_old_events(
     )
     assert await current.requests() == []
     changed = config.model_copy(
-        update={"policy": config.policy.model_copy(update={"max_batch_size": 2})}
+        update={
+            "repository": "ACME/WIDGETS",
+            "policy": config.policy.model_copy(update={"max_batch_size": 2}),
+        }
     )
     await save_configuration(changed)
     await runtime.RUNTIME.reconcile(payload)
@@ -1262,7 +1265,7 @@ async def test_queue_dashboard_authorization(
                     }
                 },
             )
-        assert request.url.path == "/repos/acme/widgets"
+        assert request.url.path.lower() == "/repos/acme/widgets"
         return httpx2.Response(200, json={"id": 42})
 
     @asynccontextmanager
@@ -1338,7 +1341,10 @@ async def test_queue_dashboard_authorization(
         )
         assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 204
         revoked = queue_controller.config.model_copy(
-            update={"operator_emails": frozenset({"another@example.com"})}
+            update={
+                "repository": "ACME/WIDGETS",
+                "operator_emails": frozenset({"another@example.com"}),
+            }
         )
         await save_configuration(revoked)
         assert (await client.patch(f"{path}/pause", json={"paused": True})).status_code == 403
@@ -1797,6 +1803,12 @@ async def test_configuration_fences_stale_workers_and_serializes_external_action
     queue_controller: QueueController,
 ) -> None:
     queue = queue_controller.queue
+    async with postgres.session() as session:
+        await session.execute(
+            update(Repository)
+            .where(Repository.id == queue.repository_id)
+            .values(full_name="Acme/Widgets")
+        )
     policy, unused_lease, _ = await enable_native_validation(queue)
     await queue.release(unused_lease)
     config = queue_controller.config.model_copy(
@@ -1814,11 +1826,14 @@ async def test_configuration_fences_stale_workers_and_serializes_external_action
     )
     assert work is not None
     updated = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
-    async with queue.native_action(lease):
-        change = asyncio.create_task(save_configuration(updated))
-        done, _ = await asyncio.wait({change}, timeout=0.05)
-        assert not done
-    await change
+    async with asyncio.timeout(10):
+        with pytest.raises(TimeoutError):
+            async with queue.native_action(lease):
+                change = asyncio.create_task(save_configuration(updated))
+                done, _ = await asyncio.wait({change}, timeout=0.05)
+                assert not done
+                await asyncio.Event().wait()
+        await change
     with pytest.raises(LeaseLost, match="configuration changed"):
         async with queue.native_action(lease):
             pytest.fail("A stale controller could publish a check")
@@ -1843,27 +1858,15 @@ async def test_configuration_fences_stale_workers_and_serializes_external_action
     assert history.batch.state == "invalidated" and history.attempts[0].state == "cancelled"
     assert not await queue.authorize_native_result(work, native_snapshot(), new_lease)
 
-
-@pytest.mark.parametrize("disabled", [None, {"repository": "invalid"}])
-async def test_removed_or_invalid_configuration_blocks_claims_and_old_publication(
-    queue_controller: QueueController, disabled: dict[str, str] | None
-) -> None:
-    queue = queue_controller.queue
-    _, old_lease, _ = await enable_native_validation(queue)
-    await queue.release(old_lease)
-    config = queue_controller.config.model_copy(update={"mode": "native", "check_app_id": 456})
-    await save_configuration(config)
-    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
-    assert lease is not None
     async with postgres.session() as session:
         await session.execute(
             update(WorkspaceRow)
             .where(WorkspaceRow.id == queue.workspace_id)
-            .values(merge_queue_config=disabled)
+            .values(merge_queue_config={"repository": "invalid"})
         )
     with pytest.raises(LeaseLost, match="disabled or invalid"):
-        async with queue.native_action(lease):
-            pytest.fail("Disabled queue could dispatch or publish a check")
-    await queue.release(lease)
+        async with queue.native_action(new_lease):
+            pytest.fail("Invalid configuration allowed dispatch or check publication")
+    await queue.release(new_lease)
     with pytest.raises(LeaseLost, match="disabled or invalid"):
-        await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+        await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)

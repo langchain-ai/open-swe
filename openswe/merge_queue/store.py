@@ -5,6 +5,7 @@ workspace lock, then locks the binding and queue. Status reads do not take these
 No GitHub calls, admission decisions or job registration live here.
 """
 
+import asyncio
 import base64
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -265,7 +266,8 @@ class MergeQueue(Record):
     @asynccontextmanager
     async def native_action(self, lease: Lease) -> AsyncIterator[None]:
         """Serialize external effects with configuration changes and queue pauses."""
-        async with self._locked(lease) as (_, queue, _):
+        # Bound lock waits and network I/O so a slow gateway cannot stall workspace writes.
+        async with asyncio.timeout(5), self._locked(lease) as (_, queue, _):
             if queue.paused or queue.mode != "native":
                 raise LeaseLost("Native queue is paused or disabled")
             yield
@@ -562,9 +564,9 @@ class MergeQueue(Record):
                 return None
             if config is not None:
                 repository = await session.scalar(
-                    select(Repository.full_name).where(Repository.id == queue.repository_id)
+                    select(Repository.key).where(Repository.id == queue.repository_id)
                 )
-                if config.mode != queue.mode or repository != config.repository:
+                if config.mode != queue.mode or repository != config.repository.lower():
                     raise LeaseLost("Queue configuration belongs to another repository or mode")
                 if queue.mode == "native" and queue.configuration_generation != generation:
                     active = await session.scalar(

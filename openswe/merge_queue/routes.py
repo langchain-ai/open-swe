@@ -130,7 +130,7 @@ async def queue_access(
     if config is None:
         raise HTTPException(404, "Queue is not enabled for this workspace")
     if (
-        config.repository != running.config.repository
+        config.repository.lower() != running.config.repository.lower()
         or config.repository_id != running.config.repository_id
     ):
         raise HTTPException(409, "Queue identity changed; explicit handoff required")
