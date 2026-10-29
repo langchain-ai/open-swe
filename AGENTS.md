@@ -75,6 +75,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.
   Destructive or sensitive actions may stay human-only.
   Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
+- Design new agent tools as fine-grained, Unix-style primitives: each does one thing and returns structured data that code mode can compose.
+  Don't add batch tools or combined orchestration tools; use code mode to loop, branch, and run independent calls in parallel instead.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
 - Only the agent that owns a Slack channel thread posts in it.
   Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run.
