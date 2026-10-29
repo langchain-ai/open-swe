@@ -60,7 +60,7 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself.
   Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
-- Don't add new uses of `langgraph_client` in the backend.
+- Don't add new uses of the LangGraph SDK client (`langgraph_client`, `get_client`) in the backend.
   Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state.
   Existing uses are legacy, not a pattern to copy.
 - Don't use the LangGraph Store (`client.store`) for state; keep it in PostgreSQL tables.

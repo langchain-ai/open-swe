@@ -12,13 +12,15 @@ class LangGraphClientCheckTests(unittest.TestCase):
 -import os
 +from openswe.utils.thread_ops import langgraph_client as legacy_client
 +client = legacy_client()
-@@ -20,0 +22,2 @@
+@@ -20,0 +22,4 @@
 +client = langgraph_client()
 +client = get_langgraph_client()
++from langgraph_sdk import get_client
++await get_client().threads.update(thread_id, metadata={})
 """
         self.assertEqual(
             violations(diff.splitlines()),
-            [f"openswe/example.py:{line}: {REASON}" for line in (1, 22, 23)],
+            [f"openswe/example.py:{line}: {REASON}" for line in (1, 22, 23, 24, 25)],
         )
 
     def test_allows_removal_and_unchanged_legacy_uses(self):
