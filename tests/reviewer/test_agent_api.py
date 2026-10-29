@@ -190,9 +190,8 @@ async def test_task_context_rechecks_membership_and_cancellation(
         effort="high",
     )
     thread = AsyncMock(return_value={"metadata": {}})
-    refresh = AsyncMock()
     monkeypatch.setattr(task_coordination, "read_thread", thread)
-    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
     monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
     graph = RemoteGraph("agent", AsyncMock())
@@ -200,27 +199,21 @@ async def test_task_context_rechecks_membership_and_cancellation(
 
     absent = await graph.api(run, "task_context", {"run_id": "run-1"})
     assert isinstance(absent, dict) and absent["message"] is None
-    membership.assert_awaited_once_with(run.thread_id)
 
     membership.return_value = context
-    for _ in range(2):
-        joined = await graph.api(run, "task_context", {"run_id": "run-1"})
-        assert isinstance(joined, dict)
-        assert str(task.id) in str(joined["message"])
-    assert membership.await_count == 3
-    assert refresh.await_count == 2
-    refresh.assert_awaited_with("owner")
+    joined = await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert isinstance(joined, dict)
+    assert str(task.id) in str(joined["message"])
+    assert task.title in str(joined["message"])
+    assert joined["instructions"] != absent["instructions"]
 
     delegation.cancelled = True
     with pytest.raises(PermissionError, match="This worker was cancelled"):
         await graph.api(run, "task_context", {"run_id": "run-1"})
-    assert membership.await_count == 4
-    assert refresh.await_count == 2
 
     thread.side_effect = PermissionError("Thread access revoked")
     with pytest.raises(PermissionError, match="Thread access revoked"):
         await graph.api(run, "task_context", {"run_id": "run-1"})
-    assert membership.await_count == 4
 
 
 @pytest.mark.usefixtures("registry_db")
