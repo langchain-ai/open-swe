@@ -5321,6 +5321,17 @@
             ],
             "title": "Active Batch Id"
           },
+          "configuration_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Generation"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/EntryView"
@@ -5364,7 +5375,8 @@
           "operator",
           "items",
           "next_cursor",
-          "active_batch_id"
+          "active_batch_id",
+          "configuration_generation"
         ],
         "title": "QueueStatus",
         "type": "object"
