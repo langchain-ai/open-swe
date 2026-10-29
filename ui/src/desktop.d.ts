@@ -156,6 +156,12 @@ declare global {
     __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
     openSweDesktop?: {
       isDesktop: true
+      fleetStatus: () => Promise<{ id: string; name: string } | null>
+      fleetConnect: (input: {
+        apiKey: string
+        workspaceId: string
+      }) => Promise<{ id: string; name: string }>
+      fleetDisconnect: () => Promise<void>
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { FleetChat } from "@/features/agents/components/FleetChat"
+import { FleetDesktop } from "@/features/agents/components/FleetDesktop"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/chat")({
@@ -18,7 +18,7 @@ function ChatPage() {
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   return (
-    <FleetChat
+    <FleetDesktop
       key={search.workspace}
       workspaceId={search.workspace}
       threadId={search.chat}

@@ -2,7 +2,6 @@ import { useMemo, useState } from "react"
 import { useStream } from "@langchain/langgraph-sdk/react"
 import type { Message } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
@@ -92,9 +91,6 @@ export function FleetChat({
           className="flex flex-wrap items-center gap-space-3 border-b border-default bg-error px-space-6 py-space-3 text-sm text-primary"
         >
           {problem}
-          <Link to="/my-settings/connections" className="underline">
-            Connections
-          </Link>
           <Button
             size="sm"
             color="secondary"
@@ -131,7 +127,7 @@ export function FleetChat({
               <p className="text-sm text-secondary">
                 {workspaceId
                   ? "This conversation uses your LangSmith workspace and account."
-                  : "Choose a LangSmith workspace to start. Connect your account in Settings → Connections."}
+                  : "Choose a LangSmith workspace to start. Connect your LangSmith workspace to start."}
               </p>
             </div>
           )}

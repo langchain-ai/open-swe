@@ -711,37 +711,39 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="px-space-2 pb-space-4">
-        <GroupedTabs
-          size="md"
-          className="w-full"
-          value={fleetSelected ? "fleet" : "openswe"}
-          options={[
-            {
-              value: "openswe",
-              display: "OpenSWE",
-              className: "flex-1",
-              "aria-label": "OpenSWE",
-            },
-            {
-              value: "fleet",
-              display: "Fleet",
-              className: "flex-1",
-              "aria-label": "Fleet",
-            },
-          ]}
-          onChange={(value) => {
-            void navigate(
-              linkOptions(
-                value === "fleet"
-                  ? getLastSectionLocation("/agents/chat")
-                  : "/agents"
+      {isDesktop && (
+        <div className="px-space-2 pb-space-4">
+          <GroupedTabs
+            size="md"
+            className="w-full"
+            value={fleetSelected ? "fleet" : "openswe"}
+            options={[
+              {
+                value: "openswe",
+                display: "OpenSWE",
+                className: "flex-1",
+                "aria-label": "OpenSWE",
+              },
+              {
+                value: "fleet",
+                display: "Fleet",
+                className: "flex-1",
+                "aria-label": "Fleet",
+              },
+            ]}
+            onChange={(value) => {
+              void navigate(
+                linkOptions(
+                  value === "fleet"
+                    ? getLastSectionLocation("/agents/chat")
+                    : "/agents"
+                )
               )
-            )
-            layout.closeOnMobile()
-          }}
-        />
-      </div>
+              layout.closeOnMobile()
+            }}
+          />
+        </div>
+      )}
       {fleetSelected && (
         <div className="flex min-h-0 flex-1 flex-col px-space-2 pb-space-2">
           <Link
@@ -783,10 +785,10 @@ export function AgentsSidebar({
                 }}
               />
               <Link
-                to="/my-settings/connections"
+                to="/agents/chat"
                 className="px-space-2 text-xs text-secondary underline"
               >
-                Connections
+                Connect Fleet
               </Link>
             </>
           )}

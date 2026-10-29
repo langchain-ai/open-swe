@@ -29,6 +29,13 @@ The side panel's **Changes** tab diffs the project against a git snapshot taken 
 It also shows the workspace's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 The **Terminal** and file browser open in the same checkout, on this Mac.
 
+## Fleet mode
+
+The **OpenSWE / Fleet** switch is desktop-only. Fleet connects directly to LangSmith using a workspace UUID and an API key with Fleet and workspace metadata permissions; it does not use the OpenSWE backend's LangSmith OAuth connection.
+The key stays in Electron main-process memory and is never saved to disk. Quitting, disconnecting, or changing the OpenSWE backend clears it. Connect again after restarting. The renderer submits the key once through the native bridge; ordinary Fleet requests receive credentials only in the main process.
+This version supports one US-cloud workspace per session, not BYOC or other regions. Fleet conversations remain in LangSmith and runs execute in the cloud; disconnecting does not delete them or explicitly cancel cloud runs.
+Testing a new Fleet UI requires both this desktop shell and this branch's dashboard archive (`OPEN_SWE_DESKTOP_UI_ARCHIVE` below), not just a frontend update on an older installed shell.
+
 ## How it connects
 
 The UI runs at `open-swe://app`, with native IPC for local projects, threads, worktrees, terminals and files.
