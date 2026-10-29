@@ -605,6 +605,17 @@ async def bind_mda_sandbox(
     metadata = ThreadMetadata.model_validate(raw)
     if metadata.task_id is not None:
         return
+    if (
+        metadata.sandbox_owner == "mda"
+        and metadata.sandbox_id is not None
+        and sandbox_id not in (None, metadata.sandbox_id)
+    ):
+        raise SandboxUnreachableError(
+            thread_id,
+            metadata.sandbox_id,
+            "Managed Deep Agents opened a different sandbox than this thread is bound to",
+            reason=f"Expected {metadata.sandbox_id}; opened {sandbox_id}. The binding was preserved.",
+        )
     if not (metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id)):
         await _bind_mda_sandbox(thread_id, sandbox_id, raw, workspace_slug)
     if sandbox_id is None and metadata.sandbox_id is None:

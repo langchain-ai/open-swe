@@ -12,7 +12,7 @@ import pytest
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_requests import PullRequest, ThreadLink
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -29,6 +29,39 @@ from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+async def test_review_backlink_survives_card_reposts_without_duplicate_comments() -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        slack_channel_id="C1",
+        slack_thread_ts="1.0",
+        slack_message_ts="2.0",
+    )
+    request.pull_request = pr
+    pull = AsyncMock()
+    pull.issue_comments.side_effect = [
+        [],
+        [{"body": f"<!-- open-swe-review-request:{request.id} -->"}],
+    ]
+    with (
+        patch("openswe.human_review.lifecycle.PullRequestClient.as_app") as app,
+        patch(
+            "openswe.human_review.lifecycle.get_slack_permalink",
+            AsyncMock(return_value="https://slack.example.com/review"),
+        ),
+    ):
+        app.return_value.__aenter__.return_value = pull
+        await ReviewCard(request).link_on_github()
+        request.slack_message_ts = "3.0"
+        await ReviewCard(request).link_on_github()
+    pull.comment.assert_awaited_once_with(
+        f"Review requested in [Slack](https://slack.example.com/review).\n\n"
+        f"<!-- open-swe-review-request:{request.id} -->"
+    )
 
 
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
@@ -858,6 +891,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
     from openswe.slack.client import GitHubPrRef
 
     pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    pr = await pr.link_thread("implementation")
     details = MagicMock(head_sha="abc", body="Fix")
     ref = GitHubPrRef(owner="lc", repo="repo", number=7, url=pr.url)
     with (
@@ -880,6 +914,10 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         assert result.success and result.auto_merge is expected
         request = await HumanReviewRequest.active_for("lc", "repo", 7)
         assert request is not None and request.auto_merge is expected
+        assert request.pull_request.thread_ids == ["implementation"]
+        async with HumanReviewRequest.locked(request.id) as (_, locked):
+            assert locked is not None
+            assert locked.pull_request.thread_ids == ["implementation"]
         assert [call.args[1] for call in schedule.await_args_list] == (
             ["unclaimed", "auto_merge"] if expected else ["unclaimed"]
         )
@@ -895,14 +933,25 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 
 
 @pytest.mark.parametrize("trigger", ["event", "deadline"])
-@pytest.mark.parametrize("pending", [False, True])
-@pytest.mark.parametrize("auto_merge", [False, True])
+@pytest.mark.parametrize(
+    ("auto_merge", "pending", "activity"),
+    [
+        (False, False, "idle"),
+        (False, True, "idle"),
+        (True, True, "idle"),
+        *[
+            (True, False, status)
+            for status in ("idle", "busy", "pending", "running", "unknown", "unavailable")
+        ],
+    ],
+)
 @pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
 async def test_only_auto_merge_requests_merge_when_approved(
     author: str,
     trigger: str,
     auto_merge: bool,
     pending: bool,
+    activity: str,
     github_app: AsyncMock,
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
@@ -910,11 +959,32 @@ async def test_only_auto_merge_requests_merge_when_approved(
     from openswe.human_review.merging import MergeResult
     from openswe.human_review.picking import Coverage
 
+    client = MagicMock()
+
+    async def thread(thread_id: str) -> MagicMock | None:
+        if thread_id == "deleted":
+            return None
+        if thread_id == "review-request":
+            if activity == "unavailable":
+                raise httpx2.ConnectError("Runtime unavailable")
+            if activity in {"busy", "unknown"}:
+                return MagicMock(status=activity, runtime="mda")
+        return MagicMock(status="idle", runtime="mda")
+
+    async def runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, str]]:
+        return [{"status": status}] if activity == status else []
+
+    client.runs.list = AsyncMock(side_effect=runs)
     pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
+    pr.threads = [
+        ThreadLink(thread_id="implementation", role="primary"),
+        ThreadLink(thread_id="deleted"),
+    ]
     request = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
     )
     request.pull_request = pr
+    request.thread_id = "review-request"
     request.created_at = datetime.now(UTC) - timedelta(hours=3)
     if pending:
         user = User(
@@ -949,6 +1019,9 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(ReviewCard, "update_blocked_reactions", AsyncMock()),
         patch.object(ReviewCard, "mark_merged", AsyncMock()),
         patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(standard.index, "get", AsyncMock(side_effect=thread)),
+        patch.object(standard.RUNTIMES, "runs_on", return_value=MagicMock(client=client)),
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(
             standard, "merge_pull_request", AsyncMock(return_value=MergeResult("merged", "Merged"))
         ) as merge,
@@ -957,7 +1030,15 @@ async def test_only_auto_merge_requests_merge_when_approved(
             await standard.run_deadline(str(request.id), "auto_merge")
         else:
             await standard.settle_pull_request("lc", "repo", 7)
-    assert merge.await_count == int(auto_merge)
+        held = auto_merge and activity != "idle"
+        assert merge.await_count == int(auto_merge and not held)
+        if held:
+            assert request.state == "open"
+            assert request.detail.startswith("auto-merge paused")
+            schedule.assert_awaited_once_with(request, "auto_merge", timedelta(minutes=5))
+            activity = "idle"
+            await standard.run_deadline(str(request.id), "auto_merge")
+            assert merge.await_count == 1
     if not auto_merge:
         assert request.state == "open"
         assert request.detail == (

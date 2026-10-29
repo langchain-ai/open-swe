@@ -1173,7 +1173,7 @@ async def slack_interactivity(
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
                     thread_ts=reply_ts,
-                    text=f"Workflow push rejected for fingerprint `{button.fingerprint}`. No workflow files will be pushed.",
+                    text="Workflow push rejected. No workflow files will be pushed.",
                     agent_thread_id=thread_id,
                 )
                 return accepted("Workflow push rejected")
@@ -1181,7 +1181,7 @@ async def slack_interactivity(
             await common.post_slack_thread_reply(
                 channel_id=channel_id,
                 thread_ts=reply_ts,
-                text=f"Workflow push approved for fingerprint `{button.fingerprint}`. Open SWE will retry the blocked push.",
+                text="Workflow push approved. Open SWE will retry the blocked push.",
                 agent_thread_id=thread_id,
             )
             repo = await common.get_slack_repo_config(

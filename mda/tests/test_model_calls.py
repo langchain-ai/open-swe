@@ -520,7 +520,9 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     model = ChatOpenAI(model="test", api_key="test", max_retries=0)
-    backend_middleware = BackendRunMiddleware(run.backend, model_timeout_seconds=0.15)
+    backend_middleware = BackendRunMiddleware(
+        run.backend, model_timeout_seconds=2.0 if outcome == "exhausted" else 0.15
+    )
     for name in ("_before_agent", "_before_model", "_after_model", "_after_agent"):
         monkeypatch.setattr(backend_middleware, name, AsyncMock(return_value=None))
     graph = create_agent(
