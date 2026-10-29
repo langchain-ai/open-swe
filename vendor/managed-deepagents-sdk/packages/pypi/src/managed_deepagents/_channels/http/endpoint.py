@@ -60,7 +60,10 @@ _SECRET_SHAPE = (
 EventEndpoint = str | httpx.Request
 """Where an ``on_event`` key's events go when a service of yours decides what they
 start: its URL, or an ``httpx.Request`` that also carries headers, such as a
-credential the service checks. See :func:`endpoint_handler`."""
+credential the service checks. See :func:`endpoint_handler`.
+
+Experimental: this may change in a minor release.
+"""
 
 _cached_keys: tuple[str, tuple[bytes, ...]] | None = None
 
@@ -100,6 +103,8 @@ class EndpointEvent(TypedDict, Generic[_K, _P]):
     ``EndpointEvent[Literal["AgentSessionEvent.created"], LinearSessionCreatedPayload]``
     types one event key's payload; ``LinearEndpointRequest`` and
     ``GitHubEndpointRequest`` are the unions of a channel's keys.
+
+    Experimental: this may change in a minor release.
     """
 
     key: _K
@@ -117,7 +122,10 @@ class _EndpointThreadChannel(TypedDict):
 
 
 class EndpointThread(TypedDict):
-    """The conversation's thread an endpoint request is about."""
+    """The conversation's thread an endpoint request is about.
+
+    Experimental: this may change in a minor release.
+    """
 
     id: str
     """The thread the run starts on, or that waits on an interrupt."""
@@ -138,6 +146,8 @@ class EndpointRequest(TypedDict, Generic[_E]):
     key; in Python, a union alias can't take the key, so a receiver of one key
     names it as ``EndpointRequest[EndpointEvent[Literal[key], Payload]]``, with the
     payload types the package exports, or narrows on ``request["event"]["key"]``.
+
+    Experimental: this may change in a minor release.
     """
 
     event: _E
@@ -148,7 +158,10 @@ class EndpointRequest(TypedDict, Generic[_E]):
 class EndpointAnswer(TypedDict):
     """The run an endpoint answers with: its input, and the run options a handler
     may set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start
-    nothing."""
+    nothing.
+
+    Experimental: this may change in a minor release.
+    """
 
     input: str | dict[str, JsonValue]
     """The run's input, as a handler returns it: text, or state such as

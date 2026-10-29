@@ -81,7 +81,7 @@ use entry::{
     RuntimeContext,
 };
 pub(crate) use exports::project_needs_events_public_url;
-use exports::{scan_exported_channels, scan_exported_connectors};
+use exports::{experimental_channel_warnings, scan_exported_channels, scan_exported_connectors};
 use local_packages::vendor_local_packages;
 use manifest::{
     configure_python_packaging, generate_lockfile, inject_managed_dependencies,
@@ -827,6 +827,7 @@ fn compile_inner(
     let channel_scan = scan_exported_channels(project)?;
     let channel_entries = channel_scan.entries;
     let channel_providers = channel_scan.providers;
+    warnings.extend(experimental_channel_warnings(&channel_providers));
     let channels_import = if channel_entries.is_empty() {
         None
     } else {

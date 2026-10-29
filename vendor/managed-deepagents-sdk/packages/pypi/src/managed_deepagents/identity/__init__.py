@@ -383,6 +383,7 @@ def define_identity(
         resolve_user: Map a channel's verified sender to one of your users, for
             every channel that does not set its own: a function, or an endpoint
             MDA asks (a URL, or an ``httpx.Request`` that carries headers).
+            Experimental: this may change in a minor release.
     """
     from managed_deepagents._channels.resolve_user import checked_resolve_user  # noqa: PLC0415
 

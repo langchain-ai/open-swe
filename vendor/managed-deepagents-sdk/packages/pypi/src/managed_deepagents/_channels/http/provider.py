@@ -167,7 +167,10 @@ def resolve_endpoints(
 EventFinished = Callable[[_E, _T, "HttpFinish"], "Awaitable[None] | None"]
 """A provider channel's ``on_finish``: a delivery of one of its events is done,
 with the event, its thread, and how it finished, to switch on by ``type``: the
-run it started, why it started none, or that MDA lost it; see ``HttpFinish``."""
+run it started, why it started none, or that MDA lost it; see ``HttpFinish``.
+
+Experimental: this may change in a minor release.
+"""
 
 
 def finish_events(
@@ -213,7 +216,10 @@ def _finish_of(delivery: HttpFinishedDelivery) -> HttpFinish:
 
 EventReceived = Callable[[_E, _T], "Awaitable[None] | None"]
 """A provider channel's ``on_received``: a delivery of one of its events reached
-its thread, before MDA reads the thread; see ``http_channel``'s ``on_received``."""
+its thread, before MDA reads the thread; see ``http_channel``'s ``on_received``.
+
+Experimental: this may change in a minor release.
+"""
 
 
 def receive_events(

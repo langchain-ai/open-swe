@@ -436,8 +436,8 @@ fn lists_an_env_apps_settings_and_waits_for_them_in_a_terminal() {
 #[test]
 fn tells_a_wrong_client_id_or_secret_from_an_answer_that_says_nothing() {
     let invalid = |error: &str| format!(r#"{{"error":"{error}","error_description":"x"}}"#);
-    let secret = credentials_verdict(400, &invalid("invalid_secret")).unwrap_err();
-    assert!(secret.to_string().contains(CLIENT_SECRET_ENV), "{secret}");
+    let refusal = credentials_verdict(400, &invalid("invalid_secret")).unwrap_err();
+    assert!(refusal.to_string().contains(CLIENT_SECRET_ENV), "{refusal}");
     let client = credentials_verdict(400, &invalid("invalid_client")).unwrap_err();
     assert!(client.to_string().contains(CLIENT_ID_ENV), "{client}");
     // Right credentials: Linear only refuses the made-up code.

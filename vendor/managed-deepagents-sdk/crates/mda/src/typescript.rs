@@ -132,10 +132,11 @@ pub(crate) fn collect_string_bindings(body: &[Statement<'_>]) -> HashMap<String,
 /// no-substitution template literal; `None` for anything dynamic.
 pub(crate) fn static_string_expression(expression: &Expression<'_>) -> Option<String> {
     match expression {
-        Expression::StringLiteral(literal) => Some(literal.value.to_string()),
-        Expression::TemplateLiteral(literal) => {
-            literal.single_quasi().map(|cooked| cooked.to_string())
-        }
+        Expression::StringLiteral(literal) => literal.value.as_str().map(str::to_owned),
+        Expression::TemplateLiteral(literal) => literal
+            .single_quasi()
+            .and_then(|cooked| cooked.as_str())
+            .map(str::to_owned),
         _ => None,
     }
 }
@@ -205,7 +206,11 @@ pub(crate) fn collect_managed_export_bindings(
         let Some(specifiers) = import.specifiers.as_ref() else {
             continue;
         };
-        let from_managed = import.source.value.as_str().contains("managed-deepagents");
+        let from_managed = import
+            .source
+            .value
+            .as_str()
+            .is_some_and(|source| source.contains("managed-deepagents"));
         for specifier in specifiers {
             match specifier {
                 ImportDeclarationSpecifier::ImportSpecifier(named) => {

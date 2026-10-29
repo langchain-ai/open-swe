@@ -662,13 +662,13 @@ async def _prepare(
             )
         )
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel input failed (%s)", type(error).__name__)
+        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return None
     try:
         prepared = normalize_run_input(result)
     except InvalidRunInput as error:
         # MDA's own reason, bounded, unlike a raised exception's message.
-        _LOG.error("channel input refused, no run started: %s", error.reason)
+        logger.error("channel input refused, no run started: %s", error.reason)
         return None
     except Exception as error:  # noqa: BLE001
         logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
@@ -862,7 +862,7 @@ async def _withhold(
             transport=channel.messaging(os.environ) if channel.messaging else None,
             delivery_key=message.get("delivery_key"),
         )
-    _LOG.info(
+    logger.info(
         "channel run withheld by resolve_user %s",
         json.dumps({"threadId": message["thread_id"].lower()}),
     )

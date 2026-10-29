@@ -468,6 +468,7 @@ def slack_channel(
             not yet done, as the thread's status. A callable that raises, takes
             longer than 1 s, or returns something else leaves the status as it
             is.
+            Experimental: this may change in a minor release.
         on_event: Handlers that decide what each kind of message starts, by
             key: ``"mention"`` (a channel message that @-mentions your agent),
             ``"directMessage"``, and ``"message"`` (any other channel message,
@@ -485,18 +486,22 @@ def slack_channel(
             message, which reads the click from ``runtime.channel.event``. A
             click that answers a decision the thread waits on resumes the run,
             and never reaches it.
+            Experimental: this may change in a minor release.
         multitask_strategy: What a message that starts a run does while its
             thread already runs: ``enqueue`` (the default) waits for the run
             and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+            Experimental: this may change in a minor release.
         reply: Whether the channel posts the run's final answer in the thread:
             ``"auto"`` (the default) or ``"none"``, to leave replying to the
             agent, through ``runtime.channel.post`` or its own tools. The
             status, reactions and ``on_finish`` stay as they are. ``"none"``
             needs an ``mda`` CLI that deploys it.
+            Experimental: this may change in a minor release.
         resolve_user: Map the Slack user to one of your users, with a function
             or an endpoint MDA asks; overrides the identity's ``resolve_user``.
+            Experimental: this may change in a minor release.
         on_finish: Called once when a message or interaction is done, with the
             ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
             ``SlackChannelThread``, and how it finished: ``run`` (its run
@@ -510,6 +515,7 @@ def slack_channel(
             Trigger Server will send again because its run couldn't start.
             It runs in the deployment's process, so a restart loses it: use
             the run's ``webhook`` for anything you can't miss.
+            Experimental: this may change in a minor release.
 
     Example::
 

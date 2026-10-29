@@ -161,6 +161,12 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     // Trigger Server keeps them; the deployment never gets them as env vars.
     "MDA_SLACK_BOT_TOKEN",
     "MDA_SLACK_SIGNING_SECRET",
+    // CLI-only: the deployment name is the agent ID, and the environment is
+    // the `--agent-environment` default. Host sets the agent environment's
+    // tracing project, and the LangSmith SDK skips tracing when it also sees
+    // an agent address.
+    "LANGSMITH_AGENT_ID",
+    "LANGSMITH_AGENT_ENVIRONMENT",
 ];
 
 /// Convert env vars into deployment secrets, dropping reserved and empty values.

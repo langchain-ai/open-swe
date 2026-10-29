@@ -137,6 +137,24 @@ pub struct Project {
     pub files: Vec<PathBuf>,
 }
 
+impl Project {
+    /// Leave an `--env-file` that lives in the project out of the build.
+    ///
+    /// Discovery already skips `.env` and `.env.*`; this covers other names
+    /// (`config/staging.env`), whose secrets would otherwise be copied into
+    /// the build and uploaded with a deploy.
+    pub(crate) fn without_env_file(mut self, env_file: Option<&Path>) -> Self {
+        // `root` is canonical, so the env file must be too before stripping.
+        let rel = env_file
+            .and_then(|path| path.canonicalize().ok())
+            .and_then(|path| path.strip_prefix(&self.root).ok().map(Path::to_path_buf));
+        if let Some(rel) = rel {
+            self.files.retain(|file| file != &rel);
+        }
+        self
+    }
+}
+
 /// Load and validate the project rooted at `root`.
 pub fn load(root: &Path) -> Result<Project> {
     ensure_project_dir(root)?;
@@ -562,6 +580,26 @@ mod tests {
         assert!(!project.files.contains(&PathBuf::from(".env.local")));
         assert!(!project.files.contains(&PathBuf::from(".DS_Store")));
         assert!(!project.files.contains(&PathBuf::from("Thumbs.db")));
+    }
+
+    #[test]
+    fn without_env_file_drops_an_env_file_discovery_keeps() {
+        let root = tempfile::tempdir().unwrap();
+        write_stub_file(root.path(), "agent.ts");
+        write_stub_file(root.path(), "config/staging.env");
+        let project = load(root.path()).unwrap();
+        assert!(project.files.contains(&PathBuf::from("config/staging.env")));
+
+        // An env file outside the project changes nothing.
+        let outside = tempfile::tempdir().unwrap();
+        write_stub_file(outside.path(), "staging.env");
+        let files = project.files.clone();
+        let project = project.without_env_file(Some(&outside.path().join("staging.env")));
+        assert_eq!(project.files, files);
+
+        let project = project.without_env_file(Some(&root.path().join("config/staging.env")));
+        assert!(!project.files.contains(&PathBuf::from("config/staging.env")));
+        assert!(project.files.contains(&PathBuf::from("agent.ts")));
     }
 
     #[test]
