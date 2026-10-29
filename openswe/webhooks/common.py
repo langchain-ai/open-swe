@@ -141,7 +141,7 @@ from openswe.slack.records import (  # noqa: F401
     resolve_slack_thread_id,
     store_slack_run_mapping,
 )
-from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
+from openswe.slack.stop import process_agent_session_stopped
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
 from openswe.threads.summary import (
@@ -282,7 +282,6 @@ __all__ = [
     "process_agent_session_stopped",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
-    "process_slack_stop_reaction",
     "queue_message_for_thread",
     "react_to_github_comment",
     "reconcile_findings_with_review_threads",
@@ -465,7 +464,7 @@ async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
 
     sender = payload.get("sender") or {}
     sender_login = sender.get("login", "") or ""
-    if sender_login in INTERNAL_BOT_LOGINS:
+    if sender_login.lower() in INTERNAL_BOT_LOGINS:
         return True
 
     if not sender_login:

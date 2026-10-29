@@ -15,6 +15,9 @@ from openswe import event_claims
 from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
 from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
 from openswe.agent_api.report_receipts import purge_report_receipts
+from openswe.agent_api.tool_sets import PURGE_JOB as TOOL_SETS_PURGE
+from openswe.agent_api.tool_sets import PURGE_SCHEDULE as TOOL_SETS_SCHEDULE
+from openswe.agent_api.tool_sets import purge_tool_sets
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
@@ -44,6 +47,7 @@ from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.threads.index_import import import_agent_server_threads
+from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
@@ -172,7 +176,10 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return {"threads_settled": await reconcile_busy_threads()}
+    return {
+        "threads_settled": await reconcile_busy_threads(),
+        "stalled_runs_failed": await fail_stalled_runs(),
+    }
 
 
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)
@@ -183,6 +190,11 @@ async def _slack_channel_directory(_job: Job) -> None:
 @WORKER.register(REPORT_RECEIPT_PURGE)
 async def _report_receipt_purge(_job: Job) -> None:
     logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
+
+
+@WORKER.register(TOOL_SETS_PURGE)
+async def _tool_sets_purge(_job: Job) -> None:
+    logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
 @WORKER.register(WAKE_THREAD_JOB)
@@ -215,6 +227,7 @@ async def start_jobs() -> None:
         lambda: queue.schedule(
             REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
+        lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
     ]
     for step in steps:
         try:
