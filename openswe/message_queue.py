@@ -135,6 +135,15 @@ class QueuedMessage(Base):
             and message_sender_id(message["content"], kind="system") in _SILENT_SENDERS
         )
 
+    @property
+    def starts_follow_up(self) -> bool:
+        """Whether this message warrants a new run if the current run misses it."""
+        message = self.run_message
+        return (
+            message is None
+            or message_sender_id(message["content"], kind="system") != REVIEW_WALKTHROUGH_SENDER
+        )
+
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
         from openswe.incidents.report import context_message

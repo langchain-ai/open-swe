@@ -1423,7 +1423,7 @@ async def dispatch_pending_follow_ups(
     the store; the new run's first model call picks it up. Returns the run id,
     or ``None`` when nothing was waiting.
     """
-    if not await QueuedMessage.for_thread(thread_id):
+    if not any(message.starts_follow_up for message in await QueuedMessage.for_thread(thread_id)):
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(
