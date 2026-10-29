@@ -431,7 +431,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 sandbox_error=opened.error,
             ),
         )
-        # Off the first model call's path: nothing changes the box before a tool runs.
+        if self._loop is not None:
+            prepared.update.update(self._loop.prepared(prepared))
         self._baselines.get(self._backend.run).start(self._backend, run_id())
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
 

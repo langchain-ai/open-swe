@@ -53,8 +53,10 @@ from runtime_api.loop import (
     AfterAgent,
     BeforeModel,
     ChosenModel,
+    GitHubProxyRefreshed,
     ModelCall,
     PhaseResult,
+    Prepared,
     ReplyOnBehalf,
     Route,
     Routed,
@@ -206,6 +208,15 @@ class _RunGuidance:
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     held = state.get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
+
+
+def _github_proxy_due(refreshed: GitHubProxyRefreshed, now: datetime) -> dict[str, JsonValue]:
+    due = (
+        refreshed.expires_at - _GITHUB_PROXY_WINDOW
+        if refreshed.expires_at is not None
+        else now + _GITHUB_PROXY_RECHECK
+    )
+    return {_GITHUB_PROXY_DUE: due.isoformat()}
 
 
 def _moment(value: object) -> datetime | None:
@@ -374,12 +385,13 @@ class RunLoop:
         except Exception:
             logger.warning("Could not refresh the box's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
-        due = (
-            refreshed.expires_at - _GITHUB_PROXY_WINDOW
-            if refreshed.expires_at is not None
-            else now + _GITHUB_PROXY_RECHECK
-        )
-        return {_GITHUB_PROXY_DUE: due.isoformat()}
+        return _github_proxy_due(refreshed, now)
+
+    def prepared(self, prepared: Prepared) -> dict[str, JsonValue]:
+        """Held state that keeps the token preparation put on the box until it is due."""
+        if prepared.github_proxy is None or not self.rules.refresh_github_proxy:
+            return {}
+        return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
     async def _task_context(self) -> TaskContext:
         if not self.rules.task_coordination:
