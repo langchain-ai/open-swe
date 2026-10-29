@@ -380,11 +380,13 @@ class RunLoop:
                 update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
         model = await self._model_for(current)
+        system_prompt, thread_prompt = self._system_prompt(current)
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
-                system_prompt=self._system_prompt(current),
+                system_prompt=system_prompt,
+                thread_prompt=thread_prompt,
                 hidden_tools=self._hidden(current),
                 model=model,
                 vision=None if model.reads_images else self._models.vision,
@@ -487,11 +489,20 @@ class RunLoop:
             return await self._chosen_model(selected, held.get("selected_effort"))
         return self._models.model
 
-    def _system_prompt(self, held: Mapping[str, object]) -> str:
-        """Only parts fixed for the thread's life: a changed byte misses the provider's cache."""
+    def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str]:
+        """The prompt every thread shares and the part only this one's says, both fixed for
+        the thread's life: a changed byte misses the provider's cache.
+
+        The rendered prompt ends in the thread's part. A thread rendered before the
+        backend named that part has none, and all of its prompt is the first.
+        """
         rendered = held.get("rendered_system_prompt")
-        sections = [self.rules.deployment_prompt, rendered if isinstance(rendered, str) else ""]
-        return "\n\n".join(section for section in sections if section)
+        rendered = rendered if isinstance(rendered, str) else ""
+        thread = held.get("rendered_thread_prompt")
+        thread = thread if isinstance(thread, str) and rendered.endswith(thread) else ""
+        shared = rendered.removesuffix(thread).rstrip()
+        sections = [self.rules.deployment_prompt, shared]
+        return "\n\n".join(section for section in sections if section), thread
 
     def _hidden(self, held: Mapping[str, object]) -> list[str]:
         hidden = set(self.rules.hidden_tools)

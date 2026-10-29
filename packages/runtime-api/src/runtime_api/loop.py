@@ -76,6 +76,9 @@ class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
     system_prompt: str
+    # What only this thread's prompt says, sent after ``system_prompt`` and the run's
+    # skills so that every thread shares the cached prefix before it.
+    thread_prompt: str = ""
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None = None
