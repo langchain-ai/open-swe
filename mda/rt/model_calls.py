@@ -15,15 +15,15 @@ from typing import Final
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelRetryMiddleware,
-    TracePolicy,
-    omit_payload,
 )
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ def _in_call_order(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
 
 class _ModelCallGuard(AgentMiddleware):
     # Its request carries the whole conversation, which the model call's own trace has.
-    trace_policy = TracePolicy(process_inputs=omit_payload)
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
 
 class ReplayableHistoryMiddleware(_ModelCallGuard):
@@ -186,6 +186,29 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
             )
 
 
+class _RunPromptCaching(AnthropicPromptCachingMiddleware):
+    """Anthropic's prompt cache, less its breakpoint on the last tool.
+
+    The tools come before the system prompt, so ``RunPromptMiddleware``'s breakpoints
+    already cache them; the request's four go to the system prompt and conversation.
+    """
+
+    @property
+    def name(self) -> str:
+        """deepagents replaces its own prompt cache with the one of the same name."""
+        return AnthropicPromptCachingMiddleware.__name__
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelCallResult:
+        async def untagged_tools(tagged: ModelRequest) -> ModelResponse:
+            return await handler(tagged.override(tools=request.tools))
+
+        return await super().awrap_model_call(request, untagged_tools)
+
+
 def model_call_guards(
     timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS, *, subagent: bool = False
 ) -> list[AgentMiddleware]:
@@ -203,5 +226,10 @@ def model_call_guards(
         ModelCallTimeoutMiddleware(timeout_seconds),
         # Its default answers with the error as the model's reply instead of raising.
         ModelRetryMiddleware(retry_on=(TimeoutError,), on_failure="error"),
-        AnthropicPromptCachingMiddleware(ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"),
+        # An agent's two breakpoints from RunPromptMiddleware and this one's last system
+        # block and automatic one fill all four a request may have; Anthropic rejects a
+        # fifth, so anything adding one must give one up. A subagent's take the last tool.
+        (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
+            ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
+        ),
     ]

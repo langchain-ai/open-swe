@@ -22,7 +22,6 @@ from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.client import post_slack_top_level_message_with_ts
@@ -38,7 +37,6 @@ from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 PAYLOAD_TTL = timedelta(seconds=300)
 _NEVER_FETCHED = datetime.fromtimestamp(0, UTC)
 HISTORY_MAX_MESSAGES = 100
@@ -290,7 +288,7 @@ class SlackChannel(Base):
     @classmethod
     async def cached(cls, channel_id: str) -> Self | None:
         """Fresh directory metadata only; never contact Slack for an audit lookup."""
-        if not SLACK_BOT_TOKEN or not channel_id:
+        if not channel_id:
             return None
         known = await cls._row(channel_id)
         return known if known is not None and known.fresh else None
@@ -300,7 +298,7 @@ class SlackChannel(Base):
         cls, channel_id: str, *, use_cache: bool = True, raise_unavailable: bool = False
     ) -> Self | None:
         """The channel, from the directory while fresh and from Slack otherwise."""
-        if not SLACK_BOT_TOKEN or not channel_id:
+        if not channel_id:
             return None
         if use_cache and (known := await cls.cached(channel_id)) is not None:
             return known
@@ -357,8 +355,6 @@ class SlackChannel(Base):
     @classmethod
     async def resolve(cls, reference: str) -> Self | None:
         """The channel for an id, a ``<#C…|name>`` mention, ``#name`` or ``name``."""
-        if not SLACK_BOT_TOKEN:
-            return None
         value = reference.strip()
         if mention := _MENTION.fullmatch(value):
             value = mention.group(1)
@@ -377,8 +373,6 @@ class SlackChannel(Base):
 
     async def join(self) -> bool:
         """Join this channel; a private one needs an invite instead."""
-        if not SLACK_BOT_TOKEN:
-            return False
         try:
             async with SlackClient.bot() as client:
                 await client.conversations_join(channel=self.id)
@@ -417,8 +411,6 @@ class SlackChannel(Base):
         so a message that has any carries its ``reply_count`` and ``thread_ts``
         for ``slack_read_thread_messages`` to follow.
         """
-        if not SLACK_BOT_TOKEN:
-            return []
         if not self.public:
             logger.info(
                 "Refused to read history for a non-public Slack channel",

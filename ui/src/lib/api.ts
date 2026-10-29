@@ -325,7 +325,7 @@ export interface Profile {
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_monitor?: boolean | null
+  experimental_fleet?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -345,7 +345,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  experimental_monitor?: boolean | null
+  experimental_fleet?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -476,8 +476,12 @@ export interface ManagedToolsMissingCredential {
 }
 
 export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
   name: string
   tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
 }
 
 export interface ManagedToolsGatewayStatus {
@@ -1424,6 +1428,7 @@ export interface HumanReviewRequestResult {
   error: string
   request_id: string
   channel: string
+  channel_name: string
   permalink: string
   reused: boolean
 }
@@ -1781,6 +1786,11 @@ export const api = {
           : ""
       }`,
       { method: "POST" }
+    ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
     ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),

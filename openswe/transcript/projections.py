@@ -355,7 +355,9 @@ async def _turn_ended(
     Only an open turn is ever moved, so a late completion of a turn that was
     already interrupted changes nothing — including the thread's status, which
     by then belongs to whatever happened after the interruption. A thread with
-    another turn still open stays ``running``.
+    another turn still open stays ``running``, unless that turn is stranded: a
+    request no run ever took (its start died with the process) that a later
+    turn has already overtaken. It would otherwise keep the thread busy forever.
     """
     failed = isinstance(event, TurnFailed)
     completed = isinstance(event, TurnCompleted)
@@ -388,8 +390,18 @@ async def _turn_ended(
             """
             UPDATE thread SET
                 status = CASE WHEN EXISTS (
-                    SELECT 1 FROM thread_turn
-                    WHERE thread_id = :thread_id AND state IN ('requested', 'running')
+                    SELECT 1 FROM thread_turn AS candidate
+                    WHERE candidate.thread_id = :thread_id
+                      AND candidate.state IN ('requested', 'running')
+                      AND NOT (
+                          candidate.state = 'requested' AND candidate.run_id IS NULL
+                          AND EXISTS (
+                              SELECT 1 FROM thread_turn AS later
+                              WHERE later.thread_id = :thread_id
+                                AND later.started_at IS NOT NULL
+                                AND later.requested_at > candidate.requested_at
+                          )
+                      )
                 ) THEN 'running' ELSE :settled END,
                 updated_at = clock_timestamp()
             WHERE thread_id = :thread_id

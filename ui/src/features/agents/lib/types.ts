@@ -345,6 +345,7 @@ export interface QueuedThreadMessage {
   id: string
   content: string
   images?: Array<AnyImageChunk>
+  replies?: Array<PassageReply>
   createdAt: number
   /** The server has not acknowledged it yet, so it cannot be sent now or cancelled. */
   pending?: boolean

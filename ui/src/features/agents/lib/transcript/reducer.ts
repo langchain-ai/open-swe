@@ -450,6 +450,22 @@ function settledStatus(
 }
 
 /**
+ * A request no run ever took (its start died with the server) that a later
+ * turn has already overtaken. It never runs, so it is not waiting for anything.
+ */
+function isStrandedTurn(
+  state: TranscriptState,
+  turn: TranscriptTurnState
+): boolean {
+  if (turn.state !== "requested" || turn.runId !== null) return false
+  const requestedAt = Date.parse(turn.requestedAt)
+  return Object.values(state.turns).some(
+    (other) =>
+      other.startedAt !== null && Date.parse(other.requestedAt) > requestedAt
+  )
+}
+
+/**
  * Waiting behind the live run. A requested turn is queued once its run exists,
  * and already while another turn is running: the run id only follows the
  * request by a moment, and the row should not change shape in between.
@@ -460,6 +476,7 @@ function isQueuedTurn(
 ): boolean {
   if (turn.state !== "requested") return false
   if (turn.runId !== null) return true
+  if (isStrandedTurn(state, turn)) return false
   return Object.values(state.turns).some(
     (other) => other.turnId !== turn.turnId && other.state === "running"
   )
@@ -1150,7 +1167,15 @@ function turnMessages(
         const message = humanMessage(state.threadId, row, state.entities)
         if (!message) continue
         turnKey = row.messageId
-        out.push(message)
+        out.push(
+          turn.state === "failed" && turn.startedAt === null
+            ? {
+                ...message,
+                deliveryStatus: "failed",
+                deliveryError: turn.error ?? undefined,
+              }
+            : message
+        )
         continue
       }
       const chunks: Array<Chunk> = []

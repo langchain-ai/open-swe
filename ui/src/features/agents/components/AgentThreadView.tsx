@@ -646,6 +646,7 @@ export function AgentThreadView({
         id: entry.message.id,
         content: queuedText(entry),
         images: queuedImages(entry),
+        replies: entry.message.replies,
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
         mine: isOwnQueued(entry),
@@ -656,6 +657,7 @@ export function AgentThreadView({
           id: message.id,
           content: message.content,
           images: message.images,
+          replies: message.replies,
           createdAt: message.createdAt,
           pending: true,
         })),
@@ -833,8 +835,7 @@ export function AgentThreadView({
                 />
               }
             >
-              Every pull request from this thread is merged or closed. Resolve
-              the thread if the work is done, or send a follow-up to keep going.
+              Every pull request from this thread is merged or closed.
             </Banner>
           </div>
         )}

@@ -1442,6 +1442,15 @@
       "ConnectedService": {
         "description": "A service in the gateway this person has connected.",
         "properties": {
+          "disconnectable": {
+            "default": false,
+            "title": "Disconnectable",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1452,6 +1461,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "tool_count"
         ],
@@ -1899,6 +1909,40 @@
           "verifier"
         ],
         "title": "DesktopConnectExchange",
+        "type": "object"
+      },
+      "DesktopEnvironment": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "DesktopEnvironment",
+        "type": "object"
+      },
+      "DesktopEnvironments": {
+        "properties": {
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopEnvironment"
+            },
+            "title": "Environments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "environments"
+        ],
+        "title": "DesktopEnvironments",
         "type": "object"
       },
       "DesktopHandoffExchange": {
@@ -4649,8 +4693,7 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_monitor": {
-            "agent_feature_flag": true,
+          "experimental_fleet": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -4659,7 +4702,7 @@
                 "type": "null"
               }
             ],
-            "title": "Experimental Monitor"
+            "title": "Experimental Fleet"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -5277,6 +5320,17 @@
             ],
             "title": "Active Batch Id"
           },
+          "configuration_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Generation"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/EntryView"
@@ -5320,7 +5374,8 @@
           "operator",
           "items",
           "next_cursor",
-          "active_batch_id"
+          "active_batch_id",
+          "configuration_generation"
         ],
         "title": "QueueStatus",
         "type": "object"
@@ -5529,6 +5584,16 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_mismatch": {
+            "default": false,
+            "title": "Channel Mismatch",
+            "type": "boolean"
+          },
+          "channel_name": {
+            "default": "",
+            "title": "Channel Name",
+            "type": "string"
+          },
           "claimed": {
             "default": false,
             "title": "Claimed",
@@ -5547,6 +5612,11 @@
           "request_id": {
             "default": "",
             "title": "Request Id",
+            "type": "string"
+          },
+          "requested_channel": {
+            "default": "",
+            "title": "Requested Channel",
             "type": "string"
           },
           "reused": {
@@ -11041,6 +11111,27 @@
         ]
       }
     },
+    "/dashboard/api/desktop/environments": {
+      "get": {
+        "operationId": "api_desktop_environments_dashboard_api_desktop_environments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopEnvironments"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Desktop Environments",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/enabled-review-repos": {
       "get": {
         "operationId": "api_list_enabled_review_repos_dashboard_api_enabled_review_repos_get",
@@ -11124,6 +11215,140 @@
         "tags": [
           "dashboard",
           "review"
+        ]
+      }
+    },
+    "/dashboard/api/fleet-chat/{path}": {
+      "get": {
+        "operationId": "proxy_dashboard_api_fleet_chat__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Proxy",
+        "tags": [
+          "dashboard",
+          "fleet-chat"
+        ]
+      },
+      "patch": {
+        "operationId": "proxy_dashboard_api_fleet_chat__path__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Proxy",
+        "tags": [
+          "dashboard",
+          "fleet-chat"
+        ]
+      },
+      "post": {
+        "operationId": "proxy_dashboard_api_fleet_chat__path__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Proxy",
+        "tags": [
+          "dashboard",
+          "fleet-chat"
         ]
       }
     },
@@ -12854,6 +13079,56 @@
           }
         ],
         "summary": "Api Connect Managed Tool",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/{gateway}/services/{service}": {
+      "delete": {
+        "description": "Remove the caller's own LangSmith connection to one service in the tool kit.",
+        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools__gateway__services__service__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Disconnect Managed Tool",
         "tags": [
           "dashboard"
         ]

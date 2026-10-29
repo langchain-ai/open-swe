@@ -5,7 +5,14 @@ from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from deepagents.middleware._utils import append_to_system_message
+from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import (
+    AgentState,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -13,18 +20,24 @@ from langchain_core.messages import (
     AnyMessage,
     BaseMessage,
     HumanMessage,
+    SystemMessage,
     ToolMessage,
 )
+from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
+from rt.backend import Run, RunContext
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
+    model_call_guards,
 )
 from rt.models import ModelSpec
+from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
 _OPENAI = ChatOpenAI(
@@ -43,7 +56,7 @@ class _WrapsModelCalls(Protocol):
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse: ...
+    ) -> ModelResponse | ExtendedModelResponse: ...
 
 
 async def _forwarded(
@@ -205,11 +218,113 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
         HumanMessage(content="explain it"),
     ]
 
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    # A run whose catalog names no models of its own, so the call's own decide.
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     forwarded = await _forwarded(
-        BackendRunMiddleware(MagicMock(), None),
+        BackendRunMiddleware(run.backend),
         messages,
         _ANTHROPIC,
         state={"messages": messages, "open_swe_call": call.model_dump()},
     )
 
     assert forwarded.model is (_OPENAI if with_image else _FIREWORKS)
+
+
+class _Skills(AgentMiddleware):
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        system = append_to_system_message(request.system_message, "Skills")
+        return await handler(request.override(system_message=system))
+
+
+def _through(
+    layers: list[AgentMiddleware], handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+) -> Callable[[ModelRequest], Awaitable[ModelResponse]]:
+    async def call(request: ModelRequest) -> ModelResponse:
+        response = await layers[0].awrap_model_call(request, _through(layers[1:], handler))
+        assert isinstance(response, ModelResponse)
+        return response
+
+    return call if layers else handler
+
+
+@tool
+def _search(query: str) -> str:
+    """Search."""
+    return query
+
+
+async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The graph's prompt and the run's shared one each end in an Anthropic cache
+    breakpoint ahead of the skills and the thread's own part, the tools take none, and a
+    fallback to another provider carries none."""
+    built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
+    monkeypatch.setattr(
+        "rt.middleware.build_model", lambda spec, *, use_gateway: built[spec.model_id]
+    )
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    static = SystemMessage(content="The graph's own instructions")
+    sent: list[ModelRequest] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        sent.append(request)
+        if request.model is _ANTHROPIC:
+            raise RuntimeError("overloaded")
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    layers: list[AgentMiddleware] = [
+        RunPromptMiddleware(),
+        _Skills(),
+        ThreadPromptMiddleware(),
+        model_call_guards()[-1],
+    ]
+    for thread in ("First thread's part", "Next thread's part"):
+        call = ModelCall(
+            system_prompt="Every thread's prompt",
+            thread_prompt=thread,
+            model=ModelSpec(model_id="anthropic:opus", kwargs={}),
+            fallback=ModelSpec(model_id="openai:gpt", kwargs={}),
+            use_gateway=False,
+        )
+        messages: list[AnyMessage] = [HumanMessage(content="go")]
+        request = ModelRequest(
+            model=_ANTHROPIC,
+            messages=messages,
+            system_message=static,
+            tools=[_search],
+            state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+        )
+        await BackendRunMiddleware(run.backend).awrap_model_call(request, _through(layers, handler))
+
+    cached = {"type": "ephemeral", "ttl": "1h"}
+    first, first_fallback, second, _ = sent
+    assert cast(SystemMessage, first.system_message).content == [
+        {"type": "text", "text": "The graph's own instructions", "cache_control": cached},
+        {"type": "text", "text": "Every thread's prompt", "cache_control": cached},
+        {"type": "text", "text": "\n\nSkills"},
+        {"type": "text", "text": "First thread's part", "cache_control": cached},
+    ]
+    assert first.model_settings == {"cache_control": cached}
+    assert first.tools == [_search]
+    second_blocks = cast(SystemMessage, second.system_message).content
+    assert second_blocks[:3] == cast(SystemMessage, first.system_message).content[:3]
+    assert second_blocks[3] == {
+        "type": "text",
+        "text": "Next thread's part",
+        "cache_control": cached,
+    }
+    assert cast(SystemMessage, first_fallback.system_message).content == [
+        {"type": "text", "text": "The graph's own instructions"},
+        {"type": "text", "text": "Every thread's prompt"},
+        {"type": "text", "text": "\n\nSkills"},
+        {"type": "text", "text": "First thread's part"},
+    ]
+    assert first_fallback.model_settings == {}
+    assert static.content == "The graph's own instructions"
