@@ -4693,8 +4693,7 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_monitor": {
-            "agent_feature_flag": true,
+          "experimental_fleet": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -4703,7 +4702,7 @@
                 "type": "null"
               }
             ],
-            "title": "Experimental Monitor"
+            "title": "Experimental Fleet"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -5321,6 +5320,17 @@
             ],
             "title": "Active Batch Id"
           },
+          "configuration_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Generation"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/EntryView"
@@ -5364,7 +5374,8 @@
           "operator",
           "items",
           "next_cursor",
-          "active_batch_id"
+          "active_batch_id",
+          "configuration_generation"
         ],
         "title": "QueueStatus",
         "type": "object"
@@ -5573,6 +5584,16 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_mismatch": {
+            "default": false,
+            "title": "Channel Mismatch",
+            "type": "boolean"
+          },
+          "channel_name": {
+            "default": "",
+            "title": "Channel Name",
+            "type": "string"
+          },
           "claimed": {
             "default": false,
             "title": "Claimed",
@@ -5591,6 +5612,11 @@
           "request_id": {
             "default": "",
             "title": "Request Id",
+            "type": "string"
+          },
+          "requested_channel": {
+            "default": "",
+            "title": "Requested Channel",
             "type": "string"
           },
           "reused": {
@@ -11174,6 +11200,140 @@
         "tags": [
           "dashboard",
           "review"
+        ]
+      }
+    },
+    "/dashboard/api/fleet-chat/{path}": {
+      "get": {
+        "operationId": "proxy_dashboard_api_fleet_chat__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Proxy",
+        "tags": [
+          "dashboard",
+          "fleet-chat"
+        ]
+      },
+      "patch": {
+        "operationId": "proxy_dashboard_api_fleet_chat__path__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Proxy",
+        "tags": [
+          "dashboard",
+          "fleet-chat"
+        ]
+      },
+      "post": {
+        "operationId": "proxy_dashboard_api_fleet_chat__path__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Proxy",
+        "tags": [
+          "dashboard",
+          "fleet-chat"
         ]
       }
     },

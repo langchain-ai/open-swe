@@ -387,6 +387,23 @@ def render_status_comment(
     return "\n\n".join(parts)
 
 
+def render_failed_status_comment(*, pr_number: int, thread_id: str, reason: str) -> str:
+    """Compose the status comment left by a review run that died before publishing.
+
+    It takes the place of the "in progress" comment, so the next review deletes
+    it when it starts or publishes.
+    """
+    parts = [
+        "## ⚠️ Open SWE Review: couldn't run\n\n"
+        f"Open SWE stopped before it could review this PR: {reason}. "
+        "Push a commit or re-request a review from Open SWE to run it again."
+    ]
+    if ui_url := dashboard_thread_url(thread_id):
+        parts.append(f"[Open in Web]({ui_url})")
+    parts.append(status_comment_marker(pr_number))
+    return "\n\n".join(parts)
+
+
 async def post_status_comment(
     *,
     owner: str,

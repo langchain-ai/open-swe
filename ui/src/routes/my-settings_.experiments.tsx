@@ -20,6 +20,11 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <StreamPreference />
+        <ProfileSwitchRow
+          field="experimental_fleet"
+          label="Fleet chats"
+          description="Add an Open SWE / Fleet switch to the sidebar to chat with Fleet in your LangSmith workspace, as you. Needs a LangSmith connection."
+        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
@@ -43,11 +48,6 @@ function ExperimentsPage() {
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
-        />
-        <ProfileSwitchRow
-          field="experimental_monitor"
-          label="Monitors"
-          description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
         <ProfileSwitchRow
           field="experimental_act_as_approval"

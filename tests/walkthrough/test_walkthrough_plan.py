@@ -1,7 +1,7 @@
 import shutil
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock
@@ -13,7 +13,7 @@ from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
-from openswe.walkthrough.checkout import BASE_REF, HEAD_REF, MERGE_BASE_REF, PinnedCheckout
+from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, CheckoutError, PinnedCheckout
 from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
@@ -71,7 +71,6 @@ def _commit(repo: Path, files: dict[str, str | None], message: str) -> str:
 async def _pin(checkout: PinnedCheckout, base: str, head: str) -> DiffIndex:
     """Pin ``checkout`` as a planner would, and index its diff in the "sandbox"."""
     repo = Path(checkout.repo_dir)
-    _git(repo, "update-ref", BASE_REF, base)
     _git(repo, "update-ref", HEAD_REF, head)
     _git(repo, "update-ref", MERGE_BASE_REF, _git(repo, "merge-base", base, head).strip())
     return await checkout.index()
@@ -452,3 +451,102 @@ async def test_a_plan_stored_line_by_line_reads_as_ranges_and_gets_its_index() -
 
     assert stored is not None and stored.diff_index == index
     assert stored.plan.complete(index)
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_plan_left_at_an_older_merge_base_is_replanned_without_base_branch_files(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stale_base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    _commit(repo, {"feature.py": "x = 1\n"}, "feature")
+    _git(repo, "checkout", "-q", "main")
+    base = _commit(repo, {"unrelated.py": "y = 2\n"}, "landed on main")
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    stale = await _pin(checkout, stale_base, head)
+    assert [file.path for file in stale.files] == ["feature.py", "unrelated.py"]
+    pull_request = await PullRequest(owner="o", repo="r", number=1).ensure()
+    assert await Walkthrough.install(
+        pull_request.id,
+        Plan.start(head, stale),
+        merge_base_sha=stale_base,
+        index=stale,
+        replacing=None,
+    )
+    await _pin(checkout, base, head)
+
+    async def current_head(_: PullRequest) -> str:
+        return head
+
+    monkeypatch.setattr("openswe.walkthrough.planner._current_head", current_head)
+    workspace = await PlanWorkspace.open(pull_request, checkout)
+
+    assert workspace.merge_base_sha == base
+    assert [file.path for file in workspace.index.files] == ["feature.py"]
+    stored = await Walkthrough.get(pull_request.id, with_index=True)
+    assert stored is not None and stored.merge_base_sha == base
+
+
+async def test_a_missing_checkout_is_reported_unless_allowed(tmp_path: Path) -> None:
+    missing = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(tmp_path / "repo"))
+    with pytest.raises(CheckoutError, match="Repository not found"):
+        await missing.pinned()
+    assert await missing.pinned(allow_missing=True) is None
+
+
+async def test_a_head_change_during_planning_ends_the_scout(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from runtime_api.loop import RunCall
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.database import postgres
+    from openswe.review_scout.graph import PrepareReviewScoutRunMiddleware
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from openswe.tools import plan_walkthrough
+
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"cli.py": "print(1)\n"}, "feature")
+    index = await _pin(checkout, base, head)
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, base, index, Plan.start(head, index))
+    stored = SimpleNamespace(head_sha=head)
+    session = AsyncMock()
+    session.scalar.return_value = stored
+
+    @asynccontextmanager
+    async def database_session() -> AsyncIterator[AsyncMock]:
+        yield session
+
+    monkeypatch.setattr(postgres, "session", database_session)
+    monkeypatch.setattr(plan_walkthrough, "_workspace", AsyncMock(return_value=workspace))
+    config = {"configurable": {"thread_id": "scout"}}
+    model = ModelChoice("anthropic:claude-sonnet-4-5", {})
+    surface = ToolSurface(
+        base_tools=[plan_walkthrough.walkthrough_describe_other],
+        middleware=[PrepareReviewScoutRunMiddleware(thread_id="scout", config=config)],
+        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+    )
+    await surface.prepare()
+    run = RunSession(surface, config, None, started_here=True)
+    stored.head_sha = _commit(repo, {"cli.py": "print(2)\n"}, "push")
+
+    result = await run.operation(
+        RunOperation(
+            name="walkthrough_describe_other",
+            arguments={"summary": "Noise"},
+            state={"scout_nothing_to_plan": False},
+            request_id="call-1",
+        )
+    )
+    assert result.state == {"scout_nothing_to_plan": True}
+    next_step = await run.before_model(RunCall(state=result.state))
+    assert next_step.jump_to == "end"
+    assert next_step.call is None
+    assert workspace.plan.other_summary == ""
+    session.commit.assert_not_awaited()

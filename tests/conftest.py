@@ -395,18 +395,22 @@ def github_app(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return token
 
 
-@pytest.fixture
-def slack_api(monkeypatch: pytest.MonkeyPatch):
-    from openswe.slack import channels, client, code_channels, http
+@pytest.fixture(autouse=True)
+def _slack_api(monkeypatch: pytest.MonkeyPatch):
+    from openswe.slack import http
     from tests.support.slack_api import slack_api_server
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
-        monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
-        monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
-        monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        api.handler = lambda *_: (200, {"ok": False, "error": "missing_scope"}, {})
         yield api
+
+
+@pytest.fixture
+def slack_api(_slack_api):
+    _slack_api.handler = None
+    return _slack_api
 
 
 class MemoryEventClaims:

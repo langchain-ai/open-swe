@@ -1,6 +1,7 @@
 """Compose the canary controller from trusted configuration and a backend dispatch gateway."""
 
 import hashlib
+import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
@@ -17,6 +18,8 @@ from openswe.merge_queue.native import NativeQueueRuntime
 from openswe.merge_queue.store import MergeQueue
 from openswe.merge_queue.validation_contract import WORKFLOW
 
+logger = logging.getLogger(__name__)
+
 
 class QueueController:
     def __init__(self, config: QueueConfiguration):
@@ -25,7 +28,7 @@ class QueueController:
             DispatchGateway(
                 str(config.dispatch_url), SecretStr(ENV.MERGE_QUEUE_DISPATCH_SECRET.require())
             )
-            if config.mode == "custom"
+            if config.mode == "custom" or config.check_app_id is not None
             else None
         )
 
@@ -53,11 +56,13 @@ class QueueController:
                 "statuses": "read",
             }
         )
+        if self.config.mode == "native" and self.dispatcher is not None:
+            permissions.update({"actions": "read", "checks": "read"})
         async with GitHubClient.as_app(owner, name, permissions=permissions) as github:
             repo = github.repo(*self.config.repository.split("/", 1))
             if (await repo.info()).get("id") != self.config.repository_id:
                 raise ValueError("Queue GitHub repository identity changed")
-            if self.config.mode == "custom":
+            if self.config.mode == "custom" and self.dispatcher is not None:
                 revision = await repo.branch_sha("main")
                 workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", revision)
                 if (
@@ -67,6 +72,35 @@ class QueueController:
                     raise ValueError("Queue workflow changed")
             yield repo
 
+    async def reconcile(self, payload: runtime.QueueJob) -> None:
+        if payload.queue_id != self.queue.id or payload.workspace_id != self.config.workspace_id:
+            return
+        try:
+            config = await QueueConfiguration.load(payload.workspace_id)
+        except ValueError:
+            logger.exception(
+                "Merge queue configuration is invalid", extra={"queue_id": str(self.queue.id)}
+            )
+            config = None
+        if config is not None and (
+            config.repository.lower() != self.config.repository.lower()
+            or config.repository_id != self.config.repository_id
+            or config.mode != self.config.mode
+        ):
+            logger.error(
+                "Merge queue identity changed; explicit handoff required",
+                extra={"queue_id": str(self.queue.id)},
+            )
+            config = None
+        current = QueueController(config) if config is not None else self
+        await NativeQueueRuntime(
+            self.queue.id,
+            self.config.repository_id,
+            current.open_repo,
+            config=config,
+            dispatcher=current.dispatcher if config is not None else None,
+        ).reconcile(payload)
+
     async def start(self) -> None:
         repository = await Repository.get(self.config.repository)
         if repository is None:
@@ -75,7 +109,7 @@ class QueueController:
         self.queue = queue
         if self.config.mode == "native":
             await queue.enable_native_observation()
-            controller = NativeQueueRuntime(queue.id, self.config.repository_id, self.open_repo)
+            controller = self
         else:
             if queue.mode != "custom":
                 raise ValueError("Cannot restart a custom controller for a native queue")
@@ -105,14 +139,17 @@ async def wake_native_queue(payload: Mapping[str, object]) -> bool:
     controller = CONTROLLER
     if controller is None or controller.config.mode != "native":
         return False
+    config = await QueueConfiguration.load(controller.config.workspace_id)
+    if config is None or config.mode != "native":
+        return False
     repository = payload.get("repository")
     if not isinstance(repository, dict):
         return False
     full_name = repository.get("full_name")
     if (
-        repository.get("id") != controller.config.repository_id
+        repository.get("id") != config.repository_id
         or not isinstance(full_name, str)
-        or full_name.lower() != controller.config.repository.lower()
+        or full_name.lower() != config.repository.lower()
     ):
         return False
     queue = controller.queue

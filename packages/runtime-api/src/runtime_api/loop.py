@@ -4,7 +4,8 @@ The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: the route a
 task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
-token, a reply posted on the model's behalf, and what the end of the run records.
+token, the turn's git baseline, a reply posted on the model's behalf, and what the
+end of the run records.
 The transcript and usage hear of each reply and tool call.
 
 Preparation, and every phase of a run still answered from its plan, are phase
@@ -18,6 +19,7 @@ until a run receives it.
 """
 
 from datetime import datetime
+from typing import Final
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
@@ -25,6 +27,10 @@ from pydantic import BaseModel, JsonValue
 from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
+
+# Held state a call carries once summarization replaced the conversation's start: the
+# index of the first message the model still sees.
+VISIBLE_FROM: Final = "visible_from"
 
 
 class RunCall(RunRequest):
@@ -39,6 +45,8 @@ class RunCall(RunRequest):
 class Prepare(RunCall):
     # The thread's box, which the runtime opened before preparing; None when it could not.
     sandbox_id: str | None = None
+    # Why the runtime could not open it, secrets removed.
+    sandbox_error: str | None = None
 
 
 class PhaseResult(BaseModel):
@@ -51,10 +59,26 @@ class PhaseResult(BaseModel):
     events: list[JsonValue] = []
 
 
+class GitHubProxyRefreshed(BaseModel):
+    """The box's GitHub proxy was given a fresh token."""
+
+    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    expires_at: datetime | None = None
+
+
+class Prepared(PhaseResult):
+    # The token preparation put on the box, which the first model call then keeps; None
+    # when it put none there.
+    github_proxy: GitHubProxyRefreshed | None = None
+
+
 class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
     system_prompt: str
+    # What only this thread's prompt says, sent after ``system_prompt`` and the run's
+    # skills so that every thread shares the cached prefix before it.
+    thread_prompt: str = ""
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None = None
@@ -116,6 +140,12 @@ class ToolResultReply(BaseModel):
     update: dict[str, JsonValue] = {}
 
 
+class GitBaseline(BaseModel):
+    # The thread's checkouts as the turn starts, as run state: the turn's git trace
+    # measures what its tools change against it.
+    update: dict[str, JsonValue] = {}
+
+
 class RunEnded(Report):
     # The run's replies without their content: their ids, usage and model, for usage.
     replies: list[dict[str, JsonValue]] = []
@@ -153,6 +183,9 @@ class InboxItems(BaseModel):
 class InboxRead(RunRequest):
     # The catalog's ``inbox``; None reads nothing.
     spec: InboxSpec | None = None
+    # What earlier model calls received whose receipt the backend may not have yet:
+    # received before reading, so none of it comes again.
+    received: InboxItems = InboxItems()
 
 
 class Inbox(BaseModel):
@@ -174,16 +207,12 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
-class GitHubProxyRefreshed(BaseModel):
-    """The box's GitHub proxy was given a fresh token."""
-
-    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
-    expires_at: datetime | None = None
-
-
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
+    # False when the classifier could not decide; the run uses the route for this
+    # call only, so a later turn classifies again instead of keeping a fallback.
+    persist: bool = True
 
 
 class ChosenModel(RunRequest):
@@ -196,8 +225,9 @@ class ChosenModel(RunRequest):
 class TaskContext(BaseModel):
     """The task the thread belongs to, as each model call tells the model."""
 
-    # Added to each call's system prompt: the thread's role in the task.
-    instructions: str = ""
+    # The thread's role in the task, added to the conversation when it differs from the
+    # role the model last saw there.
+    instructions: str | None = None
     # The task's context, added to the conversation where the model no longer sees it.
     message: str | None = None
 
@@ -208,8 +238,9 @@ class ReplyOnBehalf(RunCall):
     text: str
 
 
-# Preparation the runtime makes again on a restarted run anyway.
-PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
+# Preparation the runtime makes again on a restarted run anyway. It waits up to ten
+# minutes on the review scout's walkthrough.
+PREPARE = Endpoint("prepare", Prepare, Prepared, seconds=900.0, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
@@ -221,10 +252,17 @@ INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
+AFTER_MODEL = Endpoint(
+    "after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
+# Taken while the run's first model call runs, and waited for before any tool runs.
+# Only reads the box, so it is safe to send again.
+GIT_BASELINE = Endpoint(
+    "git_baseline", RunRequest, GitBaseline, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
 # The runtime replaced the thread's box: the backend connects to the fresh one.
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the box gone: the backend tells the person.

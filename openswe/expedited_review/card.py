@@ -168,7 +168,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
         initial=options[0],
     )
     send = button(
-        "Send",
+        "Broadcast",
         action_id="open_swe_option_select_send",
         value=_button_value("send", approval),
     )

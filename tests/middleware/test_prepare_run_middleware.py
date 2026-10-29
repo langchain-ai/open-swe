@@ -1,6 +1,8 @@
 import asyncio
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from xml.etree import ElementTree
 
 import pytest
@@ -11,7 +13,8 @@ from langgraph.runtime import Runtime
 from openswe.input_messages import human_input, person_introduction
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from openswe.run_config import RunConfig
-from openswe.server import PrepareAgentRunMiddleware
+from openswe.server import PrepareAgentRunMiddleware, _thread_participants
+from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -61,6 +64,59 @@ def _participant_block(participant: ThreadParticipant) -> HumanMessage:
     return HumanMessage(content=cast(str, content))
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sender_login", ["alice", "Alice"])
+async def test_sender_is_matched_by_login_and_others_get_their_slack_timezone(
+    sender_login: str,
+) -> None:
+    alice, bob = _participant("alice"), _participant("bob")
+    sender = replace(
+        alice.identity,
+        github_login=sender_login,
+        commit_email=f"123+{sender_login}@users.noreply.github.com",
+    )
+    bob_user = SimpleNamespace(
+        id="bob", github_login="bob", display_name="bob", email="", slack_user_id="U-bob"
+    )
+    with patch.multiple(
+        "openswe.server",
+        _thread_participant_identities=AsyncMock(return_value=[alice.identity, bob.identity]),
+        _participant_user=AsyncMock(
+            side_effect=lambda login, _: bob_user if login == "bob" else None
+        ),
+        get_slack_user_timezone=AsyncMock(return_value="Europe/Paris"),
+        load_profile=AsyncMock(return_value={}),
+        participant_is_admin=AsyncMock(return_value=False),
+        _resolve_user_custom_instructions=AsyncMock(return_value=None),
+    ):
+        participants = await _thread_participants(
+            "thread-id",
+            {},
+            sender,
+            sender_person_id=alice.person_id,
+            sender_timezone="America/New_York",
+        )
+
+    assert [(p.identity.github_login, p.timezone) for p in participants] == [
+        (sender_login, "America/New_York"),
+        ("bob", "Europe/Paris"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_slack_timezone_skips_failed_lookups_and_keeps_a_reported_one():
+    ttl_cache.clear()
+    with patch(
+        "openswe.slack.client.get_slack_user_info",
+        AsyncMock(side_effect=[None, {"tz": "Europe/Paris"}]),
+    ):
+        assert await get_slack_user_timezone("U1") == ""
+        assert await get_slack_user_timezone("U1") == "Europe/Paris"
+
+    remember_slack_user_timezone("U1", "America/New_York")
+    assert await get_slack_user_timezone("U1") == "America/New_York"
+
+
 def test_only_the_changed_participant_is_resent():
     alice, bob = _participant("alice"), _participant("bob")
     state = cast(
@@ -76,14 +132,16 @@ def test_only_the_changed_participant_is_resent():
     assert "standing_instructions: Never use ripgrep." in (block.text or "")
 
 
-def test_participant_blocks_are_restored_after_compaction():
+@pytest.mark.parametrize(
+    "cut",
+    # In process, and as the runtime forwards it.
+    [{"_summarization_event": {"cutoff_index": 1}}, {"visible_from": 1}],
+)
+def test_participant_blocks_are_restored_after_compaction(cut: dict[str, object]):
     alice = _participant("alice")
     state = cast(
         PrepareRunState,
-        {
-            "messages": [_participant_block(alice), _sender_message("user:alice")],
-            "_summarization_event": {"cutoff_index": 1},
-        },
+        {"messages": [_participant_block(alice), _sender_message("user:alice")], **cut},
     )
 
     assert len(PrepareAgentRunMiddleware._participants_messages(state, [alice])) == 1

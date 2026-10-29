@@ -14,6 +14,8 @@ from openswe.linear.notifications import post_linear_notification
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     LANGGRAPH_URL,
+    SANDBOX_UNREACHABLE_NOTICE,
+    SlackNotice,
     get_active_slack_thread,
     post_slack_thread_reply,
 )
@@ -26,14 +28,16 @@ def sandbox_unreachable_message(
     *,
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
-    replacement_attempted: bool = False,
+    handed_to_mda: bool = False,
+    reason: str | None = None,
 ) -> str:
     """User-facing text for a sandbox that stopped answering.
 
     Deliberately does not claim the sandbox is gone for good — all we observed is
-    that it stopped responding, and it may come back. ``replacement_attempted``
-    is for callers allowed to replace an unreachable sandbox (the read-only
-    reviewer), where "Open SWE will not start a replacement" would be untrue.
+    that it stopped responding, and it may come back. ``handed_to_mda`` is for a
+    box Open SWE set aside (deleted, or a reviewer's that stopped answering), where
+    the thread's next run starts in a fresh one and "will not start a replacement"
+    would be untrue.
     """
     identifiers = [
         part
@@ -44,11 +48,16 @@ def sandbox_unreachable_message(
         if part
     ]
     which = f" ({', '.join(identifiers)})" if identifiers else ""
-    if replacement_attempted:
+    if reason:
         return warning(
-            f"This thread's sandbox{which} stopped responding and Open SWE could "
-            "not provision a replacement, so this run had nowhere to work. "
+            f"Open SWE could not open this thread's sandbox{which}: `{reason.replace('`', "'")}`. "
             "Retrigger this thread to try again."
+        )
+    if handed_to_mda:
+        return warning(
+            f"This thread's sandbox{which} is gone or stopped responding, so this run "
+            "had nowhere to work. Its next run starts in a fresh sandbox, without "
+            "anything that was not pushed. Retrigger this thread to continue."
         )
     return warning(
         f"This thread's sandbox{which} stopped responding, and Open SWE can't tell "
@@ -110,25 +119,28 @@ async def post_sandbox_unreachable_notification(
     *,
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
-    replacement_attempted: bool = False,
+    handed_to_mda: bool = False,
+    reason: str | None = None,
 ) -> None:
     cfg = RunConfig.from_config(config)
 
     message = sandbox_unreachable_message(
         sandbox_id=sandbox_id,
         sandbox_name=sandbox_name,
-        replacement_attempted=replacement_attempted,
+        handed_to_mda=handed_to_mda,
+        reason=reason,
     )
 
     slack_target = await get_slack_target(cfg)
     if slack_target is not None:
         channel_id, thread_ts = slack_target
+        notice = SlackNotice(SANDBOX_UNREACHABLE_NOTICE, message)
         if cfg.thread_id:
             await post_slack_thread_reply(
-                channel_id, thread_ts, message, agent_thread_id=cfg.thread_id
+                channel_id, thread_ts, message, agent_thread_id=cfg.thread_id, notice=notice
             )
         else:
-            await post_slack_thread_reply(channel_id, thread_ts, message)
+            await post_slack_thread_reply(channel_id, thread_ts, message, notice=notice)
         logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
         return
 
