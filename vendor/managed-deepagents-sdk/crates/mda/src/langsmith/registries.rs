@@ -26,7 +26,7 @@ pub struct RegistrySummary {
 impl Client {
     /// Look up a registry by name, returning `None` when it is already gone.
     pub fn find_registry_by_name(&self, name: &str) -> Result<Option<RegistrySummary>> {
-        let base = self.platform_base()?;
+        let base = self.platform_base();
         let path = format!("/api/v2/sandboxes/registries/{}", urlencoding_path(name));
         self.request_optional(base, Method::GET, &path, &[], None)?
             .map(|value| {
@@ -43,7 +43,7 @@ impl Client {
         username: &str,
         password: &str,
     ) -> Result<RegistrySummary> {
-        let base = self.platform_base()?;
+        let base = self.platform_base();
         let root = "/api/v2/sandboxes/registries";
         let existing_path = format!("{root}/{}", urlencoding_path(name));
         let existing = self.find_registry_by_name(name)?;
@@ -71,7 +71,7 @@ impl Client {
 
     /// Delete a deployment-owned registry. Missing registries are a success.
     pub fn delete_registry(&self, name: &str) -> Result<()> {
-        let base = self.platform_base()?;
+        let base = self.platform_base();
         let path = format!("/api/v2/sandboxes/registries/{}", urlencoding_path(name));
         self.request_optional(base, Method::DELETE, &path, &[], None)?;
         Ok(())
@@ -98,7 +98,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::langsmith::{Credential, REQUEST_TIMEOUT};
 
     fn serve(responses: Vec<(u16, String)>) -> (String, Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -136,19 +135,6 @@ mod tests {
         String::from_utf8_lossy(&data).to_string()
     }
 
-    fn client_for(platform: String) -> Client {
-        Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(platform),
-        }
-    }
-
     #[test]
     fn reconcile_registry_creates_when_missing() {
         let body = json!({
@@ -164,7 +150,7 @@ mod tests {
         // Build at runtime so static analysis does not treat the fixture as a
         // hard-coded credential (CodeQL rust/hard-coded-cryptographic-value).
         let password = format!("{}-{}", "fixture", "credential");
-        let registry = client_for(url)
+        let registry = Client::for_test(&url)
             .reconcile_registry("agent--registry", "ghcr.io", "octocat", &password)
             .unwrap();
         assert_eq!(registry.id, "reg-1");

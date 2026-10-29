@@ -17,6 +17,8 @@ how its catalog says to read the inbox; the backend keeps what each thread is ow
 until a run receives it.
 """
 
+from datetime import datetime
+from typing import Final
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
@@ -24,6 +26,10 @@ from pydantic import BaseModel, JsonValue
 from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
+
+# Held state a call carries once summarization replaced the conversation's start: the
+# index of the first message the model still sees.
+VISIBLE_FROM: Final = "visible_from"
 
 
 class RunCall(RunRequest):
@@ -38,6 +44,8 @@ class RunCall(RunRequest):
 class Prepare(RunCall):
     # The thread's box, which the runtime opened before preparing; None when it could not.
     sandbox_id: str | None = None
+    # Why the runtime could not open it, secrets removed.
+    sandbox_error: str | None = None
 
 
 class PhaseResult(BaseModel):
@@ -173,9 +181,19 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
+class GitHubProxyRefreshed(BaseModel):
+    """The box's GitHub proxy was given a fresh token."""
+
+    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    expires_at: datetime | None = None
+
+
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
+    # False when the classifier could not decide; the run uses the route for this
+    # call only, so a later turn classifies again instead of keeping a fallback.
+    persist: bool = True
 
 
 class ChosenModel(RunRequest):
@@ -188,8 +206,9 @@ class ChosenModel(RunRequest):
 class TaskContext(BaseModel):
     """The task the thread belongs to, as each model call tells the model."""
 
-    # Added to each call's system prompt: the thread's role in the task.
-    instructions: str = ""
+    # The thread's role in the task, added to the conversation when it differs from the
+    # role the model last saw there.
+    instructions: str | None = None
     # The task's context, added to the conversation where the model no longer sees it.
     message: str | None = None
 
@@ -200,8 +219,9 @@ class ReplyOnBehalf(RunCall):
     text: str
 
 
-# Preparation the runtime makes again on a restarted run anyway.
-PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
+# Preparation the runtime makes again on a restarted run anyway. It waits up to ten
+# minutes on the review scout's walkthrough.
+PREPARE = Endpoint("prepare", Prepare, PhaseResult, seconds=900.0, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
@@ -213,7 +233,9 @@ INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
+AFTER_MODEL = Endpoint(
+    "after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
@@ -233,9 +255,13 @@ MODEL_CHOICE = Endpoint(
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# Refreshes only a token near its expiry, so it is safe to send again.
+# Mints a token and sets it on the box, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(
-    "refresh_github_proxy", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+    "refresh_github_proxy",
+    RunRequest,
+    GitHubProxyRefreshed,
+    seconds=LOOP_CALL_SECONDS,
+    delivery="idempotent",
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn, usage is finalized and the turn's git

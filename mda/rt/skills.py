@@ -8,7 +8,8 @@ person a previous run acted for.
 """
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from functools import cache
 from typing import Any, Final, cast
 
 from deepagents.backends.protocol import (
@@ -26,12 +27,20 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.state import StateBackend
 from deepagents.backends.utils import create_file_data
-from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
+from deepagents.middleware.skills import (
+    SkillsMiddleware,
+    SkillsState,
+    SkillsStateUpdate,
+)
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.endpoint import Transport, call
+from runtime_api.endpoint import call
 from runtime_api.operations import RunRequest
 from runtime_api.skills import SKILLS
+
+from rt.backend import OpenSweBackend, RunLocal
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 _SYNC: Final = "The run's skills are read asynchronously"
 _READ_ONLY: Final = "Skills are read-only here"
@@ -48,27 +57,35 @@ class _Listed(StateBackend):
         return dict(self._listed)
 
 
+class _Listing:
+    """One run's skills, listed once."""
+
+    def __init__(self) -> None:
+        self.files: _Listed | None = None
+        self.lock = asyncio.Lock()
+
+
 class SkillFiles(BackendProtocol):
     """The run's skills as files: a folder per skill under each source, with its ``SKILL.md``.
 
-    The backend lists them on the run's first read of any; every read after that is
-    answered here.
+    The backend lists them on each run's first read of any; every read after that in
+    the run is answered here.
     """
 
-    def __init__(self, transport: Transport, run_id: Callable[[], str | None]) -> None:
-        self._transport = transport
+    def __init__(self, backend: OpenSweBackend, run_id: Callable[[], str | None]) -> None:
+        self._backend = backend
         self._run_id = run_id
-        self._files: _Listed | None = None
-        self._listing = asyncio.Lock()
+        self._listings = RunLocal(_Listing)
 
     async def _listed(self) -> _Listed:
-        async with self._listing:
-            if self._files is None:
-                listed = await call(self._transport, SKILLS, RunRequest(run_id=self._run_id()))
-                self._files = _Listed(
+        listing = self._listings.get(self._backend.run)
+        async with listing.lock:
+            if listing.files is None:
+                listed = await call(self._backend, SKILLS, RunRequest(run_id=self._run_id()))
+                listing.files = _Listed(
                     {skill.path: create_file_data(skill.content) for skill in listed.files}
                 )
-        return self._files
+        return listing.files
 
     async def als(self, path: str) -> LsResult:
         return (await self._listed()).ls(path)
@@ -117,12 +134,55 @@ class SkillFiles(BackendProtocol):
         raise NotImplementedError(_SYNC)
 
 
+@cache
+def _labels(sources: tuple[str, ...]) -> tuple[str, ...]:
+    """How deepagents labels ``sources`` in the prompt."""
+    return tuple(SkillsMiddleware(backend=StateBackend(), sources=list(sources)).source_labels)
+
+
 class RunSkillsMiddleware(SkillsMiddleware):
-    """deepagents' skills middleware, listing the run's skills afresh every run."""
+    """deepagents' skills middleware over the run's own skill sources, listed afresh every run.
+
+    The graph serves every run, so the sources are read from the run in progress; a run
+    whose catalog names none sees no skills, as if the middleware were absent.
+    """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
+
+    def __init__(self, backend: OpenSweBackend, files: SkillFiles) -> None:
+        self._run_backend = backend
+        super().__init__(backend=files, sources=[])
+
+    @property
+    def sources(self) -> list[str]:
+        return list(self._run_backend.run.catalog.skill_sources)
+
+    @sources.setter
+    def sources(self, _sources: list[str]) -> None:
+        """deepagents sets its sources once; these are each run's."""
+
+    @property
+    def source_labels(self) -> list[str]:
+        return list(_labels(tuple(self.sources)))
+
+    @source_labels.setter
+    def source_labels(self, _labels: list[str]) -> None:
+        """deepagents sets its labels once; these are each run's."""
 
     async def abefore_agent(
         self, state: SkillsState, runtime: Runtime, config: RunnableConfig
     ) -> SkillsStateUpdate | None:
+        if not self.sources:
+            return None
         return await super().abefore_agent(
             cast(SkillsState, {**state, "skills_metadata": None}), runtime, config
         )
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse | ExtendedModelResponse:
+        if not self.sources:
+            return await handler(request)
+        return await super().awrap_model_call(request, handler)

@@ -3,20 +3,16 @@
 import logging
 from typing import Literal
 
-from sqlalchemy import MetaData, Table, and_, delete, insert, text, update
+from sqlalchemy import MetaData, Table, and_, delete, insert, update
 
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.tools.access import Policy, access
 from openswe.tools.admin_gate import configurable
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.tools.read_only_sql import MAX_QUERY_CHARS, MAX_ROWS, rows_response
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
-
-_SQL_STATEMENT_TIMEOUT_MS = 60_000
-_SQL_LOCK_TIMEOUT_MS = 10_000
 
 
 def repair_tools_enabled() -> bool:
@@ -32,6 +28,33 @@ def _require_confirmation(confirm: bool) -> None:
 
 @expose_mcp(access="admin")
 @access(Policy(trusted="admin_surface", actor="admin"))
+async def execute_database_sql(query: str, confirm: bool = False) -> dict[str, object]:
+    """Execute an admin-confirmed SQL statement, including DDL and migration repairs."""
+    _require_confirmation(confirm)
+    if not query.strip():
+        raise ValueError("Query cannot be empty.")
+    if len(query) > 200_000:
+        raise ValueError("Query exceeds the 200,000-character limit.")
+    logger.warning(
+        "Admin SQL repair requested",
+        extra={"github_login": configurable().github_login},
+    )
+    async with postgres.engine().connect() as conn:
+        try:
+            async with conn.begin():
+                await conn.exec_driver_sql(f"SET LOCAL search_path TO {postgres.SCHEMA}, public")
+                await conn.exec_driver_sql("SET LOCAL statement_timeout = 60000")
+                await conn.exec_driver_sql("SET LOCAL lock_timeout = 3000")
+                result = await conn.exec_driver_sql(query)
+                row_count = result.rowcount
+                result.close()
+        finally:
+            await conn.invalidate()
+    return {"ok": True, "row_count": row_count}
+
+
+@expose_mcp(access="admin")
+@access(Policy(trusted="admin_surface", actor="admin"))
 async def write_database_rows(
     table: str,
     operation: Literal["insert", "update", "delete"],
@@ -39,7 +62,7 @@ async def write_database_rows(
     where: JsonObject | None = None,
     confirm: bool = False,
 ) -> dict[str, object]:
-    """Repair rows in an Open SWE table; update/delete require exact-match filters."""
+    """Repair Open SWE rows, including alembic_version; update/delete need exact-match filters."""
     _require_confirmation(confirm)
     if operation not in {"insert", "update", "delete"}:
         raise ValueError("Operation must be insert, update, or delete.")
@@ -65,8 +88,6 @@ async def write_database_rows(
         target = await conn.run_sync(
             lambda sync: Table(table, MetaData(), schema=postgres.SCHEMA, autoload_with=sync)
         )
-        if table == "alembic_version":
-            raise ValueError("Migration metadata cannot be repaired with this tool.")
         unknown = (set(values or {}) | set(where or {})) - set(target.c.keys())
         if unknown:
             raise ValueError("Unknown column names.")
@@ -85,33 +106,3 @@ async def write_database_rows(
                 "Repair exceeds 100 rows; transaction rolled back. Narrow the filters."
             )
     return {"ok": True, "row_count": result.rowcount}
-
-
-@expose_mcp(access="admin")
-@access(Policy(trusted="admin_surface", actor="admin"))
-async def run_sql(query: str, confirm: bool = False) -> dict[str, object]:
-    """Run one SQL statement, writes included, against a preview or staging database."""
-    _require_confirmation(confirm)
-    query = query.strip()
-    if not query:
-        return {"ok": False, "error": "Query cannot be empty."}
-    if len(query) > MAX_QUERY_CHARS:
-        return {"ok": False, "error": f"Query exceeds the {MAX_QUERY_CHARS:,}-character limit."}
-    logger.warning(
-        "Admin SQL statement requested",
-        extra={"github_login": configurable().github_login, "query_chars": len(query)},
-    )
-    try:
-        async with postgres.transaction() as conn:
-            await conn.exec_driver_sql(f"SET LOCAL statement_timeout = {_SQL_STATEMENT_TIMEOUT_MS}")
-            await conn.exec_driver_sql(f"SET LOCAL lock_timeout = {_SQL_LOCK_TIMEOUT_MS}")
-            result = await conn.execute(text(query))
-            if not result.returns_rows:
-                return {"ok": True, "row_count": result.rowcount}
-            columns = [str(column) for column in result.keys()]
-            fetched = result.fetchmany(MAX_ROWS + 1)
-    except Exception as exc:
-        logger.warning("Admin SQL statement failed", extra={"error_type": type(exc).__name__})
-        # The admin wrote the statement, so the database's own message is what they need.
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    return rows_response(columns, fetched)

@@ -703,6 +703,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     };
 
     await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
     const stopButton = page.getByRole("button", { name: "Stop run" });
     await expect(stopButton).toBeVisible();
 
@@ -745,6 +746,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     };
 
     await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
     const stopButton = page.getByRole("button", { name: "Stop run" });
     await expect(stopButton).toBeVisible();
 

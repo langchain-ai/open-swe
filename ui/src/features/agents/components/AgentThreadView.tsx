@@ -33,7 +33,6 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { BackgroundWorkSidebar } from "@/features/agents/components/BackgroundWorkSidebar"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -284,6 +283,7 @@ export function AgentThreadView({
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
   const login = session.data?.login
+  const displayName = session.data?.display_name || undefined
   // Only its sender may act on a queued follow-up; the server enforces it too.
   const isOwnQueued = useCallback(
     (entry: QueuedTurn) => login !== undefined && entry.senderLogin === login,
@@ -601,9 +601,9 @@ export function AgentThreadView({
       visiblePendingMessages(
         thread.pendingMessages?.filter((message) => !message.queued),
         [...baseMessages, ...queued.map((entry) => entry.message)],
-        pendingSenderName(baseMessages, login)
+        pendingSenderName(baseMessages, login, displayName)
       ),
-    [baseMessages, login, queued, thread.pendingMessages]
+    [baseMessages, displayName, login, queued, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -646,6 +646,7 @@ export function AgentThreadView({
         id: entry.message.id,
         content: queuedText(entry),
         images: queuedImages(entry),
+        replies: entry.message.replies,
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
         mine: isOwnQueued(entry),
@@ -656,6 +657,7 @@ export function AgentThreadView({
           id: message.id,
           content: message.content,
           images: message.images,
+          replies: message.replies,
           createdAt: message.createdAt,
           pending: true,
         })),
@@ -1033,7 +1035,6 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      {!reviewChat && <BackgroundWorkSidebar threadId={thread.id} />}
       {/* The review page is already the diff; a second panel only squeezes the chat. */}
       {!reviewChat && (
         <AgentGitPanel

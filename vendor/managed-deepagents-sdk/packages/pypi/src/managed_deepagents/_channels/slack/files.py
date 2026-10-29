@@ -12,8 +12,7 @@ import httpx
 from langchain_core.messages import HumanMessage
 
 from managed_deepagents._channels.binding import resolve_channel_binding
-from managed_deepagents._channels.slack.api import SlackApiError, slack_api
-from managed_deepagents._connections import connections
+from managed_deepagents._channels.slack.api import SlackApiError, slack_api, slack_bot_token
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import BackendProtocol
@@ -139,7 +138,8 @@ async def stage_files(runtime: ManagedDeepAgentRuntime) -> HumanMessage | None:
     status: list[str] = []
     token = None
     destination = get_slack_destination(runtime)
-    if binding["event"]["type"] == "message" and destination and backend is not None:
+    event = binding.get("event")
+    if event is not None and event["type"] == "message" and destination and backend is not None:
         try:
             token = await get_slack_bot_token()
             cursor = ""
@@ -244,7 +244,7 @@ def get_slack_destination(runtime: ManagedDeepAgentRuntime) -> ChannelAddress | 
 
 async def get_slack_bot_token() -> str:
     try:
-        return await connections.get("mda/slack-bot-token", {"type": "agent"})
+        return await slack_bot_token()
     except Exception:  # noqa: BLE001 - credential errors can contain secrets
         raise SlackConnectionError(
             "The managed Slack connection is unavailable. Reconnect Slack."

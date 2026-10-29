@@ -23,7 +23,11 @@ from managed_deepagents._channels.http.types import (
     HttpChannelParseResult,
     HttpChannelRequest,
 )
-from managed_deepagents._channels.run_input import NormalizedRunInput, normalize_run_input
+from managed_deepagents._channels.run_input import (
+    InvalidRunInput,
+    NormalizedRunInput,
+    normalize_run_input,
+)
 from managed_deepagents._channels.runtime import is_json_value, json_copy
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._log import logger
@@ -634,7 +638,15 @@ async def _prepare(
                 _copied_message(message), None if raw_event is None else json_copy(raw_event)
             )
         )
+    except Exception as error:  # noqa: BLE001
+        _LOG.error("channel input failed (%s)", type(error).__name__)
+        return None
+    try:
         prepared = normalize_run_input(result)
+    except InvalidRunInput as error:
+        # MDA's own reason, bounded, unlike a raised exception's message.
+        _LOG.error("channel input refused, no run started: %s", error.reason)
+        return None
     except Exception as error:  # noqa: BLE001
         logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return None

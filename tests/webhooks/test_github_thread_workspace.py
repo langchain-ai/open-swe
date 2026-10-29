@@ -8,15 +8,28 @@ from openswe.webhooks import common as webhook_common
 
 
 @pytest.mark.parametrize(
-    ("saved", "expected"),
-    [("oss", "oss"), (None, "moved-to")],
-    ids=["saved workspace wins", "new thread follows the repository"],
+    ("saved", "expected", "slack_thread"),
+    [
+        ("oss", "oss", {"channel_id": "C123", "thread_ts": "1700000000.000100"}),
+        ("oss", "oss", None),
+        (None, "moved-to", None),
+    ],
+    ids=["saved Slack thread", "saved web thread", "new thread follows the repository"],
 )
 async def test_trigger_or_queue_run_prefers_the_threads_saved_workspace(
-    monkeypatch: pytest.MonkeyPatch, saved: str | None, expected: str
+    monkeypatch: pytest.MonkeyPatch,
+    saved: str | None,
+    expected: str,
+    slack_thread: dict[str, str] | None,
 ) -> None:
     record = webhook_common.ThreadRecord(
-        exists=saved is not None, metadata={"workspace": saved} if saved else {}
+        exists=saved is not None,
+        metadata={
+            "workspace": saved,
+            "source_context": {"slack_thread": slack_thread} if slack_thread else {},
+        }
+        if saved
+        else {},
     )
     monkeypatch.setattr(webhook_common.ThreadRecord, "read", AsyncMock(return_value=record))
     monkeypatch.setattr(
@@ -40,3 +53,8 @@ async def test_trigger_or_queue_run_prefers_the_threads_saved_workspace(
     configurable = dispatch.await_args.args[2]
     assert configurable["workspace"] == expected
     assert configurable["environment"] == expected
+    assert configurable["source"] == "github"
+    if slack_thread:
+        assert configurable["slack_thread"] == slack_thread
+    else:
+        assert "slack_thread" not in configurable

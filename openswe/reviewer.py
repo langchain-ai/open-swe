@@ -19,6 +19,7 @@ import asyncio
 import logging
 import posixpath
 import re
+import uuid
 import warnings
 from functools import partial
 from typing import Any, NamedTuple, NotRequired, cast
@@ -38,6 +39,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMidd
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 
 from openswe.dashboard.options import gate_fable_model
@@ -82,7 +84,7 @@ from openswe.runtime import (
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.state import SandboxHandedOverError, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools import (
@@ -136,13 +138,10 @@ def _repo_checkout_note(
 
 
 def _reviewer_system_prompt(
-    working_dir: str,
     *,
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
-    repo_ready: bool = True,
-    head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     approval_policy: str | None = None,
@@ -153,20 +152,11 @@ def _reviewer_system_prompt(
 ) -> str:
     return prompt(
         "reviewer/main",
-        working_dir=working_dir,
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         reviewer_eval=reviewer_eval,
         approval_policy=approval_policy or "",
-        repo_checkout_note=_repo_checkout_note(
-            repo_ready=repo_ready,
-            working_dir=working_dir,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            pr_number=pr_number,
-            head_sha=head_sha,
-        ),
         org_guidelines=org_guidelines or "",
         repo_style_prompt=repo_style_prompt or "",
         agents_md_content=agents_md_content or "",
@@ -531,9 +521,9 @@ async def ensure_reviewer_sandbox_for_thread(
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
-        # thread per PR, re-triggered on every push. Refusing to replace an
+        # thread per PR, re-triggered on every push. Staying bound to an
         # unreachable one would brick reviews on that PR for good.
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 
@@ -626,10 +616,12 @@ async def prepare_reviewer_run(
             try:
                 sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
             except SandboxUnreachableError as exc:
-                # Replacement was allowed and still failed, so this run dies without a
-                # sandbox. Say so on the PR instead of leaving it looking unreviewed.
+                # This run dies without a sandbox. Say so on the PR instead of leaving
+                # it looking unreviewed.
                 await post_sandbox_unreachable_notification(
-                    config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+                    config or {},
+                    sandbox_id=exc.sandbox_id,
+                    handed_to_mda=isinstance(exc, SandboxHandedOverError),
                 )
                 raise
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
@@ -858,6 +850,7 @@ async def prepare_reviewer_run(
         # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
 
@@ -907,12 +900,9 @@ async def prepare_reviewer_run(
             )
 
     system_prompt = _reviewer_system_prompt(
-        f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
-        repo_ready=repo_ready,
-        head_sha=head_sha,
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         approval_policy=approval_policy,
@@ -921,20 +911,33 @@ async def prepare_reviewer_run(
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
     )
-    if review_context:
-        system_prompt = f"{system_prompt}\n\n{review_context}"
-    walkthrough_block = _format_walkthrough(walkthrough)
-    if walkthrough_block:
-        system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
-    human_input_block = _format_human_input(walkthrough)
-    if human_input_block:
-        system_prompt = f"{system_prompt}\n\n{human_input_block}"
+    run_context = prompt(
+        "reviewer/run-context",
+        blocks=[
+            block
+            for block in (
+                _repo_checkout_note(
+                    repo_ready=repo_ready,
+                    working_dir=f"{work_dir}/{repo_name}" if repo_name else work_dir,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_number=pr_number if isinstance(pr_number, int) else "",
+                    head_sha=head_sha,
+                ),
+                review_context,
+                _format_walkthrough(walkthrough),
+                _format_human_input(walkthrough),
+            )
+            if block
+        ],
+    )
     if checkout.skills_prompt:
         system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
         "rendered_system_prompt": system_prompt,
+        "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,

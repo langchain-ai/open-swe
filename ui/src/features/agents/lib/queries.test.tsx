@@ -27,6 +27,7 @@ import {
   useThreadsPage,
   useUpdateAgentSchedule,
   useWorkflowApprovalDecision,
+  useWorkflowApprovals,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
 import type {
@@ -606,11 +607,16 @@ describe("sidebar queries", () => {
   })
 
   it("refreshes an active coordinator's workers from sidebar pages without opening them", () => {
-    const worker = { id: "worker-thread", status: "running" } as AgentThread
+    const worker = {
+      id: "worker-thread",
+      status: "running",
+      updatedAt: 1,
+    } as AgentThread
     const coordinator = {
       id: "coordinator-thread",
       title: "Onscreen coordinator",
       status: "finished",
+      updatedAt: 2,
       taskMembership: { role: "coordinator" },
       taskWorkers: [worker],
     } as AgentThread
@@ -635,7 +641,8 @@ describe("sidebar queries", () => {
       loaded: {
         ...coordinator,
         title: "Older sidebar title",
-        taskWorkers: [{ ...worker, status: "finished" }],
+        updatedAt: 1,
+        taskWorkers: [{ ...worker, status: "finished", updatedAt: 2 }],
       },
     })
 
@@ -669,7 +676,52 @@ describe("sidebar queries", () => {
       }
     )
 
-    expect(result.current).toBe(coordinator)
+    expect(result.current).toEqual(coordinator)
+  })
+
+  it("nests an open worker the sidebar page has not listed yet under its coordinator", () => {
+    const listedWorker = {
+      id: "listed-worker",
+      status: "finished",
+      updatedAt: 1,
+    } as AgentThread
+    const coordinator = {
+      id: "coordinator-thread",
+      status: "finished",
+      updatedAt: 1,
+      taskMembership: { role: "coordinator", taskId: "task" },
+      taskWorkers: [listedWorker],
+    } as AgentThread
+    const started = {
+      id: "started-worker",
+      status: "running",
+      updatedAt: 2,
+      taskMembership: {
+        role: "worker",
+        taskId: "task",
+        coordinatorThreadId: coordinator.id,
+      },
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(started.id), started)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: started.id,
+          loadedThreads: [coordinator],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current?.id).toBe(coordinator.id)
+    expect(result.current?.taskWorkers?.map((worker) => worker.id)).toEqual([
+      listedWorker.id,
+      started.id,
+    ])
   })
 
   it("keeps the deep-linked active thread available as cached pages catch up", async () => {
@@ -938,6 +990,36 @@ describe("useUpdateAgentSchedule", () => {
 
     act(() => request.reject(new Error("request failed")))
     await waitFor(() => expect(enabled()).toEqual([true, true]))
+  })
+})
+
+describe("useWorkflowApprovals", () => {
+  it("fetches approvals created after the last poll when the run stops", async () => {
+    const client = testClient()
+    const approval = {
+      fingerprint: "late-approval",
+      status: "pending",
+    } as WorkflowPushApproval
+    vi.spyOn(agentsApi, "listWorkflowApprovals")
+      .mockResolvedValueOnce({ threadId: "thread-1", approvals: [] })
+      .mockResolvedValue({ threadId: "thread-1", approvals: [approval] })
+    const { result, rerender } = renderHook(
+      ({ active }) =>
+        useWorkflowApprovals("thread-1", { pollWhileActive: active }),
+      {
+        initialProps: { active: true },
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.data?.approvals).toEqual([]))
+
+    rerender({ active: false })
+
+    await waitFor(() =>
+      expect(result.current.data?.approvals).toEqual([approval])
+    )
   })
 })
 

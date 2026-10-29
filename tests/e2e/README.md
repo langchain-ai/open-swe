@@ -3,16 +3,14 @@
 This drives the **whole happy path** through two mock UIs:
 
 1. A user asks Open SWE to implement something in a **mock Slack** thread.
-2. The **real agent** runs: its model loop on a local **Managed Deep Agents**
-   server (the real `mda/` project), its tools and middleware on the backend
-   (`langgraph dev`). It implements the change in a **local temp-dir sandbox**,
-   pushes a branch, and opens a PR on a **fake GitHub**.
-3. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
+1. The **real agent** runs: its model loop on a local **Managed Deep Agents** server (the real `mda/` project), its tools and middleware on the backend (`langgraph dev`).
+   It implements the change in a **sandbox MDA creates**, which a stand-in for LangSmith's sandbox service roots in a local temp dir, pushes a branch, and opens a PR on a **fake GitHub**.
+1. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
 
 ## What is faked vs. real
 
-Only the **LLM** and the **external SaaS HTTP boundaries** are faked. All agent
-code runs for real.
+Only the **LLM** and the **external SaaS HTTP boundaries** are faked.
+All agent code runs for real.
 
 | Piece                                                            | Real or fake                                                               |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -20,7 +18,7 @@ code runs for real.
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
 | Managed Deep Agents runtime (`mda/`, compiled by `mda build`)    | **real**, served locally by `mda-dev.sh` on `E2E_MDA_PORT` (default 2025)   |
 | `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
-| Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
+| Sandbox — LangSmith's sandbox service                           | **fake** (`sandbox_service.py`): MDA creates each box, the backend reconnects by id; a box is a shell rooted in a throwaway temp dir. `E2E_REAL_SANDBOX=1` keeps LangSmith |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
@@ -28,7 +26,7 @@ code runs for real.
 | Workspace tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
-| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
+| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the stand-in sandbox has nothing to snapshot      |
 | GitHub App token mint + installation lookup, `api.github.com/user` identity | stubbed (offline)                                              |
 | GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
 | Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
@@ -37,51 +35,38 @@ code runs for real.
 | Review scout sandbox                                              | **fake** (`patches.py`) — provisioning fails after a delay, so a scout run ends in a known error |
 | `users` rows + provider identities for the named test users      | **real** (seeded through `User.sign_in` / `link`)                          |
 
-The fake GitHub/Slack stores are the single source of truth the mock UIs render,
-so what Playwright asserts on is exactly what the real agent produced.
+The fake GitHub/Slack stores are the single source of truth the mock UIs render, so what Playwright asserts on is exactly what the real agent produced.
 
 ## Files
 
-- `e2e_env.py` — env + constants set before any `agent.*` import (sandbox=local,
-  fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
+- `e2e_env.py` — env + constants set before any `agent.*` import (sandbox root, fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
+- `sandbox_service.py` — the stand-in for LangSmith's sandbox service, which both the MDA server and the backend open boxes through.
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
-- `agent_entrypoint.py` — langgraph `agent` graph: applies patches in the backend
-  worker, re-exports the read-only `traced_agent`. Every Open SWE thread runs on
-  Managed Deep Agents, whose hooks the backend answers from `plan_agent`.
-- `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build`
-  output served by `langgraph dev` as `mda dev` serves it, with the fake model
-  and loopback completion webhooks.
-- `harness.py` — langgraph `http.app`: the real `openswe.webapp` plus the fake
-  GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
-- `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote. PR
-  files carry a real per-file `patch`, so eligibility checks that read the diff
-  see what GitHub would return.
+- `agent_entrypoint.py` — langgraph `agent` graph: applies patches in the backend worker, re-exports the read-only `traced_agent`.
+  Every Open SWE thread runs on Managed Deep Agents, whose hooks the backend answers from `plan_agent`.
+- `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build` output served by `langgraph dev` as `mda dev` serves it, with the fake model and loopback completion webhooks.
+- `harness.py` — langgraph `http.app`: the real `openswe.webapp` plus the fake GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
+- `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote.
+  PR files carry a real per-file `patch`, so eligibility checks that read the diff see what GitHub would return.
 - `langgraph.e2e.json` — dev-server config pointing at the two entrypoints above.
-- `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't
-  run locally). The dashboard is **not** mocked — it's the real `ui/` app.
+- `static/{slack,github}.html` — the mock Slack/GitHub UIs (external SaaS we can't run locally).
+  The dashboard is **not** mocked — it's the real `ui/` app.
 - `global-setup.ts` — builds the real `ui/` SPA (once) so the harness can serve it.
-- `playwright.desktop.config.ts` + `tests/desktop.spec.ts` — launch Electron and drive
-  the real pinned dcode ACP flow against the same fake model and GitHub state.
+- `playwright.desktop.config.ts` + `tests/desktop.spec.ts` — launch Electron and drive the real pinned dcode ACP flow against the same fake model and GitHub state.
 
 ## The dashboard — the real `ui/` app
 
-The dashboard is **not** mocked. The bot's "Open in Web" link
-(`DASHBOARD_BASE_URL/agents/{thread_id}`) loads the **actual built `ui/` React
-app** — served same-origin from the harness so the session cookie and
-`/dashboard/api/*` calls work without CORS. The signed session cookie is real
-(minted via `/control/login`), so per-user authorization is genuine; the only
-extra fake is the OAuth-token store (an external credential).
+The dashboard is **not** mocked.
+The bot's "Open in Web" link (`DASHBOARD_BASE_URL/agents/{thread_id}`) loads the **actual built `ui/` React app** — served same-origin from the harness so the session cookie and `/dashboard/api/*` calls work without CORS.
+The signed session cookie is real (minted via `/control/login`), so per-user authorization is genuine; the only extra fake is the OAuth-token store (an external credential).
 
-The UI is built by `global-setup.ts` with both API bases pointed at the harness,
-which then runs the app's own Nitro server on `E2E_UI_PORT` (default 3100). The
-harness proxies page requests to it, so the specs exercise real server rendering
-— the root session gate, the redirect, hydration — instead of a static shell.
-`ssr.spec.ts` asserts that on the raw response, because a server-rendering
-regression falls back to the client and otherwise passes unnoticed.
+The UI is built by `global-setup.ts` with both API bases pointed at the harness, which then runs the app's own Nitro server on `E2E_UI_PORT` (default 3100).
+The harness proxies page requests to it, so the specs exercise real server rendering — the root session gate, the redirect, hydration — instead of a static shell.
+`ssr.spec.ts` asserts that on the raw response, because a server-rendering regression falls back to the client and otherwise passes unnoticed.
 
-It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a UI change or
-port change). Requires `pnpm`.
+It builds once; set `E2E_FORCE_UI_BUILD=1` to rebuild (e.g. after a UI change or port change).
+Requires `pnpm`.
 
 ## Run
 
@@ -98,8 +83,7 @@ Watch it in human time:
 SLOW_MO=700 pnpm exec playwright test --headed
 ```
 
-The webServer is reused locally, so re-running a single spec against a warm
-`langgraph dev` is the fast iteration loop — prefer that over the whole suite:
+The webServer is reused locally, so re-running a single spec against a warm `langgraph dev` is the fast iteration loop — prefer that over the whole suite:
 
 ```bash
 pnpm exec playwright test tests/full_flow.spec.ts
@@ -107,27 +91,21 @@ pnpm exec playwright test tests/full_flow.spec.ts
 
 ## Artifacts (replay a run)
 
-Recording costs real time on every spec, so browser tests keep a **trace**
-(DOM-snapshot timeline + network + console + source) and a **video** only for a
-failed attempt; failures also get a screenshot. Set `E2E_ARTIFACTS=1` to capture
-both unconditionally, which is what you want when a spec passes but does the
-wrong thing. The Desktop test records an Electron trace and a success
-screenshot. Artifacts land in `test-results/<test>/` and `playwright-report/`:
+Recording costs real time on every spec, so browser tests keep a **trace** (DOM-snapshot timeline + network + console + source) and a **video** only for a failed attempt; failures also get a screenshot.
+Set `E2E_ARTIFACTS=1` to capture both unconditionally, which is what you want when a spec passes but does the wrong thing.
+The Desktop test records an Electron trace and a success screenshot.
+Artifacts land in `test-results/<test>/` and `playwright-report/`:
 
 ```bash
 pnpm exec playwright show-report                       # browse runs; each has a Trace tab
 pnpm exec playwright show-trace test-results/<test>/trace.zip   # open one trace directly
 ```
 
-In CI the browser shards upload **playwright-report-1**, **playwright-report-2**,
-and **playwright-report-3**; Desktop uploads **playwright-report-desktop**. Each
-contains `playwright-report/` and `test-results/`. Download the relevant artifact,
-then `pnpm exec playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto
-<https://trace.playwright.dev>) to replay.
+In CI the browser shards upload **playwright-report-1**, **playwright-report-2**, and **playwright-report-3**; Desktop uploads **playwright-report-desktop**.
+Each contains `playwright-report/` and `test-results/`.
+Download the relevant artifact, then `pnpm exec playwright show-report <unzipped-dir>` (or drag a `trace.zip` onto <https://trace.playwright.dev>) to replay.
 
-The backend requires PostgreSQL: export `POSTGRES_URI` before running the suite
-or `langgraph dev` (a throwaway `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD=postgres postgres:16`
-with `POSTGRES_URI=postgresql://postgres:postgres@localhost:5433/postgres` is enough).
+The backend requires PostgreSQL: export `POSTGRES_URI` before running the suite or `langgraph dev` (a throwaway `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD=postgres postgres:16` with `POSTGRES_URI=postgresql://postgres:postgres@localhost:5433/postgres` is enough).
 CI provides one as a job service.
 
 Poke at it by hand (from the repo root), each server in its own terminal:

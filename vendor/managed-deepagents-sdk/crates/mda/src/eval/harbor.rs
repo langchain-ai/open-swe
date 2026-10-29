@@ -17,6 +17,7 @@ use super::types::{
     HARBOR_JOB_PLUGIN, HARBOR_LANGSMITH_PLUGIN, HARBOR_NODE_RUNNER, HARBOR_PYTHON_RUNNER,
 };
 use crate::deploy::helpers::REMOVED_WORKSPACE_ID_ENVS;
+use crate::error::{categorized, ErrorCategory};
 use crate::langsmith::{GATEWAY_API_KEY_ENV, REMOVED_API_KEY_ENVS};
 
 const MDA_AGENT_IMPORT_PATH: &str = "mda_harbor.agent:ManagedDeepAgent";
@@ -110,225 +111,46 @@ struct InitialVerifier {
     include_logs: [&'static str; 1],
 }
 
-#[derive(Clone, Copy)]
-enum GeneratedJobConfigKind {
-    CompileLegacy,
-    AbsoluteInit,
-}
-
-fn legacy_task_moves(config_path: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
-    let dataset_dir = config_path
-        .parent()
-        .context("legacy Harbor job config is missing its dataset directory")?;
-    let legacy_tasks = dataset_dir.join("tasks");
-    match fs::symlink_metadata(&legacy_tasks) {
-        Ok(metadata) if metadata.file_type().is_symlink() => anyhow::bail!(
-            "legacy Harbor task directory must not be a symlink: {}",
-            legacy_tasks.display()
-        ),
-        Ok(metadata) if !metadata.is_dir() => anyhow::bail!(
-            "legacy Harbor task path is not a directory: {}",
-            legacy_tasks.display()
-        ),
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+/// Refuse a job config written by `mda evals compile` in v0.4.0–v0.5.3.
+///
+/// Those configs pin absolute paths, a fixed `job_name`, and the compiled
+/// artifact's digest and graph, so Harbor runs against them break. They are
+/// recognized by `job_name: "mda-eval"` plus an `artifact_sha256` agent kwarg,
+/// which no current generator writes. Anything else, including a file that is
+/// not JSON, is user-owned and left alone.
+pub(crate) fn reject_legacy_job_config(project_root: &Path) -> Result<()> {
+    let path = project_root.join(EVAL_DATASET_DIR).join("harbor-job.json");
+    let file_type = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata.file_type(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to inspect {}", legacy_tasks.display()))
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()))
         }
+    };
+    if !file_type.is_file() || file_type.is_symlink() {
+        return Ok(());
     }
-
-    let mut entries = fs::read_dir(&legacy_tasks)
-        .with_context(|| format!("failed to read {}", legacy_tasks.display()))?
-        .collect::<std::io::Result<Vec<_>>>()
-        .with_context(|| format!("failed to enumerate {}", legacy_tasks.display()))?;
-    entries.sort_by_key(fs::DirEntry::file_name);
-
-    let mut moves = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let source = entry.path();
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("failed to inspect {}", source.display()))?;
-        if file_type.is_symlink() || (!file_type.is_dir() && !file_type.is_file()) {
-            anyhow::bail!(
-                "legacy Harbor task entry must be a real file or directory: {}",
-                source.display()
-            );
-        }
-        let destination = dataset_dir.join(entry.file_name());
-        match fs::symlink_metadata(&destination) {
-            Ok(_) => anyhow::bail!(
-                "cannot migrate legacy Harbor task {} because {} already exists",
-                source.display(),
-                destination.display()
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to inspect {}", destination.display()))
-            }
-        }
-        moves.push((source, destination));
-    }
-    Ok(moves)
-}
-
-fn rollback_legacy_task_moves(moves: &[(PathBuf, PathBuf)]) -> Result<()> {
-    for (source, destination) in moves.iter().rev() {
-        fs::rename(destination, source).with_context(|| {
-            format!(
-                "failed to roll back legacy Harbor task {} to {}",
-                destination.display(),
-                source.display()
-            )
-        })?;
-    }
-    Ok(())
-}
-
-fn apply_legacy_task_moves(moves: &[(PathBuf, PathBuf)]) -> Result<Vec<(PathBuf, PathBuf)>> {
-    let mut applied = Vec::with_capacity(moves.len());
-    for (source, destination) in moves {
-        if let Err(error) = fs::rename(source, destination) {
-            let failure = format!(
-                "failed to migrate legacy Harbor task {} to {}: {error}",
-                source.display(),
-                destination.display()
-            );
-            if let Err(rollback_error) = rollback_legacy_task_moves(&applied) {
-                anyhow::bail!("{failure}; rollback also failed: {rollback_error:#}");
-            }
-            anyhow::bail!(failure);
-        }
-        applied.push((source.clone(), destination.clone()));
-    }
-    Ok(applied)
-}
-
-fn generated_job_config_kind(config: &serde_json::Value) -> Option<GeneratedJobConfigKind> {
-    let agents = config.get("agents")?.as_array()?;
-    let datasets = config.get("datasets")?.as_array()?;
-    if agents.len() != 1 || datasets.len() != 1 {
-        return None;
-    }
-
-    let agent = agents.first()?.as_object()?;
-    let kwargs = agent.get("kwargs")?.as_object()?;
-    if agent.get("import_path")?.as_str()? != MDA_AGENT_IMPORT_PATH
-        || kwargs.get("runtime")?.as_str()? != "auto"
-        || kwargs.get("adapter_protocol_version")?.as_u64()? != 1
-    {
-        return None;
-    }
-
-    let jobs_dir = Path::new(config.get("jobs_dir")?.as_str()?);
-    let artifact_path = Path::new(kwargs.get("artifact_path")?.as_str()?);
-    let dataset_path = Path::new(datasets.first()?.get("path")?.as_str()?);
-    if !jobs_dir.is_absolute() || !artifact_path.is_absolute() || !dataset_path.is_absolute() {
-        return None;
-    }
-
-    let absolute_init_root = dataset_path
-        .parent()
-        .filter(|_| dataset_path.ends_with(EVAL_DATASET_DIR));
-    if absolute_init_root.is_some_and(|root| {
-        artifact_path == root.join(GENERATED_EVAL_DIR).join("artifact")
-            && jobs_dir == root.join(GENERATED_EVAL_DIR).join("jobs")
-    }) {
-        return Some(GeneratedJobConfigKind::AbsoluteInit);
-    }
-
-    let legacy_root = dataset_path
-        .parent()
-        .and_then(Path::parent)
-        .filter(|_| dataset_path.ends_with(Path::new(EVAL_DATASET_DIR).join("tasks")));
-    let run_id = jobs_dir.file_name().and_then(|value| value.to_str())?;
-    let digest = kwargs.get("artifact_sha256")?.as_str()?;
-    let graph = kwargs.get("graph")?.as_str()?;
-    let model = agent.get("model_name")?.as_str()?;
-    let is_legacy = legacy_root.is_some_and(|root| {
-        artifact_path == root.join(EVAL_DATASET_DIR).join("artifact")
-            && jobs_dir.parent() == Some(root.join(EVAL_DATASET_DIR).join("harbor-jobs").as_path())
-    }) && config.get("job_name").and_then(|value| value.as_str())
-        == Some("mda-eval")
-        && !run_id.is_empty()
-        && run_id.bytes().all(|byte| byte.is_ascii_digit())
-        && digest.len() == 16
-        && digest
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        && !model.trim().is_empty()
-        && crate::agent_config::validate_assistant_id(graph, "legacy Harbor job config").is_ok();
-
-    is_legacy.then_some(GeneratedJobConfigKind::CompileLegacy)
-}
-
-fn migrate_generated_job_config(path: &Path) -> Result<()> {
     let contents =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&contents) else {
         return Ok(());
     };
-    let Some(kind) = generated_job_config_kind(&config) else {
-        return Ok(());
-    };
-
-    let legacy_moves = match kind {
-        GeneratedJobConfigKind::CompileLegacy => {
-            let Some(config_object) = config.as_object_mut() else {
-                return Ok(());
-            };
-            config_object.remove("job_name");
-            legacy_task_moves(path)?
-        }
-        GeneratedJobConfigKind::AbsoluteInit => Vec::new(),
-    };
-
-    let Some(jobs_dir) = config.get_mut("jobs_dir") else {
-        return Ok(());
-    };
-    *jobs_dir = json!(Path::new(GENERATED_EVAL_DIR).join("jobs"));
-    let Some(kwargs) = config
-        .pointer_mut("/agents/0/kwargs")
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return Ok(());
-    };
-    kwargs.insert(
-        "artifact_path".to_string(),
-        json!(Path::new(GENERATED_EVAL_DIR).join("artifact")),
-    );
-    if matches!(kind, GeneratedJobConfigKind::CompileLegacy) {
-        kwargs.remove("artifact_sha256");
-        kwargs.remove("graph");
-    }
-    let Some(configured_dataset_path) = config.pointer_mut("/datasets/0/path") else {
-        return Ok(());
-    };
-    *configured_dataset_path = json!(EVAL_DATASET_DIR);
-
-    let upgraded = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&config)
-            .context("failed to serialize upgraded Harbor job config")?
-    );
-    let applied_moves = apply_legacy_task_moves(&legacy_moves)?;
-    if let Err(error) = fs::write(path, upgraded) {
-        let failure = format!(
-            "failed to upgrade legacy Harbor job config {}: {error}",
-            path.display()
-        );
-        if let Err(rollback_error) = rollback_legacy_task_moves(&applied_moves) {
-            anyhow::bail!("{failure}; task rollback also failed: {rollback_error:#}");
-        }
-        anyhow::bail!(failure);
+    let is_legacy = config.get("job_name").and_then(serde_json::Value::as_str) == Some("mda-eval")
+        && config.pointer("/agents/0/kwargs/artifact_sha256").is_some();
+    if is_legacy {
+        return Err(categorized(
+            ErrorCategory::UserInput,
+            format!(
+                "{} was generated by mda 0.5 or earlier and no longer works. \
+                 Delete it, move evals/tasks/* into evals/, then re-run `mda evals init`.",
+                path.display()
+            ),
+        ));
     }
     Ok(())
 }
 
 /// Create the user-owned Harbor job config once, preserving all later edits.
-/// Recognized configs from older MDA generators receive a one-time path upgrade.
 pub(crate) fn write_job_config_if_missing(
     project_root: &Path,
     dataset_dir: &Path,
@@ -373,7 +195,6 @@ pub(crate) fn write_job_config_if_missing(
                 .with_context(|| format!("failed to inspect {}", path.display()))?
                 .file_type();
             if file_type.is_file() && !file_type.is_symlink() {
-                migrate_generated_job_config(&path)?;
                 return Ok(path);
             }
             anyhow::bail!(
@@ -481,17 +302,6 @@ pub(crate) fn is_shell_identifier(name: &str) -> bool {
     };
     (first.is_ascii_alphabetic() || first == '_')
         && chars.all(|char| char.is_ascii_alphanumeric() || char == '_')
-}
-
-/// Project `.env` keys that cannot be forwarded because a shell cannot export
-/// them. Returned so compile can say which keys a trial will not see.
-#[cfg(test)]
-pub(crate) fn unexportable_env_keys(project_env_keys: &BTreeSet<String>) -> Vec<&str> {
-    project_env_keys
-        .iter()
-        .map(String::as_str)
-        .filter(|name| !is_shell_identifier(name))
-        .collect()
 }
 
 pub(crate) fn insert_env_template(

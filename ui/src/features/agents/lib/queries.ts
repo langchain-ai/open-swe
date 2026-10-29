@@ -1,4 +1,8 @@
-import { threadFamily, sidebarRefreshInterval } from "./sidebarThreads"
+import {
+  mergeTaskFamily,
+  sidebarRefreshInterval,
+  threadFamily,
+} from "./sidebarThreads"
 import {
   queryOptions,
   useInfiniteQuery,
@@ -58,6 +62,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  backgroundOutput: (threadId: string, taskId: string) =>
+    ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -700,6 +706,45 @@ export function useSidebarRepos({
   })
 }
 
+function useCachedAgentThread(threadId?: string): AgentThread | undefined {
+  const queryClient = useQueryClient()
+  return useQuery({
+    ...agentThreadDetailOptions(threadId ?? "", queryClient),
+    enabled: false,
+  }).data
+}
+
+function useFetchedSidebarThread(
+  threadId: string | undefined,
+  enabled: boolean
+): AgentThread | undefined {
+  return useQuery({
+    queryKey: agentThreadKeys.sidebarActive(threadId ?? ""),
+    queryFn: () => agentsApi.getThread(threadId!, { markViewed: false }),
+    enabled: enabled && Boolean(threadId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: (current) =>
+      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
+    retry: false,
+  }).data
+}
+
+/** The open thread itself, for commands that act on it. */
+export function useActiveAgentThread(
+  threadId: string | undefined,
+  { enabled = true } = {}
+): AgentThread | undefined {
+  const detail = useCachedAgentThread(threadId)
+  const fetched = useFetchedSidebarThread(threadId, enabled && !detail)
+  return detail ?? fetched
+}
+
+/**
+ * The open thread's sidebar row. An open worker's row is its coordinator's:
+ * listed on its own it would show unnested, as it does whenever the sidebar
+ * page has not picked up a just-started worker yet.
+ */
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
@@ -709,30 +754,31 @@ export function useSidebarActiveThread({
   loadedThreads: Array<AgentThread>
   enabled?: boolean
 }): AgentThread | undefined {
-  const queryClient = useQueryClient()
-  const detail = useQuery({
-    ...agentThreadDetailOptions(activeThreadId ?? "", queryClient),
-    enabled: false,
-  }).data
-  const loaded = loadedThreads.find((thread) =>
-    threadFamily(thread).some((member) => member.id === activeThreadId)
+  const active = useCachedAgentThread(activeThreadId)
+  const rootId =
+    (active?.taskMembership?.role === "worker"
+      ? active.taskMembership.coordinatorThreadId
+      : null) ?? activeThreadId
+  const rootDetail = useCachedAgentThread(rootId)
+  const listed = loadedThreads.find(
+    (thread) =>
+      thread.id === rootId ||
+      threadFamily(thread).some((member) => member.id === activeThreadId)
   )
-  const query = useQuery({
-    queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
-    queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
-    enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-    refetchInterval: (current) =>
-      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
-    retry: false,
-  })
-  // An open worker is already listed under its coordinator; listing it again on its own duplicates it.
-  if (loaded && loaded.id !== activeThreadId) return loaded
-  if (detail && loaded?.taskWorkers) {
-    return { ...detail, taskWorkers: loaded.taskWorkers }
-  }
-  return detail ?? loaded ?? query.data
+  const fetched = useFetchedSidebarThread(
+    rootId,
+    enabled && !listed && !rootDetail
+  )
+  const row = listed ?? rootDetail ?? fetched ?? active
+  return (
+    row &&
+    mergeTaskFamily(
+      row,
+      [rootDetail, fetched, active].flatMap((thread) =>
+        thread ? [thread] : []
+      )
+    )
+  )
 }
 
 function useSidebarThreadPages(
@@ -990,6 +1036,21 @@ export function useAgentThreadBackgroundWork(threadId: string) {
   })
 }
 
+/** Output is not pushed, so it is polled while someone reads it. */
+export function useAgentThreadBackgroundOutput(
+  threadId: string,
+  taskId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundOutput(threadId, taskId),
+    queryFn: () => agentsApi.getThreadBackgroundOutput(threadId, taskId),
+    enabled,
+    refetchInterval: 5_000,
+    retry: false,
+  })
+}
+
 export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.branchDiff(threadId),
@@ -1035,21 +1096,30 @@ export function useAgentThreadWorkingTreeDiff(
 
 export function useWorkflowApprovals(
   threadId: string,
-  options: { pollWhileActive?: boolean } = {}
+  { pollWhileActive = false }: { pollWhileActive?: boolean } = {}
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
-    refetchInterval: (query) =>
-      options.pollWhileActive ||
-      query.state.data?.approvals.some(
+    refetchInterval: (current) =>
+      pollWhileActive ||
+      current.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
         ? 3000
         : false,
     retry: false,
   })
+  const previous = useRef({ threadId, pollWhileActive })
+  const refetch = query.refetch
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { threadId, pollWhileActive }
+    if (was.threadId === threadId && was.pollWhileActive && !pollWhileActive)
+      void refetch()
+  }, [threadId, pollWhileActive, refetch])
+  return query
 }
 
 export function useWorkflowApprovalDecision(threadId: string) {
