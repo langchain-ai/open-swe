@@ -4,6 +4,7 @@ import copy
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 from urllib.parse import quote
@@ -80,6 +81,7 @@ def github_channel(
     on_finish: EventFinished[GitHubEvent, GitHubChannelThread] | None = None,
     on_received: EventReceived[GitHubEvent, GitHubChannelThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
+    include_own_events: bool = False,
 ) -> HttpChannel:
     """Options for ``channels.github(...)``: App scope and event handlers that start runs.
 
@@ -118,6 +120,12 @@ def github_channel(
             interrupt, or the handler declines, so apply your own filters,
             such as a mention check. In the background, before ``on_finish``;
             failures are logged and don't stop the run.
+        include_own_events: Also hand handlers the events the channel's own
+            App caused, such as a push or a pull request the agent made with
+            the App's token, with ``event.from_app`` set. Off by default, so
+            the agent's own activity starts nothing. A handler that answers
+            comments or reviews skips ``event.from_app``, or the agent answers
+            itself.
 
     Example::
 
@@ -141,7 +149,7 @@ def github_channel(
         return channel_name(channel)
 
     async def parse(ctx: HttpChannelRequest) -> HttpChannelParseResult:
-        return await _parse(ctx, handlers, name(), repositories)
+        return await _parse(ctx, handlers, name(), repositories, include_own_events)
 
     async def run_input(
         message: HttpChannelInboundMessage, raw_event: JsonValue | None
@@ -223,6 +231,7 @@ def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
         },
         "actor": endpoint_actor(event.actor),
         "mentions": list(event.mentions),
+        "fromApp": event.from_app,
     }
     if event.action is not None:
         fields["action"] = event.action
@@ -296,6 +305,7 @@ async def _parse(
     handlers: Mapping[str, GitHubEventCallback],
     channel_name: str,
     repositories: frozenset[str] | None,
+    include_own_events: bool,
 ) -> HttpChannelParseResult:
     json_response = import_module("starlette.responses").JSONResponse
 
@@ -325,7 +335,8 @@ async def _parse(
     if repositories is not None and parsed_event.repository.full_name.lower() not in repositories:
         return {"type": "ignore", "response": response}
 
-    # Ignore the App's own activity to avoid triggering ourselves.
+    # The App's own activity starts nothing unless the channel asks for it, so
+    # the agent doesn't trigger itself.
     configured_bot_id = await _github_app_value("GH_APP_BOT_ID", "bot-id") or ""
     if not re.fullmatch(r"[1-9][0-9]*", configured_bot_id):
         raise TypeError(
@@ -333,7 +344,9 @@ async def _parse(
         )
     bot_id = github_identifier_adapter.validate_python(int(configured_bot_id), strict=True)
     if parsed_event.sender.id == bot_id:
-        return {"type": "ignore", "response": response}
+        if not include_own_events:
+            return {"type": "ignore", "response": response}
+        parsed_event = replace(parsed_event, from_app=True)
 
     # Preserve the original event even if a callback modifies its argument.
     snapshot = event_snapshot(parsed_event, "GitHub")
@@ -402,6 +415,7 @@ def _event(raw_event: JsonValue | None) -> GitHubEvent | None:
             sender=GitHubSender(**cast("dict[str, Any]", raw["sender"])),
             payload=cast("Any", raw["payload"]),
             mentions=tuple(cast("list[str]", raw.get("mentions", ()))),
+            from_app=raw.get("from_app") is True,
         )
     except (KeyError, TypeError):
         return None
