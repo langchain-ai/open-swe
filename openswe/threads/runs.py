@@ -1,10 +1,12 @@
 """Turning a dashboard request into a LangGraph run: bodies, models, images, commands."""
 
+import asyncio
 import base64
 import binascii
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -264,9 +266,13 @@ async def create_dashboard_thread_record(
     visibility: Literal["public", "private"] = "public",
     workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a dashboard thread with immutable ownership and visibility."""
-    profile = await get_profile(login) or {}
+    """Create a dashboard thread with immutable ownership and visibility.
+
+    ``profile`` is the person's profile when the caller already read it.
+    """
+    profile = profile if profile is not None else await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
@@ -733,46 +739,67 @@ async def _requested_visibility(
     return cast(Literal["public", "private"], visibility)
 
 
+@dataclass(frozen=True)
+class _ThreadHistory:
+    """What the graph already holds of a thread's conversation, read from its state.
+
+    Only the state carries the dynamic context a run injected, so this is a full
+    state read; callers start it early so it overlaps their other lookups.
+    """
+
+    read: bool = False
+    context_hashes: frozenset[str] | None = None
+    message_ids: frozenset[str] = frozenset()
+
+    @classmethod
+    async def of(cls, thread_id: str) -> _ThreadHistory:
+        """The thread's history, empty when its state cannot be read."""
+        try:
+            state = await THREADS.state(thread_id)
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+            return cls()
+        if state is None:
+            return cls()
+        values = state.get("values")
+        messages = values.get("messages") if isinstance(values, dict) else None
+        if not isinstance(messages, list):
+            return cls(read=True)
+        return cls(
+            read=True,
+            context_hashes=frozenset(dynamic_context_hashes_from_messages(messages)),
+            message_ids=frozenset(
+                message_id
+                for message in messages
+                if isinstance(message, Mapping) and isinstance(message_id := message.get("id"), str)
+            ),
+        )
+
+
 async def _attributed_run_messages(
-    thread_id: str,
     login: str,
     *,
     metadata: Mapping[str, Any],
+    history: _ThreadHistory,
     content: Any,
-    creating: bool,
     email: str | None,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
     replies: Sequence[PassageReply] = (),
-) -> tuple[list[RunMessage], set[str], set[str]]:
+) -> tuple[list[RunMessage], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
-    Returns the structured messages, the dynamic-context hashes already in the
-    conversation, and the ids of the messages the graph already holds.
+    Returns the structured messages and the dynamic-context hashes already in the
+    conversation.
     """
     if content is None:
         content = ""
     sender_id = f"github:{login}"
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
-    persisted_message_ids: set[str] = set()
-    history_read = False
-    if not creating:
-        try:
-            prior_state = await THREADS.state(thread_id)
-            history_read = prior_state is not None
-            values = prior_state.get("values") if prior_state is not None else None
-            if isinstance(values, dict):
-                messages = values.get("messages")
-                if isinstance(messages, list):
-                    injected = dynamic_context_hashes_from_messages(messages)
-                    persisted_message_ids = {
-                        message_id
-                        for message in messages
-                        if isinstance(message, Mapping)
-                        and isinstance(message_id := message.get("id"), str)
-                    }
-        except Exception:
-            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+    injected = (
+        set(history.context_hashes)
+        if history.context_hashes is not None
+        else injected_dynamic_context_hashes_from_metadata(metadata)
+    )
     person: PersonIdentity = {"id": sender_id, "github_login": login}
     if email:
         person["email"] = email
@@ -793,7 +820,7 @@ async def _attributed_run_messages(
             )
         )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
-    if pr_url and history_read and not persisted_message_ids:
+    if pr_url and history.read and not history.message_ids:
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
@@ -819,7 +846,7 @@ async def _attributed_run_messages(
                 injected_dynamic_context_hashes={system["id"]},
             )[0],
         )
-    return structured, injected, persisted_message_ids
+    return structured, injected
 
 
 async def _enrich_run_start_command(
@@ -839,6 +866,11 @@ async def _enrich_run_start_command(
         params = {}
         command["params"] = params
 
+    # The state read is the slowest lookup before dispatch, and nothing below
+    # changes the conversation or the profile, so both run alongside the checks
+    # and any sandbox move.
+    history = None if creating else asyncio.ensure_future(_ThreadHistory.of(thread_id))
+    profile_read = asyncio.ensure_future(get_profile(login))
     await _ensure_dashboard_github_token(login)
 
     client_config = params.get("config")
@@ -926,6 +958,7 @@ async def _enrich_run_start_command(
             effort=client_configurable.get("agent_effort"),
             model_selection=model_selection or "auto",
             workspace=workspace,
+            profile=await profile_read or {},
         )
         metadata = thread_metadata(thread)
         if sandbox_bridge is not None:
@@ -947,12 +980,12 @@ async def _enrich_run_start_command(
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
 
-    structured, injected, persisted_message_ids = await _attributed_run_messages(
-        thread_id,
+    prior = await history if history is not None else _ThreadHistory()
+    structured, injected = await _attributed_run_messages(
         login,
         metadata=metadata,
+        history=prior,
         content=content,
-        creating=creating,
         email=email,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
@@ -965,7 +998,7 @@ async def _enrich_run_start_command(
     ) == TRANSCRIPT_VERSION
     client_message_id = _command_message_id(params)
     message_id: str | None = None
-    if client_message_id and client_message_id not in persisted_message_ids:
+    if client_message_id and client_message_id not in prior.message_ids:
         message_id = client_message_id
     elif transcribed:
         message_id = str(uuid.uuid7())
@@ -1071,6 +1104,7 @@ async def _enrich_run_start_command(
         thread_id,
         login,
         metadata,
+        profile=await profile_read or {},
         overrides=overrides,
     )
 
@@ -1172,18 +1206,20 @@ async def steer_running_thread(
         live_run_id = latest_run_id
     # The run keeps the model it started with, so images are held to it. Thread
     # metadata may already name the model of a follow-up queued behind it.
-    run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
+    live_run_metadata, history = await asyncio.gather(
+        _run_metadata(client, thread_id, live_run_id), _ThreadHistory.of(thread_id)
+    )
+    run_model = live_run_metadata.get(RUN_MODEL_KEY)
     image_blocks = _image_blocks(
         command_images,
         model_id=run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0],
     )
 
-    structured, _, persisted_message_ids = await _attributed_run_messages(
-        thread_id,
+    structured, _ = await _attributed_run_messages(
         login,
         metadata=metadata,
+        history=history,
         content=content,
-        creating=False,
         email=email,
         relayed_from=relayed_from,
         replies=replies,
@@ -1191,7 +1227,7 @@ async def steer_running_thread(
     client_message_id = _command_message_id(params)
     message_id = (
         client_message_id
-        if client_message_id and client_message_id not in persisted_message_ids
+        if client_message_id and client_message_id not in history.message_ids
         else str(uuid.uuid7())
     )
     structured[-1]["id"] = message_id

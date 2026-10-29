@@ -656,12 +656,11 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
 
-    _, injected, _ = await thread_runs._attributed_run_messages(
-        "tid",
+    _, injected = await thread_runs._attributed_run_messages(
         "octocat",
         metadata={"injected_dynamic_context_hashes": [linked_hash, unlinked_hash]},
+        history=await thread_runs._ThreadHistory.of("tid"),
         content="Continue",
-        creating=False,
         email=None,
     )
 
