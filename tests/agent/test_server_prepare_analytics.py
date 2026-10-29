@@ -236,7 +236,6 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     proxy = _ReadyProxy()
     monkeypatch.setattr(proxy, "ready", AsyncMock(return_value=backend))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", lambda _: proxy)
-    monkeypatch.setattr(server, "resolve_sandbox_work_dir", AsyncMock(side_effect=AssertionError))
     runtime = cast(Runtime[Any], MagicMock())
     asked = HumanMessage(content="Fix the login", id="human-1")
 

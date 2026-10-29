@@ -1,6 +1,7 @@
 """Reset the fallback Git identity each run without a separate LangSmith command."""
 
 import asyncio
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,6 +14,7 @@ from openswe.agent_api.git_metadata import TurnGitMetadata
 from openswe.agent_api.graph import RunSession
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.lifecycle import _connect_existing_sandbox
+from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -54,7 +56,7 @@ async def test_identity_is_written_while_the_proxy_is_configured() -> None:
 
 
 @pytest.mark.asyncio
-async def test_identity_failure_fails_the_sandbox() -> None:
+async def test_identity_failure_does_not_fail_the_sandbox(caplog: pytest.LogCaptureFixture) -> None:
     backend = MagicMock(
         id="sandbox-mda", aexecute=AsyncMock(side_effect=RuntimeError("identity failed"))
     )
@@ -67,9 +69,10 @@ async def test_identity_failure_fails_the_sandbox() -> None:
         ),
         patch("openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock),
         patch("openswe.sandboxes.lifecycle.record_proxy_token_expiry"),
-        pytest.raises(RuntimeError, match="identity failed"),
     ):
-        await _connect(backend, "thread-identity-fails")
+        assert await _connect(backend, "thread-identity-fails") is backend
+
+    assert "Failed to write the bot Git identity" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -106,7 +109,10 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
 @pytest.mark.asyncio
 @pytest.mark.parametrize("offloaded", [False, True])
 async def test_identity_is_reset_each_run_in_the_first_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offloaded: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    offloaded: bool,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     backend = TimeoutLangSmithSandbox(SimpleNamespace(name="sandbox-mda"))
     commands: list[str] = []
@@ -118,7 +124,9 @@ async def test_identity_is_reset_each_run_in_the_first_command(
         process = await asyncio.create_subprocess_exec(
             "bash",
             "-c",
-            f"export HOME={home}; {command}",
+            command,
+            env={**os.environ, "HOME": str(home)},
+            cwd=home,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -169,9 +177,12 @@ async def test_identity_is_reset_each_run_in_the_first_command(
         await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)
         (home / ".gitconfig.lock").touch()
         target = tmp_path / "command-ran"
-        with pytest.raises(RuntimeError, match="Failed to configure sandbox Git identity"):
-            await run(f"touch {target}")
-        assert not target.exists()
+        result = await run(f"touch {target}")
+        assert result.exit_code == 0
+        assert target.exists()
+        assert "Failed to write the bot Git identity" in caplog.text
+        assert "could not lock config file" not in result.output
+        assert (await run("printf still-usable")).output == "still-usable"
 
         session = RunSession(
             ToolSurface(), {"configurable": {"thread_id": "thread-reset"}}, None, started_here=True
@@ -185,12 +196,22 @@ async def test_identity_is_reset_each_run_in_the_first_command(
             "begin",
             AsyncMock(side_effect=AssertionError("baseline must be deferred")),
         )
-        with pytest.raises(RuntimeError, match="Failed to configure sandbox Git identity"):
-            await session.prepare(Prepare())
-
-        (home / ".gitconfig.lock").unlink()
+        backend.reset_git_identity()
         prepared = await session.prepare(Prepare())
         assert prepared.update["git_trace_baseline"] is None
-        result = await run(f"touch {target}")
-        assert result.exit_code == 0
-        assert target.exists()
+
+        (home / ".gitconfig.lock").unlink()
+        await _connect_existing_sandbox("thread-reset", cached=backend, sandbox_id=backend.id)
+        result = await run("git config --global user.email")
+        assert result.output.strip() == "open-swe@users.noreply.github.com"
+
+        unavailable = tmp_path / "not-a-directory"
+        unavailable.touch()
+        monkeypatch.setattr("openswe.sandboxes.providers.langsmith.WORKSPACE_DIR", str(unavailable))
+        monkeypatch.setattr("openswe.sandboxes.paths.WORKSPACE_DIR", str(unavailable))
+        backend.reset_git_identity()
+        assert await resolve_sandbox_work_dir(backend) == str(home)
+        assert (await run("printf usable-without-workspace")).output == "usable-without-workspace"
+        unavailable.unlink()
+        backend.reset_git_identity()
+        assert await resolve_sandbox_work_dir(backend) == str(unavailable)

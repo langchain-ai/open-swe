@@ -32,7 +32,7 @@ from langsmith.sandbox import (
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.config import ENV
-from openswe.sandboxes.paths import WORKSPACE_DIR, remember_work_dir
+from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
@@ -631,11 +631,24 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     def reset_git_identity(self) -> None:
         """Apply the fallback identity before the next command, without another connection."""
         self._git_identity_pending = f"__open_swe_git_identity_{secrets.token_hex(16)}__\n"
+        forget_work_dir(self)
 
     async def ensure_git_identity(self) -> None:
-        """Finish a pending reset when no other startup command completed it."""
+        """Attempt a pending reset without making a failed identity write fail preparation."""
         if self._git_identity_pending is not None:
-            await self.aexecute(":")
+            try:
+                result = await self.aexecute(":", timeout=30)
+                if result.exit_code != 0:
+                    logger.warning(
+                        "Failed to write the bot Git identity",
+                        extra={"sandbox_id": self.id, "log_tail": result.output[-2000:]},
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to write the bot Git identity",
+                    extra={"sandbox_id": self.id},
+                    exc_info=True,
+                )
 
     def get_work_dir(self) -> str:
         """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
@@ -763,24 +776,39 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             marker = self._git_identity_pending
             if marker is None:
                 return await self._aretried_execute(command, timeout)
+            work_dir_ready = f"{marker}work-dir\n"
+            identity_ready = f"{marker}identity\n"
+            command_started = f"{marker}command\n"
             prepared = (
-                f"mkdir -p {shlex.quote(WORKSPACE_DIR)} && test -w {shlex.quote(WORKSPACE_DIR)} || exit $?; "
-                f"git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
-                f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)} || exit $?; "
-                f"printf %s {shlex.quote(marker)}; "
+                f"{{ if mkdir -p {shlex.quote(WORKSPACE_DIR)} && test -w {shlex.quote(WORKSPACE_DIR)}; "
+                f"then printf %s {shlex.quote(work_dir_ready)}; fi; }} 2>&1; "
+                f"{{ if git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
+                f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)}; "
+                f"then printf %s {shlex.quote(identity_ready)}; fi; }} 2>&1; "
+                f"printf %s {shlex.quote(command_started)}; "
                 f"exec /bin/bash -c {shlex.quote(command)}"
             )
-            result = await self._aretried_execute(prepared, timeout)
-            if not result.output.startswith(marker):
-                raise RuntimeError(
-                    f"Failed to configure sandbox Git identity (exit code {result.exit_code}): "
-                    f"{result.output}"
+            try:
+                result = await self._aretried_execute(prepared, timeout)
+            finally:
+                if self._git_identity_pending == marker:
+                    self._git_identity_pending = None
+            setup, started, output = result.output.partition(command_started)
+            if not started:
+                return result
+            if work_dir_ready in setup:
+                remember_work_dir(self, WORKSPACE_DIR)
+            else:
+                logger.warning(
+                    "Could not ready the sandbox work directory", extra={"sandbox_id": self.id}
                 )
-            if self._git_identity_pending == marker:
-                self._git_identity_pending = None
-            remember_work_dir(self, WORKSPACE_DIR)
+            if identity_ready not in setup:
+                logger.warning(
+                    "Failed to write the bot Git identity",
+                    extra={"sandbox_id": self.id, "log_tail": setup[-2000:]},
+                )
             return ExecuteResponse(
-                output=result.output.removeprefix(marker),
+                output=output,
                 exit_code=result.exit_code,
                 truncated=result.truncated,
             )

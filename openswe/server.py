@@ -1394,11 +1394,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         if stale_workspace := take_stale_boot(self._thread_id):
             queue_stale_workspace_notice(self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.work_dir"):
-            work_dir = (
-                sandbox_backend.get_work_dir()
-                if isinstance(sandbox_backend, TimeoutLangSmithSandbox)
-                else await resolve_sandbox_work_dir(sandbox_backend)
-            )
+            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
         if bridged and self._bridge_client == "desktop":
             schedule_worktree_branch_rename(

@@ -12,7 +12,6 @@ from pydantic import BaseModel, JsonValue, ValidationError
 
 from openswe.run_config import RunConfig
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
-from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.scripts import SandboxScript
 from openswe.sandboxes.state import get_sandbox_backend
 
@@ -99,11 +98,7 @@ class TurnGitMetadata:
             return None
         try:
             backend = await get_sandbox_backend(self.config.thread_id)
-            root = (
-                backend.current.get_work_dir()
-                if isinstance(backend.current, TimeoutLangSmithSandbox)
-                else await resolve_sandbox_work_dir(backend)
-            )
+            root = await resolve_sandbox_work_dir(backend)
             result = await SandboxScript("git_trace.py", f"{root}/.open-swe/scripts").run(
                 backend, {"root": root}
             )

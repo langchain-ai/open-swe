@@ -304,8 +304,15 @@ async def git_identity(
         return
 
     async def run() -> None:
-        async with aphase(thread_id, "sandbox.git_identity"):
-            await configure_git_identity(sandbox_backend)
+        try:
+            async with aphase(thread_id, "sandbox.git_identity"):
+                await configure_git_identity(sandbox_backend)
+        except Exception:
+            logger.warning(
+                "Failed to write the bot Git identity",
+                extra={"thread_id": thread_id, "sandbox_id": sandbox_backend.id},
+                exc_info=True,
+            )
 
     task = asyncio.create_task(run())
     try:
