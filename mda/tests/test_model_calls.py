@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -12,15 +12,19 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     AnyMessage,
     BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.outputs import ChatGenerationChunk
+from langchain_core.tracers._streaming import _V2StreamingCallbackHandler
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -31,7 +35,7 @@ from rt.model_calls import (
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
 )
-from rt.models import ModelSpec
+from rt.models import ModelSpec, build_model
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -275,3 +279,34 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
         {"type": "text", "text": "First run's prompt"},
     ]
     assert static.content == "The graph's own instructions"
+
+
+async def test_claude_reports_a_first_token_when_streaming_blocks_on_v2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def blocks(
+        self: ChatAnthropic, *args: object, **kwargs: object
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(content=[{"type": "text", "text": "hi", "index": 0}])
+        )
+
+    monkeypatch.setattr(ChatAnthropic, "_astream", blocks)
+    tokens: list[str | list[str | dict[str, object]]] = []
+
+    class _V2Messages(AsyncCallbackHandler, _V2StreamingCallbackHandler):
+        pass
+
+    class _Tokens(AsyncCallbackHandler):
+        async def on_llm_new_token(
+            self, token: str | list[str | dict[str, object]], **kwargs: object
+        ) -> None:
+            tokens.append(token)
+
+    model = build_model(
+        ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={"api_key": "test"}),
+        use_gateway=False,
+    )
+    await model.ainvoke("hello", config={"callbacks": [_V2Messages(), _Tokens()]})
+
+    assert tokens == ["hi"]

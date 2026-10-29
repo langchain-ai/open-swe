@@ -242,6 +242,7 @@ from openswe.server import (
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
+from openswe.utils.startup_trace import aphase
 
 logger = logging.getLogger(__name__)
 
@@ -644,9 +645,11 @@ class RunSession:
         return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
 
     async def prepare(self, request: Prepare) -> PhaseResult:
-        # MDA opened the box before preparing; preparation connects to it as to any other.
-        await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
+        # MDA opened the box before preparing; preparation connects to it as to any other.
+        # The phase is replayed into this run's trace when `before_agent` flushes phases.
+        async with aphase(cfg.thread_id, "prepare.bind_sandbox"):
+            await self.bind_sandbox(request)
         if self.surface.inbox is not None and cfg.thread_id is not None:
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(cfg.thread_id).receive(events=_carried_events(self.config))
