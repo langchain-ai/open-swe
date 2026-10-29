@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from openswe.dashboard.oauth import require_session
 from openswe.fleet_chat import routes
+from openswe.users import UserPreferences
 
 THREAD = "018d50d4-3d52-7000-8000-000000000001"
 
@@ -19,6 +20,21 @@ def _app() -> FastAPI:
 
 def _http(app: FastAPI) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url="http://test", transport=httpx.ASGITransport(app=app))
+
+
+async def test_requires_the_fleet_experiment_before_reading_the_token(monkeypatch):
+    async def preferences(login):
+        return UserPreferences()
+
+    async def token(login):
+        pytest.fail("People without the Fleet experiment must not use their LangSmith token")
+
+    monkeypatch.setattr(routes.User, "preferences_for_login", preferences)
+    monkeypatch.setattr(routes, "langsmith_access_token", token)
+    async with _http(_app()) as http:
+        response = await http.post("/fleet-chat/threads/search", json={})
+    assert response.status_code == 403
+    assert "Experiments" in response.json()["detail"]
 
 
 async def test_unsupported_paths_never_obtain_credentials(monkeypatch):

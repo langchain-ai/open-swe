@@ -1,4 +1,3 @@
-import { useCallback } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { FleetHome } from "@/features/agents/components/FleetHome"
 import { pageTitle } from "@/lib/pageTitle"
@@ -14,9 +13,10 @@ export const Route = createFileRoute("/agents/chat")({
 function ChatPage() {
   const { chat } = Route.useSearch()
   const navigate = Route.useNavigate()
-  const select = useCallback(
-    (thread: string) => void navigate({ search: { chat: thread } }),
-    [navigate]
+  return (
+    <FleetHome
+      threadId={chat}
+      onThreadCreated={(thread) => void navigate({ search: { chat: thread } })}
+    />
   )
-  return <FleetHome threadId={chat} onThreadCreated={select} />
 }

@@ -197,12 +197,14 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
-  const fleetSelected = useRouterState({
+  const profile = useProfile()
+  const fleetEnabled = profile.data?.experimental_fleet === true
+  const onFleetRoute = useRouterState({
     select: (state) => state.location.pathname === "/agents/chat",
   })
+  const fleetSelected = fleetEnabled && onFleetRoute
   const linkOptions = useHrefLinkOptions()
   const newThreadShortcut = useShortcutLabel("mod+n")
-  const profile = useProfile()
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
     queryFn: api.concierge,
@@ -683,35 +685,37 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="px-space-2 pb-space-4">
-        <GroupedTabs
-          size="md"
-          className="w-full"
-          value={fleetSelected ? "fleet" : "openswe"}
-          options={[
-            {
-              value: "openswe",
-              display: "Open SWE",
-              className: "flex-1",
-            },
-            {
-              value: "fleet",
-              display: "Fleet",
-              className: "flex-1",
-            },
-          ]}
-          onChange={(value) => {
-            void navigate(
-              linkOptions(
-                value === "fleet"
-                  ? getLastSectionLocation("/agents/chat")
-                  : "/agents"
+      {fleetEnabled && (
+        <div className="px-space-2 pb-space-4">
+          <GroupedTabs
+            size="md"
+            className="w-full"
+            value={fleetSelected ? "fleet" : "openswe"}
+            options={[
+              {
+                value: "openswe",
+                display: "Open SWE",
+                className: "flex-1",
+              },
+              {
+                value: "fleet",
+                display: "Fleet",
+                className: "flex-1",
+              },
+            ]}
+            onChange={(value) => {
+              void navigate(
+                linkOptions(
+                  value === "fleet"
+                    ? getLastSectionLocation("/agents/chat")
+                    : "/agents"
+                )
               )
-            )
-            layout.closeOnMobile()
-          }}
-        />
-      </div>
+              layout.closeOnMobile()
+            }}
+          />
+        </div>
+      )}
       {fleetSelected && (
         <FleetThreadList
           compact={prefs.compact}

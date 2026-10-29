@@ -21,6 +21,7 @@ from openswe.dashboard.langsmith_oauth import (
     langsmith_access_token,
     langsmith_issuer,
 )
+from openswe.users import User
 
 router = APIRouter(prefix="/fleet-chat", tags=["fleet-chat"])
 _ID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
@@ -33,6 +34,8 @@ _MAX_BODY = 1024 * 1024
 
 
 async def _client(login: str) -> httpx.AsyncClient:
+    if not (await User.preferences_for_login(login)).experimental_fleet:
+        raise HTTPException(403, "Turn on Fleet in Settings → Experiments.")
     try:
         token = await langsmith_access_token(login)
     except LangSmithOAuthError as exc:
