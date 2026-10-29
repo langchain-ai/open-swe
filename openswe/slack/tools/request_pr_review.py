@@ -49,16 +49,12 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     goal_mode = bool(github_login) and (await User.preferences_for_login(github_login)).goal_mode
     slack_thread = configurable.get("slack_thread") or {}
     thread_id = configurable.get("thread_id")
-    active = (
-        None
-        if goal_mode
-        else await get_active_slack_thread(
-            get_client(),
-            thread_id if isinstance(thread_id, str) else None,
-            slack_thread if isinstance(slack_thread, dict) else None,
-        )
+    active = await get_active_slack_thread(
+        get_client(),
+        thread_id if isinstance(thread_id, str) else None,
+        slack_thread if isinstance(slack_thread, dict) else None,
     )
-    slack_thread = active or {}
+    slack_thread = {} if goal_mode else active or {}
     result = await trigger_pr_review_from_ref(
         pr_ref,
         source=source,
