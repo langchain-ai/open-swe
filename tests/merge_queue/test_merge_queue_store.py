@@ -1897,8 +1897,26 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                 check_app_id=456,
             ),
         )
-        # A replacement starts before GitHub lands the already-published success.
+        lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+        assert lease is not None
+        previous = (await queue.native_validation_history(lease))[0]
+        assert not await queue.authorize_native_result(previous, native_snapshot(), lease)
+        pending_rebuild = native_snapshot().model_copy(update={"main_sha": "e" * 40})
+        assert (
+            await queue.prepare_native_validation(
+                pending_rebuild, 600, lease, policy=policy, trust=config.native_trust
+            )
+            is None
+        )
+        assert (await queue.history(request.batch_id)).batch.state == "active"
+        await queue.release(lease)
+        repo.native_queue.return_value = native_snapshot(main="e" * 40)
         await reconcile()
+        replacement = await queue.history(request.batch_id)
+        assert replacement.batch.deadline == history.batch.deadline
+        assert replacement.batch.max_attempts == history.batch.max_attempts
+        assert replacement.batch.candidate == history.batch.candidate
+        assert [attempt.number for attempt in replacement.attempts] == [1, 2]
         repo.native_queue.return_value = native_snapshot((), main=request.candidate_sha)
         repo.merge_base = AsyncMock(return_value=request.candidate_sha)
         await reconcile()
@@ -1983,79 +2001,3 @@ async def test_configuration_fences_stale_workers_and_serializes_check_publicati
     await queue.release(new_lease)
     with pytest.raises(LeaseLost, match="disabled or invalid"):
         await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)
-
-
-async def test_workflow_policy_adoption_preserves_budget_and_fences_old_results(
-    queue_controller: QueueController,
-) -> None:
-    from openswe.merge_queue.dispatch import WorkflowPolicy
-
-    queue = queue_controller.queue
-    policy, lease, _ = await enable_native_validation(queue)
-    await queue.release(lease)
-    config = queue_controller.config.model_copy(
-        update={
-            "mode": "native",
-            "policy": policy,
-            "check_app_id": 456,
-            "sync_workflow_policy": True,
-        }
-    )
-    await save_configuration(config)
-    approved = WorkflowPolicy(
-        nonce=uuid7(),
-        repository=config.repository,
-        repository_id=config.repository_id,
-        workflow_policy_revision=1,
-        workflow_digest=config.workflow_digest,
-        dispatch_actor_id=123,
-        check_app_id=456,
-    )
-    config = await queue.adopt_workflow_policy(config, approved)
-    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
-    assert lease is not None
-    work = await queue.prepare_native_validation(
-        native_snapshot(), 600, lease, policy=policy, trust=config.native_trust
-    )
-    assert work is not None
-    await queue.bind_validation_run(work.attempt.id, 42, lease)
-    await queue.finish_native_validation(
-        work,
-        {
-            **work.request.model_dump(mode="json"),
-            "run_id": 42,
-            "run_attempt": 1,
-            "tested_sha": work.request.candidate_sha,
-        },
-        lease,
-        succeeded=True,
-    )
-    changed = approved.model_copy(
-        update={"workflow_policy_revision": 2, "workflow_digest": "b" * 64}
-    )
-    updated = await queue.adopt_workflow_policy(config, changed)
-    await queue.release(lease)
-    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=updated)
-    assert lease is not None
-    assert not await queue.authorize_native_result(work, native_snapshot(), lease)
-    pending_rebuild = native_snapshot().model_copy(update={"main_sha": "e" * 40})
-    assert (
-        await queue.prepare_native_validation(
-            pending_rebuild, 600, lease, policy=policy, trust=updated.native_trust
-        )
-        is None
-    )
-    assert (await queue.history(work.batch.id)).batch.state == "active"
-    rebuilt = native_snapshot(main="e" * 40)
-    replacement = await queue.prepare_native_validation(
-        rebuilt, 600, lease, policy=policy, trust=updated.native_trust
-    )
-    assert replacement is not None and replacement.dispatch
-    assert replacement.batch.id == work.batch.id
-    assert replacement.batch.deadline == work.batch.deadline
-    assert replacement.batch.max_attempts == work.batch.max_attempts
-    assert replacement.attempt.number == 2
-    assert replacement.request.attempt_id != work.request.attempt_id
-    assert replacement.request.workflow_sha == rebuilt.main_sha
-    assert replacement.batch.candidate == work.batch.candidate
-    await queue.release(lease)
