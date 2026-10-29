@@ -44,7 +44,7 @@ from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
 from rt.backend import Graph, OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
-from rt.cache_affinity import CacheAffinityMiddleware
+from rt.cache_affinity import CacheAffinityMiddleware, FireworksCacheAffinityMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
@@ -250,6 +250,7 @@ def _parts(graph: Graph) -> _Parts:
                     RunToolsMiddleware(toolsets, subagent=subagent),
                     RunSubagentMiddleware(toolsets, subagent),
                     CacheAffinityMiddleware(graph),
+                    FireworksCacheAffinityMiddleware(unsupported_model_behavior="ignore"),
                     *model_call_guards(subagent=True),
                 ],
             ),
@@ -274,6 +275,7 @@ def _parts(graph: Graph) -> _Parts:
             ReportedBrowserMiddleware(backend, enabled=graph == "agent"),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             CacheAffinityMiddleware(graph),
+            FireworksCacheAffinityMiddleware(unsupported_model_behavior="ignore"),
             *model_call_guards(),
         ],
     )
