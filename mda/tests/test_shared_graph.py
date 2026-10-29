@@ -20,7 +20,7 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, tool
 from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
 from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
@@ -961,3 +961,26 @@ async def test_cancelling_an_eval_its_worker_has_not_started_returns_promptly() 
         release.set()
     assert (await repl.eval_async("typeof globalThis.ran")).result == "undefined"
     await registry.aevict("busy")
+
+
+async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_run() -> None:
+    nested: list[object] = []
+    for _ in range(200):
+        nested = [nested]
+
+    @tool
+    def nest() -> list[object]:
+        """Return a result nested deeper than the interpreter marshals."""
+        return nested
+
+    registry = _Registry(
+        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
+    )
+    repl = registry.get("nest")
+    repl.install_tools([nest])
+    try:
+        failed = await repl.eval_async("globalThis.kept = 1; await tools.nest({})")
+        assert failed.error_type == "MarshalError"
+        assert (await repl.eval_async("kept")).result == "1"
+    finally:
+        await registry.aevict("nest")
