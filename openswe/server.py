@@ -1433,6 +1433,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
+        # Reads only who the run is for, so it runs alongside routing and participants.
+        recent_threads = asyncio.create_task(self._recent_threads(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
             attribution_model_id = self._model_id
             attribution_effort = self._effort
@@ -1486,19 +1488,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
-        audience = self._recent_context_audience(cfg)
-        recent_threads = (
-            await recent_thread_context_section(
-                audience=audience,
-                login=self._profile_login,
-                email=self._user_email or None,
-                exclude_thread_id=self._thread_id,
-                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
-                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
-            )
-            if audience is not None
-            else ""
-        )
         turn = TurnContext(
             working_dir=work_dir,
             source="background_task" if cfg.background_task_completion else self._source,
@@ -1515,7 +1504,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
-            recent_threads=recent_threads,
+            recent_threads=await recent_threads,
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (
@@ -1533,6 +1522,20 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             **({"model_route": attribution_route} if persist_route else {}),
             **system_prompt,
         }
+
+    async def _recent_threads(self, cfg: RunConfig) -> str:
+        audience = self._recent_context_audience(cfg)
+        if audience is None:
+            return ""
+        async with aphase(self._thread_id, "prepare.recent_threads"):
+            return await recent_thread_context_section(
+                audience=audience,
+                login=self._profile_login,
+                email=self._user_email or None,
+                exclude_thread_id=self._thread_id,
+                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
+                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
+            )
 
     async def _render_system_prompt(self, cfg: RunConfig) -> str:
         """The thread's system prompt, from what holds for it as its first run starts."""

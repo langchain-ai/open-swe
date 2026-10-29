@@ -26,6 +26,7 @@ from langgraph_sdk import get_client
 
 from openswe.github.token_scope import token_repositories_from_metadata
 from openswe.threads.store import THREADS
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
@@ -443,7 +444,7 @@ async def thread_token_repositories(thread_id: str) -> list[str] | None:
     if thread_id in _TOKEN_SCOPES:
         _TOKEN_SCOPES.move_to_end(thread_id)
         return _TOKEN_SCOPES[thread_id]
-    thread = await get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id, get_client())
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     scope = token_repositories_from_metadata(metadata if isinstance(metadata, dict) else {})
     _TOKEN_SCOPES[thread_id] = scope
