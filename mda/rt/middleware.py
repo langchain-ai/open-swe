@@ -62,6 +62,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
+from managed_deepagents.model_calls import ModelCallBudget
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import InboxSpec
 from runtime_api.endpoint import Endpoint, call
@@ -95,6 +96,7 @@ from rt.backend import (
 from rt.git_baseline import TurnBaseline
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
+from rt.model_calls import MODEL_CALL_TIMEOUT_SECONDS
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.tools import STATE_KEY, cited, run_id, tool_report
@@ -308,8 +310,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
         read_ahead: Sequence[Callable[[], None]] = (),
+        *,
+        model_timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
     ) -> None:
         self._backend = backend
+        self._model_budget = ModelCallBudget(model_timeout_seconds)
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
@@ -548,7 +553,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 self._traces.get(self._backend.run).record_model(models.model.model_id)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
-            return await handler(request)
+            return await self._model_budget.call(request, handler)
         planned = ModelCall.model_validate(raw)
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
@@ -556,16 +561,21 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
             self._traces.get(self._backend.run).record_model(model.model_id)
-        try:
-            return await handler(request)
-        except Exception as exc:
-            if planned.fallback is None or _tool_pairing_error(exc):
-                raise
-            # As the in-process graph does: another provider before failing the run.
-            logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
-            self._traces.get(self._backend.run).record_model(planned.fallback.model_id)
-            return await handler(request.override(model=fallback))
+        spec = planned.fallback
+        if spec is None:
+            return await self._model_budget.call(request, handler)
+
+        def fallback() -> BaseChatModel:
+            self._traces.get(self._backend.run).record_model(spec.model_id)
+            return build_model(spec, use_gateway=planned.use_gateway)
+
+        # As the in-process graph does: another provider before failing the run.
+        return await self._model_budget.call(
+            request,
+            handler,
+            fallback=fallback,
+            falls_back=lambda exc: not _tool_pairing_error(exc),
+        )
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

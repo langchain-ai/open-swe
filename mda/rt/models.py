@@ -11,6 +11,7 @@ from typing import Final
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+from managed_deepagents.model_calls import disable_sdk_retries
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ModelSpec
 
@@ -22,7 +23,6 @@ _GATEWAY_PROVIDER_PATHS: Final = {
     "fireworks": "/fireworks",
     "google_genai": "/gemini",
 }
-_DEFAULT_MAX_RETRIES: Final = 6
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 600.0
 _kwargs = TypeAdapter(dict[str, JsonValue])
 
@@ -39,9 +39,9 @@ def _gateway_overrides(provider: str) -> dict[str, JsonValue]:
 @lru_cache(maxsize=32)
 def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
     kwargs = _kwargs.validate_python(json.loads(kwargs_json))
-    kwargs.setdefault("max_retries", _DEFAULT_MAX_RETRIES)
     kwargs.setdefault("timeout", _DEFAULT_REQUEST_TIMEOUT_SECONDS)
     provider = model_id.split(":", 1)[0]
+    disable_sdk_retries(provider, kwargs)
     if provider == "anthropic":
         kwargs.setdefault("streaming", True)
     if provider == "openai":

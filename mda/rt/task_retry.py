@@ -17,7 +17,7 @@ _TRANSIENT_ERROR_NAMES = frozenset(
         "APIConnectionError",
         "APITimeoutError",
         "ConnectTimeout",
-        # A subagent's wedged model call (rt.model_calls).
+        # A subagent's wedged model call (managed_deepagents.model_calls).
         "ModelCallTimeoutError",
         "ReadTimeout",
         "TimeoutException",

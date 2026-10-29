@@ -2,7 +2,7 @@ import json
 
 import httpx2
 import pytest
-from rt.model_calls import ModelCallTimeoutError
+from managed_deepagents.model_calls import ModelCallTimeoutError
 from rt.task_retry import task_on_failure, task_retry_on
 
 

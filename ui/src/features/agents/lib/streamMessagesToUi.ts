@@ -363,6 +363,7 @@ export function streamMessagesToUi(
     }
 
     if (AIMessage.isInstance(raw)) {
+      if (raw.response_metadata?.mda_superseded === true) return
       if (raw.additional_kwargs.lc_source === "summarization") return
       const chunks: Array<Chunk> = []
       const reasoning = reasoningText(raw)
