@@ -28,3 +28,25 @@ it("only loads evidence through the authenticated report media API", () => {
     evidenceMediaUrl(path.replaceAll("before.png", "%5csecrets"))
   ).toThrow(/authenticated/)
 })
+
+it("keeps source-page links on their origin and rejects credential or executable URLs", async () => {
+  const { pageLink } = await import("./pageLinks")
+  expect(
+    pageLink(
+      "https://preview.example.com",
+      "/projects/42?tab=traces&filter=success#details"
+    )
+  ).toBe(
+    "https://preview.example.com/projects/42?tab=traces&filter=success#details"
+  )
+  expect(pageLink("javascript:alert(1)", "/projects")).toBeUndefined()
+  expect(
+    pageLink("https://user:password@example.com", "/projects")
+  ).toBeUndefined()
+  expect(
+    pageLink("https://preview.example.com", "//other.example.com")
+  ).toBeUndefined()
+  expect(
+    pageLink("https://preview.example.com", "/\\other.example.com")
+  ).toBeUndefined()
+})

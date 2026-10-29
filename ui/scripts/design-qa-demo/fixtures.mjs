@@ -73,9 +73,9 @@ export const checkpoints = [
   },
   {
     id: "size",
-    title: "Button size · 2 px taller",
-    note: "Button height increased from 34 to 36 px",
-    body: "Check alignment with the neighboring search field. Use 200% or 400% zoom to inspect the two-pixel edge.",
+    title: "Table density & button sizing",
+    note: "Table rows and actions lose alignment",
+    body: "The button grows by 2 px and table row spacing becomes uneven. Compare header alignment and row density with the surrounding controls.",
     rect: [720, 88, 140, 36],
   },
   {
@@ -89,9 +89,11 @@ export const checkpoints = [
   },
   {
     id: "pressed",
-    title: "New trace · Pressed",
+    title: "Status filter · Selected",
     interaction: true,
-    actions: ["hover New trace", "press New trace (held)"],
+    actions: ["click Status filter", "select Success"],
+    note: "Selected filter is taller than neighboring controls",
+    body: "The selected control grows from 32 to 52 px and its label no longer aligns with search. Compare the shared Select size and wrapper spacing.",
     rect: [720, 88, 140, 36],
   },
   {
@@ -153,10 +155,10 @@ export function snapshot(id, side) {
   content +=
     rect(195, 194, 665, 32, "#edf2f7", 4) +
     text(210, 215, "Name", 12) +
-    text(550, 215, "Status", 12) +
+    text(id === "size" && head ? 592 : 550, 215, "Status", 12) +
     text(735, 215, "Latency", 12)
   for (let i = 0; i < 6; i++) {
-    const y = 252 + i * 43
+    const y = 252 + i * (id === "size" && head ? 50 : 43)
     content += text(
       210,
       y,
@@ -169,6 +171,10 @@ export function snapshot(id, side) {
     content +=
       text(740, y, `${320 + i * 41} ms`, 12, "#62717e") +
       rect(195, y + 16, 665, 1, "#edf2f7", 0)
+  }
+  if (id === "pressed") {
+    content += rect(522, 101, 156, head ? 52 : 32, "#ffffff", 6, "#ccd5dd")
+    content += text(535, head ? 134 : 122, "Status: Success  ⌄", 12)
   }
   if (id === "dialog" || id === "filled") {
     const y = head ? 160 : 70
@@ -212,14 +218,19 @@ export function snapshot(id, side) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560"><g font-family="Arial, sans-serif">${content}</g></svg>`
 }
 
-export function makeRun(number, metrics = {}, id = ids.run) {
+export function makeRun(
+  number,
+  metrics = {},
+  id = ids.run,
+  demoOrigin = "http://127.0.0.1:4189"
+) {
   const root = `/dashboard/api/reviews/langchain-ai/langchainplus/${number}/frontend-reviews/${id}/media`
   return {
     id,
     status: "complete",
     auth_mode: "none",
-    base_url: "https://synthetic-base.invalid",
-    head_url: "https://synthetic-pr.invalid",
+    base_url: `${demoOrigin}/__demo/production`,
+    head_url: `${demoOrigin}/__demo/preview`,
     base_sha: revision.base,
     head_sha: revision.head,
     paths: [
@@ -230,18 +241,17 @@ export function makeRun(number, metrics = {}, id = ids.run) {
     updated_at: date,
     error: null,
     report: {
+      production_url: `${demoOrigin}/__demo/production`,
       summary:
-        "Scripted demo recap: the button has a subtle color shift and a 2 px height change. Check the low-contrast hover state and the dialog footer that falls below the viewport. These are authored examples, not findings from a live AI review.",
+        "Demo · Six scripted comparisons: subtle color and size changes, uneven table rows, low-contrast hover, an oversized filter, and a clipped dialog. Inspect each state below.",
       ai_review_status: "complete",
       build_verification: "unverified",
       video_status: "unavailable",
       scenarios: checkpoints.map((point) => ({
         id: point.id,
         title: point.title,
-        path:
-          point.id === "size"
-            ? "/projects/customer-support/settings"
-            : "/projects/customer-support",
+        path: `/projects/customer-support?example=${point.id}&tab=${point.interaction ? "interactions" : "traces"}`,
+
         status: "complete",
         before_url: `${root}/${point.id}-base.png`,
         after_url: `${root}/${point.id}-head.png`,

@@ -6,9 +6,9 @@
     "threshold": 0
   },
   "size": {
-    "changed_pixels": 302,
+    "changed_pixels": 26805,
     "total_pixels": 504000,
-    "changed_ratio": 0.0005992063492063492,
+    "changed_ratio": 0.05318452380952381,
     "threshold": 0
   },
   "hover": {
@@ -18,9 +18,9 @@
     "threshold": 0
   },
   "pressed": {
-    "changed_pixels": 5011,
+    "changed_pixels": 6611,
     "total_pixels": 504000,
-    "changed_ratio": 0.009942460317460317,
+    "changed_ratio": 0.013117063492063492,
     "threshold": 0
   },
   "dialog": {

@@ -122,6 +122,7 @@ class FrontendScenario(BaseModel):
 
 
 class FrontendReport(BaseModel):
+    production_url: str | None = Field(default=None, max_length=2000)
     summary: str = Field(max_length=12000)
     ai_review_status: Literal["not_run", "running", "complete", "failed"] = "not_run"
     assessment_thread_id: str | None = Field(default=None, max_length=200)

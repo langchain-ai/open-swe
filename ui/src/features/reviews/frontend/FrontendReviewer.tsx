@@ -1,9 +1,9 @@
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
-import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
+import { Link as ExternalLink } from "@langchain/macaw-components/Link"
 import { Select } from "@langchain/macaw-components/Select"
 import {
   useIsMutating,
@@ -12,6 +12,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useRef, useState } from "react"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { Link } from "@tanstack/react-router"
 
 import {
@@ -26,6 +27,7 @@ import {
 } from "./api"
 import { EvidenceViewer } from "./EvidenceViewer"
 import { AskAboutChange } from "./AskAboutChange"
+import { pageLink } from "./pageLinks"
 
 export function FrontendReviewer({
   pr,
@@ -82,36 +84,16 @@ export function FrontendReviewer({
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-space-5 p-space-5 max-sm:p-space-3">
         <div className="flex flex-wrap items-start justify-between gap-space-3">
-          <div>
-            <div className="mb-space-2 flex items-center gap-space-2">
-              <h2 className="text-lg font-semibold">Design QA</h2>
-              <Badge color="secondary" size="xs">
-                Preview
-              </Badge>
-            </div>
-            <p className="max-w-2xl text-sm text-secondary">
-              Compare the actual PR preview with its base. Inspect pixel changes
-              and the screenshot evidence behind each finding.
-            </p>
-          </div>
+          <h2 className="text-lg font-semibold">Design QA</h2>
           <div className="flex items-center gap-space-2">
             <Button
+              size="sm"
               color="secondary"
               variant="outlined"
-              size="sm"
-              onClick={() => {
-                void list.refetch()
-                if (selectedId) void detail.refetch()
-              }}
-            >
-              Refresh
-            </Button>
-            <Button
-              size="sm"
               disabled={list.isPending || starting || captureInProgress}
               onClick={() => setSetupOpen(!setupOpen)}
             >
-              {setupOpen ? "Close setup" : "New Design QA review"}
+              {setupOpen ? "Cancel" : "Capture settings"}
             </Button>
           </div>
         </div>
@@ -142,18 +124,11 @@ export function FrontendReviewer({
               </p>
             )}
             {empty && (
-              <Card className="flex flex-col items-start gap-space-3 p-space-6">
-                <h3 className="text-base font-medium">
-                  Visual evidence belongs with the code review.
-                </h3>
-                <p className="max-w-xl text-sm text-secondary">
-                  Start with matching base and PR preview URLs. Each run keeps
-                  its own screenshots, changed pixels, recordings, and coverage.
-                  No Design QA review has run for this PR yet.
-                </p>
-              </Card>
+              <p className="text-sm text-secondary">
+                No saved comparisons yet.
+              </p>
             )}
-            {list.data && list.data.runs.length > 0 && (
+            {list.data && list.data.runs.length > 1 && (
               <label className="flex items-center gap-space-3 text-xs text-secondary">
                 Review run
                 <Select
@@ -181,6 +156,7 @@ export function FrontendReviewer({
                 key={run.id}
                 run={run}
                 currentHeadSha={currentHeadSha}
+                pr={pr}
               />
             )}
           </>
@@ -234,15 +210,14 @@ function ReviewSetup({
         <div>
           <h3 className="text-sm font-medium">Capture a Design QA review</h3>
           <p className="mt-space-1 text-xs text-secondary">
-            Use the same routes, viewport, and data on both versions. Use a base
-            preview built from the PR base commit.
+            Use matching routes on the base and PR previews.
           </p>
           <p
             role="status"
             className="mt-space-2 text-xs text-warning-secondary"
           >
-            Live preview capture is not available yet. Dummy login records an
-            authentication blocker so you can check the review flow.
+            Live capture requires browser network isolation. Dummy login does
+            not sign in.
           </p>
         </div>
         <div className="grid gap-space-3 md:grid-cols-2">
@@ -297,8 +272,8 @@ function ReviewSetup({
           />
           <p className="text-xs text-secondary">
             {auth === "dummy"
-              ? "Records an authentication blocker without attempting a login or contacting the preview."
-              : "Records the browser isolation blocker without contacting the preview. Public page capture requires enforced browser network isolation."}
+              ? "Records an authentication blocker."
+              : "Records the browser isolation blocker."}
           </p>
         </div>
         {error && (
@@ -323,124 +298,86 @@ function ReviewSetup({
 export function FrontendReportView({
   run,
   currentHeadSha,
+  pr,
 }: {
   run: FrontendReviewRun
   currentHeadSha?: string | null
+  pr?: PullRequestRef
 }) {
-  const [scenarioId, setScenarioId] = useState(run.report?.scenarios[0]?.id)
-  const [changesOnly, setChangesOnly] = useState(false)
   const report = run.report
-  const comparisonRef = useRef<HTMLElement>(null)
   const scenarios = report?.scenarios ?? []
-  const changesAndIncomplete = scenarios.filter(
-    (item) =>
-      item.status !== "complete" ||
-      !item.before_url ||
-      !item.after_url ||
-      !item.metrics ||
-      item.metrics.total_pixels === 0 ||
-      item.metrics.changed_pixels > 0
+  const sections = useRef(new Map<string, HTMLElement>())
+  const notes = scenarios.flatMap((scenario) =>
+    scenario.annotations.map((note) => ({ ...note, scenario }))
   )
-  const visibleScenarios = changesOnly ? changesAndIncomplete : scenarios
-  const scenario =
-    visibleScenarios.find((item) => item.id === scenarioId) ??
-    visibleScenarios[0]
-  const interactions = scenarios.filter((item) => item.interaction)
-  const pairedInteractions = interactions.filter(
+  const paired = scenarios.filter(
     (item) => item.status === "complete" && item.before_url && item.after_url
-  ).length
-  const complete =
-    report?.scenarios.filter(
-      (item) =>
-        !item.interaction &&
-        item.status === "complete" &&
-        item.before_url &&
-        item.after_url
-    ).length ?? 0
-  const statusColor =
-    run.status === "failed"
-      ? "error"
-      : run.status === "blocked"
-        ? "warning"
-        : run.status === "complete"
-          ? "success"
-          : "secondary"
-  const reviewNotes = scenarios.flatMap((item) =>
-    item.annotations.map((note) => ({ ...note, scenario: item }))
   )
+  const routes = paired.filter((item) => !item.interaction).length
+  const interactions = scenarios.filter((item) => item.interaction)
+  const pairedInteractions = paired.filter((item) => item.interaction).length
+  const production =
+    report?.production_url ??
+    (pr?.owner === "langchain-ai" && pr.repo === "langchainplus"
+      ? "https://smith.langchain.com"
+      : undefined)
   return (
-    <div className="flex flex-col gap-space-4">
+    <div className="flex flex-col gap-space-5">
       {currentHeadSha && currentHeadSha !== run.head_sha && (
-        <Card role="status" className="p-space-4">
-          <h3 className="text-sm font-medium text-warning-secondary">
-            New PR changes have not been reviewed
-          </h3>
-          <p className="mt-space-2 text-sm text-secondary">
-            This report covers commit{" "}
-            <span className="font-mono">{run.head_sha.slice(0, 12)}</span>. The
-            current PR commit is{" "}
-            <span className="font-mono">{currentHeadSha.slice(0, 12)}</span>.
-            Start a new Design QA review to check the latest changes.
-          </p>
-        </Card>
+        <p role="status" className="text-sm text-warning-secondary">
+          New PR changes have not been reviewed · saved{" "}
+          {run.head_sha.slice(0, 7)}, current {currentHeadSha.slice(0, 7)}.
+        </p>
       )}
       {report && (
-        <Card aria-label="AI Recap" className="flex flex-col gap-space-3">
-          <div className="flex flex-wrap items-center gap-space-2">
+        <Card
+          aria-label="AI Recap"
+          className="flex flex-col gap-space-3 p-space-4"
+        >
+          <div className="flex items-center gap-space-2">
             <h3 className="text-sm font-semibold">AI Recap</h3>
-            <Badge color="secondary" size="xs">
-              {report.ai_review_status === "complete"
-                ? "Ready"
-                : report.ai_review_status === "running"
+            {report.ai_review_status !== "complete" && (
+              <Badge color="secondary" size="xs">
+                {report.ai_review_status === "running"
                   ? "Reviewing"
                   : report.ai_review_status === "failed"
                     ? "Unavailable"
                     : "Not run"}
-            </Badge>
+              </Badge>
+            )}
           </div>
-          <p className="text-sm whitespace-pre-wrap text-secondary">
+          <p className="text-sm text-secondary">
             {report.ai_review_status === "complete"
               ? report.summary
               : report.ai_review_status === "running"
-                ? "Reviewing the saved screenshots and interaction states. You can inspect the evidence while the recap is prepared."
+                ? "Reviewing captured screenshots…"
                 : report.ai_review_status === "failed"
-                  ? "The AI recap could not be prepared. Your captured evidence is still available below."
-                  : "An AI recap has not run for this review. Inspect the captured evidence below."}
+                  ? "AI review unavailable. Saved screenshots are below."
+                  : "No AI assessment yet."}
           </p>
-          {report.ai_review_status === "complete" && reviewNotes.length > 0 && (
-            <ul className="divide-y divide-default border-t border-default">
-              {reviewNotes.slice(0, 3).map((note, index) => (
-                <li
+          {report.ai_review_status === "complete" && notes.length > 0 && (
+            <div className="flex flex-wrap gap-space-2">
+              {notes.slice(0, 3).map((note, index) => (
+                <Button
                   key={`${note.scenario.id}:${index}`}
-                  className="flex items-start justify-between gap-space-3 py-space-3 last:pb-0"
+                  size="sm"
+                  color="secondary"
+                  variant="plain"
+                  aria-label={`Inspect ${note.title}`}
+                  onClick={() =>
+                    sections.current
+                      .get(note.scenario.id)
+                      ?.scrollIntoView({ block: "start", behavior: "smooth" })
+                  }
                 >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{note.title}</p>
-                    <p className="mt-space-1 text-xs text-secondary">
-                      {note.body}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    color="secondary"
-                    variant="outlined"
-                    aria-label={`Inspect ${note.title}`}
-                    onClick={() => {
-                      setChangesOnly(false)
-                      setScenarioId(note.scenario.id)
-                      comparisonRef.current?.scrollIntoView({ block: "start" })
-                    }}
-                  >
-                    Inspect
-                  </Button>
-                </li>
+                  {note.title} ↗
+                </Button>
               ))}
-            </ul>
+            </div>
           )}
           {report.assessment_error && (
             <p role="status" className="text-xs text-warning-secondary">
-              AI review: {report.assessment_error}. Captured evidence is still
-              available.
+              {report.assessment_error}
             </p>
           )}
           {report.assessment_thread_id && (
@@ -449,243 +386,161 @@ export function FrontendReportView({
               params={{ threadId: report.assessment_thread_id }}
               className="w-fit text-xs text-secondary underline underline-offset-2"
             >
-              Open AI review conversation
+              AI review conversation
             </Link>
           )}
         </Card>
       )}
-      <Card className="flex flex-col gap-space-3 p-space-4">
-        <div className="flex flex-wrap items-center gap-space-2">
-          <Badge color={statusColor} size="sm">
-            {run.status}
-          </Badge>
+      {(run.status !== "complete" || run.error) && (
+        <Card role="status" className="flex flex-col gap-space-2 p-space-4">
           <h3 className="text-sm font-medium">
-            {run.status === "running" || run.status === "pending"
-              ? run.status === "pending"
-                ? "Frontend review queued…"
-                : "Capturing paired preview evidence…"
-              : report
-                ? "Review evidence"
-                : "No visual evidence captured"}
+            {run.status === "pending"
+              ? "Frontend review queued…"
+              : run.status === "running"
+                ? "Capturing screenshots…"
+                : run.status === "blocked"
+                  ? run.auth_mode === "dummy"
+                    ? "Authentication required"
+                    : "Capture blocked"
+                  : "Capture failed"}
           </h3>
-        </div>
-        {report?.summary && report.ai_review_status !== "complete" && (
-          <p className="text-sm whitespace-pre-wrap text-secondary">
-            {report.summary}
-          </p>
-        )}
-        {run.error && (
-          <p role="status" className="text-sm text-secondary">
-            {run.error}
-          </p>
-        )}
-        <div className="flex flex-wrap gap-x-space-5 gap-y-space-2 text-xs text-secondary">
-          <span>
-            Coverage: {complete}/{run.paths.length} routes captured
-          </span>
-          <span>
-            Interactions:{" "}
-            {interactions.length > 0
-              ? `${pairedInteractions}/${interactions.length} states paired`
-              : "Not captured"}
-          </span>
-          <span>
-            AI review:{" "}
-            {report?.ai_review_status === "complete"
-              ? "Complete"
-              : report?.ai_review_status === "running"
-                ? "Reviewing screenshots…"
-                : report?.ai_review_status === "failed"
-                  ? "Failed"
-                  : "Not run"}
-          </span>
-          <span>
-            Build verification:{" "}
-            {report?.build_verification === "verified"
-              ? "Verified"
-              : "Unverified"}
-          </span>
-          <span>
-            Videos:{" "}
-            {report?.video_status === "recorded" ? "Recorded" : "Not captured"}
-          </span>
-        </div>
-        {pairedInteractions < interactions.length && (
-          <p role="status" className="text-xs text-warning-secondary">
-            Some interaction states are incomplete. This run does not cover the
-            whole planned flow.
-          </p>
-        )}
-        <details className="border-t border-default pt-space-3 text-xs text-secondary">
-          <summary className="w-fit cursor-pointer">
-            Preview and revision details
-          </summary>
-          <div className="mt-space-3 grid gap-space-2 sm:grid-cols-2">
-            <p className="min-w-0 truncate text-secondary" title={run.base_url}>
-              Base{" "}
-              <span className="font-mono text-primary">
-                {run.base_sha.slice(0, 12)}
-              </span>{" "}
-              · {run.base_url}
+          {run.error && <p className="text-sm text-secondary">{run.error}</p>}
+          {run.status === "blocked" && run.auth_mode === "dummy" && (
+            <p className="text-xs text-secondary">
+              No preview was contacted and no page was reviewed. A disposable QA
+              identity is required.
             </p>
-            <p className="min-w-0 truncate text-secondary" title={run.head_url}>
-              PR{" "}
-              <span className="font-mono text-primary">
-                {run.head_sha.slice(0, 12)}
-              </span>{" "}
-              · {run.head_url}
-            </p>
-          </div>
-        </details>
-      </Card>
-      {run.status === "blocked" && (
-        <Card className="p-space-4">
-          <h3 className="text-sm font-medium">
-            {run.auth_mode === "dummy"
-              ? "Authentication required"
-              : "Capture blocked"}
-          </h3>
-          <p className="mt-space-2 text-sm text-secondary">
-            {run.auth_mode === "dummy"
-              ? "Dummy login is intentionally unable to sign in. No preview was contacted and no page was reviewed. A private LangSmith preview needs a disposable QA identity before authenticated capture can run."
-              : "The preview could not be captured. Blocked captures do not count as visually reviewed coverage."}
-          </p>
+          )}
         </Card>
       )}
-      {report && report.build_verification !== "verified" && complete > 0 && (
-        <p className="text-xs text-warning-secondary">
-          Preview URLs have not been attested to these commits. Treat this as
-          captured evidence, not verified PR/base coverage.
-        </p>
-      )}
-      {report && (report.scenarios.length > 1 || changesOnly) && (
-        <div className="flex flex-col gap-space-3">
-          <div className="flex flex-wrap items-center gap-space-3">
-            <Checkbox
-              label="Changes and incomplete"
-              checked={changesOnly}
-              onCheckedChange={(checked) => setChangesOnly(checked === true)}
-            />
-            <p role="status" className="text-xs text-secondary">
-              Showing {visibleScenarios.length}/{scenarios.length}{" "}
-              {interactions.length > 0 ? "captures" : "routes"}
-            </p>
-          </div>
-          {[false, true].map((interaction) => {
-            const items = visibleScenarios.filter(
-              (item) => Boolean(item.interaction) === interaction
-            )
-            if (items.length === 0) return null
-            const buttons = (
-              <div
-                className="flex flex-wrap gap-space-2"
-                aria-label={
-                  interaction
-                    ? "Captured interaction states"
-                    : "Captured routes"
-                }
-              >
-                {items.map((item) => {
-                  const recordedChange =
-                    item.metrics && item.metrics.total_pixels > 0
-                      ? `${(item.metrics.changed_ratio * 100).toFixed(2)}% recorded change`
-                      : "Not compared"
+      {scenarios.map((scenario, index) => (
+        <section
+          key={scenario.id}
+          aria-label={scenario.title}
+          ref={(element) => {
+            if (element) sections.current.set(scenario.id, element)
+            else sections.current.delete(scenario.id)
+          }}
+          className="scroll-mt-space-4 min-w-0 overflow-hidden rounded-lg border border-default bg-surface-level-2"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-space-3 px-space-4 py-space-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold">
+                <span className="mr-space-2 text-secondary">{index + 1}.</span>
+                {scenario.title}
+              </h3>
+              <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-secondary">
+                {scenario.metrics && (
+                  <span title="Saved changed-pixel count; change extent is not issue severity">
+                    {(scenario.metrics.changed_ratio * 100).toFixed(2)}% changed
+                  </span>
+                )}
+                {(
+                  [
+                    ["Production", production],
+                    ["Preview", run.head_url],
+                    ["Base", run.base_url],
+                  ] as const
+                ).map(([label, origin]) => {
+                  const href = origin && pageLink(origin, scenario.path)
                   return (
-                    <Button
-                      key={item.id}
-                      color="secondary"
-                      variant={item.id === scenario?.id ? "outlined" : "plain"}
-                      size="sm"
-                      onClick={() => setScenarioId(item.id)}
-                      aria-pressed={item.id === scenario?.id}
-                      aria-label={`${item.title} · ${item.status} · ${recordedChange}`}
-                    >
-                      {item.title} · {item.status} · {recordedChange}
-                    </Button>
+                    href && (
+                      <ExternalLink
+                        key={label}
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="xs"
+                        rightDecorator={ArrowSquareOutIcon}
+                        title={href}
+                      >
+                        {label}
+                      </ExternalLink>
+                    )
                   )
                 })}
               </div>
-            )
-            return interaction ? (
-              <details
-                key="interactions"
-                className="rounded-md border border-default p-space-3"
-              >
-                <summary className="cursor-pointer text-sm font-medium">
-                  Interaction states · {pairedInteractions}/
-                  {interactions.length} paired
-                </summary>
-                <div className="pt-space-3">{buttons}</div>
-              </details>
-            ) : (
-              <div key="routes">{buttons}</div>
-            )
-          })}
-          <p className="text-xs text-secondary">
-            Route percentages use the saved capture settings. Viewer settings
-            apply only to the open screenshot comparison.
-          </p>
-          {visibleScenarios.length === 0 && (
-            <Card role="status" className="p-space-4 text-sm text-secondary">
-              No recorded changes. Clear the filter to inspect unchanged routes.
-            </Card>
-          )}
-        </div>
-      )}
-      {scenario && (
-        <section
-          ref={comparisonRef}
-          aria-label={scenario.title}
-          className="min-w-0"
-        >
-          <div className="mb-space-3 flex flex-wrap items-center gap-space-2">
-            <h3 className="text-sm font-medium">{scenario.title}</h3>
-            <span className="text-xs text-secondary">{scenario.path}</span>
-            <span className="flex-1" />
+            </div>
             <AskAboutChange
-              key={`${run.id}:${scenario.id}`}
               run={run}
               scenario={scenario}
               currentHeadSha={currentHeadSha}
             />
           </div>
-          {scenario.interaction && (
-            <div className="mb-space-3 flex flex-col gap-space-2 text-xs text-secondary">
-              <p>
-                Interaction checkpoint ·{" "}
-                {scenario.status === "complete"
-                  ? "Replayed on base and PR"
-                  : "Incomplete comparison"}
-              </p>
-              {scenario.before_error && (
-                <p role="status">Base: {scenario.before_error}</p>
-              )}
-              {scenario.after_error && (
-                <p role="status">PR: {scenario.after_error}</p>
-              )}
+          {scenario.before_error ||
+          scenario.after_error ||
+          scenario.layout_warnings?.length ? (
+            <div className="flex flex-col gap-space-1 border-t border-default px-space-4 py-space-2 text-xs text-warning-secondary">
+              {scenario.before_error && <p>Base: {scenario.before_error}</p>}
+              {scenario.after_error && <p>PR: {scenario.after_error}</p>}
               {scenario.layout_warnings?.map((warning) => (
-                <p key={warning} className="text-warning-secondary">
-                  {warning}
-                </p>
+                <p key={warning}>{warning}</p>
               ))}
-              <details>
-                <summary className="cursor-pointer">
-                  Planned replay steps
-                </summary>
+            </div>
+          ) : null}
+          <EvidenceViewer scenario={scenario} />
+          {scenario.actions?.length || scenario.annotations.length ? (
+            <details className="border-t border-default px-space-4 py-space-2 text-xs text-secondary">
+              <summary className="w-fit cursor-pointer">
+                {scenario.interaction ? "Interaction & notes" : "Review notes"}
+              </summary>
+              {scenario.actions?.length ? (
                 <ol className="mt-space-2 list-inside list-decimal">
-                  {scenario.actions?.map((action, index) => (
-                    <li key={index}>{action}</li>
+                  {scenario.actions.map((action, actionIndex) => (
+                    <li key={actionIndex}>{action}</li>
                   ))}
                 </ol>
-              </details>
-            </div>
-          )}
-          <EvidenceViewer
-            key={`${run.id}:${scenario.id}`}
-            scenario={scenario}
-          />
+              ) : null}
+              {scenario.annotations.map((note, noteIndex) => (
+                <p key={noteIndex} className="mt-space-2">
+                  <span className="font-medium text-primary">{note.title}</span>{" "}
+                  · {note.body}
+                </p>
+              ))}
+            </details>
+          ) : null}
         </section>
-      )}
+      ))}
+      <details className="text-xs text-secondary">
+        <summary className="w-fit cursor-pointer">
+          Capture details · {scenarios.length} states ·{" "}
+          {report?.build_verification === "verified"
+            ? "Build verified"
+            : "Build unverified"}
+        </summary>
+        <div className="mt-space-3 flex flex-col gap-space-2">
+          <p>
+            Coverage: {routes}/{run.paths.length} routes captured
+          </p>
+          <p>
+            Interactions: {pairedInteractions}/{interactions.length} states
+            paired
+          </p>
+          <p>
+            AI review:{" "}
+            {report?.ai_review_status === "complete"
+              ? "Complete"
+              : report?.ai_review_status === "running"
+                ? "Reviewing"
+                : report?.ai_review_status === "failed"
+                  ? "Failed"
+                  : "Not run"}
+          </p>
+          <p>
+            Base {run.base_sha.slice(0, 12)} · {run.base_url}
+          </p>
+          <p>
+            PR {run.head_sha.slice(0, 12)} · {run.head_url}
+          </p>
+          {report?.build_verification !== "verified" && (
+            <p>Preview builds have not been verified against these commits.</p>
+          )}
+          <p>
+            Recordings:{" "}
+            {report?.video_status === "recorded" ? "Available" : "Not captured"}
+          </p>
+        </div>
+      </details>
     </div>
   )
 }
@@ -693,7 +548,7 @@ export function FrontendReportView({
 function ErrorCard({ message }: { message: string }) {
   return (
     <Card role="alert" className="p-space-4 text-sm text-error-secondary">
-      Could not load Design QA review: {message}. Refresh to retry.
+      Could not load Design QA: {message}.
     </Card>
   )
 }

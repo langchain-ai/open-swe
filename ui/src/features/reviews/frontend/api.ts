@@ -51,6 +51,7 @@ export interface FrontendScenario {
 }
 
 export interface FrontendReport {
+  production_url?: string | null
   summary: string
   ai_review_status: "not_run" | "running" | "complete" | "failed"
   assessment_thread_id?: string | null

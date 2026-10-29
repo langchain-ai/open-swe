@@ -92,7 +92,7 @@ it("does not count a scenario marked complete without its paired screenshots", (
     />
   )
   expect(screen.getByText("Coverage: 0/2 routes captured")).toBeTruthy()
-  expect(screen.getByText(/does not count as visually reviewed/)).toBeTruthy()
+  expect(screen.getByText(/has not been visually compared/)).toBeTruthy()
 })
 
 it("warns when a saved report covers a different PR commit and retains the report", () => {
@@ -104,160 +104,63 @@ it("warns when a saved report covers a different PR commit and retains the repor
   const { rerender } = render(
     <FrontendReportView run={completed} currentHeadSha={"c".repeat(40)} />
   )
-  expect(screen.getByText("New PR changes have not been reviewed")).toBeTruthy()
-  expect(screen.getByText(/The current PR commit is/)).toBeTruthy()
-  expect(screen.getByText("Review evidence")).toBeTruthy()
+  expect(screen.getByText(/New PR changes have not been reviewed/)).toBeTruthy()
+  expect(screen.getByText(/Build unverified/)).toBeTruthy()
 
   rerender(<FrontendReportView run={completed} currentHeadSha={run.head_sha} />)
-  expect(screen.queryByText("New PR changes have not been reviewed")).toBeNull()
-  expect(screen.getByText("Review evidence")).toBeTruthy()
+  expect(screen.queryByText(/New PR changes have not been reviewed/)).toBeNull()
+  expect(screen.getByText(/Build unverified/)).toBeTruthy()
 })
 
-it("filters unchanged routes while preserving incomplete evidence and a sensible selection", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(null, { status: 404 })
-  )
-  const unchanged: FrontendScenario = {
-    id: "unchanged",
-    title: "Unchanged route",
-    path: "/unchanged",
+it("shows all saved states together and preserves route queries in page links", () => {
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("fixture"))
+  const media =
+    "/dashboard/api/reviews/acme/app/7/frontend-reviews/run/media/state.png"
+  const scenarios: FrontendScenario[] = Array.from({ length: 6 }, (_, i) => ({
+    id: `state-${i}`,
+    title: `State ${i}`,
+    path: `/projects/42?tab=traces&filter=success`,
     status: "complete",
-    before_url:
-      "/dashboard/api/reviews/acme/app/7/frontend-reviews/run/media/before.png",
-    after_url:
-      "/dashboard/api/reviews/acme/app/7/frontend-reviews/run/media/after.png",
+    before_url: media,
+    after_url: media,
     diff_url: null,
     mask_url: null,
     before_video_url: null,
     after_video_url: null,
     width: 100,
     height: 100,
-    metrics: {
-      changed_pixels: 0,
-      total_pixels: 10_000,
-      changed_ratio: 0,
-      threshold: 18,
-    },
+    metrics: null,
     regions: [],
     mask_rects: [],
+    annotations: [],
     tile_size: 24,
     min_region_pixels: 4,
-    annotations: [
-      {
-        x: 0,
-        y: 0,
-        width: 10,
-        height: 10,
-        title: "Check unchanged state",
-        body: "Compare the focus treatment.",
-      },
-    ],
     error: null,
-  }
-  const scenarios: FrontendScenario[] = [
-    unchanged,
-    {
-      ...unchanged,
-      id: "changed",
-      title: "Changed route",
-      metrics: {
-        ...unchanged.metrics!,
-        changed_pixels: 500,
-        changed_ratio: 0.05,
-      },
-    },
-    { ...unchanged, id: "unknown", title: "Unknown route", metrics: null },
-    {
-      ...unchanged,
-      id: "blocked",
-      title: "Blocked route",
-      status: "blocked",
-      before_url: null,
-      after_url: null,
-      metrics: null,
-    },
-    {
-      ...unchanged,
-      id: "failed",
-      title: "Failed route",
-      status: "failed",
-      before_url: null,
-      after_url: null,
-      metrics: null,
-    },
-  ]
-  const captured: FrontendReviewRun = {
-    ...run,
-    status: "complete",
-    auth_mode: "none",
-    paths: scenarios.map((scenario) => scenario.path),
-    error: null,
-    report: { ...run.report!, summary: "Saved review", scenarios },
-  }
-  const { rerender } = render(<FrontendReportView run={captured} />)
-  expect(
-    within(screen.getByLabelText("AI Recap")).queryByText("Saved review")
-  ).toBeNull()
-  expect(screen.getByRole("heading", { name: "Unchanged route" })).toBeTruthy()
-  expect(
-    screen.getByRole("button", {
-      name: "Changed route · complete · 5.00% recorded change",
-    })
-  ).toBeTruthy()
-
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Changes and incomplete" })
+    interaction: i > 1,
+  }))
+  render(
+    <FrontendReportView
+      pr={{ owner: "langchain-ai", repo: "langchainplus", number: 7 }}
+      run={{
+        ...run,
+        status: "complete",
+        error: null,
+        report: { ...run.report!, scenarios },
+      }}
+    />
   )
-  expect(screen.queryByRole("button", { name: /^Unchanged route/ })).toBeNull()
-  expect(screen.getByText("Showing 4/5 routes")).toBeTruthy()
-  expect(screen.getByRole("heading", { name: "Changed route" })).toBeTruthy()
-  for (const title of ["Unknown route", "Blocked route", "Failed route"])
+  for (const scenario of scenarios) {
+    const card = within(screen.getByRole("region", { name: scenario.title }))
     expect(
-      screen.getByRole("button", { name: new RegExp(`^${title}`) })
-    ).toBeTruthy()
-
-  rerender(
-    <FrontendReportView
-      run={{
-        ...captured,
-        report: { ...captured.report!, ai_review_status: "complete" },
-      }}
-    />
-  )
-  expect(
-    within(screen.getByLabelText("AI Recap")).getByText("Saved review")
-  ).toBeTruthy()
-  fireEvent.click(
-    screen.getAllByRole("button", { name: "Inspect Check unchanged state" })[0]!
-  )
-  expect(screen.getByRole("heading", { name: "Unchanged route" })).toBeTruthy()
-  expect(screen.getByText("Showing 5/5 routes")).toBeTruthy()
-
-  fireEvent.click(screen.getByRole("button", { name: /^Failed route/ }))
-  expect(screen.getByRole("heading", { name: "Failed route" })).toBeTruthy()
-  expect(screen.getByText("Showing 5/5 routes")).toBeTruthy()
-
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Changes and incomplete" })
-  )
-  rerender(
-    <FrontendReportView
-      run={{
-        ...captured,
-        report: {
-          ...captured.report!,
-          scenarios: [unchanged],
-        },
-      }}
-    />
-  )
-  expect(screen.getByText("Showing 0/1 routes")).toBeTruthy()
-  expect(screen.getByText(/No recorded changes. Clear the filter/)).toBeTruthy()
-  expect(screen.queryByRole("region", { name: "Failed route" })).toBeNull()
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Changes and incomplete" })
-  )
-  expect(screen.getByRole("region", { name: "Unchanged route" })).toBeTruthy()
+      card.getByRole("link", { name: "Production" }).getAttribute("href")
+    ).toBe("https://smith.langchain.com/projects/42?tab=traces&filter=success")
+    expect(
+      card.getByRole("link", { name: "Preview" }).getAttribute("href")
+    ).toBe("https://pr.example.com/projects/42?tab=traces&filter=success")
+    expect(card.getByRole("link", { name: "Base" }).getAttribute("href")).toBe(
+      "https://base.example.com/projects/42?tab=traces&filter=success"
+    )
+  }
 })
 
 it("keeps an in-flight start disabled after remount and never navigates from its unmounted form", async () => {
@@ -433,10 +336,6 @@ it("attaches the selected interaction's available image and replay context witho
   )
   expect(screen.getByText("Coverage: 1/1 routes captured")).toBeTruthy()
   expect(screen.getByText("Interactions: 0/1 states paired")).toBeTruthy()
-  fireEvent.click(screen.getByText("Interaction states · 0/1 paired"))
-  fireEvent.click(
-    screen.getByRole("button", { name: /Create dialog · Filled/ })
-  )
   expect(screen.getByText("Base: Control missing on base")).toBeTruthy()
   expect(screen.getByAltText("PR interaction state")).toBeTruthy()
   expect(
@@ -450,7 +349,11 @@ it("attaches the selected interaction's available image and replay context witho
       blob: async () => new Blob(["pr-pixels"], { type: "image/png" }),
     })
   )
-  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  fireEvent.click(
+    within(
+      screen.getByRole("region", { name: "Create dialog · Filled" })
+    ).getByRole("button", { name: "Ask about this change" })
+  )
   await waitFor(() =>
     expect(useReviewPage.getState().chatDraft?.images).toEqual([
       {
@@ -472,7 +375,6 @@ it("attaches the selected interaction's available image and replay context witho
   expect(railOpen).toBe(true)
   expect(railTab).toBe("chat")
 
-  fireEvent.click(screen.getByRole("button", { name: /^Projects · complete/ }))
   fetch.mockImplementation(async (input) =>
     Object.assign(new Response(), {
       blob: async () =>
@@ -482,7 +384,12 @@ it("attaches the selected interaction's available image and replay context witho
         ),
     })
   )
-  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Projects" })).getByRole(
+      "button",
+      { name: "Ask about this change" }
+    )
+  )
   await waitFor(() =>
     expect(
       useReviewPage
@@ -498,13 +405,21 @@ it("attaches the selected interaction's available image and replay context witho
       ? new Response(null, { status: 403 })
       : new Response(null, { status: 404 })
   )
-  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Projects" })).getByRole(
+      "button",
+      { name: "Ask about this change" }
+    )
+  )
   await waitFor(() =>
     expect(
       (
-        screen.getByRole("button", {
-          name: "Ask about this change",
-        }) as HTMLButtonElement
+        within(screen.getByRole("region", { name: "Projects" })).getByRole(
+          "button",
+          {
+            name: "Ask about this change",
+          }
+        ) as HTMLButtonElement
       ).disabled
     ).toBe(false)
   )
@@ -518,7 +433,12 @@ it("attaches the selected interaction's available image and replay context witho
         finish.push(resolve)
       })
   )
-  fireEvent.click(screen.getByRole("button", { name: "Ask about this change" }))
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Projects" })).getByRole(
+      "button",
+      { name: "Ask about this change" }
+    )
+  )
   unmount()
   await act(async () => {
     for (const resolve of finish)

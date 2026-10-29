@@ -43,7 +43,12 @@ function reset() {
       runs.set(pr.number, [])
       continue
     }
-    const run = makeRun(pr.number, metrics, pr.blocked ? ids.blocked : ids.run)
+    const run = makeRun(
+      pr.number,
+      metrics,
+      pr.blocked ? ids.blocked : ids.run,
+      `http://127.0.0.1:${port}`
+    )
     run.report.scenarios = run.report.scenarios.filter((state) =>
       pr.states.includes(state.id)
     )
@@ -184,8 +189,23 @@ const server = http.createServer((req, res) => {
     res.end()
     return
   }
+  if (/^\/__demo\/(production|preview)\//.test(path)) {
+    const point = checkpoints.find(
+      ({ id }) => id === url.searchParams.get("example")
+    )
+    if (!point) return json(res, { detail: "Unknown demo comparison" }, 404)
+    const preview = path.startsWith("/__demo/preview/")
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    })
+    res.end(
+      `<!doctype html><html><head><title>${preview ? "Preview" : "Production"} · Design QA demo</title></head><body style="margin:0;font:14px system-ui;background:#f5f8fb"><header style="padding:16px">${preview ? "Preview" : "Production"} · Fictional page · ${point.title}</header>${snapshot(point.id, preview ? "head" : "base")}</body></html>`
+    )
+    return
+  }
   if (path === "/__demo/fixtures") {
-    res.writeHead(200, { "Content-Type": "text/html" })
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
     res.end(`<html><body><h1>Synthetic screenshot sources</h1><p>Development-only fixture generation. No application was captured.</p><script type="module">
       const points = ${JSON.stringify(checkpoints.map(({ id }) => id))};
       for (const id of points) for (const side of ['base','head']) {
@@ -242,7 +262,9 @@ const server = http.createServer((req, res) => {
     /^\/dashboard\/api\/repos\/langchain-ai\/langchainplus\/pulls\/(\d+)$/
   )
   if (details) {
-    const pr = demoPullRequests.find((pr) => pr.number === Number(details[1]))
+    const pr = demoPullRequests.find(
+      (item) => item.number === Number(details[1])
+    )
     return json(res, pr ? pullRequest(pr) : null)
   }
   const match = path.match(
@@ -251,7 +273,7 @@ const server = http.createServer((req, res) => {
   if (match) {
     const number = Number(match[1]),
       suffix = match[2] ?? ""
-    const pr = demoPullRequests.find((pr) => pr.number === number)
+    const pr = demoPullRequests.find((item) => item.number === number)
     if (!pr)
       return json(
         res,
@@ -264,7 +286,12 @@ const server = http.createServer((req, res) => {
     if (suffix === "frontend-reviews") {
       if (req.method === "POST") {
         req.resume()
-        const run = makeRun(number, metrics, randomUUID())
+        const run = makeRun(
+          number,
+          metrics,
+          randomUUID(),
+          `http://127.0.0.1:${port}`
+        )
         Object.assign(run, {
           status: "pending",
           report: null,
@@ -277,7 +304,12 @@ const server = http.createServer((req, res) => {
         }, 800)
         schedule(() => {
           run.status = "complete"
-          run.report = makeRun(number, metrics, run.id).report
+          run.report = makeRun(
+            number,
+            metrics,
+            run.id,
+            `http://127.0.0.1:${port}`
+          ).report
           run.report.ai_review_status = "running"
           invalidate(number)
         }, 2200)
@@ -431,7 +463,7 @@ const server = http.createServer((req, res) => {
     return file(res, candidate)
   const shell = readFileSync(resolve(root, "_shell.html"), "utf8")
   res.writeHead(200, {
-    "Content-Type": "text/html",
+    "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
   })
   res.end(shell)
