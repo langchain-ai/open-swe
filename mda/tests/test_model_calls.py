@@ -26,7 +26,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.runtime import ExecutionInfo, Runtime
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
-from rt.cache_affinity import OpenAICacheAffinityMiddleware
+from rt.cache_affinity import CacheAffinityMiddleware
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
     ModelCallTimeoutError,
@@ -241,10 +241,7 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
     run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     static = SystemMessage(content="The graph's own instructions")
     sent: list[ModelRequest] = []
-    affinity = OpenAICacheAffinityMiddleware()
-    monkeypatch.setattr(
-        "rt.cache_affinity.get_config", lambda: {"configurable": {"thread_id": "thread"}}
-    )
+    affinity = CacheAffinityMiddleware("agent")
 
     async def handler(request: ModelRequest) -> ModelResponse:
         sent.append(request)
@@ -289,11 +286,14 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
     assert static.content == "The graph's own instructions"
 
 
-async def test_cache_affinity_stays_local_to_each_request() -> None:
-    middleware = OpenAICacheAffinityMiddleware()
+@pytest.mark.parametrize("model", [_OPENAI, _FIREWORKS])
+async def test_cache_affinity_is_shared_across_threads_not_models_or_graphs(
+    model: ChatOpenAI | ChatFireworks,
+) -> None:
+    middleware = CacheAffinityMiddleware("agent")
     requests = [
         ModelRequest(
-            model=_OPENAI,
+            model=model,
             messages=[],
             runtime=Runtime(execution_info=ExecutionInfo("", "", "", thread_id=thread)),
         )
@@ -311,24 +311,37 @@ async def test_cache_affinity_stays_local_to_each_request() -> None:
         return ModelResponse(result=[AIMessage("ok")])
 
     await asyncio.gather(*(middleware.awrap_model_call(r, handler) for r in requests))
-    assert keys["thread-a"] and keys["thread-b"] and keys["thread-a"] != keys["thread-b"]
-    assert keys[None] is None
-    assert all(r.model_settings == {} for r in requests)
-    assert "prompt_cache_key" not in _OPENAI.model_kwargs
+    assert keys["thread-a"] and len(set(keys.values())) == 1
 
+    async def different_group(request: ModelRequest) -> ModelResponse:
+        assert request.model_settings["prompt_cache_key"] != keys["thread-a"]
+        return ModelResponse(result=[AIMessage("ok")])
 
-@pytest.mark.parametrize("source", ["model", "request", "model_extra", "request_extra"])
-async def test_cache_affinity_preserves_explicit_openai_keys(
-    monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    monkeypatch.setattr(
-        "rt.cache_affinity.get_config", lambda: {"configurable": {"thread_id": "thread"}}
+    await CacheAffinityMiddleware("reviewer").awrap_model_call(requests[0], different_group)
+    await middleware.awrap_model_call(
+        requests[0].override(model=model.model_copy(update={"model_name": "other-model"})),
+        different_group,
     )
+    assert all(r.model_settings == {} for r in requests)
+    assert "prompt_cache_key" not in model.model_kwargs
+
+
+@pytest.mark.parametrize("base", [_OPENAI, _FIREWORKS])
+@pytest.mark.parametrize("source", ["model", "request", "model_extra", "request_extra"])
+async def test_cache_affinity_preserves_explicit_keys(base: BaseChatModel, source: str) -> None:
     key = {"prompt_cache_key": "explicit"}
-    model = _OPENAI.model_copy(
+    model = base.model_copy(
         update={
-            "model_kwargs": key if source == "model" else {},
-            "extra_body": key if source == "model_extra" else None,
+            "model_kwargs": key
+            if source == "model"
+            else {"extra_body": key}
+            if source == "model_extra"
+            else {},
+            **(
+                {"extra_body": key}
+                if source == "model_extra" and isinstance(base, ChatOpenAI)
+                else {}
+            ),
         }
     )
     settings = (
@@ -340,4 +353,24 @@ async def test_cache_affinity_preserves_explicit_openai_keys(
         assert selected.model_settings == settings
         return ModelResponse(result=[AIMessage("ok")])
 
-    await OpenAICacheAffinityMiddleware().awrap_model_call(request, handler)
+    await CacheAffinityMiddleware("agent").awrap_model_call(request, handler)
+
+
+@pytest.mark.parametrize(
+    "settings", [{"user": "custom"}, {"extra_headers": {"X-Session-Affinity": "custom"}}]
+)
+@pytest.mark.parametrize("on_model", [True, False])
+async def test_fireworks_explicit_session_routing_is_preserved(
+    settings: dict[str, object], on_model: bool
+) -> None:
+    request = ModelRequest(
+        model=_FIREWORKS.model_copy(update={"model_kwargs": settings if on_model else {}}),
+        messages=[],
+        model_settings={} if on_model else settings,
+    )
+
+    async def handler(selected: ModelRequest) -> ModelResponse:
+        assert "prompt_cache_key" not in selected.model_settings
+        return ModelResponse(result=[AIMessage("ok")])
+
+    await CacheAffinityMiddleware("agent").awrap_model_call(request, handler)

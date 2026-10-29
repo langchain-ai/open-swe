@@ -1,47 +1,41 @@
-"""Request-local prompt-cache routing for the selected provider."""
+"""Request-local prompt-cache routing shared by graphs using the same model."""
 
 import hashlib
-import logging
+import json
 from collections.abc import Awaitable, Callable, Mapping
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_fireworks.middleware import FireworksPromptCachingMiddleware
+from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
-from langgraph.config import get_config
 
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
-logger = logging.getLogger(__name__)
 
-
-def _thread_key(request: ModelRequest) -> str | None:
-    execution = getattr(request.runtime, "execution_info", None)
-    thread_id = getattr(execution, "thread_id", None)
-    if not isinstance(thread_id, str) or not thread_id:
-        try:
-            thread_id = get_config().get("configurable", {}).get("thread_id")
-        except RuntimeError:
-            logger.debug("No runnable config for prompt-cache affinity", exc_info=True)
-            return None
-    return (
-        hashlib.sha256(thread_id.encode()).hexdigest()
-        if isinstance(thread_id, str) and thread_id
-        else None
-    )
-
-
-def _has_cache_key(settings: Mapping[str, object]) -> bool:
+def _has_override(settings: Mapping[str, object], *, fireworks: bool) -> bool:
     extra = settings.get("extra_body")
-    return "prompt_cache_key" in settings or (
-        isinstance(extra, Mapping) and "prompt_cache_key" in extra
+    body = {**settings, **extra} if isinstance(extra, Mapping) else settings
+    if "prompt_cache_key" in body or (fireworks and "user" in body):
+        return True
+    headers = settings.get("extra_headers")
+    return (
+        fireworks
+        and headers is not None
+        and (
+            not isinstance(headers, Mapping)
+            or any(isinstance(key, str) and key.lower() == "x-session-affinity" for key in headers)
+        )
     )
 
 
-class OpenAICacheAffinityMiddleware(AgentMiddleware):
-    """Default OpenAI cache routing to this thread without changing shared models."""
+class CacheAffinityMiddleware(AgentMiddleware):
+    """Group common prefixes without storing generated settings on shared models."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
+
+    def __init__(self, graph: str) -> None:
+        super().__init__()
+        self._graph = graph
 
     async def awrap_model_call(
         self,
@@ -49,28 +43,20 @@ class OpenAICacheAffinityMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         model = request.model
-        if (
-            type(model) is ChatOpenAI
-            and not _has_cache_key(request.model_settings)
-            and not _has_cache_key(model.model_kwargs)
-            and not (model.extra_body is not None and "prompt_cache_key" in model.extra_body)
-            and (key := _thread_key(request)) is not None
+        if type(model) is not ChatOpenAI and type(model) is not ChatFireworks:
+            return await handler(request)
+        fireworks = isinstance(model, ChatFireworks)
+        settings = dict(model.model_kwargs)
+        if isinstance(model, ChatOpenAI) and model.extra_body is not None:
+            settings["extra_body"] = model.extra_body
+        if not any(
+            _has_override(s, fireworks=fireworks) for s in (settings, request.model_settings)
         ):
+            group = json.dumps(
+                ["open-swe-prefix-v1", self._graph, type(model).__name__, model.model_name]
+            )
+            key = hashlib.sha256(group.encode()).hexdigest()
             request = request.override(
                 model_settings={**request.model_settings, "prompt_cache_key": key}
             )
         return await handler(request)
-
-
-class FireworksCacheAffinityMiddleware(FireworksPromptCachingMiddleware):
-    """Use the integration's context-local affinity without tracing request inputs."""
-
-    trace_policy = MIDDLEWARE_TRACE_POLICY
-
-
-def cache_affinity() -> list[AgentMiddleware]:
-    """Run inside model selection so each primary or fallback gets its own defaults."""
-    return [
-        OpenAICacheAffinityMiddleware(),
-        FireworksCacheAffinityMiddleware(unsupported_model_behavior="ignore"),
-    ]
