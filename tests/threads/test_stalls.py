@@ -20,19 +20,20 @@ _SLACK: dict[str, JsonValue] = {
 
 
 class _Mda:
-    """MDA as a frozen run leaves it: still running, whatever it is told."""
+    """MDA with frozen workers: a running run ignores its cancel; a pending one is dropped."""
 
-    def __init__(self, runs: dict[str, MdaRun], settled: dict[str, RunStatus]) -> None:
+    def __init__(self, runs: dict[str, list[MdaRun]], settled: dict[str, RunStatus]) -> None:
         self.runs = runs
         self.settled = settled
         self.cancelled: list[str] = []
 
-    async def active_run(self, thread_id: str) -> MdaRun | None:
-        return self.runs.get(thread_id)
+    async def active_runs(self, thread_id: str) -> list[MdaRun]:
+        runs = self.runs[thread_id]
+        return [run for run in runs if run.status == "running" or run.run_id not in self.cancelled]
 
     async def run(self, thread_id: str, run_id: str) -> MdaRun | None:
-        run = self.runs[thread_id]
-        ended = self.settled.get(thread_id)
+        run = next(run for run in self.runs[thread_id] if run.run_id == run_id)
+        ended = self.settled.get(run_id)
         return run.model_copy(update={"status": ended}) if ended else run
 
     async def cancel(self, thread_id: str, run_id: str) -> bool:
@@ -80,11 +81,11 @@ async def test_a_run_that_stopped_responding_is_failed_once(
         await _busy(thread_id, long_ago)
     mda = _Mda(
         {
-            thread_id: MdaRun(run_id=f"run-{thread_id}", status="running", created_at=long_ago)
+            thread_id: [MdaRun(run_id=f"run-{thread_id}", status="running", created_at=long_ago)]
             for thread_id in ("frozen", "finished", "working")
         },
         # Its real completion lands between the sweep finding it and failing it.
-        settled={"finished": "success"},
+        settled={"run-finished": "success"},
     )
     activity = {"run-working": datetime.now(UTC) - timedelta(minutes=10)}
 
@@ -117,3 +118,18 @@ async def test_a_run_that_stopped_responding_is_failed_once(
     reply.assert_awaited_once()
     assert reply.await_args is not None
     assert "stopped responding" in reply.await_args.args[2]
+
+    # The person resends; it queues behind the frozen run, which never let go.
+    resent = datetime.now(UTC) - timedelta(hours=2)
+    mda.runs["frozen"].append(MdaRun(run_id="run-resend", status="pending", created_at=resent))
+    await index.set_status("frozen", "busy")
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE thread_index SET status_since = :since WHERE thread_id = 'frozen'"),
+            {"since": resent},
+        )
+    assert await stalls.fail_stalled_runs() == 1
+    assert mda.cancelled == ["run-frozen", "run-resend"]
+    assert reply.await_count == 2
+    frozen = await index.get("frozen")
+    assert frozen is not None and frozen.status == "error"

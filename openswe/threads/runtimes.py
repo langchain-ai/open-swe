@@ -195,16 +195,16 @@ class MdaRuntime:
         response.raise_for_status()
         return MdaRun.model_validate(response.json())
 
-    async def active_run(self, thread_id: str) -> MdaRun | None:
-        """The run the thread is on: the running one, else the oldest still waiting to start."""
+    async def active_runs(self, thread_id: str) -> list[MdaRun]:
+        """The thread's unfinished runs in the order they hold it: running, then pending oldest first."""
+        active: list[MdaRun] = []
         for status in ("running", "pending"):
             response = await self.http.get(
                 f"/threads/{thread_id}/runs", params={"status": status, "limit": 10}
             )
             response.raise_for_status()
-            if runs := _runs.validate_python(response.json()):
-                return min(runs, key=lambda run: run.created_at)
-        return None
+            active += sorted(_runs.validate_python(response.json()), key=lambda run: run.created_at)
+        return active
 
     async def run_payload(
         self,

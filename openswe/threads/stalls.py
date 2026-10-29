@@ -34,6 +34,10 @@ _ERROR: Final[dict[str, JsonValue]] = {
 }
 
 
+def _claim_key(thread_id: str, run_id: str) -> str:
+    return f"{thread_id}:{run_id}"
+
+
 @dataclass(frozen=True)
 class StalledRun:
     """A thread's active run that has gone quiet past ``STALLED_AFTER``."""
@@ -44,9 +48,18 @@ class StalledRun:
 
     @classmethod
     async def find(cls, thread: IndexedThread, now: datetime) -> Self | None:
-        run = await RUNTIMES.mda_runtime.active_run(thread.thread_id)
-        if run is None:
-            return None
+        """The run holding the thread, if quiet too long.
+
+        A run already failed that ignored its cancel is passed over, so a resend
+        queued behind it is timed on its own instead of waiting unseen.
+        """
+        for run in await RUNTIMES.mda_runtime.active_runs(thread.thread_id):
+            if not await event_claims.held(_CLAIM_SCOPE, _claim_key(thread.thread_id, run.run_id)):
+                return await cls._if_quiet(thread, run, now)
+        return None
+
+    @classmethod
+    async def _if_quiet(cls, thread: IndexedThread, run: MdaRun, now: datetime) -> Self | None:
         activity = await last_run_activity(thread.thread_id, run.run_id)
         quiet_since = max(run.created_at, activity) if activity else run.created_at
         return cls(thread, run, quiet_since) if now - quiet_since >= STALLED_AFTER else None
@@ -65,7 +78,7 @@ class StalledRun:
         ``False`` when another sweep holds it, or it ended on its own meanwhile, in
         which case its webhook reports the real outcome.
         """
-        key = f"{self.thread_id}:{self.run_id}"
+        key = _claim_key(self.thread_id, self.run_id)
         if not await event_claims.claim(_CLAIM_SCOPE, key, ttl=_CLAIM_TTL):
             return False
         mda = RUNTIMES.mda_runtime
@@ -107,9 +120,13 @@ class StalledRun:
         # Reported before cancelling, so a cancel the run acts on finds its turn closed.
         await mda.cancel(self.thread_id, self.run_id)
         if await refresh_thread_status(self.thread_id) == "busy":
-            still = await mda.active_run(self.thread_id)
-            if still is not None and still.run_id == self.run_id:
-                # A run frozen past cancelling keeps reporting busy; the index stops showing it.
+            # A run frozen past cancelling keeps reporting busy; the index stops showing it.
+            for run in await mda.active_runs(self.thread_id):
+                if not await event_claims.held(
+                    _CLAIM_SCOPE, _claim_key(self.thread_id, run.run_id)
+                ):
+                    break
+            else:
                 await index.set_status(self.thread_id, "error")
         return True
 
