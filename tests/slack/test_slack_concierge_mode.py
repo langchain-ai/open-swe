@@ -135,6 +135,15 @@ async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> 
     assert request.reply_thread_ts == "1786573300.000000"
 
 
+async def test_a_reply_in_a_btw_dm_thread_stays_in_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_routes, "continues_in_dm", AsyncMock(return_value=True))
+
+    request = await _queued_request(_dm_payload("Ev-dm-btw", thread_ts="1786573300.000000"))
+
+    assert request.thread_ts == "1786573300.000000"
+    assert request.concierge_mode is False
+
+
 async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

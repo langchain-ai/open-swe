@@ -228,6 +228,8 @@ from openswe.tools import (
     slack_add_reaction,
     slack_attach_html,
     slack_breakout_thread,
+    slack_btw_answer,
+    slack_btw_ask_in_dm,
     slack_list_channel_members,
     slack_list_channels,
     slack_move_thread,
@@ -725,6 +727,8 @@ AGENT_TOOLS: Final = (
     slack_read_thread_messages,
     slack_reply,
     slack_breakout_thread,
+    slack_btw_answer,
+    slack_btw_ask_in_dm,
     slack_start_review_channel,
     submit_thread_feedback,
     suggest_task,
@@ -1822,6 +1826,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_read_thread_messages,
         slack_reply,
         slack_breakout_thread,
+        slack_btw_answer,
+        slack_btw_ask_in_dm,
         slack_start_review_channel,
     ]
     withheld = [
@@ -1837,6 +1843,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" and not stop_summary_mode else (worktree_handoff,)),
         *(() if _writes_database_rows() else (write_database_rows,)),
+        # A `/btw` question moves to its asker's DM, and is answered from there.
+        *(() if slack_ask_mode and cfg.slack_by_the_way_thread_ts else (slack_btw_ask_in_dm,)),
+        *(() if cfg.slack_btw_follow_up is True else (slack_btw_answer,)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
