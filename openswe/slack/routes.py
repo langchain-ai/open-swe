@@ -29,7 +29,6 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
-from openswe.slack.by_the_way import continues_in_dm
 from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
@@ -664,12 +663,7 @@ async def slack_webhook(
     # conversation for as long as it exists, so every message routes to the same
     # agent thread rather than opening a Slack thread per request. Everyone else
     # keeps a thread per message. Untagged messages count as requests in a DM either way.
-    # A reply in the DM thread a `/btw` question continues in stays in that thread.
-    in_concierge_mode = (
-        in_dm_channel
-        and await User.concierge_mode_for_slack(user_id)
-        and not (reply_thread_ts and await continues_in_dm(channel_id, reply_thread_ts))
-    )
+    in_concierge_mode = in_dm_channel and await User.concierge_mode_for_slack(user_id)
     if in_concierge_mode:
         thread_ts = CONCIERGE_TS
 

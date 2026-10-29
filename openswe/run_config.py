@@ -162,6 +162,8 @@ class RunConfig(BaseModel):
     stop_summary: bool | None = None
     slack_ask: bool | None = None
     slack_kickoff_eligible: bool | None = None
+    # A turn in the DM a `/btw` question continues in, before its answer is posted.
+    slack_btw_follow_up: bool | None = None
     # First run of a thread broken out from another Slack thread.
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
@@ -169,8 +171,6 @@ class RunConfig(BaseModel):
     # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None
-    # A turn in the DM a `/btw` question continues in, before its answer is posted.
-    slack_btw_follow_up: bool | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 

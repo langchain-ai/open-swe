@@ -38,7 +38,7 @@ from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from openswe.slack.by_the_way import ByTheWayFollowUp
+from openswe.slack.by_the_way import ByTheWayDm
 from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
@@ -1196,24 +1196,20 @@ async def _process_slack_mention_impl(
         if dm_origin is not None
         else ""
     )
-    # The asker's reply in the DM a `/btw` question continues in.
-    btw_follow_up = (
-        await ByTheWayFollowUp.at(thread_id, channel_id, thread_ts, user_id)
-        if is_dm_channel(channel_context) and not concierge_mode and allowed_bot is None
+    # The asker's reply in the DM a `/btw` question continues in, under the bot's DM.
+    btw_dm = (
+        await ByTheWayDm.at(thread_id, channel_id, thread_ts, user_id)
+        if is_dm_channel(channel_context) and event_ts != thread_ts and allowed_bot is None
         else None
     )
-    btw_waiting = btw_follow_up is not None and not btw_follow_up.dm.answered
+    btw_waiting = btw_dm is not None and not btw_dm.answered
     turn_context = "\n\n".join(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
-            prompt(
-                "slack/btw-follow-up",
-                dm=btw_follow_up.dm,
-                asked_by=user_name or f"<@{user_id}>",
-            )
-            if btw_follow_up is not None and btw_waiting
+            prompt("slack/btw-follow-up", dm=btw_dm, asked_by=user_name or f"<@{user_id}>")
+            if btw_waiting
             else "",
             request.turn_context,
             prompt("runs/slack-review-request", pull_request=review_card.pull_request)
@@ -1231,7 +1227,7 @@ async def _process_slack_mention_impl(
         "source": "slack",
         "slack_kickoff_eligible": False,
     }
-    if btw_follow_up is not None:
+    if btw_dm is not None:
         # The thread keeps the `/btw` run's configurable; a turn here answers in the DM.
         configurable.update(
             slack_ask=False, slack_by_the_way_thread_ts="", slack_btw_follow_up=btw_waiting

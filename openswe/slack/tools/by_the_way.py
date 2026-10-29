@@ -1,94 +1,60 @@
 """The tools that finish a `/btw` question in the asker's DM (``openswe.slack.by_the_way``)."""
 
-import logging
 from typing import Any
 
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
-from openswe.slack.by_the_way import ByTheWayDm, thread_metadata
+from openswe.slack.by_the_way import ByTheWayDm
 from openswe.slack.client import SlackThreadMappingError, get_slack_permalink
 from openswe.slack.dm import post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id
-from openswe.slack.tools.reply import post_by_the_way_answer
-from openswe.source_context import SourceContext
-
-logger = logging.getLogger(__name__)
-
-_QUESTION_MAX_CHARS = 2800
-_ALREADY_POSTED = "the /btw answer was already posted"
+from openswe.slack.tools.reply import _by_the_way_reply  # noqa: PLC2701
 
 
 async def slack_btw_ask_in_dm(message: str) -> dict[str, Any]:
     """Implement the `slack_btw_ask_in_dm` tool."""
     cfg = RunConfig.from_runtime()
-    slack = cfg.slack_thread
-    thread_id = cfg.thread_id or ""
     asked_in = cfg.slack_by_the_way_thread_ts or ""
-    if cfg.slack_ask is not True or not asked_in or slack is None or not thread_id:
+    if cfg.slack_ask is not True or not asked_in or cfg.slack_thread is None or not cfg.thread_id:
         return {"success": False, "error": "Only a /btw question continues in a DM"}
-    question = message.strip()
-    if not question:
+    if not message.strip():
         return {"success": False, "error": "message is required"}
-    if len(question) > _QUESTION_MAX_CHARS:
-        return {"success": False, "error": "message is too long", "max_chars": _QUESTION_MAX_CHARS}
-    if ByTheWayDm.of(await thread_metadata(thread_id)) is not None:
-        return {
-            "success": False,
-            "error": "This question already continues in a DM",
-            "hint": "End the run; the asker answers there.",
-        }
-    permalink = (
-        await get_slack_permalink(slack.channel_id, cfg.slack_by_the_way_message_ts or asked_in)
-        or ""
-    )
+    if await ByTheWayDm.of(cfg.thread_id) is not None:
+        return {"success": False, "error": "This question already continues in a DM"}
+    channel_id = cfg.slack_thread.channel_id
+    permalink = await get_slack_permalink(channel_id, asked_in) or ""
     try:
         dm_channel, dm_ts = await post_dm(
-            slack.triggering_user_id,
-            prompt("slack/btw-dm-question", question=question, permalink=permalink),
+            cfg.slack_thread.triggering_user_id,
+            prompt("slack/btw-dm-question", question=message.strip(), permalink=permalink),
         )
-    except SlackRequestError as exc:
-        return {"success": False, "error": exc.code or "DM failed", "slack_error": exc.code}
-    # Recorded before the DM thread is bound, so its first reply already finds the question.
-    await ByTheWayDm(
-        channel_id=dm_channel, thread_ts=dm_ts, question=question, permalink=permalink
-    ).save(thread_id)
-    try:
-        await bind_slack_thread_id(dm_channel, dm_ts, thread_id)
-    except SlackThreadMappingError:
-        logger.exception(
-            "Could not bind the /btw DM to its thread", extra={"agent_thread_id": thread_id}
-        )
-        return {"success": False, "error": "Could not link the DM to this question"}
-    return {
-        "success": True,
-        "hint": (
-            "The asker answers in the DM, which continues this thread. "
-            "Post nothing in the thread the question was asked in; end the run."
-        ),
-    }
+        # Recorded before the DM thread is bound, so its first reply already finds it.
+        await ByTheWayDm(
+            channel_id=dm_channel, thread_ts=dm_ts, question=message.strip(), permalink=permalink
+        ).save(cfg.thread_id)
+        await bind_slack_thread_id(dm_channel, dm_ts, cfg.thread_id)
+    except (SlackRequestError, SlackThreadMappingError) as exc:
+        return {"success": False, "error": f"Could not continue in a DM: {exc}"}
+    return {"success": True, "hint": "The asker answers in the DM; post nothing else, end the run."}
 
 
 async def slack_btw_answer(message: str) -> dict[str, Any]:
     """Implement the `slack_btw_answer` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id or ""
-    metadata = await thread_metadata(thread_id) if thread_id else {}
-    dm = ByTheWayDm.of(metadata)
+    found = await ByTheWayDm.of(thread_id) if thread_id else None
     here = cfg.slack_thread
-    if dm is None or dm.answered or here is None or not dm.is_at(here.channel_id, here.thread_ts):
+    if found is None or here is None:
         return {"success": False, "error": "No /btw question is waiting for its answer here"}
-    asked_in = SourceContext.from_metadata(metadata)
-    result = await post_by_the_way_answer(
-        thread_id,
-        asked_in.slack_thread.channel_id if asked_in.slack_thread else "",
-        asked_in.slack_by_the_way_thread_ts or "",
-        asked_in.slack_by_the_way_message_ts,
-        message,
+    dm, asked_in = found
+    if dm.answered or (dm.channel_id, dm.thread_ts) != (here.channel_id, here.thread_ts):
+        return {"success": False, "error": "No /btw question is waiting for its answer here"}
+    # Answered as the `/btw` run itself would: where, and how, its source context says.
+    as_asked = RunConfig.parse({**cfg.dump(), **asked_in.dump()})
+    result = await _by_the_way_reply(
+        as_asked, asked_in.slack_by_the_way_thread_ts or "", message, "final", None, None
     )
-    if result.get("success") is True or result.get("error") == _ALREADY_POSTED:
-        # Detached: the DM is the asker's own conversation from here on.
+    if result.get("success") is True or result.get("error") == "the /btw answer was already posted":
         await dm.model_copy(update={"answered": True}).save(thread_id)
-    if result.get("success") is True:
-        result["hint"] = "Posted. Tell the asker in this DM, with a link to the thread."
     return result

@@ -16,30 +16,14 @@ _ASKED_IN = {
     "slack_by_the_way_thread_ts": "100.1",
     "slack_by_the_way_message_ts": "100.2",
 }
+_IN_DM = {
+    "slack_ask": False,
+    "slack_by_the_way_thread_ts": "",
+    "slack_thread": {"channel_id": "D1", "thread_ts": "200.1", "triggering_user_id": "U1"},
+}
 
 
-class _Threads:
-    """One thread's metadata, as the thread index keeps it."""
-
-    def __init__(self) -> None:
-        self.metadata: dict[str, Any] = {"source_context": dict(_ASKED_IN)}
-
-    async def get(self, _thread_id: str) -> SimpleNamespace:
-        return SimpleNamespace(metadata=self.metadata)
-
-    async def update(self, _thread_id: str, metadata: dict[str, Any]) -> None:
-        self.metadata = {**self.metadata, **metadata}
-
-
-@pytest.fixture
-def threads(monkeypatch: pytest.MonkeyPatch) -> _Threads:
-    store = _Threads()
-    monkeypatch.setattr(by_the_way, "THREADS", store)
-    monkeypatch.setattr(by_the_way.index, "get", store.get)
-    return store
-
-
-def _run(monkeypatch: pytest.MonkeyPatch, **configurable: object) -> None:
+def _run(monkeypatch: pytest.MonkeyPatch, configurable: dict[str, Any]) -> None:
     monkeypatch.setattr(
         "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "t-1", **configurable}},
@@ -47,111 +31,71 @@ def _run(monkeypatch: pytest.MonkeyPatch, **configurable: object) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_btw_question_asked_in_dm_is_answered_once_where_it_was_asked(
-    monkeypatch: pytest.MonkeyPatch, threads: _Threads
+async def test_a_btw_question_continues_in_dm_and_is_answered_once_where_asked(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    metadata: dict[str, Any] = {"source_context": dict(_ASKED_IN)}
+
+    async def update(_thread_id: str, values: dict[str, Any]) -> None:
+        metadata.update(values)
+
+    monkeypatch.setattr(
+        by_the_way.index, "get", AsyncMock(return_value=SimpleNamespace(metadata=metadata))
+    )
+    monkeypatch.setattr(by_the_way.THREADS, "update", update)
     post_dm = AsyncMock(return_value=("D1", "200.1"))
     bind = AsyncMock()
     monkeypatch.setattr(btw_tools, "post_dm", post_dm)
     monkeypatch.setattr(btw_tools, "bind_slack_thread_id", bind)
     monkeypatch.setattr(btw_tools, "get_slack_permalink", AsyncMock(return_value="https://p"))
-    _run(monkeypatch, **_ASKED_IN)
 
-    asked = await btw_tools.slack_btw_ask_in_dm("Which environment do you mean?")
-
-    assert asked["success"] is True
+    _run(monkeypatch, {**_ASKED_IN, "slack_by_the_way_thread_ts": ""})  # `/oswe`, not `/btw`
+    assert (await btw_tools.slack_btw_ask_in_dm("Which one?"))["success"] is False
+    _run(monkeypatch, _ASKED_IN)
+    assert (await btw_tools.slack_btw_ask_in_dm("Which environment?"))["success"] is True
     assert post_dm.await_args.args[0] == "U1"
-    assert "Which environment do you mean?" in post_dm.await_args.args[1]
     bind.assert_awaited_once_with("D1", "200.1", "t-1")
-    assert (await btw_tools.slack_btw_ask_in_dm("again?"))["success"] is False
+    assert (await btw_tools.slack_btw_ask_in_dm("Again?"))["success"] is False
 
-    # Only the asker's replies in that DM thread continue the question.
-    assert await by_the_way.ByTheWayFollowUp.at("t-1", "D1", "200.1", "U1") is not None
-    assert await by_the_way.ByTheWayFollowUp.at("t-1", "D1", "200.1", "U2") is None
-    assert await by_the_way.ByTheWayFollowUp.at("t-1", "D1", "999.9", "U1") is None
-    monkeypatch.setattr(by_the_way, "lookup_slack_thread_id", AsyncMock(return_value="t-1"))
-    assert await by_the_way.continues_in_dm("D1", "200.1") is True
+    # Only the asker's own replies in that DM thread continue the question.
+    assert await by_the_way.ByTheWayDm.at("t-1", "D1", "200.1", "U1") is not None
+    assert await by_the_way.ByTheWayDm.at("t-1", "D1", "200.1", "U2") is None
+    assert await by_the_way.ByTheWayDm.at("t-1", "D1", "999.9", "U1") is None
 
     post = AsyncMock(return_value="100.9")
-    remove_reaction = AsyncMock()
-    monkeypatch.setattr(slack_reply.event_claims, "claim", AsyncMock(side_effect=[True, False]))
+    monkeypatch.setattr(slack_reply.event_claims, "claim", AsyncMock(return_value=True))
     monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
-    monkeypatch.setattr(slack_reply, "remove_slack_reaction", remove_reaction)
+    # Gone once `/btw` replies "Working.." instead of reacting (#4755).
+    monkeypatch.setattr(slack_reply, "remove_slack_reaction", AsyncMock(), raising=False)
     monkeypatch.setattr(slack_reply, "settle_slack_thread_status", AsyncMock())
-    _run(
-        monkeypatch,
-        slack_ask=False,
-        slack_by_the_way_thread_ts="",
-        slack_btw_follow_up=True,
-        slack_thread={"channel_id": "D1", "thread_ts": "200.1", "triggering_user_id": "U1"},
-    )
+    _run(monkeypatch, {**_IN_DM, "slack_thread": {"channel_id": "D1", "thread_ts": "300.1"}})
+    assert (await btw_tools.slack_btw_answer("Staging"))["success"] is False
+    _run(monkeypatch, _IN_DM)
 
-    answered = await btw_tools.slack_btw_answer("Staging runs the migration first.")
-
-    assert answered["success"] is True
-    assert post.await_args.args == ("C1", "100.1", "Staging runs the migration first.")
-    remove_reaction.assert_awaited_once_with("C1", "100.2", "hourglass_flowing_sand")
+    assert (await btw_tools.slack_btw_answer("Staging runs it first."))["success"] is True
+    assert post.await_args.args[:3] == ("C1", "100.1", "Staging runs it first.")
     # Detached: nothing more from this DM reaches the thread it was asked in.
-    assert threads.metadata[by_the_way.METADATA_KEY]["answered"] is True
-    assert (await btw_tools.slack_btw_answer("more"))["success"] is False
-    assert await by_the_way.continues_in_dm("D1", "200.1") is False
+    assert metadata[by_the_way.METADATA_KEY]["answered"] is True
+    assert (await btw_tools.slack_btw_answer("More"))["success"] is False
     post.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "configurable",
-    [
-        {**_ASKED_IN, "slack_by_the_way_thread_ts": ""},
-        {**_ASKED_IN, "slack_ask": False},
-    ],
-    ids=["oswe-command", "not-an-ask"],
-)
-async def test_only_a_btw_question_moves_to_a_dm(
-    monkeypatch: pytest.MonkeyPatch, threads: _Threads, configurable: dict[str, object]
-) -> None:
-    post_dm = AsyncMock()
-    monkeypatch.setattr(btw_tools, "post_dm", post_dm)
-    _run(monkeypatch, **configurable)
-
-    assert (await btw_tools.slack_btw_ask_in_dm("Which one?"))["success"] is False
-    post_dm.assert_not_awaited()
-    assert by_the_way.METADATA_KEY not in threads.metadata
-
-
-@pytest.mark.asyncio
-async def test_the_answer_posts_only_from_the_dm_the_question_continues_in(
-    monkeypatch: pytest.MonkeyPatch, threads: _Threads
-) -> None:
-    threads.metadata[by_the_way.METADATA_KEY] = {"channel_id": "D1", "thread_ts": "200.1"}
-    post = AsyncMock()
-    monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
-    _run(monkeypatch, slack_thread={"channel_id": "D1", "thread_ts": "300.1"})
-
-    assert (await btw_tools.slack_btw_answer("answer"))["success"] is False
-    post.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("answered", [False, True])
-async def test_a_reply_in_the_dm_answers_there_not_where_the_question_was_asked(
+async def test_a_reply_in_the_dm_answers_there(
     monkeypatch: pytest.MonkeyPatch, answered: bool
 ) -> None:
     from openswe.run_config import RunConfig
     from openswe.slack import webhook as slack_webhook
     from openswe.slack.payloads import SlackChannelContext
     from openswe.slack.request import SlackRequest
-    from openswe.source_context import SourceContext
     from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
     _setup_slack_mention_fakes(monkeypatch, {})
-    follow_up = by_the_way.ByTheWayFollowUp(
-        dm=by_the_way.ByTheWayDm(
-            channel_id="D1", thread_ts="200.1", question="Which environment?", answered=answered
-        ),
-        asked_in=SourceContext.model_validate(_ASKED_IN),
+    dm = by_the_way.ByTheWayDm(
+        channel_id="D1", thread_ts="200.1", question="Which environment?", answered=answered
     )
-    monkeypatch.setattr(slack_webhook.ByTheWayFollowUp, "at", AsyncMock(return_value=follow_up))
+    monkeypatch.setattr(slack_webhook.ByTheWayDm, "at", AsyncMock(return_value=dm))
     dispatch = AsyncMock(return_value={})
     monkeypatch.setattr(slack_webhook, "_dispatch_or_queue_slack_run", dispatch)
     request = SlackRequest(

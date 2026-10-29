@@ -1,99 +1,55 @@
-"""A `/btw` question finished in the asker's DM: asked there, answered once where it was asked.
+"""A `/btw` question finished in the asker's DM, then answered once where it was asked.
 
-A `/btw` run posts one public answer and ends. When it can't answer without asking
-the asker something, it never posts a partial answer: it DMs the asker instead
-(``slack_btw_ask_in_dm``), and the DM's Slack thread is bound to the same private
-agent thread, so each reply there continues the question. Once the answer is
-complete, ``slack_btw_answer`` posts it in the thread it was asked in, the one
-reservation every `/btw` answer takes, and detaches the DM: later turns there are
-the asker's private conversation and can no longer post to that thread.
-
-The thread's metadata records the DM (``slack_btw_dm``); its ``source_context``
-keeps where the question was asked, which no later turn repoints.
+``slack_btw_ask_in_dm`` DMs the asker and binds that DM thread to the question's own
+private agent thread, which records it here (``slack_btw_dm``). Replies there continue
+the question; ``slack_btw_answer`` posts the answer where it was asked, as any `/btw`
+answer is posted, and marks the DM answered: from then on it is the asker's own
+conversation.
 """
 
-import logging
-from collections.abc import Mapping
 from typing import Self
 
-from pydantic import BaseModel, JsonValue, ValidationError
+from pydantic import BaseModel, ValidationError
 
-from openswe.slack.records import lookup_slack_thread_id
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.store import THREADS
-
-logger = logging.getLogger(__name__)
 
 METADATA_KEY = "slack_btw_dm"
 
 
 class ByTheWayDm(BaseModel):
-    """The DM thread a `/btw` question continues in, and whether its answer was posted."""
+    """The DM thread a `/btw` question continues in."""
 
     channel_id: str
     thread_ts: str
     question: str = ""
-    # The Slack thread the question was asked in, for the asker and the model.
+    # Where the question was asked.
     permalink: str = ""
     answered: bool = False
 
     @classmethod
-    def of(cls, metadata: Mapping[str, JsonValue]) -> Self | None:
-        raw = metadata.get(METADATA_KEY)
-        if not isinstance(raw, dict):
+    async def of(cls, thread_id: str) -> tuple[Self, SourceContext] | None:
+        """The DM ``thread_id`` continues in, and where its question was asked."""
+        thread = await index.get(thread_id)
+        raw = thread.metadata.get(METADATA_KEY) if thread is not None else None
+        if thread is None or not isinstance(raw, dict):
             return None
         try:
-            return cls.model_validate(raw)
+            return cls.model_validate(raw), SourceContext.from_metadata(thread.metadata)
         except ValidationError:
-            logger.warning("Unparseable /btw DM record, ignoring", exc_info=True)
             return None
-
-    def is_at(self, channel_id: str, thread_ts: str) -> bool:
-        return (self.channel_id, self.thread_ts) == (channel_id, thread_ts)
-
-    async def save(self, thread_id: str) -> None:
-        await THREADS.update(thread_id, {METADATA_KEY: self.model_dump(mode="json")})
-
-
-async def thread_metadata(thread_id: str) -> dict[str, JsonValue]:
-    """The thread's metadata as the thread index keeps it; empty for an unknown thread.
-
-    A `/btw` thread is always indexed, so a DM thread new to the index is none.
-    """
-    thread = await index.get(thread_id)
-    return {} if thread is None else thread.metadata
-
-
-class ByTheWayFollowUp(BaseModel):
-    """A turn in the DM a `/btw` question continues in."""
-
-    dm: ByTheWayDm
-    asked_in: SourceContext
 
     @classmethod
     async def at(cls, thread_id: str, channel_id: str, thread_ts: str, user_id: str) -> Self | None:
-        """The `/btw` question ``thread_id`` continues in this DM thread, if any.
-
-        Only the asker's own messages count: the DM is theirs, and so is the agent thread.
-        """
-        metadata = await thread_metadata(thread_id)
-        dm = ByTheWayDm.of(metadata)
-        asked_in = SourceContext.from_metadata(metadata)
-        asker = asked_in.slack_thread.triggering_user_id if asked_in.slack_thread else ""
-        if dm is None or not dm.is_at(channel_id, thread_ts) or not user_id or asker != user_id:
+        """The DM a message there continues, when it is the asker's own."""
+        found = await cls.of(thread_id)
+        if found is None:
             return None
-        return cls(dm=dm, asked_in=asked_in)
+        dm, asked_in = found
+        asker = asked_in.slack_thread.triggering_user_id if asked_in.slack_thread else ""
+        here = (dm.channel_id, dm.thread_ts) == (channel_id, thread_ts)
+        return dm if here and user_id and asker == user_id else None
 
-
-async def continues_in_dm(channel_id: str, thread_ts: str) -> bool:
-    """Whether this DM thread continues a `/btw` question still waiting for its answer.
-
-    A concierge DM routes every message to one conversation; a reply in this thread
-    stays in it instead, so it reaches the question.
-    """
-    thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
-    if thread_id is None:
-        return False
-    dm = ByTheWayDm.of(await thread_metadata(thread_id))
-    return dm is not None and not dm.answered and dm.is_at(channel_id, thread_ts)
+    async def save(self, thread_id: str) -> None:
+        await THREADS.update(thread_id, {METADATA_KEY: self.model_dump(mode="json")})

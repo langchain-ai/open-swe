@@ -351,28 +351,7 @@ async def _by_the_way_reply(
                 "ends with it, so send a single `final` reply without `options`."
             ),
         }
-    return await post_by_the_way_answer(
-        cfg.thread_id or "",
-        cfg.slack_thread.channel_id if cfg.slack_thread else "",
-        thread_ts,
-        cfg.slack_by_the_way_message_ts,
-        message,
-        blocks,
-    )
-
-
-async def post_by_the_way_answer(
-    thread_id: str,
-    channel_id: str,
-    thread_ts: str,
-    message_ts: str | None,
-    message: str,
-    blocks: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Post agent thread ``thread_id``'s one public `/btw` answer in the Slack thread asked in.
-
-    ``message_ts`` is the `/btw` mention, whose hourglass the answer clears.
-    """
+    channel_id = cfg.slack_thread.channel_id if cfg.slack_thread else ""
     if not channel_id:
         return {"success": False, "error": "Missing the Slack channel to answer in"}
     if not message.strip():
@@ -381,13 +360,15 @@ async def post_by_the_way_answer(
         blocks = _reply_blocks(message, None, reserve=0)
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
-    reservation = thread_id
+    reservation = cfg.thread_id or ""
     try:
         reserved = await event_claims.claim(
             _BY_THE_WAY_ANSWER_SCOPE, reservation, ttl=_BY_THE_WAY_ANSWER_TTL
         )
     except Exception:
-        logger.exception("Could not reserve the /btw answer", extra={"agent_thread_id": thread_id})
+        logger.exception(
+            "Could not reserve the /btw answer", extra={"agent_thread_id": cfg.thread_id}
+        )
         return {"success": False, "error": "could not reserve the answer", "retry": True}
     if not reserved:
         return {
@@ -403,7 +384,7 @@ async def post_by_the_way_answer(
         except Exception:
             logger.exception(
                 "Could not release the /btw answer reservation",
-                extra={"agent_thread_id": thread_id},
+                extra={"agent_thread_id": cfg.thread_id},
             )
         return {
             "success": False,
@@ -411,8 +392,10 @@ async def post_by_the_way_answer(
             "slack_error": exc.code,
             "hint": _slack_reply_failure_hint(exc.code),
         }
-    if message_ts:
-        await remove_slack_reaction(channel_id, message_ts, "hourglass_flowing_sand")
+    if cfg.slack_by_the_way_message_ts:
+        await remove_slack_reaction(
+            channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
+        )
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}
