@@ -7,7 +7,7 @@ import httpx2
 import pytest
 
 from openswe.slack import client as slack_client
-from openswe.slack import webhook as slack_webhook
+from openswe.slack import staged_files
 from openswe.utils import url_safety
 
 
@@ -53,8 +53,8 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
     return responses, requests
 
 
-def _entry(name: str, url: str) -> slack_webhook.SlackFileEntry:
-    return slack_webhook.SlackFileEntry(name=name, url=url)
+def _entry(name: str, url: str) -> staged_files.SlackFileEntry:
+    return staged_files.SlackFileEntry(name=name, url=url)
 
 
 @pytest.mark.asyncio
@@ -139,39 +139,74 @@ async def test_download_slack_file_closes_redirect_before_blocking_private_host(
 
 
 @pytest.mark.asyncio
-async def test_download_slack_files_uploads_before_downloading_next_file(
+async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
     monkeypatch, tmp_path
 ) -> None:
+    """The webhook only records the files: MDA creates the thread's box when its run starts."""
+    from deepagents.backends.protocol import FileUploadResponse
+
+    from openswe.sandboxes import state
+
+    metadata: dict[str, object] = {}
+
+    async def read_metadata(_thread_id: str) -> dict[str, object]:
+        return dict(metadata)
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        stored.update(metadata)
+
+    stored = metadata
+    client = MagicMock()
+    client.threads.update = write_metadata
+    monkeypatch.setattr(state, "get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr(staged_files, "get_client", lambda: client)
+
     async def download(url: str) -> bytes:
         if url.endswith("second.zip"):
             assert (tmp_path / "bundle.zip").read_bytes() == b"zip"
         return b"zip"
 
-    async def upload(files: list[tuple[str, bytes]]) -> list[dict[str, None]]:
+    async def upload(files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         for path, content in files:
             (tmp_path / path.rsplit("/", 1)[-1]).write_bytes(content)
-        return [{"error": None} for _ in files]
+        return [FileUploadResponse(path=path) for path, _ in files]
 
     backend = MagicMock()
-    backend.aupload_files = upload
-    monkeypatch.setattr(
-        "openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", AsyncMock(return_value=backend)
-    )
+    backend.aupload_files = AsyncMock(side_effect=upload)
     monkeypatch.setattr(slack_client, "download_slack_file", download)
 
-    staged = await slack_webhook._download_slack_files_to_sandbox(
+    first = await staged_files.queue_slack_files(
+        "thread-1",
         [
             _entry("bundle.zip", "https://files.slack.com/first.zip"),
             _entry("bundle.zip", "https://files.slack.com/second.zip"),
         ],
-        "thread-1",
     )
+    # A later message before the run starts names its files apart from those waiting.
+    later = await staged_files.queue_slack_files(
+        "thread-1", [_entry("bundle.zip", "https://files.slack.com/third.zip")]
+    )
+    backend.aupload_files.assert_not_awaited()
 
-    assert staged == [
-        slack_webhook.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
-        slack_webhook.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
+    run_read = dict(metadata)
+    # A message queued after the run read the thread waits for the next run, not lost.
+    racing = await staged_files.queue_slack_files(
+        "thread-1", [_entry("late.csv", "https://files.slack.com/late.csv")]
+    )
+    await staged_files.deliver_slack_files("thread-1", run_read, backend)
+    assert metadata[staged_files.PENDING_SLACK_FILES_KEY] == [
+        {"url": "https://files.slack.com/late.csv", "path": racing[0].sandbox_path}
     ]
-    assert (tmp_path / "bundle-1").read_bytes() == b"zip"
+    await staged_files.deliver_slack_files("thread-1", dict(metadata), backend)
+
+    assert [*first, *later] == [
+        staged_files.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
+        staged_files.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
+        staged_files.StagedSlackFile("bundle-2", "/workspace/.open-swe/slack-files/bundle-2"),
+    ]
+    assert backend.aupload_files.await_count == 4
+    assert (tmp_path / "bundle-2").read_bytes() == b"zip"
+    assert metadata[staged_files.PENDING_SLACK_FILES_KEY] is None
 
 
 @pytest.mark.asyncio

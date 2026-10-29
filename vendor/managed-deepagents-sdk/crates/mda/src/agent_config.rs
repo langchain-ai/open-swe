@@ -19,7 +19,8 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{
-    ArrowFunctionBody, Declaration, Expression, Function, FunctionBody, ObjectExpression, Statement,
+    ArrayExpressionElement, ArrowFunctionBody, Declaration, Expression, Function, FunctionBody,
+    ObjectExpression, ObjectPropertyKind, Statement,
 };
 use serde::Deserialize;
 
@@ -57,21 +58,17 @@ pub(crate) struct AgentStaticConfig {
     pub model: Option<String>,
     /// Whether the exported `agent` is a per-run factory.
     pub is_factory: bool,
-    /// Whether the definition still sets the retired `disableMemory` /
-    /// `disable_memory` knob (any value). Memory moved to `memory.{ts,py}`, so
-    /// its presence is a migration error rather than an opt-out.
-    pub declares_disable_memory: bool,
-    /// Subagents marked `"async": True`, each built as its own graph.
+    /// Subagents marked async, each built as its own graph.
     pub async_subagents: Vec<AsyncSubagentGraph>,
     /// Subagent entries MDA cannot read statically (helper calls, spreads, imports).
     pub unreadable_subagents: usize,
 }
 
-/// Name of the general-purpose subagent, which MDA also runs async on served Python builds.
+/// Name of the general-purpose subagent, which MDA also runs async on served builds.
 pub(crate) const GENERAL_PURPOSE_SUBAGENT: &str = "general-purpose";
 
 impl AgentStaticConfig {
-    /// Async subagents to build for a served Python agent: the declared ones,
+    /// Async subagents to build for a served agent: the declared ones,
     /// plus the general-purpose subagent unless one is declared async already.
     pub(crate) fn served_async_subagents(&self) -> Vec<AsyncSubagentGraph> {
         let mut graphs = self.async_subagents.clone();
@@ -95,7 +92,7 @@ pub(crate) struct AsyncSubagentGraph {
     pub name: String,
     /// Graph key in `langgraph.json`: `<assistant_id>--<normalized name>`.
     pub graph_id: String,
-    /// Python export of its graph factory in the generated entry.
+    /// Export of its graph factory in the generated entry.
     pub export: String,
 }
 
@@ -127,13 +124,16 @@ pub(crate) fn read_agent_static_config(project: &Project) -> Result<AgentStaticC
     let file_label = project.agent_file.display().to_string();
     let fields = read_agent_config_fields(project)?;
     let assistant_id = resolve_assistant_id(fields.name, &file_label, project.language)?;
-    let async_subagents =
-        resolve_async_subagents(fields.async_subagents, &assistant_id, &file_label)?;
+    let async_subagents = resolve_async_subagents(
+        fields.async_subagents,
+        &assistant_id,
+        &file_label,
+        project.language,
+    )?;
     Ok(AgentStaticConfig {
         assistant_id,
         model: fields.model,
         is_factory: fields.is_factory,
-        declares_disable_memory: fields.declares_disable_memory,
         async_subagents,
         unreadable_subagents: fields.unreadable_subagents,
     })
@@ -143,15 +143,18 @@ fn resolve_async_subagents(
     values: Vec<AgentNameValue>,
     assistant_id: &str,
     file_label: &str,
+    language: Language,
 ) -> Result<Vec<AsyncSubagentGraph>> {
     let mut graphs: Vec<AsyncSubagentGraph> = Vec::new();
     for value in values {
         let AgentNameValue::Static(name) = value else {
+            let flag = language.ident("`async: true`", "`\"async\": True`");
+            let spread = language.ident("`...spread`", "`**spread`");
             return Err(categorized(
                 ErrorCategory::Project,
                 format!(
-                    "async subagents in {file_label} must set `name` and `\"async\": True` \
-                     as literals, after any `**spread`, so MDA can build a graph for each one."
+                    "async subagents in {file_label} must set `name` and {flag} \
+                     as literals, after any {spread}, so MDA can build a graph for each one."
                 ),
             ));
         };
@@ -313,15 +316,25 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
     let parsed = parse_typescript(&allocator, source, file_name)?;
     let bindings = collect_string_bindings(&parsed.program.body);
 
-    if let Some(name) = typescript_factory_name(&parsed.program.body) {
+    if let Some(factory) = typescript_factory_return(&parsed.program.body) {
+        // The factory's own declarations shadow the module's, as in Python.
+        let mut strings = bindings;
+        strings.extend(collect_string_bindings(factory.statements));
+        let (async_subagents, unreadable_subagents) = typescript_subagent_fields(
+            factory.returned.and_then(factory_definition_config),
+            &[&parsed.program.body, factory.statements],
+            &strings,
+        );
         return Ok(AgentConfigFields {
-            name,
+            name: factory
+                .returned
+                .map_or(AgentNameValue::Dynamic, factory_definition_name),
             model: None,
             is_factory: true,
             declares_disable_memory: false,
             unsupported_keys: Vec::new(),
-            async_subagents: Vec::new(),
-            unreadable_subagents: 0,
+            async_subagents,
+            unreadable_subagents,
         });
     }
 
@@ -355,12 +368,8 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
     }
 
     let config = first_object_argument(call);
-    if config.is_some_and(object_declares_async_subagent) {
-        return Err(categorized(
-            ErrorCategory::Project,
-            format!("{file_name}: async subagents (`async: true`) are only supported in Python projects"),
-        ));
-    }
+    let (async_subagents, unreadable_subagents) =
+        typescript_subagent_fields(config, &[&parsed.program.body], &bindings);
     Ok(AgentConfigFields {
         name: config
             .map(|object| object_name_property(object, &bindings))
@@ -373,21 +382,206 @@ fn extract_agent_config_typescript(source: &str, file_name: &str) -> Result<Agen
             .filter(|key| config.is_some_and(|object| object_property(object, key).is_some()))
             .map(str::to_string)
             .collect(),
-        async_subagents: Vec::new(),
-        unreadable_subagents: 0,
+        async_subagents,
+        unreadable_subagents,
     })
 }
 
-fn object_declares_async_subagent(object: &ObjectExpression<'_>) -> bool {
-    let Some(Expression::ArrayExpression(subagents)) = object_property(object, "subagents") else {
-        return false;
+/// `const`/`let`/`var` bindings in `body` to an object or array literal, by name.
+fn collect_literal_bindings<'a>(body: &'a [Statement<'a>]) -> HashMap<&'a str, &'a Expression<'a>> {
+    let mut bindings = HashMap::new();
+    for statement in body {
+        let Some(declaration) = statement_variable_declaration(statement) else {
+            continue;
+        };
+        for declarator in &declaration.declarations {
+            let (Some(name), Some(init)) = (declarator.id.get_identifier_name(), &declarator.init)
+            else {
+                continue;
+            };
+            if matches!(
+                unwrap_type_expression(init),
+                Expression::ObjectExpression(_) | Expression::ArrayExpression(_)
+            ) {
+                bindings.insert(name.as_str(), init);
+            }
+        }
+    }
+    bindings
+}
+
+/// `x as T`, `x satisfies T`, `(x)` and `x!` as `x`.
+fn unwrap_type_expression<'a>(expression: &'a Expression<'a>) -> &'a Expression<'a> {
+    match expression {
+        Expression::TSAsExpression(e) => unwrap_type_expression(&e.expression),
+        Expression::TSSatisfiesExpression(e) => unwrap_type_expression(&e.expression),
+        Expression::TSNonNullExpression(e) => unwrap_type_expression(&e.expression),
+        Expression::ParenthesizedExpression(e) => unwrap_type_expression(&e.expression),
+        other => other,
+    }
+}
+
+/// The async subagent names and unreadable entry count of a `defineDeepAgent` config.
+///
+/// `scopes` run outermost first; a later scope's literals shadow an earlier one's.
+fn typescript_subagent_fields<'a>(
+    config: Option<&'a ObjectExpression<'a>>,
+    scopes: &[&'a [Statement<'a>]],
+    strings: &HashMap<String, String>,
+) -> (Vec<AgentNameValue>, usize) {
+    let Some(config) = config else {
+        return (Vec::new(), 0);
     };
-    subagents.elements.iter().any(|element| {
-        matches!(
-            element.as_expression(),
-            Some(Expression::ObjectExpression(spec)) if object_property(spec, "async").is_some()
-        )
+    let mut objects = HashMap::new();
+    for scope in scopes {
+        objects.extend(collect_literal_bindings(scope));
+    }
+    typescript_async_subagents(config, &objects, strings)
+}
+
+/// Async subagent names in a `defineDeepAgent` config, and how many subagent
+/// entries MDA can't read (the runtime rejects any of those that is async).
+fn typescript_async_subagents<'a>(
+    config: &'a ObjectExpression<'a>,
+    objects: &HashMap<&'a str, &'a Expression<'a>>,
+    strings: &HashMap<String, String>,
+) -> (Vec<AgentNameValue>, usize) {
+    let Some(value) = object_property(config, "subagents") else {
+        return (Vec::new(), 0);
+    };
+    let Some(entries) = subagent_entries(value, objects, &mut Vec::new()) else {
+        return (Vec::new(), 1);
+    };
+    let mut names = Vec::new();
+    let mut unreadable = 0;
+    for entry in entries {
+        match entry {
+            Some(spec) => names.extend(async_subagent_name(spec, strings)),
+            None => unreadable += 1,
+        }
+    }
+    (names, unreadable)
+}
+
+/// The object literals a subagent list holds, with `...spread`s expanded; `None`
+/// for an entry MDA can't read, or overall when the list itself can't be read.
+fn subagent_entries<'a>(
+    value: &'a Expression<'a>,
+    objects: &HashMap<&'a str, &'a Expression<'a>>,
+    seen: &mut Vec<&'a str>,
+) -> Option<Vec<Option<&'a ObjectExpression<'a>>>> {
+    let value = unwrap_type_expression(value);
+    if let Expression::Identifier(reference) = value {
+        // Keep the name marked while its spreads are walked, so a cycle ends.
+        let name = reference.name.as_str();
+        if seen.contains(&name) {
+            return None;
+        }
+        let bound = objects.get(name)?;
+        seen.push(name);
+        let entries = subagent_entries(bound, objects, seen);
+        seen.pop();
+        return entries;
+    }
+    let Expression::ArrayExpression(array) = value else {
+        return None;
+    };
+    let mut entries = Vec::new();
+    for element in &array.elements {
+        match element {
+            ArrayExpressionElement::SpreadElement(spread) => {
+                match subagent_entries(&spread.argument, objects, seen) {
+                    Some(spread) => entries.extend(spread),
+                    None => entries.push(None),
+                }
+            }
+            ArrayExpressionElement::Elision(_) => {}
+            element => {
+                entries.push(
+                    element.as_expression().and_then(|expression| {
+                        match resolve_literal(expression, objects, seen)? {
+                            Expression::ObjectExpression(spec) => Some(&**spec),
+                            _ => None,
+                        }
+                    }),
+                )
+            }
+        }
+    }
+    Some(entries)
+}
+
+/// The literal an expression is, or the one a module-level binding names.
+fn resolve_literal<'a>(
+    value: &'a Expression<'a>,
+    objects: &HashMap<&'a str, &'a Expression<'a>>,
+    seen: &mut Vec<&'a str>,
+) -> Option<&'a Expression<'a>> {
+    match unwrap_type_expression(value) {
+        Expression::Identifier(reference) => {
+            let name = reference.name.as_str();
+            if seen.contains(&name) {
+                return None;
+            }
+            seen.push(name);
+            let resolved = objects
+                .get(name)
+                .and_then(|bound| resolve_literal(bound, objects, seen));
+            seen.pop();
+            resolved
+        }
+        other => Some(other),
+    }
+}
+
+/// An async subagent's name: `None` when the spec isn't async, `Dynamic` when
+/// MDA can't read `name` or `async`. The last literal key wins, as at runtime,
+/// and a `...spread` after it could replace it.
+fn async_subagent_name(
+    spec: &ObjectExpression<'_>,
+    strings: &HashMap<String, String>,
+) -> Option<AgentNameValue> {
+    let (flag_at, flag) = last_property(spec, "async")?;
+    let flag = match unwrap_type_expression(flag) {
+        Expression::BooleanLiteral(literal) => Some(literal.value),
+        _ => None,
+    };
+    if flag == Some(false) {
+        return None;
+    }
+    let name = last_property(spec, "name");
+    let first = name.map_or(flag_at, |(name_at, _)| name_at.min(flag_at));
+    let spread_after = spec.properties.iter().enumerate().any(|(index, property)| {
+        index > first && matches!(property, ObjectPropertyKind::SpreadProperty(_))
+    });
+    let is_true = flag == Some(true);
+    let name = name.and_then(|(_, value)| match unwrap_type_expression(value) {
+        Expression::Identifier(reference) => strings.get(reference.name.as_str()).cloned(),
+        other => static_string_expression(other),
+    });
+    Some(match name {
+        Some(name) if is_true && !spread_after => AgentNameValue::Static(name),
+        _ => AgentNameValue::Dynamic,
     })
+}
+
+/// The index and value of the last literal `key` in an object literal, which wins at runtime.
+fn last_property<'a>(
+    spec: &'a ObjectExpression<'a>,
+    key: &str,
+) -> Option<(usize, &'a Expression<'a>)> {
+    spec.properties
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, property)| match property {
+            ObjectPropertyKind::ObjectProperty(property)
+                if property.key.is_specific_static_name(key) =>
+            {
+                Some((index, &property.value))
+            }
+            _ => None,
+        })
 }
 
 fn statement_function<'a>(statement: &'a Statement<'a>) -> Option<&'a Function<'a>> {
@@ -401,8 +595,16 @@ fn statement_function<'a>(statement: &'a Statement<'a>) -> Option<&'a Function<'
     }
 }
 
-/// Read a returned definition without importing the module or running its factory.
-fn typescript_factory_name(body: &[Statement<'_>]) -> Option<AgentNameValue> {
+/// What the exported `agent` factory returns, and the statements before its return.
+struct FactoryReturn<'a> {
+    /// `None` when the return can't be read.
+    returned: Option<&'a Expression<'a>>,
+    statements: &'a [Statement<'a>],
+}
+
+/// The exported `agent` factory's return, read without importing the module or
+/// running the factory; `None` if `agent` isn't a factory.
+fn typescript_factory_return<'a>(body: &'a [Statement<'a>]) -> Option<FactoryReturn<'a>> {
     let mut binding = "agent";
     for statement in body {
         if let Statement::ExportNamedDeclaration(export) = statement {
@@ -432,13 +634,7 @@ fn typescript_factory_name(body: &[Statement<'_>]) -> Option<AgentNameValue> {
     for statement in body {
         if let Some(function) = statement_function(statement) {
             if function.id.as_ref().is_some_and(|id| id.name == binding) {
-                return Some(
-                    function
-                        .body
-                        .as_deref()
-                        .and_then(direct_return_expression)
-                        .map_or(AgentNameValue::Dynamic, factory_definition_name),
-                );
+                return Some(function_body_return(function.body.as_deref()));
             }
         }
         let Some(declaration) = statement_variable_declaration(statement) else {
@@ -452,20 +648,29 @@ fn typescript_factory_name(body: &[Statement<'_>]) -> Option<AgentNameValue> {
             {
                 continue;
             }
-            let returned = match declarator.init.as_ref()? {
-                Expression::ArrowFunctionExpression(factory) => match &factory.body {
-                    ArrowFunctionBody::FunctionBody(body) => direct_return_expression(body),
-                    body => body.as_expression(),
-                },
+            return match declarator.init.as_ref()? {
+                Expression::ArrowFunctionExpression(factory) => Some(match &factory.body {
+                    ArrowFunctionBody::FunctionBody(body) => function_body_return(Some(body)),
+                    body => FactoryReturn {
+                        returned: body.as_expression(),
+                        statements: &[],
+                    },
+                }),
                 Expression::FunctionExpression(factory) => {
-                    factory.body.as_deref().and_then(direct_return_expression)
+                    Some(function_body_return(factory.body.as_deref()))
                 }
-                _ => return None,
+                _ => None,
             };
-            return Some(returned.map_or(AgentNameValue::Dynamic, factory_definition_name));
         }
     }
     None
+}
+
+fn function_body_return<'a>(body: Option<&'a FunctionBody<'a>>) -> FactoryReturn<'a> {
+    FactoryReturn {
+        returned: body.and_then(direct_return_expression),
+        statements: body.map_or(&[], |body| &body.statements),
+    }
 }
 
 fn direct_return_expression<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expression<'a>> {
@@ -495,6 +700,18 @@ fn factory_definition_name(expression: &Expression<'_>) -> AgentNameValue {
             factory_definition_name(&expression.expression)
         }
         _ => AgentNameValue::Dynamic,
+    }
+}
+
+/// The config object of a returned `defineDeepAgent({...})` call.
+fn factory_definition_config<'a>(
+    expression: &'a Expression<'a>,
+) -> Option<&'a ObjectExpression<'a>> {
+    match unwrap_type_expression(expression) {
+        Expression::CallExpression(call) if is_define_deep_agent_callee(&call.callee) => {
+            first_object_argument(call)
+        }
+        _ => None,
     }
 }
 
@@ -926,18 +1143,129 @@ mod tests {
         extract_name_from_typescript(source, "agent.ts").unwrap()
     }
 
-    #[test]
-    fn typescript_async_subagents_are_rejected() {
-        let error = extract_agent_config_typescript(
-            "export const agent = defineDeepAgent({ name: 'lead', subagents: [{ name: 'r', async: true }] });\n",
-            "agent.ts",
-        )
-        .unwrap_err();
+    fn ts_async_subagents(source: &str) -> (Vec<AgentNameValue>, usize) {
+        let fields = extract_agent_config_typescript(source, "agent.ts").unwrap();
+        (fields.async_subagents, fields.unreadable_subagents)
+    }
 
-        assert!(
-            error.to_string().contains("only supported in Python"),
-            "{error}"
+    fn statics(names: &[&str]) -> Vec<AgentNameValue> {
+        names
+            .iter()
+            .map(|name| AgentNameValue::Static((*name).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn typescript_async_subagents_are_read_from_inline_and_bound_objects() {
+        let (names, unreadable) = ts_async_subagents(concat!(
+            "const writerName = 'writer';\n",
+            "const writer = { name: writerName, description: 'd', async: true };\n",
+            "const team = [writer, { name: 'editor', description: 'd', async: true }];\n",
+            "export const agent = defineDeepAgent({\n",
+            "  name: 'lead',\n",
+            "  subagents: [\n",
+            "    { name: 'researcher', description: 'd', async: true } satisfies ManagedAsyncSubAgent,\n",
+            "    { name: 'helper', description: 'd' },\n",
+            "    { name: 'sync', description: 'd', async: false },\n",
+            "    ...team,\n",
+            "  ],\n",
+            "});\n",
+        ));
+
+        assert_eq!(names, statics(&["researcher", "writer", "editor"]));
+        assert_eq!(unreadable, 0);
+    }
+
+    #[test]
+    fn typescript_async_subagents_are_read_from_a_factory() {
+        let (names, _) = ts_async_subagents(concat!(
+            "export async function agent() {\n",
+            "  return defineDeepAgent({ name: 'lead', subagents: [{ name: 'r', description: 'd', async: true }] });\n",
+            "}\n",
+        ));
+
+        assert_eq!(names, statics(&["r"]));
+    }
+
+    #[test]
+    fn typescript_async_subagents_are_read_from_a_factorys_own_bindings() {
+        let (names, unreadable) = ts_async_subagents(concat!(
+            "const name = 'shadowed';\n",
+            "export const agent = async () => {\n",
+            "  const name = 'r';\n",
+            "  const researcher = { name, description: 'd', async: true };\n",
+            "  return defineDeepAgent({ name: 'lead', subagents: [researcher] });\n",
+            "};\n",
+        ));
+
+        assert_eq!(names, statics(&["r"]));
+        assert_eq!(unreadable, 0);
+    }
+
+    #[test]
+    fn typescript_async_subagents_mda_cant_read_are_dynamic_or_counted() {
+        let (names, unreadable) = ts_async_subagents(concat!(
+            "const name = makeName();\n",
+            "export const agent = defineDeepAgent({\n",
+            "  name: 'lead',\n",
+            "  subagents: [\n",
+            "    { name, description: 'd', async: true },\n",
+            "    { name: 'r', async: true, ...overrides },\n",
+            "    { ...defaults, name: 'kept', async: true },\n",
+            "    { name: 'flag', async: isAsync },\n",
+            "    makeSubagent(),\n",
+            "    ...helpers(),\n",
+            "  ],\n",
+            "});\n",
+        ));
+
+        assert_eq!(
+            names,
+            [
+                AgentNameValue::Dynamic,
+                AgentNameValue::Dynamic,
+                AgentNameValue::Static("kept".to_string()),
+                AgentNameValue::Dynamic,
+            ]
         );
+        assert_eq!(unreadable, 2);
+    }
+
+    #[test]
+    fn typescript_spread_cycles_are_unreadable() {
+        let (names, unreadable) = ts_async_subagents(concat!(
+            "const a = [...b];\n",
+            "const b = [...a];\n",
+            "export const agent = defineDeepAgent({ name: 'lead', subagents: a });\n",
+        ));
+
+        assert!(names.is_empty());
+        assert_eq!(unreadable, 1);
+    }
+
+    #[test]
+    fn typescript_subagent_lists_mda_cant_read_count_as_one() {
+        let (names, unreadable) = ts_async_subagents(
+            "export const agent = defineDeepAgent({ name: 'lead', subagents: buildSubagents() });\n",
+        );
+
+        assert!(names.is_empty());
+        assert_eq!(unreadable, 1);
+    }
+
+    #[test]
+    fn typescript_async_subagent_names_need_literals_after_any_spread() {
+        let error = resolve_async_subagents(
+            vec![AgentNameValue::Dynamic],
+            "lead",
+            "agent.ts",
+            Language::TypeScript,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("`async: true`"), "{error}");
+        assert!(error.contains("`...spread`"), "{error}");
     }
 
     fn py_async_subagents(source: &str) -> Vec<AgentNameValue> {
@@ -1104,6 +1432,7 @@ mod tests {
             vec![AgentNameValue::Static("Deep Researcher".to_string())],
             "lead",
             "agent.py",
+            Language::Python,
         )
         .unwrap();
 
@@ -1122,7 +1451,6 @@ mod tests {
             assistant_id: "lead".to_string(),
             model: None,
             is_factory: false,
-            declares_disable_memory: false,
             async_subagents,
             unreadable_subagents: 0,
         }
@@ -1148,6 +1476,7 @@ mod tests {
             vec![AgentNameValue::Static("general-purpose".to_string())],
             "lead",
             "agent.py",
+            Language::Python,
         )
         .unwrap();
 
@@ -1163,6 +1492,7 @@ mod tests {
             vec![AgentNameValue::Static("General Purpose".to_string())],
             "lead",
             "agent.py",
+            Language::Python,
         )
         .unwrap();
 
@@ -1174,7 +1504,12 @@ mod tests {
 
     #[test]
     fn async_subagents_reject_dynamic_and_duplicate_names() {
-        let dynamic = resolve_async_subagents(vec![AgentNameValue::Dynamic], "lead", "agent.py");
+        let dynamic = resolve_async_subagents(
+            vec![AgentNameValue::Dynamic],
+            "lead",
+            "agent.py",
+            Language::Python,
+        );
         assert!(dynamic.unwrap_err().to_string().contains("as literals"));
 
         let duplicate = resolve_async_subagents(
@@ -1184,6 +1519,7 @@ mod tests {
             ],
             "lead",
             "agent.py",
+            Language::Python,
         );
         assert!(duplicate
             .unwrap_err()

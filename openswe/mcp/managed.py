@@ -42,6 +42,7 @@ SERVERS_PATH = "/v1/managed-tools/servers"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 CONNECTION_NAME = "lmt"
 _MISSING_CREDENTIALS_META = "com.langchain.langsmith/missingCredentials"
+_LANGSMITH_APP_SLUG_PREFIX = "langsmith-"
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
 # LangSmith holds each status request open this long while consent is pending.
@@ -67,6 +68,8 @@ class MissingCredential(BaseModel):
     """A service in the gateway this person has not connected yet."""
 
     slug: str
+    """Which service, for connect links and cards: LMT's credential slug, made per service
+    where several share it (see ``_service_slug``)."""
     display_name: str
     kind: CredentialKind
 
@@ -191,12 +194,9 @@ def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, Co
         if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str):
             continue
         kind: CredentialKind = "secret" if entry.get("kind") == "secret" else "oauth"
-        slug = entry["slug"]
-        missing.append(
-            MissingCredential(
-                slug=slug, display_name=str(entry.get("display_name") or slug), kind=kind
-            )
-        )
+        display_name = str(entry.get("display_name") or entry["slug"])
+        slug = _service_slug(entry["slug"], display_name)
+        missing.append(MissingCredential(slug=slug, display_name=display_name, kind=kind))
         url = entry.get("verification_url")
         if kind == "oauth" and isinstance(url, str) and url.startswith("https://"):
             auth_id = entry.get("auth_id")
@@ -204,6 +204,19 @@ def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, Co
                 url=url, auth_id=auth_id if isinstance(auth_id, str) else None
             )
     return missing, links
+
+
+def _service_slug(slug: str, display_name: str) -> str:
+    """One key per service, even where services share an LMT connection.
+
+    LMT keeps one connection per LangSmith OAuth app (slug prefix ``langsmith-``, e.g.
+    ``langsmith-google``) for every built-in on it, but lists each built-in apart with its
+    own consent link asking only that built-in's scopes. Keyed by slug alone, all but one
+    link would be dropped and every button would grant the same built-in.
+    """
+    if slug.startswith(_LANGSMITH_APP_SLUG_PREFIX):
+        return f"{slug}:{_match_key(display_name)}"
+    return slug
 
 
 def _credentials_required(body: object) -> GatewayCredentialsRequired:
@@ -223,6 +236,13 @@ def _failure(response: httpx2.Response) -> ManagedToolsError:
     if response.status_code in {401, 403}:
         return ManagedToolsError("LangSmith refused access to this tool kit")
     if response.status_code == 404:
+        if not ENV.LMT_TENANT_ID.optional():
+            return ManagedToolsError(
+                "The tool kit was not found or is inaccessible in the current LangSmith workspace. "
+                "A workspace mismatch is one possible cause. Sign in to the workspace containing "
+                "the kit, or ask an administrator to verify the instance gateway and pin "
+                "LMT_TENANT_ID to its workspace."
+            )
         return ManagedToolsError("The tool kit no longer exists")
     return ManagedToolsError(f"Managed tools failed (HTTP {response.status_code}); retry later")
 

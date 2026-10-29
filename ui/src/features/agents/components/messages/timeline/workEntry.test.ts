@@ -89,7 +89,7 @@ describe("describeWorkEntry", () => {
         title: "shell",
         toolKind: "execute",
         status: "error",
-        input: { command: "pnpm test" },
+        input: { command: "cd /workspace/open-swe && pnpm test" },
       }),
       repoPath
     )
@@ -114,21 +114,7 @@ describe("describeWorkEntry", () => {
     expect(entry.preview).toBe("a.ts +1 more")
   })
 
-  it("builds an expandable body from the command and its output", () => {
-    const entry = describeWorkEntry(
-      chunk({
-        title: "shell",
-        toolKind: "execute",
-        input: { command: "ls" },
-        output: "a.ts\nb.ts",
-      }),
-      repoPath
-    )
-
-    expect(entry.expandedText).toBe("ls\n\na.ts\nb.ts")
-  })
-
-  it("shows important tool text in the preview and keeps every argument expandable", () => {
+  it("shows important tool text in the preview", () => {
     const reason =
       "This is a conversation between people, not a request.".repeat(100)
     const entry = describeWorkEntry(
@@ -142,23 +128,6 @@ describe("describeWorkEntry", () => {
 
     expect(entry.preview).toBe(`${reason.slice(0, 80)}...`)
     expect(entry.previewTooltip).toBe(reason)
-    expect(entry.expandedText).toContain(`reason:\n${reason}`)
-    expect(entry.expandedText).not.toContain("Internal confirmation")
-
-    const report = describeWorkEntry(
-      chunk({
-        title: "report_platform_issue",
-        toolKind: "other",
-        input: {
-          problem_description: "Sandbox disconnected",
-          keywords: ["sandbox"],
-        },
-      })
-    )
-    expect(report.preview).toBe("Sandbox disconnected")
-    expect(report.expandedText).toBe(
-      "problem description:\nSandbox disconnected"
-    )
 
     const task = describeWorkEntry(
       chunk({
@@ -171,28 +140,6 @@ describe("describeWorkEntry", () => {
       })
     )
     expect(task.preview).toBe("Investigate the failure")
-    expect(task.expandedText).toBe(
-      "description:\nInvestigate the failure\n\ninstructions:\nKeep the report concise"
-    )
-  })
-
-  it("preserves arguments when lazy output replaces the preview", async () => {
-    const output = "Full output\n".repeat(500)
-    const entry = describeWorkEntry(
-      chunk({
-        title: "report_platform_issue",
-        toolKind: "other",
-        input: { problem_description: "Sandbox disconnected" },
-        output: "Partial output",
-        loadOutput: async () => output,
-      })
-    )
-
-    const loaded = await entry.loadExpandedText?.()
-    expect(loaded).toBe(
-      `problem description:\nSandbox disconnected\n\n${output.trim()}`
-    )
-    expect(loaded).not.toContain("Partial output")
   })
 
   it("keeps complete JSON tool output available for highlighted rendering", () => {

@@ -44,6 +44,7 @@ from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
 from rt.tools import run_id
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 from rt.validate_image_reads import ValidateImageReadsMiddleware
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,8 @@ class FileToolsMiddleware(AgentMiddleware):
     Where they are, and which checks apply, is the run's: the graph is shared by every
     run, so each call reads them from the run in progress.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(
         self,
@@ -122,10 +125,32 @@ class FileToolsMiddleware(AgentMiddleware):
     def _remote(self) -> dict[str, BaseTool]:
         return self._remote_by_run.get(self._backend.run)
 
+    @property
+    def _shell_search(self) -> bool:
+        """Whether the run searches through ``execute``, its catalog keeping ``grep`` and ``glob`` out."""
+        return {"grep", "glob"} <= {*self._backend.run.catalog.excluded}
+
+    def _described_tool(self, tool: BaseTool) -> BaseTool:
+        if tool.name != "execute" or not self._shell_search:
+            return tool
+        description = tool.description.replace(
+            "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
+            "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
+            "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
+            "- Search repository contents through execute with `git grep -n` or `grep -rn`; "
+            "search file names with shell commands. There are no separate grep/glob tools. "
+            "Follow repository-specific search instructions, including restrictions on ripgrep. "
+            "Use read_file rather than cat/head/tail.",
+        )
+        return tool.model_copy(update={"description": description})
+
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
         """The file and shell tools among ``names``, for code mode, each call checked."""
         templates = remote_file_tools(self._remote_files, "/")
-        return [self._code_tool(templates[name]) for name in sorted({*names} & {*templates})]
+        return [
+            self._code_tool(self._described_tool(templates[name]))
+            for name in sorted({*names} & {*templates})
+        ]
 
     def _code_tool(self, template: BaseTool) -> StructuredTool:
         name = template.name
@@ -149,6 +174,13 @@ class FileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        if self._shell_search:
+            request = request.override(
+                tools=[
+                    self._described_tool(tool) if isinstance(tool, BaseTool) else tool
+                    for tool in request.tools
+                ]
+            )
         self._box.update(
             (tool.name, tool)
             for tool in request.tools

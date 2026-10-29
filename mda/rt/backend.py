@@ -17,11 +17,10 @@ its own.
 import asyncio
 import logging
 import os
-from collections import OrderedDict
-from collections.abc import Callable, Coroutine, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import ClassVar, Final, Literal, cast
+from typing import Final, Literal, cast
 from weakref import WeakKeyDictionary
 
 import httpx2
@@ -29,11 +28,9 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
-    ToolMessage,
     messages_to_dict,
 )
 from langgraph.runtime import get_runtime
-from langsmith.run_trees import RunTree
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -43,22 +40,13 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from runtime_api.catalog import CATALOG, Catalog, OperationSpec
-from runtime_api.endpoint import Delivery, Endpoint, call
-from runtime_api.loop import (
-    INBOX_RECEIVED,
-    MODEL_RESULT,
-    TOOL_RESULT,
-    TOOL_STARTED,
-    InboxReceipt,
-    ModelResult,
-    RunCall,
-    ToolCallReport,
-    ToolResultReport,
-)
-from runtime_api.operations import RunRequest
+from runtime_api.catalog import Catalog, ToolSpec
+from runtime_api.endpoint import Delivery, call
+from runtime_api.loop import VISIBLE_FROM, RunCall
+from runtime_api.tool_search import TOOL_SPECS, ToolNames
 from runtime_api.workers import ADOPT, Adopt
 
+from rt.outbox import Outbox
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -66,6 +54,8 @@ logger = logging.getLogger(__name__)
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
+# What MDA's summarization records; the backend hears only where it cut the conversation.
+_SUMMARIZATION_EVENT: Final = "_summarization_event"
 # What a call takes past its own ``timeout`` before it answers that it ran out: the
 # sandbox's grace for an overrunning command, and killing it.
 TOOL_CALL_SLACK_SECONDS: Final = 300.0
@@ -137,6 +127,10 @@ def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     """The graph state the backend's hooks keep, which goes back with every call."""
     held = state.get("open_swe_state")
     forwarded = {key: state[key] for key in _FORWARDED_STATE_KEYS if key in state}
+    event = state.get(_SUMMARIZATION_EVENT)
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    if isinstance(cutoff, int):
+        forwarded[VISIBLE_FROM] = cutoff
     return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
 
 
@@ -229,8 +223,6 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
 
 
 Graph = Literal["agent", "reviewer", "review-scout"]
-# Catalogs a process fetched building a run's graph, kept until the run itself asks.
-_FETCHED_KEPT: Final = 32
 
 
 class Run:
@@ -242,12 +234,8 @@ class Run:
     (``current_run``) and read what they need from it.
     """
 
-    # Catalogs fetched while building a run's graph, by the token or grant it started
-    # with, so the run need not fetch its own again.
-    _fetched: ClassVar[OrderedDict[str, Catalog]] = OrderedDict()
-
     def __init__(self, context: RunContext) -> None:
-        self._started_with = context.run_token or context.worker_grant
+        # Dispatch sends the catalog it planned the run with in every run's context.
         self._carried = context.catalog
         self._token = context.run_token
         self._worker_grant = context.worker_grant if context.run_token is None else None
@@ -257,8 +245,12 @@ class Run:
         self._planned: Catalog | None = None
         # The worker's own catalog, once it adopted a run token.
         self.adopted: Catalog | None = None
+        # Tools its catalog leaves out that it called, as the backend resolved each with
+        # the run's grant, by the name it called it by; None for no such tool.
+        self.backend_tools: dict[str, ToolSpec | None] = {}
         self.backend = OpenSweBackend(self)
-        self.reports = Reports(self.backend)
+        # What the run tells the backend happened, until the backend takes it.
+        self.outbox = Outbox(self.backend)
         self._locals: dict[object, object] = {}
 
     def local[T](self, key: object, make: Callable[[], T]) -> T:
@@ -280,43 +272,29 @@ class Run:
         """A launched worker that has not yet traded its grant for a run token of its own."""
         return self._token is None and self._worker_grant is not None
 
-    async def plan(self) -> Catalog:
-        """What the backend planned for the run as it started it.
+    async def load_tool_specs(self, run_id: str | None) -> None:
+        """Read the specs of the tools its catalog names, once: its context names them only.
 
-        A run started without it asks for it, and every later call carries the token
-        the backend signed with it.
+        A worker that has yet to adopt reads none; its own catalog comes with its run token.
         """
-        if self._planned is not None or self._carried is not None:
-            return self.planned
-        fetched = (
-            self._fetched.pop(self._started_with, None) if self._started_with is not None else None
-        )
-        if fetched is not None:
-            planned = fetched
-        elif self.has_run:
-            planned = await self.backend.catalog(None)
-            if self._started_with is not None:
-                self._fetched[self._started_with] = planned
-                while len(self._fetched) > _FETCHED_KEPT:
-                    self._fetched.popitem(last=False)
-        else:
-            # Runs without a context (state reads, assistant reads) never call a model or a tool.
-            planned = Catalog()
-        self._planned_with(planned)
-        return planned
-
-    def _planned_with(self, planned: Catalog) -> None:
-        if planned.run_token is not None and self._token is not None:
-            self._token = planned.run_token
-        self._planned = planned
+        planned = self.planned
+        if not planned.needs_tool_specs or self._token is None:
+            return
+        names = ToolNames(run_id=run_id, names=planned.tool_names)
+        listed = await call(self.backend, TOOL_SPECS, names)
+        self._planned = planned.model_copy(update={"operations": listed.tools})
 
     @property
     def planned(self) -> Catalog:
         """The catalog the run started with: its coordinator's, for a launched worker."""
-        if self._planned is None and self._carried is not None:
-            self._planned_with(Catalog.model_validate(self._carried))
         if self._planned is None:
-            raise BackendCallError("The run's catalog is read only once the run starts")
+            if self._carried is not None:
+                self._planned = Catalog.model_validate(self._carried)
+            elif self.has_run:
+                raise BackendCallError("The run started without its catalog")
+            else:
+                # Runs without a context (state reads, assistant reads) never call a model or a tool.
+                self._planned = Catalog()
         return self._planned
 
     @property
@@ -333,13 +311,16 @@ class Run:
         )
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
-        self.adopted = adopted.catalog or await self.backend.catalog(run_id)
-        if self.adopted.run_token is not None:
-            self._token = self.adopted.run_token
+        self.adopted = adopted.catalog
+        # Resolved under the coordinator's grants.
+        self.backend_tools.clear()
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
-        own = next((op for op in self.catalog.operations if op.name == name), None)
+        resolved = (tool for tool in self.backend_tools.values() if tool is not None)
+        own = next(
+            (tool for tool in (*self.catalog.operations, *resolved) if tool.name == name), None
+        )
         return None if own is None else own.grant
 
 
@@ -415,8 +396,8 @@ class OpenSweBackend:
         return self.run.invocation_id
 
     @property
-    def reports(self) -> Reports:
-        return self.run.reports
+    def outbox(self) -> Outbox:
+        return self.run.outbox
 
     @property
     def awaiting_adoption(self) -> bool:
@@ -463,6 +444,7 @@ class OpenSweBackend:
         }
         waits = iter(_RETRY_SECONDS)
         while True:
+            started = asyncio.get_running_loop().time()
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}{path}",
@@ -473,6 +455,13 @@ class OpenSweBackend:
                 response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:
+                logger.warning(
+                    "Backend call timed out",
+                    extra={
+                        "endpoint": label,
+                        "elapsed_seconds": asyncio.get_running_loop().time() - started,
+                    },
+                )
                 raise BackendTimeoutError(f"{label} failed ({type(exc).__name__})") from exc
             except httpx2.HTTPError as exc:
                 status = (
@@ -503,121 +492,5 @@ class OpenSweBackend:
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
 
-    async def catalog(self, run_id: str | None) -> Catalog:
-        """The run's catalog, for a run started without it."""
-        return await call(self, CATALOG, RunRequest(run_id=run_id))
-
-    def grant(self, spec: OperationSpec) -> str | None:
+    def grant(self, spec: ToolSpec) -> str | None:
         return self.run.grant(spec.name)
-
-    async def tool_started(
-        self, report: ToolCallReport, *, trace: Mapping[str, str] | None = None
-    ) -> None:
-        await call(self, TOOL_STARTED, report, headers=trace)
-
-    async def tool_result(
-        self,
-        report: ToolCallReport,
-        result: ToolMessage,
-        *,
-        trace: Mapping[str, str] | None = None,
-    ) -> dict[str, JsonValue]:
-        [message] = _json_dicts.validate_python(messages_to_dict([result]))
-        finished = ToolResultReport.model_validate({**report.model_dump(), "result": message})
-        return (await call(self, TOOL_RESULT, finished, headers=trace)).update
-
-
-class Reports:
-    """Tell the backend what this runtime did, off the path of what it goes on to do.
-
-    Nothing the run does next waits on a report. The transcript and usage hear of each
-    reply and tool call, and the inbox of what a model call is about to answer, in the
-    order they were made, one after another. Work the backend does for the run whose
-    answer the run never reads (a notice, a proxy refresh) goes out at once. A report
-    the backend could not take is logged and dropped: what it describes has happened
-    either way, and an inbox that never heard is read again at the next model call.
-    """
-
-    def __init__(self, backend: OpenSweBackend) -> None:
-        self._backend = backend
-        self._last: asyncio.Task[None] | None = None
-        self._receipt: asyncio.Task[None] | None = None
-        # Held so a pending one is not collected before it is sent.
-        self._loose: set[asyncio.Task[None]] = set()
-
-    def replied(self, result: ModelResult) -> None:
-        self._send(self._call(MODEL_RESULT, result, TurnTrace.current_headers()))
-
-    def started(self, report: ToolCallReport) -> None:
-        self._send(self._backend.tool_started(report, trace=TurnTrace.current_headers()))
-
-    def finished(self, report: ToolCallReport, result: ToolMessage) -> None:
-        # The call's run closes before the report is answered, and with it the way to
-        # the turn's trace and the call's span, so both are found now.
-        self._send(
-            self._finished(report, result, TurnTrace.live_root(), TurnTrace.current_headers())
-        )
-
-    def received(self, receipt: InboxReceipt) -> None:
-        self._send(self._call(INBOX_RECEIVED, receipt, TurnTrace.current_headers()))
-        self._receipt = self._last
-
-    def notify[Request: BaseModel, Response: BaseModel](
-        self, endpoint: Endpoint[Request, Response], request: Request
-    ) -> None:
-        """Have the backend do ``request``'s work for the run, without waiting for it."""
-        sent = asyncio.ensure_future(
-            _logged(self._call(endpoint, request, TurnTrace.current_headers()))
-        )
-        self._loose.add(sent)
-        sent.add_done_callback(self._loose.discard)
-
-    async def drain(self) -> None:
-        """Wait for every report made so far, so the transcript has them before what follows."""
-        if self._last is not None:
-            await asyncio.shield(self._last)
-
-    async def settled(self) -> None:
-        """Wait for every report and every piece of work asked for so far."""
-        await self.drain()
-        if self._loose:
-            await asyncio.gather(*self._loose)
-
-    async def receipts(self) -> None:
-        """Wait until the backend has every inbox receipt made so far."""
-        if self._receipt is not None:
-            await asyncio.shield(self._receipt)
-
-    async def _call[Request: BaseModel, Response: BaseModel](
-        self, endpoint: Endpoint[Request, Response], request: Request, trace: Mapping[str, str]
-    ) -> None:
-        await call(self._backend, endpoint, request, headers=trace)
-
-    async def _finished(
-        self,
-        report: ToolCallReport,
-        result: ToolMessage,
-        turn: RunTree | None,
-        trace: Mapping[str, str],
-    ) -> None:
-        # What the call changed in the thread's checkouts, for the turn's git metadata.
-        update = await self._backend.tool_result(report, result, trace=trace)
-        TurnTrace.record_evidence(update, turn)
-
-    def _send(self, report: Coroutine[object, object, None]) -> None:
-        self._last = asyncio.ensure_future(self._after(self._last, report))
-
-    @staticmethod
-    async def _after(
-        previous: asyncio.Task[None] | None, report: Coroutine[object, object, None]
-    ) -> None:
-        if previous is not None:
-            await previous
-        await _logged(report)
-
-
-async def _logged(report: Coroutine[object, object, None]) -> None:
-    try:
-        await report
-    except Exception:
-        logger.warning("The backend did not take a report", exc_info=True)

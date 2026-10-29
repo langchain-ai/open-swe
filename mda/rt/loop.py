@@ -11,10 +11,12 @@ The backend answers only what needs its data or credentials, one named call each
 state (``open_swe_state``), which preparation fills.
 """
 
+import asyncio
 import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
 
@@ -54,6 +56,7 @@ from runtime_api.loop import (
     ModelCall,
     PhaseResult,
     ReplyOnBehalf,
+    Route,
     Routed,
     RunEnded,
     ScoutPlanEnd,
@@ -76,7 +79,22 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
+# Held state: when the box's GitHub token next needs replacing. It lives in the thread's
+# checkpoint, so it holds for the next run on whichever backend replica serves it.
+_GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
+# A token is replaced this long before it expires. The backend never hands out one with
+# less left, so a replacement is not due again at once.
+_GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
+# A thread whose box has no GitHub proxy is asked again after this long.
+_GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
+# A refresh that failed is tried again after this long, so a failure that keeps happening
+# does not hold up every model call.
+_GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
+# Starts the id of each message that tells the model its role in the thread's task.
+_ROLE: Final = "task-role:"
+# Starts the id of the message holding what the backend worked out for this run.
+_RUN_CONTEXT: Final = "run-context:"
 
 
 def content_text(content: object) -> str:
@@ -134,18 +152,52 @@ def _json_payload(message: ToolMessage) -> object:
         return None
 
 
+def _messages(state: Mapping[str, object]) -> list[AnyMessage]:
+    messages = state.get("messages")
+    return list(messages) if isinstance(messages, list) else []
+
+
 def _visible(state: Mapping[str, object]) -> list[AnyMessage]:
     """The messages the model still sees: summarization drops those before its cutoff."""
-    messages = state.get("messages")
-    listed = list(messages) if isinstance(messages, list) else []
+    listed = _messages(state)
     event = state.get(_SUMMARIZATION_EVENT)
     cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
     return listed[cutoff:] if isinstance(cutoff, int) and cutoff >= 0 else listed
 
 
+def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
+    """The text of the last of ``messages`` whose id starts with ``prefix``."""
+    for message in reversed(messages):
+        if isinstance(message.id, str) and message.id.startswith(prefix):
+            return content_text(message.content)
+    return None
+
+
+def _run_guidance(messages: Sequence[BaseMessage]) -> dict[str, str]:
+    """The latest run guidance for each block id in the conversation."""
+    latest: dict[str, str] = {}
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+        for text in _texts(message.content):
+            root = _root(text, "dynamic-context")
+            if root is not None and root.get("kind") == "run" and (key := root.get("id")):
+                latest[key] = text
+    return latest
+
+
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     held = state.get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
+
+
+def _moment(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _normalized(route: str) -> str:
@@ -229,25 +281,42 @@ class RunLoop:
         held = _held(state)
         if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        if self.rules.refresh_github_proxy:
-            self._backend.reports.notify(REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
-        context = await self._task_context()
-        added: list[BaseMessage] = []
+        proxy = asyncio.create_task(self._github_proxy(held))
+        try:
+            context = await self._task_context()
+            update = await proxy
+        finally:
+            proxy.cancel()
+            await asyncio.gather(proxy, return_exceptions=True)
+        visible = _visible(state)
+        visible_guidance = _run_guidance(visible)
+        added: list[BaseMessage] = [
+            HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}")
+            for key, text in _run_guidance(_messages(state)).items()
+            if key != "task-role" and text != visible_guidance.get(key)
+        ]
+        if context.instructions and context.instructions != _latest(visible, _ROLE):
+            added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
+        run_context = _latest(_messages(state), _RUN_CONTEXT)
+        if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
+            added.append(HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"))
         if context.message is not None and not any(
-            content_text(message.content) == context.message for message in _visible(state)
+            content_text(message.content) == context.message for message in visible
         ):
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
-        update: dict[str, JsonValue] = {}
         route = await self._route(held, [*_visible(state), *added])
         if route is not None:
-            update["model_route"] = route
+            if route.persist:
+                update["model_route"] = route.route
+            else:
+                update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
         model = await self._model_for(current)
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
-                system_prompt=self._system_prompt(current, context),
+                system_prompt=self._system_prompt(current),
                 hidden_tools=self._hidden(current),
                 model=model,
                 vision=None if model.reads_images else self._models.vision,
@@ -268,6 +337,30 @@ class RunLoop:
                 return True
         return False
 
+    async def _github_proxy(self, held: Mapping[str, object]) -> dict[str, JsonValue]:
+        """Put a new GitHub token on the box once the one there is about to expire.
+
+        The call is awaited, so the model's first command never runs on an expired
+        token. A failure leaves the run going and the call is made again a minute later.
+        """
+        if not self.rules.refresh_github_proxy:
+            return {}
+        now = datetime.now(UTC)
+        due = _moment(held.get(_GITHUB_PROXY_DUE))
+        if due is not None and now < due:
+            return {}
+        try:
+            refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+        except Exception:
+            logger.warning("Could not refresh the box's GitHub token", exc_info=True)
+            return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
+        due = (
+            refreshed.expires_at - _GITHUB_PROXY_WINDOW
+            if refreshed.expires_at is not None
+            else now + _GITHUB_PROXY_RECHECK
+        )
+        return {_GITHUB_PROXY_DUE: due.isoformat()}
+
     async def _task_context(self) -> TaskContext:
         if not self.rules.task_coordination:
             return TaskContext()
@@ -275,12 +368,14 @@ class RunLoop:
 
     async def _route(
         self, held: Mapping[str, object], messages: Sequence[BaseMessage]
-    ) -> str | None:
+    ) -> Route | None:
+        """The route and whether it should be kept beyond this run."""
         rules = self.rules.routing
         if rules is None:
             return None
         requested = held.get("requested_model")
         stored = held.get("model_route")
+        persist = True
         if isinstance(requested, str) and requested:
             route = "default"
         elif rules.mode is None:
@@ -289,14 +384,17 @@ class RunLoop:
             route = _normalized(stored)
         elif rules.mode == "fast":
             route = "fast"
+        elif held.get("model_route_attempted_for") == run_id():
+            return None
         else:
             asked = Routed(run_id=run_id(), humans=human_messages(messages))
-            route = (await call(self._backend, ROUTE_MODEL, asked)).route
+            routed = await call(self._backend, ROUTE_MODEL, asked)
+            route, persist = routed.route, routed.persist
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
             if isinstance(model_id, str) and model_id:
                 get_stream_writer()({"type": "model_routed", "route": route, "model_id": model_id})
-        return route
+        return Route(route=route, persist=persist)
 
     async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
         key = (model_id, effort if isinstance(effort, str) else None)
@@ -320,15 +418,10 @@ class RunLoop:
             return await self._chosen_model(selected, held.get("selected_effort"))
         return self._models.model
 
-    def _system_prompt(self, held: Mapping[str, object], context: TaskContext) -> str:
+    def _system_prompt(self, held: Mapping[str, object]) -> str:
+        """Only parts fixed for the thread's life: a changed byte misses the provider's cache."""
         rendered = held.get("rendered_system_prompt")
-        guide = held.get("review_guide_rules") if self.rules.review_guide else None
-        sections = [
-            self.rules.deployment_prompt,
-            rendered if isinstance(rendered, str) else "",
-            guide if isinstance(guide, str) else "",
-            context.instructions,
-        ]
+        sections = [self.rules.deployment_prompt, rendered if isinstance(rendered, str) else ""]
         return "\n\n".join(section for section in sections if section)
 
     def _hidden(self, held: Mapping[str, object]) -> list[str]:
@@ -454,28 +547,29 @@ class RunLoop:
     async def after_agent(
         self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
     ) -> AfterAgent:
-        """Start the graph's own end-of-run work, then report the run's end.
+        """Ask for the graph's own end-of-run work, then report the run's end.
 
-        The run waits for none of the work, and the work waits for no report: a report
-        that fails takes none of it with it.
+        The work goes out behind the run's reports, and one the backend cannot do takes
+        none of the rest with it.
         """
         messages = _messages(state)
         current = run_id()
-        reports = self._backend.reports
+        outbox = self._backend.outbox
         if messages and _LIMIT_MARKER in content_text(messages[-1].content):
-            reports.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
+            outbox.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
         for work in self.rules.at_end:
             if work == "settle_review_check":
-                reports.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
+                outbox.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
             else:
                 summary = _held(state).get("human_input_summary")
                 finished = ScoutPlanEnd(
                     run_id=current,
                     human_input_summary=summary if isinstance(summary, str) else "",
                 )
-                reports.notify(FINISH_SCOUT_PLAN, finished)
-        # The transcript has every reply and tool call before the run's end.
-        await reports.drain()
+                outbox.notify(FINISH_SCOUT_PLAN, finished)
+        # The transcript has every reply and tool call, and the backend the work, before
+        # the run's end.
+        await outbox.drain()
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(

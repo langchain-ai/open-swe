@@ -85,7 +85,8 @@ async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool
     result = await slack_read_channel_messages("C1")
 
     assert result["success"] is False
-    assert "public" in result["error"]
+    error = result["error"]
+    assert isinstance(error, str) and "public" in error
     assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
 

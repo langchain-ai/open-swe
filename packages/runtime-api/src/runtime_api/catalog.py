@@ -1,8 +1,7 @@
 """What the backend works out for a run as it starts it: its operations, subagents,
 models, sandbox and the rules of its middleware.
 
-The run's context carries it (``CATALOG`` answers a run started without it), and
-the MDA run builds its agent from it: a tool for each operation, the subagents it
+The run's context always carries it, and the MDA run builds its agent from it: a tool for each operation, the subagents it
 may delegate to, the models it calls, the box its file and shell tools run in, and
 what its middleware does around each model call.
 """
@@ -10,9 +9,6 @@ what its middleware does around each model call.
 from typing import Literal
 
 from pydantic import BaseModel, JsonValue
-
-from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
-from runtime_api.operations import RunRequest
 
 # The runtime's own tool that finds the run's operations by what they do.
 SEARCH_TOOLS = "search_tools"
@@ -41,7 +37,7 @@ class RunModels(BaseModel):
     vision: ModelSpec | None = None
 
 
-class OperationSpec(BaseModel):
+class ToolSpec(BaseModel):
     """One operation the run may call, as the model sees the tool that calls it."""
 
     name: str
@@ -57,6 +53,8 @@ class OperationSpec(BaseModel):
     code_name: str | None = None
     # The backend's grant of this operation to this run, sent with each call of it.
     grant: str | None = None
+    # How long a call of it may take, when shorter than a tool call's allowance.
+    seconds: float | None = None
 
 
 class SubagentSpec(BaseModel):
@@ -166,8 +164,6 @@ class LoopRules(BaseModel):
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
     cli_result: CliResultRules | None = None
-    # Whether the thread's review walkthrough adds its rules to each call.
-    review_guide: bool = False
     # Whether the thread may belong to a task, as its coordinator or a worker.
     task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
@@ -181,7 +177,12 @@ class LoopRules(BaseModel):
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
-    operations: list[OperationSpec] = []
+    # The run's tools: all but its integrations, which stay on the backend, found with
+    # ``search_tools`` and called from code mode (``runtime_api.tool_search``).
+    operations: list[ToolSpec] = []
+    # The same tools by name alone, as the run's context carries them (``names_only``):
+    # the run reads their specs as it starts (``runtime_api.tool_search.TOOL_SPECS``).
+    tool_names: list[str] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
@@ -210,13 +211,22 @@ class Catalog(BaseModel):
     # What the runtime's middleware does around each model call; None leaves it to the
     # backend's phase calls, for the runs still answered from their plan.
     loop: LoopRules | None = None
-    # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
+    # Whether the run offers ``search_tools`` over all its tools and calls those its
+    # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
-    # The run's token, signed again with what the backend decided as it planned the
-    # run here; only for a run started without its catalog.
-    run_token: str | None = None
 
+    def names_only(self) -> Catalog:
+        """This catalog as a run's context carries it: its tools by name alone.
 
-# Only reads the plan, so it is safe to send again.
-CATALOG = Endpoint("catalog", RunRequest, Catalog, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+        The Agent Server copies the context into every checkpoint and every read of
+        the run, so the specs stay with the backend, which the run reads them from.
+        """
+        return self.model_copy(
+            update={"operations": [], "tool_names": [tool.name for tool in self.operations]}
+        )
+
+    @property
+    def needs_tool_specs(self) -> bool:
+        """Whether it names tools whose specs the run has yet to read."""
+        return bool(self.tool_names) and not self.operations

@@ -11,6 +11,7 @@ from openswe.claude_code.routes import router as claude_code_router
 from openswe.dashboard.agent_instructions import router as agent_instructions_router
 from openswe.dashboard.auth_routes import router as auth_router
 from openswe.dashboard.client_errors import router as client_errors_router
+from openswe.dashboard.desktop_environments import router as desktop_environments_router
 from openswe.dashboard.langsmith_routes import router as langsmith_router
 from openswe.dashboard.oauth import require_same_origin_for_mutations
 from openswe.dashboard.options_routes import router as options_router
@@ -46,6 +47,7 @@ router.include_router(incidents_router)
 router.include_router(incident_documents_router, prefix="/incidents/documents")
 router.include_router(auth_router)
 router.include_router(client_errors_router)
+router.include_router(desktop_environments_router)
 router.include_router(user_instructions_router)
 router.include_router(user_preferences_router)
 router.include_router(options_router)

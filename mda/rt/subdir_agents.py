@@ -15,6 +15,8 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
 logger = logging.getLogger(__name__)
 
 _READ_FILE = "read_file"
@@ -143,6 +145,8 @@ def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> Too
 
 class SubdirAgentsReadMiddleware(AgentMiddleware):
     """Append applicable ancestor ``AGENTS.md`` files to ``read_file`` results."""
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     state_schema = AgentState
 

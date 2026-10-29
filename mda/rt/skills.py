@@ -40,6 +40,7 @@ from runtime_api.operations import RunRequest
 from runtime_api.skills import SKILLS
 
 from rt.backend import OpenSweBackend, RunLocal
+from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 _SYNC: Final = "The run's skills are read asynchronously"
 _READ_ONLY: Final = "Skills are read-only here"
@@ -145,6 +146,8 @@ class RunSkillsMiddleware(SkillsMiddleware):
     The graph serves every run, so the sources are read from the run in progress; a run
     whose catalog names none sees no skills, as if the middleware were absent.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     def __init__(self, backend: OpenSweBackend, files: SkillFiles) -> None:
         self._run_backend = backend

@@ -88,14 +88,8 @@ impl Client {
     /// Best-effort identity lookup; errors leave optional metadata unknown.
     pub(crate) fn auth_identity(&self) -> Option<AuthIdentity> {
         let mut metadata: AuthIdentity = serde_json::from_value(
-            self.request(
-                self.platform_api_url.as_deref()?,
-                Method::GET,
-                "/auth/public",
-                &[],
-                None,
-            )
-            .ok()?,
+            self.request(self.platform_base(), Method::GET, "/auth/public", &[], None)
+                .ok()?,
         )
         .ok()?;
         for id in [
@@ -116,11 +110,6 @@ impl Client {
             return None;
         }
         Some(metadata)
-    }
-
-    /// Host backend base URL this client talks to.
-    pub fn host_backend_url(&self) -> &str {
-        &self.host_backend_url
     }
 
     /// Resolve a workspace id for this client, for use in dashboard links.
@@ -223,7 +212,7 @@ impl Client {
     /// A bounded, read-only GET against the platform API.
     fn lookup(&self, path: &str) -> Result<Value> {
         self.request_with_timeout(
-            self.platform_base()?,
+            self.platform_base(),
             Method::GET,
             path,
             &[],
@@ -271,7 +260,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::langsmith::{Client, Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::Client;
 
     /// A platform API that answers a fixed body per path, one connection per
     /// request (the client's requests are sequential and `Connection: close`).
@@ -304,16 +293,8 @@ mod tests {
 
     fn client_for(platform_api_url: String, tenant_id: Option<&str>) -> Client {
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
             tenant_id: tenant_id.map(str::to_string),
-            // Every route here is a platform-API route; a request to the host
-            // backend should fail the test rather than reach the stub server.
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(platform_api_url),
+            ..Client::for_test(&platform_api_url)
         }
     }
 
@@ -412,8 +393,7 @@ mod tests {
 
     #[test]
     fn a_scoped_client_answers_with_its_own_workspace() {
-        let client = Client::new("https://api.host.langchain.com", "key", Some("ws-1".into()))
-            .expect("client");
+        let client = client_for("http://unused.invalid".into(), Some("ws-1"));
         assert_eq!(client.workspace_id_for_links().as_deref(), Some("ws-1"));
     }
 

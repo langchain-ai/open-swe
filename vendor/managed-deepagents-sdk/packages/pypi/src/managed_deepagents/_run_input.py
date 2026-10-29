@@ -1,32 +1,39 @@
 """Config defaults for native LangGraph execution."""
 
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, nullcontext
+import asyncio
+from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import AbstractContextManager, AsyncExitStack, nullcontext
+from contextvars import Token
+from functools import cached_property
 from typing import Any, cast
+from uuid import UUID
 
+from langchain_core.callbacks import AsyncCallbackManager
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.tracers.langchain import LangChainTracer
+from langchain_core.tracers.schemas import Run
 from langgraph._internal._config import ensure_config, patch_configurable
-from langgraph._internal._constants import CONFIG_KEY_RUNTIME
+from langgraph._internal._constants import CONFIG_KEY_CHECKPOINTER, CONFIG_KEY_RUNTIME
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
-from langgraph.types import Interrupt
+from langgraph.types import StateSnapshot
 from langsmith import get_tracing_context, tracing_context
 
 from managed_deepagents._channels.binding import (
     ChannelBinding,
     _current_channel,
     _current_routing,
-    _lead_channel,
     resolve_channel_binding,
 )
-from managed_deepagents._channels.schedule_delivery import (
-    SAVED_CHANNEL_KEY,
-    _delivering_notification,
-    is_task_notification_input,
-    report_notification_interrupts,
-    restored_channel,
+from managed_deepagents._channels.delivery import (
+    INPUT_SOURCE,
+    deliver_run_result,
+    delivers_result,
 )
+from managed_deepagents._channels.run_output import RunOutput, _current_output
 from managed_deepagents._identity_runtime import _field
+from managed_deepagents._managed_thread import RunThread, _current_thread, build_run_thread
 from managed_deepagents._memory.async_util import await_if_needed
 from managed_deepagents._telemetry.otel import (
     LogContext,
@@ -36,6 +43,7 @@ from managed_deepagents._telemetry.otel import (
     trace_id_from_metadata,
 )
 from managed_deepagents.run_context import is_managed_key
+from managed_deepagents.run_resources import _current_resources
 
 #: Run ``configurable`` key deepagents uses to name the agent that started an async subagent.
 _PARENT_KEY = "deepagents_parent"
@@ -60,8 +68,108 @@ def graph_default_config(config: Mapping[str, object] | None) -> RunnableConfig:
     return cast("RunnableConfig", prepared)
 
 
+class ManagedTurnTracer(LangChainTracer):
+    """Close a managed invocation's trace tree when its root finishes."""
+
+    @cached_property
+    def roots(self) -> list[Run]:
+        return []
+
+    @property
+    def root(self) -> Run | None:
+        return self.roots[0] if self.roots else None
+
+    def copy_with_metadata_defaults(
+        self, *, metadata: Mapping[str, str] | None = None, tags: list[str] | None = None
+    ) -> LangChainTracer:
+        tracer = super().copy_with_metadata_defaults(metadata=metadata, tags=tags)
+        if isinstance(tracer, ManagedTurnTracer):
+            tracer.roots = self.roots
+        return tracer
+
+    def _start_trace(self, run: Run) -> None:
+        if self.root is None:
+            self.roots.append(run)
+            run.metadata.pop("end_reason", None)
+        elif self.root.end_time is not None:
+            run.extra["__disabled"] = True
+        super()._start_trace(run)
+
+    def _errored_chain_run(
+        self, error: BaseException, inputs: dict[str, object] | None, run_id: UUID
+    ) -> Run:
+        run = super()._errored_chain_run(error, inputs, run_id)
+        if run is self.root:
+            reason = "failed"
+            if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
+                reason = "cancelled" if isinstance(error, GeneratorExit) else "failed"
+                pending: list[BaseException] = [error]
+                seen: set[int] = set()
+                while pending:
+                    cause = pending.pop()
+                    if id(cause) in seen:
+                        continue
+                    seen.add(id(cause))
+                    if isinstance(cause, TimeoutError) or type(cause).__name__ == "UserTimeout":
+                        reason = "failed"
+                        break
+                    if type(cause).__name__ == "UserInterrupt":
+                        reason = (
+                            "superseded"
+                            if str(cause).startswith("superseded by run ")
+                            and "(multitask_strategy=interrupt)" in str(cause)
+                            else "cancelled"
+                        )
+                    pending.extend(arg for arg in cause.args if isinstance(arg, BaseException))
+                    if cause.__cause__ is not None:
+                        pending.append(cause.__cause__)
+                if reason != "failed":
+                    run.error = None
+            run.metadata["end_reason"] = reason
+        return run
+
+    def _end_trace(self, run: Run) -> None:
+        if run is self.root:
+            run.metadata.setdefault("end_reason", "failed" if run.error else "completed")
+            pending = list(run.child_runs)
+            while pending:
+                child = pending.pop()
+                pending.extend(child.child_runs)
+                if child.end_time is None:
+                    child.end(end_time=run.end_time)
+                    self._update_run_single(child)
+                    child.extra["__disabled"] = True
+        super()._end_trace(run)
+
+    @classmethod
+    def for_run(cls, config: RunnableConfig) -> RunnableConfig:
+        """Preserve tracing destinations and parents while isolating invocation lifecycle."""
+        manager = AsyncCallbackManager.configure(inheritable_callbacks=config.get("callbacks"))
+        for handler in list(manager.handlers):
+            if not isinstance(handler, LangChainTracer):
+                continue
+            tracer = cls(
+                example_id=handler.example_id,
+                project_name=handler.project_name,
+                address=handler.address,
+                client=handler.client,
+                tags=handler.tags,
+                metadata=handler.tracing_metadata,
+                run_map=dict(handler.run_map),
+                order_map=dict(handler.order_map),
+                _external_run_ids=dict(handler._external_run_ids),  # noqa: SLF001
+            )
+            manager.remove_handler(handler)
+            manager.add_handler(tracer)
+        return {**config, "callbacks": manager}
+
+
 class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
-    """Remove ingress transport before native context conversion, on every execution."""
+    """Remove ingress transport before native context conversion, on every execution.
+
+    Each step sees the run's channel and thread; when the stream ends, the run's
+    result goes to its thread origin, or a scheduled run's ``deliver_to``.
+    """
 
     replicate_traces: bool = True
 
@@ -92,37 +200,25 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         **kwargs: Any,
     ) -> Iterator[Any]:
         binding, context, routing = execution_context(context, self.config, config)
-        notifying = False
-        reports_to = None
-        if binding is None and _may_restore_channel(input, self.config, config):
-            binding = reports_to = self._saved_channel(_merged(self.config, config), config)
-            notifying = binding is not None
-        elif binding is None and (lead := _lead_thread_id(self.config, config)):
-            reports_to = self._saved_channel(_thread_config(lead), config)
+        thread = run_thread(binding, self.config, config)
+        merged = _merged(self.config, config)
         log = run_log_context(self.config, config)
+        output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
         iterator = super().stream(input, config, context=context, **kwargs)
         try:
             while True:
-                token = _current_channel.set(binding)
-                lead_token = _lead_channel.set(None if binding is not None else reports_to)
-                notify_token = _delivering_notification.set(notifying)
-                routing_token = _current_routing.set(routing)
+                tokens = _enter_step(binding, routing, thread, output)
                 log_token = enter_log_context(log)
                 try:
                     with self._tracing(config):
                         item = next(iterator)
                 except StopIteration:
-                    if reports_to is not None:
-                        merged = _merged(self.config, config)
-                        _report_pause(reports_to, merged, self.get_state(merged).interrupts)
+                    self._deliver(thread, merged, routing, output)
                     return
                 finally:
-                    _delivering_notification.reset(notify_token)
                     exit_log_context(log_token)
-                    _current_routing.reset(routing_token)
-                    _lead_channel.reset(lead_token)
-                    _current_channel.reset(token)
+                    _exit_step(tokens)
                 yield item
         finally:
             log_token = enter_log_context(log)
@@ -141,59 +237,195 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
         binding, context, routing = execution_context(context, self.config, config)
-        notifying = False
-        reports_to = None
-        if binding is None and _may_restore_channel(input, self.config, config):
-            binding = reports_to = await self._asaved_channel(_merged(self.config, config), config)
-            notifying = binding is not None
-        elif binding is None and (lead := _lead_thread_id(self.config, config)):
-            reports_to = await self._asaved_channel(_thread_config(lead), config)
+        thread = run_thread(binding, self.config, config)
+        merged = _merged(self.config, config)
         log = run_log_context(self.config, config)
+        output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
+        with self._tracing(config):
+            config = ManagedTurnTracer.for_run(ensure_config(self.config, config))
         iterator = super().astream(input, config, context=context, **kwargs)
+        resources = AsyncExitStack()
         try:
             while True:
-                token = _current_channel.set(binding)
-                lead_token = _lead_channel.set(None if binding is not None else reports_to)
-                notify_token = _delivering_notification.set(notifying)
-                routing_token = _current_routing.set(routing)
+                tokens = _enter_step(binding, routing, thread, output)
                 log_token = enter_log_context(log)
                 try:
-                    with self._tracing(config):
-                        item = await anext(iterator)
+                    resource_token = _current_resources.set(resources)
+                    try:
+                        with self._tracing(config):
+                            item = await anext(iterator)
+                    finally:
+                        _current_resources.reset(resource_token)
                 except StopAsyncIteration:
-                    if reports_to is not None:
-                        merged = _merged(self.config, config)
-                        snapshot = await self.aget_state(merged)
-                        await _areport_pause(reports_to, merged, snapshot.interrupts)
+                    await self._adeliver(thread, merged, routing, output)
                     return
                 finally:
-                    _delivering_notification.reset(notify_token)
                     exit_log_context(log_token)
-                    _current_routing.reset(routing_token)
-                    _lead_channel.reset(lead_token)
-                    _current_channel.reset(token)
+                    _exit_step(tokens)
                 yield item
         finally:
             log_token = enter_log_context(log)
             try:
-                with self._tracing(config):
-                    await iterator.aclose()
+                try:
+                    with self._tracing(config):
+                        await iterator.aclose()
+                finally:
+                    await resources.aclose()
             finally:
                 exit_log_context(log_token)
 
-    def _saved_channel(
-        self, thread_config: RunnableConfig, config: RunnableConfig | None
-    ) -> ChannelBinding | None:
-        """The channel saved on a thread, if this run's caller may deliver to it."""
-        saved = self.get_state(thread_config).values.get(SAVED_CHANNEL_KEY)
-        return restored_channel(saved, _configurable(self.config, config))
+    def _deliver(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput | None,
+    ) -> None:
+        """Send the finished stream's result to the run's thread origin or ``deliver_to``."""
+        if not delivers_result(thread, merged, routing):
+            return
+        if output is not None:
+            await_if_needed(self._deliver_output(thread, merged, routing, output))
+            return
+        # The run may have started from a named checkpoint; read the thread's latest.
+        latest = _history_config(merged)
+        history = self.get_state_history(latest, filter=_INPUT, limit=1)
+        boundary = next(iter(history), None)
+        await_if_needed(
+            deliver_run_result(
+                thread,
+                merged,
+                self.get_state(latest),
+                boundary,
+                routing=routing,
+                subagent=_lead_thread_id(self.config, merged) is not None,
+            )
+        )
 
-    async def _asaved_channel(
-        self, thread_config: RunnableConfig, config: RunnableConfig | None
-    ) -> ChannelBinding | None:
-        saved = (await self.aget_state(thread_config)).values.get(SAVED_CHANNEL_KEY)
-        return restored_channel(saved, _configurable(self.config, config))
+    async def _adeliver(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput | None,
+    ) -> None:
+        if not delivers_result(thread, merged, routing):
+            return
+        if output is not None:
+            await self._deliver_output(thread, merged, routing, output)
+            return
+        latest = _history_config(merged)
+        boundary = None
+        async for snapshot in self.aget_state_history(latest, filter=_INPUT, limit=1):
+            boundary = snapshot
+        await deliver_run_result(
+            thread,
+            merged,
+            await self.aget_state(latest),
+            boundary,
+            routing=routing,
+            subagent=_lead_thread_id(self.config, merged) is not None,
+        )
+
+    async def _deliver_output(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput,
+    ) -> None:
+        """Deliver a stateless scheduled run's answer to its ``deliver_to``.
+
+        It has no thread to read back, so its answer is what its agent ended
+        with. A stateless run with a thread origin posts nothing, as before.
+        """
+        if thread.origin is not None or output.messages is None:
+            return
+        final = StateSnapshot(
+            values={"messages": output.messages},
+            next=(),
+            config=merged,
+            metadata=None,
+            created_at=None,
+            parent_config=None,
+            tasks=(),
+            interrupts=(),
+        )
+        await deliver_run_result(
+            thread,
+            merged,
+            final,
+            None,
+            routing=routing,
+            subagent=_lead_thread_id(self.config, merged) is not None,
+            stateless=True,
+        )
+
+    def _keeps_state(self, config: RunnableConfig) -> bool:
+        """Whether the run's state can be read back; a stateless run's cannot."""
+        checkpointer = config["configurable"].get(CONFIG_KEY_CHECKPOINTER, self.checkpointer)
+        return isinstance(checkpointer, BaseCheckpointSaver)
+
+
+#: Lists the checkpoint LangGraph writes before a run's input.
+_INPUT = {"source": INPUT_SOURCE}
+
+_StepTokens = tuple[
+    Token[ChannelBinding | None],
+    Token[Mapping[str, object] | None],
+    Token[RunThread | None],
+    Token[RunOutput | None],
+]
+
+
+def _enter_step(
+    binding: ChannelBinding | None,
+    routing: Mapping[str, object] | None,
+    thread: RunThread,
+    output: RunOutput | None,
+) -> _StepTokens:
+    return (
+        _current_channel.set(binding),
+        _current_routing.set(routing),
+        _current_thread.set(thread),
+        _current_output.set(output),
+    )
+
+
+def _exit_step(tokens: _StepTokens) -> None:
+    channel, routing, thread, output = tokens
+    _current_output.reset(output)
+    _current_thread.reset(thread)
+    _current_routing.reset(routing)
+    _current_channel.reset(channel)
+
+
+def _history_config(config: RunnableConfig) -> RunnableConfig:
+    """The run's thread at its latest checkpoint, without the one the run started from."""
+    configurable = {
+        key: value
+        for key, value in config["configurable"].items()
+        if key not in ("checkpoint_id", "checkpoint_map")
+    }
+    return {**config, "configurable": configurable}
+
+
+def run_thread(
+    binding: ChannelBinding | None,
+    defaults: Mapping[str, object] | None,
+    config: Mapping[str, object] | None,
+) -> RunThread:
+    """The run's ``runtime.thread``; an async subagent's is its lead's."""
+    merged = _merged(defaults, config)
+    configurable = merged["configurable"]
+    return build_run_thread(
+        thread_id=configurable.get("thread_id"),
+        live=binding,
+        metadata=merged.get("metadata"),
+        configurable=configurable,
+        lead_thread_id=_lead_thread_id(defaults, config),
+    )
 
 
 class SingleProjectManagedAgent(ManagedCompiledAgent):
@@ -209,8 +441,8 @@ def _lead_thread_id(
 
     deepagents sends it as the parent reference, or, for a run with the lead's
     context, in the run metadata the Agent Server copies from the task thread. The
-    subagent's pause is shown in the lead's channel thread, so the user can answer
-    the subagent there.
+    subagent's thread is its lead's, so its pause is shown in the lead's channel
+    thread and the user can answer the subagent there.
     """
     merged = _merged(defaults, config)
     configurable = merged["configurable"]
@@ -226,10 +458,6 @@ def _lead_thread_id(
     ):
         return None
     return thread_id
-
-
-def _thread_config(thread_id: str) -> RunnableConfig:
-    return {"configurable": {"thread_id": thread_id}}
 
 
 def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
@@ -297,55 +525,6 @@ def _merged(
 ) -> RunnableConfig:
     return ensure_config(
         cast("RunnableConfig | None", defaults), cast("RunnableConfig | None", config)
-    )
-
-
-def _configurable(
-    defaults: Mapping[str, object] | None, config: Mapping[str, object] | None
-) -> Mapping[str, object]:
-    return _merged(defaults, config)["configurable"]
-
-
-async def _areport_pause(
-    binding: ChannelBinding, config: RunnableConfig, pending: Sequence[Interrupt]
-) -> None:
-    """Show a notification run's pending interrupts in the channel thread it restored."""
-    interrupts: list[dict[str, object]] = [
-        {"id": item.id, "value": item.value} for item in pending if item.id
-    ]
-    thread_id = config["configurable"].get("thread_id")
-    run_id = _run_id(config)
-    if interrupts and thread_id and run_id:
-        await report_notification_interrupts(
-            binding, run_thread_id=str(thread_id), run_id=run_id, interrupts=interrupts
-        )
-
-
-def _report_pause(
-    binding: ChannelBinding, config: RunnableConfig, pending: Sequence[Interrupt]
-) -> None:
-    await_if_needed(_areport_pause(binding, config, pending))
-
-
-def _run_id(config: RunnableConfig) -> str | None:
-    """The Agent Server run executing this graph, wherever the config carries it."""
-    metadata = config.get("metadata") or {}
-    for value in (
-        config.get("run_id"),
-        config["configurable"].get("run_id"),
-        metadata.get("run_id"),
-    ):
-        if value:
-            return str(value)
-    return None
-
-
-def _may_restore_channel(
-    input_value: object, defaults: Mapping[str, object] | None, config: Mapping[str, object] | None
-) -> bool:
-    """A channel caller's task notification run, which has no channel delivery of its own."""
-    return is_task_notification_input(input_value) and is_channel_execution(
-        _configurable(defaults, config)
     )
 
 

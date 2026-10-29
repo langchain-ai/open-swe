@@ -46,7 +46,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       }))
       if (result.reused) return
       toast.success(
-        `Asked Slack to review ${pullRequestKey(pr)}`,
+        `Asked ${result.channel_name ? `#${result.channel_name}` : "Slack"} to review ${pullRequestKey(pr)}`,
         result.permalink
           ? {
               action: {
@@ -66,9 +66,15 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   })
   if (pr.draft !== false) return null
   const channelHint =
-    needsChannel && !channel
-      ? "This repository has no review channel. Choose one to post the request in."
-      : null
+    active || channel
+      ? null
+      : availability.isPending
+        ? "Checking the default Slack review channel…"
+        : availability.isError
+          ? "Could not check the default Slack review channel. Choose a review channel manually or retry the review status."
+          : needsChannel
+            ? "No default Slack review channel is configured. Choose a review channel manually to enable this button."
+            : null
   const label = requestReview.isPending
     ? "Requesting…"
     : active
@@ -96,7 +102,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       <PullRequestActionButton
         label={label}
         loading={requestReview.isPending}
-        disabled={false}
+        disabled={Boolean(channelHint)}
         onClick={() => {
           if (requestReview.isPending) return
           if (active && permalink) {

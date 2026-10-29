@@ -1911,6 +1911,40 @@
         "title": "DesktopConnectExchange",
         "type": "object"
       },
+      "DesktopEnvironment": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "DesktopEnvironment",
+        "type": "object"
+      },
+      "DesktopEnvironments": {
+        "properties": {
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopEnvironment"
+            },
+            "title": "Environments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "environments"
+        ],
+        "title": "DesktopEnvironments",
+        "type": "object"
+      },
       "DesktopHandoffExchange": {
         "properties": {
           "code": {
@@ -5287,6 +5321,17 @@
             ],
             "title": "Active Batch Id"
           },
+          "configuration_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Generation"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/EntryView"
@@ -5330,7 +5375,8 @@
           "operator",
           "items",
           "next_cursor",
-          "active_batch_id"
+          "active_batch_id",
+          "configuration_generation"
         ],
         "title": "QueueStatus",
         "type": "object"
@@ -5539,6 +5585,16 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_mismatch": {
+            "default": false,
+            "title": "Channel Mismatch",
+            "type": "boolean"
+          },
+          "channel_name": {
+            "default": "",
+            "title": "Channel Name",
+            "type": "string"
+          },
           "claimed": {
             "default": false,
             "title": "Claimed",
@@ -5557,6 +5613,11 @@
           "request_id": {
             "default": "",
             "title": "Request Id",
+            "type": "string"
+          },
+          "requested_channel": {
+            "default": "",
+            "title": "Requested Channel",
             "type": "string"
           },
           "reused": {
@@ -11031,6 +11092,27 @@
           }
         ],
         "summary": "Api Report Client Error",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/desktop/environments": {
+      "get": {
+        "operationId": "api_desktop_environments_dashboard_api_desktop_environments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopEnvironments"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Desktop Environments",
         "tags": [
           "dashboard"
         ]

@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
+from xml.etree import ElementTree
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
@@ -24,6 +25,7 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
+from openswe.slack.allowed_bots import authorized_slack_bot_run
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.records import lookup_slack_thread_id
@@ -38,6 +40,7 @@ from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
+from openswe.threads.store import THREADS
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -46,6 +49,7 @@ from openswe.threads.workflow_approval import (
 )
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
+from openswe.utils.dashboard_handoff import RELAY_RUN_ID_KEY, RELAYED_FROM_KEY
 from openswe.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -88,6 +92,7 @@ _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
 _NO_ACTOR = "No verified triggering user is available"
+_NO_READER = f"Thread lookup was unavailable. {_NO_ACTOR}"
 _NO_WRITER = (
     f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
     "but cannot message, manage, or start them."
@@ -108,7 +113,7 @@ class _Actor:
 
     @property
     def admin(self) -> bool:
-        return is_admin(self.email, login=self.login)
+        return not self.automation and is_admin(self.email, login=self.login)
 
 
 def _config() -> dict[str, Any]:
@@ -130,11 +135,11 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = await User.login_for_email(email)
     if not login:
         return None
-    current_login = _latest_state_github_login(state)
-    if current_login and current_login.lower() != login.lower():
-        login = current_login
-        email = None
     try:
+        current_login = await _latest_state_github_login(state)
+        if current_login and current_login.lower() != login.lower():
+            login = current_login
+            email = None
         await enforce_github_login_gate(login)
     except HTTPException:
         return None
@@ -142,18 +147,25 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
 
 
 async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
-    """Who reads threads: the triggering user, or else the automation whose run this is."""
+    """Who reads threads: the triggering user, else the automation or allowed bot running this."""
     if actor := await _actor(state):
         return actor
-    record = await schedules.authorized_schedule_run(RunConfig.parse(_config().get("configurable")))
-    if record is None:
-        return None
-    return _Actor(
-        login=f"system:schedule:{record['id']}",
-        email=None,
-        name=record.get("name") or "Automation",
-        automation=True,
-    )
+    cfg = RunConfig.parse(_config().get("configurable"))
+    if record := await schedules.authorized_schedule_run(cfg):
+        return _Actor(
+            login=f"system:schedule:{record['id']}",
+            email=None,
+            name=record.get("name") or "Automation",
+            automation=True,
+        )
+    if bot := await authorized_slack_bot_run(cfg):
+        return _Actor(
+            login=f"system:slack-bot:{bot.team_id}:{bot.bot_id}",
+            email=None,
+            name=bot.name,
+            automation=True,
+        )
+    return None
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
@@ -210,6 +222,38 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     return result
 
 
+async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
+    result = {key: item.get(key) for key in ("id", "status", "createdAt", "updatedAt", "title")}
+    result["webUrl"] = _web_link(item)
+    pr = item.get("pr")
+    result["pr"] = (
+        {key: pr.get(key) for key in ("url", "number", "state")}
+        if isinstance(pr, Mapping)
+        else None
+    )
+    messages = item.get("messages")
+    final_message = item.get("final_message")
+    outcome = (
+        final_message
+        if isinstance(final_message, str) and final_message
+        else _last_assistant_outcome(messages if isinstance(messages, list) else [])
+    )
+    thread_id = item.get("id")
+    if outcome is None and isinstance(thread_id, str):
+        thread_state = await THREADS.state(thread_id)
+        outcome = _last_assistant_outcome(_state_messages(thread_state))
+    result["final_message"] = outcome[:500] if outcome else None
+    return result
+
+
+def _last_assistant_outcome(messages: list[object]) -> str | None:
+    for message in reversed(messages):
+        if _message_kind(message) in {"ai", "assistant"} and not _value(message, "tool_calls"):
+            if text := _plain_message_text(_message_content(message)):
+                return text
+    return None
+
+
 def _exact_locator_filters(
     *,
     participant: str | None,
@@ -258,12 +302,13 @@ async def list_threads(
     scope: ThreadScope = "all",
     automation_id: str | None = None,
     admin_threads: bool | None = None,
+    summary_only: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
     actor = await _reader(state)
     if actor is None:
-        return _failure(_NO_ACTOR)
+        return _failure(_NO_READER)
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
@@ -272,6 +317,7 @@ async def list_threads(
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
 
+    compact = summary_only if summary_only is not None else scope == "automation"
     normalized_query = query.strip() if isinstance(query, str) else ""
     exact_locator = (
         parse_langsmith_locator(normalized_query) is not None
@@ -306,9 +352,20 @@ async def list_threads(
             if isinstance(resolved_locator, dict):
                 return resolved_locator
             _, summary = resolved_locator
+            try:
+                item = (
+                    await _compact_list_item(summary)
+                    if compact
+                    else _list_item(summary, locator=normalized_query)
+                )
+            except Exception:
+                logger.exception(
+                    "Could not load thread outcome", extra={"thread_id": summary.get("id")}
+                )
+                return _failure("Could not list threads")
             return {
                 "success": True,
-                "items": [_list_item(summary, locator=normalized_query)],
+                "items": [item],
                 "limit": 1,
                 "offset": 0,
                 "has_more": False,
@@ -347,9 +404,16 @@ async def list_threads(
     items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
+    try:
+        results = [
+            await _compact_list_item(item) if compact else _list_item(item) for item in items
+        ]
+    except Exception:
+        logger.exception("Could not load thread outcomes")
+        return _failure("Could not list threads")
     return {
         "success": True,
-        "items": [_list_item(item) for item in items],
+        "items": results,
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
@@ -437,12 +501,26 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
+def _last_assistant_message(state: object) -> dict[str, object] | None:
+    for message in reversed(_state_messages(state)):
+        if _message_kind(message) not in {"ai", "assistant"}:
+            continue
+        text = _plain_message_text(_message_content(message))
+        if text:
+            return {
+                "text": text[-_MAX_DETAIL_MESSAGE_CHARS:],
+                "truncated": len(text) > _MAX_DETAIL_MESSAGE_CHARS,
+                "timestamp": _message_timestamp(message),
+            }
+    return None
+
+
 def _transcript(state: Any) -> dict[str, Any]:
     messages = _state_messages(state)
     visible: list[dict[str, Any]] = []
     omitted = 0
     used_chars = 0
-    for message in messages:
+    for message in reversed(messages):
         kind = _message_kind(message)
         if kind not in {"human", "user", "ai", "assistant"}:
             omitted += 1
@@ -456,7 +534,7 @@ def _transcript(state: Any) -> dict[str, Any]:
             omitted += 1
             continue
         remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        returned_text = text[-min(_MAX_DETAIL_MESSAGE_CHARS, remaining) :]
         visible.append(
             {
                 "id": _message_id(message),
@@ -469,7 +547,7 @@ def _transcript(state: Any) -> dict[str, Any]:
         )
         used_chars += len(returned_text)
     return {
-        "messages": visible,
+        "messages": list(reversed(visible)),
         "message_count": len(messages),
         "returned_count": len(visible),
         "omitted_count": omitted,
@@ -491,7 +569,7 @@ def _state_summary(state: Any) -> dict[str, Any]:
     }
 
 
-def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
+async def _latest_state_github_login(state: Mapping[str, object] | None) -> str | None:
     messages = state.get("messages") if isinstance(state, Mapping) else None
     if not isinstance(messages, list):
         return None
@@ -504,7 +582,58 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
         sender_id = message_sender_id(content)
         if isinstance(sender_id, str) and sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
-            return login or None
+            if not login.isdigit():
+                return login or None
+            blocks = content if isinstance(content, list) else [content]
+            for block in blocks:
+                text = _value(block, "text") if isinstance(block, Mapping) else block
+                if not isinstance(text, str):
+                    continue
+                try:
+                    envelope = ElementTree.fromstring(text)
+                except ElementTree.ParseError:
+                    continue
+                if (
+                    envelope.tag == "input-message"
+                    and envelope.get("sender") == sender_id
+                    and envelope.get("surface") in {"web", "automation"}
+                ):
+                    return login
+            for context_message in reversed(messages):
+                context_content = _message_content(context_message)
+                if dynamic_context_hash(context_content) is None:
+                    continue
+                blocks = context_content if isinstance(context_content, list) else [context_content]
+                for block in blocks:
+                    text = _value(block, "text") if isinstance(block, Mapping) else block
+                    if not isinstance(text, str):
+                        continue
+                    try:
+                        context = ElementTree.fromstring(text)
+                    except ElementTree.ParseError:
+                        continue
+                    if (
+                        context.tag != "dynamic-context"
+                        or context.get("kind") != "person"
+                        or context.get("id") != sender_id
+                    ):
+                        continue
+                    for line in (context.text or "").splitlines():
+                        field, separator, value = line.partition(":")
+                        if field == "github_login" and separator and value.strip():
+                            return value.strip()
+            try:
+                user = await User.for_identity("github", login)
+            except Exception as exc:
+                logger.warning(
+                    "Could not resolve GitHub sender",
+                    extra={"sender_id": sender_id},
+                    exc_info=True,
+                )
+                raise HTTPException(403, _NO_ACTOR) from exc
+            if user is None or not user.github_login:
+                raise HTTPException(403, _NO_ACTOR)
+            return user.github_login
         return None
     return None
 
@@ -646,6 +775,8 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
+    if actor.automation:
+        return False
     if RunConfig.parse(_config().get("configurable")).mcp_caller:
         return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
@@ -660,7 +791,12 @@ async def _private_thread_context(actor: _Actor) -> bool:
 
 
 async def _authorized_locator(
-    locator: str, actor: _Actor, *, admin_override: bool = False
+    locator: str,
+    actor: _Actor,
+    *,
+    admin_override: bool = False,
+    action: ThreadAction | None = None,
+    relayed_from: object = None,
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
@@ -707,7 +843,15 @@ async def _authorized_locator(
         and not admin_override
         and not await _private_thread_context(actor)
     ):
-        raise HTTPException(404, "thread not found")
+        if not (
+            action == "send_message"
+            and thread_id == relayed_from
+            and thread_is_owner({"owner_login": summary.get("ownerLogin")}, actor.login)
+        ):
+            return _failure(
+                "this private thread can only be reached from its owner's private conversation",
+                status_code=403,
+            )
     return thread_id, summary
 
 
@@ -766,10 +910,10 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Implement the `get_thread` tool."""
+    """Inspect a thread, including last_assistant_message (text tail, truncated, timestamp) or None."""
     actor = await _reader(state)
     if actor is None:
-        return _failure(_NO_ACTOR)
+        return _failure(_NO_READER)
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
@@ -838,6 +982,7 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "last_assistant_message": _last_assistant_message(thread_state),
         "transcript": _transcript(thread_state),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
@@ -1028,10 +1173,23 @@ async def manage_thread(
         model_id, effort = validated
 
     try:
-        # Private threads are only reachable from the owner's private context.
-        # admin_cancel is the exception, so its response must not leak details.
         admin_override = action == "admin_cancel" and actor.admin
-        resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
+        configurable = as_json_object(_config().get("configurable"))
+        relayed_from = configurable.get(RELAYED_FROM_KEY)
+        # Queued provenance is checkpointed, so only the run its inbox read it for may use it.
+        if (
+            state
+            and configurable.get("run_id")
+            and state.get(RELAY_RUN_ID_KEY) == configurable["run_id"]
+        ):
+            relayed_from = state.get(RELAYED_FROM_KEY)
+        resolved = await _authorized_locator(
+            thread_id,
+            actor,
+            admin_override=admin_override,
+            action=action,
+            relayed_from=relayed_from,
+        )
         if isinstance(resolved, dict):
             return resolved
         thread_id, summary = resolved

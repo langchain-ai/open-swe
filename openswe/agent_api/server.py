@@ -12,21 +12,20 @@ An async subagent's first run carries a worker grant instead: it may read its
 coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 """
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
-from langsmith import tracing_context
-from langsmith.run_trees import RunTree
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import CATALOG
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
+from runtime_api.loop import PREPARE
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
@@ -48,33 +47,15 @@ class RefusedCallError(PermissionError):
     """The run's token does not allow this call."""
 
 
+class CallerHungUpError(ConnectionError):
+    """The caller disconnected before the call answered, so the call was cancelled."""
+
+
 def _graphs() -> Mapping[str, Api]:
     # The webapp must not import the agent stack at startup.
     from openswe.agent_api.hosted import hosted_graphs
 
     return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
-
-
-@contextmanager
-def _traced_under_caller(scope: Scope) -> Iterator[None]:
-    """Nest what the call traces under the runtime span that made it, when it says which.
-
-    Without it every hook would start a trace of its own, apart from the run's turn.
-    """
-    headers = Request(scope).headers
-    parent: RunTree | None = None
-    if dotted_order := headers.get("langsmith-trace"):
-        try:
-            parent = RunTree.from_headers(
-                {"langsmith-trace": dotted_order, "baggage": headers.get("baggage", "")}
-            )
-        except Exception:
-            logger.warning("Ignoring unusable trace headers", exc_info=True)
-    if parent is None:
-        yield
-        return
-    with tracing_context(parent=parent):
-        yield
 
 
 def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
@@ -91,12 +72,7 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
     if isinstance(principal, WorkerGrant):
         if async_workers.GRANT_API.serves(endpoint):
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
-        if endpoint != CATALOG.name:
-            raise RefusedCallError("A worker grant only adopts a run token")
-        # Its tools, models and schemas only: the worker reads them before it has an
-        # identity, and never its coordinator's token.
-        catalog = await _graph(principal.coordinator)(principal.coordinator, endpoint, body)
-        return {**catalog, "run_token": None} if isinstance(catalog, dict) else catalog
+        raise RefusedCallError("A worker grant only adopts a run token")
     if async_workers.RUN_API.serves(endpoint):
         return await async_workers.RUN_API.dispatch(endpoint, principal, body)
     return await _graph(principal)(principal, endpoint, body)
@@ -107,6 +83,39 @@ def _graph(run: RemoteRun) -> Api:
     if graph is None:
         raise RefusedCallError(f"This backend serves no {run.assistant_id} graph")
     return graph
+
+
+async def _unless_disconnected(receive: Receive, call: Awaitable[JsonValue]) -> JsonValue:
+    """What ``call`` answers; a caller that hangs up first cancels it."""
+
+    async def disconnected() -> None:
+        while (await receive())["type"] != "http.disconnect":
+            pass
+
+    answer = asyncio.ensure_future(call)
+    hangup = asyncio.create_task(disconnected())
+    done: set[asyncio.Task[JsonValue]] = set()
+    try:
+        done, _ = await asyncio.wait({answer, hangup}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (answer, hangup):
+            task.cancel()
+        # Teardown finishes even when this request is cancelled while it runs.
+        cleanup = asyncio.gather(answer, hangup, return_exceptions=True)
+        cancelled: asyncio.CancelledError | None = None
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        if cancelled is not None:
+            raise cancelled
+    if answer in done:
+        return answer.result()
+    for task in (answer, hangup):
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error("Agent API call failed after its caller hung up", exc_info=error)
+    raise CallerHungUpError
 
 
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
@@ -128,8 +137,16 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         context["run_id"] = run_id
     set_logging_context(context)
     try:
-        with _traced_under_caller(scope):
-            result = await _answer(principal, endpoint, body)
+        with traced_under(Request(scope).headers):
+            call = _answer(principal, endpoint, body)
+            result = (
+                await _unless_disconnected(receive, call)
+                if endpoint == PREPARE.name
+                else await call
+            )
+    except CallerHungUpError:
+        logger.info("Agent API caller hung up before the call answered")
+        return
     except RefusedCallError as exc:
         await JSONResponse({"detail": str(exc)}, 403)(scope, receive, send)
         return

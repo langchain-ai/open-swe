@@ -44,9 +44,9 @@ from managed_deepagents._channels.reserved_connections import (
 from managed_deepagents._channels.source_providers import is_trusted_source_provider
 from managed_deepagents._identity_runtime import (
     build_runtime_identity,
-    on_channel_thread,
     resolve_runtime_configurable,
 )
+from managed_deepagents._managed_thread import on_channel_thread
 
 if TYPE_CHECKING:
     from managed_deepagents.identity import RuntimeIdentity

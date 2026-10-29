@@ -1,21 +1,17 @@
 import asyncio
-import os
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openswe.sandboxes.lifecycle import SandboxRecreationStopError, recreate_sandbox_for_thread
+from openswe.sandboxes.lifecycle import HandedOver, hand_sandbox_to_mda
 from openswe.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 
 
 @pytest.fixture(autouse=True)
 def sandbox_client() -> Iterator[AsyncMock]:
     client = AsyncMock()
-    with (
-        patch("openswe.sandboxes.providers.langsmith.get_async_sandbox_client") as factory,
-        patch.dict(os.environ, {"SANDBOX_TYPE": "langsmith"}),
-    ):
+    with patch("openswe.sandboxes.providers.langsmith.get_async_sandbox_client") as factory:
         factory.return_value.__aenter__ = AsyncMock(return_value=client)
         yield client
 
@@ -38,17 +34,13 @@ async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) 
             },
         ),
         patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-        ) as create,
-        patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update,
     ):
         with pytest.raises(PermissionError, match="coordinator must recover"):
-            await recreate_sandbox_for_thread("worker")
+            await hand_sandbox_to_mda("worker")
 
     sandbox_client.stop_sandbox.assert_not_awaited()
-    create.assert_not_awaited()
     update.assert_not_awaited()
     assert coordinator.current is shared_sandbox
     assert worker.current is shared_sandbox
@@ -57,7 +49,7 @@ async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stop_failure", [None, RuntimeError("stop unavailable"), TimeoutError()])
-async def test_recreate_sandbox_hands_off_after_metadata_persists(
+async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
     sandbox_client: AsyncMock, stop_failure: Exception | None
 ) -> None:
     async def hanging_stop(_sandbox_id: str) -> None:
@@ -69,12 +61,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
     timeout = asyncio.timeout
     thread_id = "thread-recreate"
     SANDBOX_BACKENDS.clear()
-    old_sandbox = MagicMock(id="sandbox-old")
-    new_sandbox = MagicMock(id="sandbox-new")
-    proxy = set_sandbox_backend(thread_id, old_sandbox)
-
-    async def persist_metadata(**_kwargs: object) -> None:
-        assert proxy.current is old_sandbox
+    proxy = set_sandbox_backend(thread_id, MagicMock(id="sandbox-old"))
 
     with (
         patch("openswe.sandboxes.lifecycle.asyncio.timeout", side_effect=lambda _: timeout(0.01)),
@@ -84,164 +71,54 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
             return_value={"sandbox_id": "sandbox-old", "owner_login": "octocat"},
         ),
         patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=new_sandbox,
-        ) as create,
-        patch(
-            "openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
-        ) as configure,
-        patch(
-            "openswe.sandboxes.lifecycle.client.threads.update",
-            new_callable=AsyncMock,
-            side_effect=persist_metadata,
-        ) as update,
-    ):
-        if stop_failure is None:
-            result = await recreate_sandbox_for_thread(thread_id)
-            assert result == ("sandbox-old", "sandbox-new")
-        else:
-            with pytest.raises(SandboxRecreationStopError) as raised:
-                await recreate_sandbox_for_thread(thread_id)
-            assert raised.value.old_sandbox_id == "sandbox-old"
-            assert raised.value.new_sandbox_id == "sandbox-new"
-            assert str(raised.value) == (
-                "Stopping the old sandbox timed out after 10 seconds"
-                if isinstance(stop_failure, TimeoutError)
-                else str(stop_failure)
-            )
-    sandbox_client.stop_sandbox.assert_awaited_once_with("sandbox-old")
-    create.assert_awaited_once_with(
-        thread_id=thread_id,
-        github_proxy_repositories=None,
-        github_proxy_permissions=None,
-        workspace_slug=None,
-        source="workspace",
-    )
-    configure.assert_awaited_once_with(new_sandbox)
-    update.assert_awaited_once_with(
-        thread_id=thread_id,
-        metadata={"sandbox_id": "sandbox-new"},
-    )
-    assert SANDBOX_BACKENDS[thread_id] is proxy
-    assert proxy.current is new_sandbox
-    SANDBOX_BACKENDS.clear()
-
-
-@pytest.mark.asyncio
-async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
-    thread_id = "thread-recreate-base"
-    SANDBOX_BACKENDS.clear()
-    set_sandbox_backend(thread_id, MagicMock(id="sandbox-old"))
-
-    with (
-        patch(
-            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-            new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-old"},
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=MagicMock(id="sandbox-new"),
-        ) as create,
-        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
-    ):
-        result = await recreate_sandbox_for_thread(
-            thread_id, workspace_slug="langchainplus", source="base"
-        )
-
-    assert result == ("sandbox-old", "sandbox-new")
-    create.assert_awaited_once_with(
-        thread_id=thread_id,
-        github_proxy_repositories=None,
-        github_proxy_permissions=None,
-        workspace_slug="langchainplus",
-        source="base",
-    )
-    SANDBOX_BACKENDS.clear()
-
-
-@pytest.mark.asyncio
-async def test_base_source_skips_workspace_lookup_entirely() -> None:
-    """An absent slug still resolves the `default` workspace, so base must not rely on it."""
-    from openswe.sandboxes.lifecycle import SandboxCreateConfig
-
-    with patch(
-        "openswe.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock
-    ) as load_workspace:
-        config = await SandboxCreateConfig.resolve("langchainplus", source="base")
-
-    load_workspace.assert_not_awaited()
-    assert config.snapshot_id is None
-    assert config.workspace is None
-    assert config.create_params == {"preserve_memory_on_stop": True}
-
-
-@pytest.mark.asyncio
-async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -> None:
-    thread_id = "thread-recreate-failure"
-    SANDBOX_BACKENDS.clear()
-    old_sandbox = MagicMock(id="sandbox-old")
-    new_sandbox = MagicMock(id="sandbox-new")
-    proxy = set_sandbox_backend(thread_id, old_sandbox)
-
-    with (
-        patch(
-            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-            new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-old"},
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=new_sandbox,
-        ),
-        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch(
-            "openswe.sandboxes.lifecycle.client.threads.update",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("metadata unavailable"),
-        ),
-    ):
-        with pytest.raises(RuntimeError, match="metadata unavailable"):
-            await recreate_sandbox_for_thread(thread_id)
-
-    assert SANDBOX_BACKENDS[thread_id] is proxy
-    assert proxy.current is old_sandbox
-    SANDBOX_BACKENDS.clear()
-
-
-@pytest.mark.asyncio
-async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
-    thread_id = "thread-recreate-same-id"
-    SANDBOX_BACKENDS.clear()
-    old_sandbox = MagicMock(id="sandbox-same")
-    set_sandbox_backend(thread_id, old_sandbox)
-
-    with (
-        patch(
-            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-            new_callable=AsyncMock,
-            return_value={"sandbox_id": "sandbox-same"},
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=MagicMock(id="sandbox-same"),
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
-        ) as configure,
-        patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update,
     ):
-        with pytest.raises(RuntimeError, match="distinct sandbox"):
-            await recreate_sandbox_for_thread(thread_id)
+        handed = await hand_sandbox_to_mda(thread_id, workspace_slug="large", source="base")
 
-    configure.assert_not_awaited()
-    update.assert_not_awaited()
-    assert SANDBOX_BACKENDS[thread_id].current is old_sandbox
+    sandbox_client.stop_sandbox.assert_awaited_once_with("sandbox-old")
+    if stop_failure is None:
+        stop_error = None
+    elif isinstance(stop_failure, TimeoutError):
+        stop_error = "Stopping the old sandbox timed out after 10 seconds"
+    else:
+        stop_error = str(stop_failure)
+    assert handed == HandedOver("sandbox-old", stop_error)
+    # MDA creates the next box from what was asked for; the thread no longer names the old one.
+    assert [call.kwargs["metadata"] for call in update.await_args_list] == [
+        {"sandbox_replacement": {"workspace": "large", "source": "base"}},
+        {"sandbox_id": None, "sandbox_base_proxy_config": None},
+    ]
+    assert not proxy.has_backend
     SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "refusal"),
+    [
+        ({"sandbox_id": "sandbox-mda", "sandbox_owner": "mda"}, "only it may replace"),
+        ({"sandbox_id": "bridge:mac-1"}, "cannot be given a cloud sandbox"),
+        ({}, "has no sandbox to recreate"),
+    ],
+)
+async def test_only_an_old_cloud_sandbox_is_handed_over(
+    sandbox_client: AsyncMock, metadata: dict[str, str], refusal: str
+) -> None:
+    SANDBOX_BACKENDS.clear()
+
+    with (
+        patch(
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
+            new_callable=AsyncMock,
+            return_value=metadata,
+        ),
+        patch(
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+        ) as update,
+        pytest.raises(ValueError, match=refusal),
+    ):
+        await hand_sandbox_to_mda("thread-refused")
+
+    sandbox_client.stop_sandbox.assert_not_awaited()
+    update.assert_not_awaited()
