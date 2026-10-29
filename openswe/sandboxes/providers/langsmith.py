@@ -13,6 +13,7 @@ from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import (
     DeleteResult,
     ExecuteResponse,
+    FileDownloadResponse,
     FileInfo,
     LsResult,
     ReadResult,
@@ -69,6 +70,7 @@ _LS_MAX_ENTRIES = 1000
 # Above this, a file API read would pull the whole file into the worker to return
 # one page; the base class's read script pages inside the sandbox instead.
 _FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
+_DOWNLOAD_CONCURRENCY = 16
 
 
 def service_identity_jwks_url() -> str:
@@ -711,6 +713,30 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         if listing.truncated or not listing.matches:
             return await super().als(path)
         return LsResult(entries=[FileInfo(path=m.path, is_dir=m.is_dir) for m in listing.matches])
+
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
+        """Read every file at once, where the base class reads them one request at a time.
+
+        A reviewer reads every trusted ``SKILL.md`` before its first model call,
+        dozens on a skill-heavy repo.
+        """
+        sandbox = self._aget_sandbox()
+        limit = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
+
+        async def download(path: str) -> FileDownloadResponse:
+            if not path.startswith("/"):
+                return FileDownloadResponse(path=path, content=None, error="invalid_path")
+            try:
+                async with limit:
+                    content = await sandbox.read(path)
+            except ResourceNotFoundError:
+                return FileDownloadResponse(path=path, content=None, error="file_not_found")
+            except SandboxClientError as exc:
+                error = "is_directory" if "is a directory" in str(exc).lower() else "file_not_found"
+                return FileDownloadResponse(path=path, content=None, error=error)
+            return FileDownloadResponse(path=path, content=content, error=None)
+
+        return list(await asyncio.gather(*(download(path) for path in paths)))
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         """Upload through the sandbox file API, which creates missing parent directories.

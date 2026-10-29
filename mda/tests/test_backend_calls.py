@@ -94,6 +94,7 @@ from runtime_api.loop import (
     GitBaseline,
     Inbox,
     InboxItems,
+    InboxRead,
     InboxReceipt,
     ModelCall,
     PhaseResult,
@@ -568,19 +569,23 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    # Nothing waits long for the receipt, which the backend takes only after the next read.
+    monkeypatch.setattr("rt.outbox.DRAIN_SECONDS", 0.05)
     backend = _run_backend(invocation_id="invocation-1", catalog=Catalog(inbox=_INBOX))
     report = HumanMessage(content="The worker finished", id="event-match:report-1")
     items = InboxItems(queued=[7], events=[UUID("0199a1b2-0000-7000-8000-000000000001")])
-    called: list[str] = []
-    reads: list[dict[str, JsonValue]] = []
+    reads: list[InboxRead] = []
+    read_again, took = asyncio.Event(), asyncio.Event()
     received: list[InboxReceipt] = []
     planned: list[RunCall] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        called.append(name)
         if name == "inbox":
-            reads.append(body)
-            if received:
+            reads.append(InboxRead.model_validate(body))
+            if len(reads) > 1:
+                read_again.set()
+            # What a receipt or the read itself names as received is owed no more.
+            if received or reads[-1].received == items:
                 return Inbox()
             return Inbox.model_validate(
                 {
@@ -590,7 +595,9 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
                 }
             )
         if name == "inbox_received":
+            await read_again.wait()
             received.append(InboxReceipt.model_validate(body))
+            took.set()
         if name == "before_model":
             planned.append(RunCall.model_validate(body))
         if name == "after_model" and len(planned) == 1:
@@ -604,15 +611,16 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
+    await asyncio.wait_for(took.wait(), 5)
 
     # The run and how its catalog reads the inbox; never its conversation or state.
-    assert reads == [{"run_id": "run-1", "spec": _INBOX.model_dump(mode="json")}] * 2
+    assert [(read.run_id, read.spec) for read in reads] == [("run-1", _INBOX)] * 2
     assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
     assert planned[0].state["reply_surface"] == "web"
     assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
     assert [receipt.items for receipt in received] == [items]
-    # The next read waits for the receipt, so it cannot hand the same items back.
-    assert called.index("inbox_received") < len(called) - called[::-1].index("inbox") - 1
+    # The next read names what the unsent receipt holds, so it cannot hand it back.
+    assert reads[1].received == items
 
 
 async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
