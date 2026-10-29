@@ -25,6 +25,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
 from runtime_api.loop import ModelCall
 
+from rt.backend import OpenSweBackend
 from rt.model_calls import PROMPT_CACHE_TTL
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -74,11 +75,17 @@ class RunPromptMiddleware(AgentMiddleware):
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        override = self._backend.run.catalog.system_prompt
+        if override is not None:
+            return await handler(request.override(system_message=SystemMessage(content=override)))
         planned = _planned(request)
         if planned is None or not planned.system_prompt:
             return await handler(request)

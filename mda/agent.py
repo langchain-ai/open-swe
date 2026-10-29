@@ -272,7 +272,7 @@ def _parts(graph: Graph) -> _Parts:
             ReportedBrowserMiddleware(backend, enabled=graph == "agent"),
             # The system prompt in the order of how many runs share each part, for the
             # provider's prompt cache (``rt.run_prompt``).
-            RunPromptMiddleware(),
+            RunPromptMiddleware(backend),
             skills,
             ThreadPromptMiddleware(),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),

@@ -20,6 +20,7 @@ from openswe.dashboard.user_instructions import router as user_instructions_rout
 from openswe.dashboard.user_preferences import router as user_preferences_router
 from openswe.dashboard.workspace_settings import router as workspace_settings_router
 from openswe.fleet_chat.routes import router as fleet_chat_router
+from openswe.frontend_review.routes import router as frontend_review_router
 from openswe.github.dashboard_routes import router as repos_router
 from openswe.github.pull_request_dashboard_routes import router as pull_requests_router
 from openswe.human_review.routes import router as human_review_router
@@ -65,6 +66,7 @@ router.include_router(repos_router)
 router.include_router(pull_requests_router)
 router.include_router(human_review_router)
 router.include_router(review_router)
+router.include_router(frontend_review_router)
 router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)

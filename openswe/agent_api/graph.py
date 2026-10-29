@@ -434,7 +434,22 @@ class RunSession:
         offered = tools.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
         # Code mode calls tools past the model's list, so what the graph excludes stays out.
         from_code = offered - excluded if self.surface.code_mode else frozenset()
+        cfg = RunConfig.from_config(self.config)
+        frontend_review = (
+            self.assistant_id in {"agent", "reviewer"}
+            and cfg.repo is not None
+            and cfg.pr_number is not None
+        )
         return Catalog(
+            frontend_review_description=prompt("tools/review_frontend")
+            if frontend_review
+            else None,
+            frontend_assessment_description=prompt("tools/submit_frontend_review")
+            if frontend_review and cfg.head_sha is not None
+            else None,
+            frontend_inspect_description=prompt("tools/read_frontend_review")
+            if frontend_review and cfg.head_sha is not None
+            else None,
             operations=[spec for spec in self._specs() if spec.name not in withheld],
             subagents=[
                 SubagentSpec(
@@ -1239,6 +1254,10 @@ class RemoteGraph:
 
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
+        if RunConfig.parse(run.configurable).frontend_review_id is not None:
+            from openswe.frontend_review.runtime import catalog_for
+
+            return RunStart(catalog=await catalog_for(run), settings=run.settings)
         session = await self._planned(run, None, fresh=False)
         tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
         cfg = RunConfig.from_config(session.config)
@@ -1269,6 +1288,14 @@ class RemoteGraph:
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), without its plan when it can."""
+        if RunConfig.parse(run.configurable).frontend_review_id is not None:
+            if endpoint in {PREPARE.name, STEP_LIMIT_REACHED.name}:
+                return PhaseResult().model_dump(mode="json")
+            if endpoint == RUN_ENDED.name:
+                from openswe.frontend_review.runtime import assessment_ended
+
+                await assessment_ended(run)
+                return AfterAgent().model_dump(mode="json")
         if endpoint != PREPARE.name:
             return await self._answer(run, endpoint, raw)
         # Planning and preparing read the same thread from many places; one read serves them.

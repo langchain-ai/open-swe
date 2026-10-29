@@ -280,7 +280,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         return ModelResponse(result=[AIMessage(content="ok")])
 
     layers: list[AgentMiddleware] = [
-        RunPromptMiddleware(),
+        RunPromptMiddleware(run.backend),
         _Skills(),
         ThreadPromptMiddleware(),
         model_call_guards()[-1],

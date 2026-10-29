@@ -21,6 +21,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
 from runtime_api.loop import PREPARE
+from runtime_api.reports import REPORTS, Reports
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -69,12 +70,31 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
     """What ``endpoint`` answers ``body`` with, as the run or worker grant that called it."""
     from openswe.agent_api import async_workers
 
+    if isinstance(principal, RemoteRun) and principal.configurable.get("frontend_review_id"):
+        from openswe.frontend_review.runtime import ALLOWED_ENDPOINTS
+
+        if endpoint not in ALLOWED_ENDPOINTS:
+            raise RefusedCallError("This visual assessment cannot call code-review or sandbox APIs")
+        if endpoint == REPORTS.name:
+            try:
+                reports = Reports.model_validate(body)
+            except ValidationError as exc:
+                raise InvalidRequestError(f"{endpoint}: {exc}") from exc
+            if any(item.endpoint not in ALLOWED_ENDPOINTS for item in reports.items):
+                raise RefusedCallError(
+                    "This visual assessment cannot batch code-review or sandbox APIs"
+                )
+
     if isinstance(principal, WorkerGrant):
         if async_workers.GRANT_API.serves(endpoint):
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
         raise RefusedCallError("A worker grant only adopts a run token")
     if async_workers.RUN_API.serves(endpoint):
         return await async_workers.RUN_API.dispatch(endpoint, principal, body)
+    from openswe.frontend_review.agent_api import API as FRONTEND_REVIEW_API
+
+    if FRONTEND_REVIEW_API.serves(endpoint):
+        return await FRONTEND_REVIEW_API.dispatch(endpoint, principal, body)
     return await _graph(principal)(principal, endpoint, body)
 
 

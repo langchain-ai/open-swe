@@ -1,5 +1,7 @@
 import { useRouter } from "@tanstack/react-router"
 
+import { validateFrontendReviewSearch } from "@/features/reviews/frontend/search"
+
 const STORAGE_KEY = "open-swe:last-app-location"
 const SECTION_STORAGE_PREFIX = "open-swe:last-section-location:"
 const FALLBACK_LOCATION = "/agents"
@@ -10,6 +12,7 @@ export const SECTION_ROOTS = [
   "/agents/automations",
   "/agents/bots",
   "/agents/reviews",
+  "/agents/qa",
   "/incidents",
 ] as const
 
@@ -30,14 +33,24 @@ function isAppLocation(value: string): boolean {
   )
 }
 
-export function sectionOf(pathname: string): SectionRoot | undefined {
+export function sectionOf(href: string): SectionRoot | undefined {
+  const url = new URL(href, "http://localhost")
+  const pathname = url.pathname
+  if (
+    isUnder("/agents/reviews", pathname) &&
+    validateFrontendReviewSearch({
+      view: url.searchParams.get("view"),
+      run: url.searchParams.get("run"),
+    }).view === "frontend"
+  )
+    return "/agents/qa"
   return SECTION_ROOTS.find((root) => isUnder(root, pathname))
 }
 
 export function rememberAppLocation(href: string): void {
   if (typeof window === "undefined" || !isAppLocation(href)) return
   window.sessionStorage.setItem(STORAGE_KEY, href)
-  const section = sectionOf(pathnameOf(href) ?? "")
+  const section = sectionOf(href)
   if (section) {
     window.sessionStorage.setItem(`${SECTION_STORAGE_PREFIX}${section}`, href)
   }
@@ -50,11 +63,12 @@ export function getLastAppLocation(): string {
 }
 
 export function getLastSectionLocation(section: SectionRoot): string {
+  if (section === "/agents/qa") return section
   if (typeof window === "undefined") return section
   const href = window.sessionStorage.getItem(
     `${SECTION_STORAGE_PREFIX}${section}`
   )
-  return href && sectionOf(pathnameOf(href) ?? "") === section ? href : section
+  return href && sectionOf(href) === section ? href : section
 }
 
 /** Link `to` is a pathname only, so a saved href must be split into its parts. */

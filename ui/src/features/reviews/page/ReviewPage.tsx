@@ -1,3 +1,4 @@
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -15,6 +16,7 @@ import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import { FrontendReviewer } from "@/features/reviews/frontend/FrontendReviewer"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
 import { Navigator } from "./Navigator"
@@ -23,7 +25,19 @@ import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
-export function ReviewPage({ pr }: { pr: PullRequestRef }) {
+export function ReviewPage({
+  pr,
+  frontendActive = false,
+  frontendRunId,
+  onViewChange,
+  onFrontendRunChange,
+}: {
+  pr: PullRequestRef
+  frontendActive?: boolean
+  frontendRunId?: string
+  onViewChange?: (view: "code" | "frontend") => void
+  onFrontendRunChange?: (id: string) => void
+}) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const chatThreadId = useReviewChat(pr).data?.thread_id
@@ -80,15 +94,11 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       markReviewViewed(queryClient, pr, chatThreadId)
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
-  useCollapseAppSidebar(pr)
+  useCollapseAppSidebar(pr, frontendActive)
   const sidebar = useSidebarControls()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const leftInset = sidebar?.collapsed
-    ? isDesktop
-      ? "pl-32"
-      : "pl-space-8"
-    : "pl-space-3"
+  const leftInset = sidebar?.collapsed && isDesktop ? "pl-32" : "pl-space-3"
 
   const navigatorInline = navigatorOpen && roomForNavigator
 
@@ -97,29 +107,70 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
         <Header
           pr={pr}
+          frontendActive={frontendActive}
           leftInset={leftInset}
-          compactRail={!wide}
+          compactRail={!wide || frontendActive}
           navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
+          showFileControls={!frontendActive}
         />
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-space-2 border-b border-default px-space-4 py-space-2">
+          <GroupedTabs
+            size="sm"
+            value={frontendActive ? "frontend" : "code"}
+            onChange={(view) => onViewChange?.(view)}
+            options={[
+              { value: "code", display: "Code review" },
+              { value: "frontend", display: "Design QA" },
+            ]}
+          />
+          {frontendActive && (
+            <Button
+              className="sm:hidden"
+              size="xs"
+              color="secondary"
+              variant="plain"
+              as={<Link to="/agents/qa" />}
+            >
+              Back to Design QA
+            </Button>
+          )}
+        </div>
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />
         ) : (
           <div className="flex min-h-0 flex-1">
-            {navigatorInline && (
+            {navigatorInline && !frontendActive && (
               <div className="w-[248px] shrink-0 border-r border-default bg-surface-level-1">
                 <Navigator pr={pr} />
               </div>
             )}
-            <section aria-label="Changes" className="min-w-0 flex-1">
-              <Changes pr={pr} />
+            <section
+              aria-label={frontendActive ? "Frontend review" : "Changes"}
+              className="min-w-0 flex-1"
+            >
+              {frontendActive ? (
+                <FrontendReviewer
+                  pr={pr}
+                  currentHeadSha={headSha}
+                  runId={frontendRunId}
+                  onRunChange={(id) => onFrontendRunChange?.(id)}
+                />
+              ) : (
+                <Changes pr={pr} />
+              )}
             </section>
-            {wide && (
+            {wide && (!frontendActive || railOpen) && (
               <RightPanelShell
                 mode="inline"
                 widthStorageKey="open-swe.review-panel.width"
                 defaultWidth={420}
               >
-                <Rail pr={pr} />
+                <Rail
+                  pr={pr}
+                  onClose={
+                    frontendActive ? () => setRailOpen(false) : undefined
+                  }
+                />
               </RightPanelShell>
             )}
           </div>
@@ -135,7 +186,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             <Rail pr={pr} onClose={() => setRailOpen(false)} />
           </SideSheet>
         )}
-        {!roomForNavigator && (
+        {!roomForNavigator && !frontendActive && (
           <SideSheet
             side="left"
             title="Files"
@@ -199,7 +250,7 @@ function PullRequestUnavailable({
 }
 
 /** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
-function useCollapseAppSidebar(pr: PullRequestRef) {
+function useCollapseAppSidebar(pr: PullRequestRef, frontendActive: boolean) {
   const sidebar = useSidebarControls()
   const sidebarRef = useRef(sidebar)
   const fromSidebar = useRef(reviewOpenedFromSidebar(pr))
@@ -208,8 +259,14 @@ function useCollapseAppSidebar(pr: PullRequestRef) {
   }, [sidebar])
   useLayoutEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed || fromSidebar.current) return
+    if (
+      frontendActive ||
+      !controls ||
+      controls.collapsed ||
+      fromSidebar.current
+    )
+      return
     controls.setCollapsedForPage(true)
     return () => controls.setCollapsedForPage(false)
-  }, [])
+  }, [frontendActive])
 }

@@ -415,7 +415,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if self._loop is not None:
             prepared.update.update(self._loop.prepared(prepared))
-        self._baselines.get(self._backend.run).start(self._backend, run_id())
+        if self._backend.run.catalog.git_baseline:
+            self._baselines.get(self._backend.run).start(self._backend, run_id())
         update = {**_apply(prepared), "open_swe_prepared_for": invocation}
         if opened.workspace_lost:
             messages = update.get("messages", [])

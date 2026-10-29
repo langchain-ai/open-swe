@@ -184,9 +184,18 @@ class Catalog(BaseModel):
     # The same tools by name alone, as the run's context carries them (``names_only``):
     # the run reads their specs as it starts (``runtime_api.tool_search.TOOL_SPECS``).
     tool_names: list[str] = []
+    # A PR-bound run's native runtime tool; it calls a named API, not a legacy operation.
+    frontend_review_description: str | None = None
+    frontend_assessment_description: str | None = None
+    frontend_inspect_description: str | None = None
+    # A specialized runtime replaces its coding instructions with this prompt.
+    system_prompt: str | None = None
+    code_interpreter: bool = True
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
+    # Whether tool changes are measured against a snapshot of the thread's checkouts.
+    git_baseline: bool = True
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.

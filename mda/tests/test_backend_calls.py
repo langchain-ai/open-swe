@@ -1008,7 +1008,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
         list[AgentMiddleware],
         [
             BackendRunMiddleware(backend),
-            RunPromptMiddleware(),
+            RunPromptMiddleware(backend),
             ThreadPromptMiddleware(),
             *model_call_guards(),
         ],

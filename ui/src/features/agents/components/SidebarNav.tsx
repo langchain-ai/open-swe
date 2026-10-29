@@ -1,3 +1,4 @@
+import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
@@ -9,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
@@ -31,6 +33,7 @@ const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
+  { to: "/agents/qa", label: "Design QA", icon: EyeIcon },
   { to: "/incidents", label: "Incidents", icon: SirenIcon },
 ] as const
 
@@ -47,7 +50,7 @@ export function SidebarNav({
 }) {
   const { prefs, toggleNavItemHidden } = useSidebarPrefs()
   const activeSection = useRouterState({
-    select: (state) => sectionOf(state.location.pathname),
+    select: (state) => sectionOf(state.location.href),
   })
   const linkTarget = useHrefLinkOptions()
   const hidden = NAV.filter((item) => prefs.hiddenNavItems.includes(item.to))
@@ -65,6 +68,14 @@ export function SidebarNav({
         >
           <item.icon size={16} weight="regular" className="shrink-0" />
           {item.label}
+          {item.to === "/agents/qa" && (
+            <Badge
+              size="xs"
+              className="shrink-0 bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+            >
+              Beta
+            </Badge>
+          )}
         </Link>
       ))}
       <DropdownMenu>
@@ -93,6 +104,14 @@ export function SidebarNav({
               <Link {...target(item.to)} onClick={onNavigate}>
                 <item.icon size={14} weight="regular" className="shrink-0" />
                 {item.label}
+                {item.to === "/agents/qa" && (
+                  <Badge
+                    size="xs"
+                    className="shrink-0 bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                  >
+                    Beta
+                  </Badge>
+                )}
               </Link>
             </DropdownMenuItem>
           ))}

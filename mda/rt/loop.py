@@ -495,6 +495,8 @@ class RunLoop:
         The rendered prompt ends in the thread's part. A thread rendered before the
         backend named that part has none, and all of its prompt is the first.
         """
+        if self._backend.run.catalog.system_prompt is not None:
+            return "", ""
         rendered = held.get("rendered_system_prompt")
         rendered = rendered if isinstance(rendered, str) else ""
         thread = held.get("rendered_thread_prompt")

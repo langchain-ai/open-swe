@@ -1,0 +1,52 @@
+import { expect, it, vi } from "vitest"
+
+vi.mock("@/lib/dashboard-fetch", () => ({
+  dashboardApiUrl: (path: string) => `/dashboard/api${path}`,
+  dashboardForwardedHeaders: () => ({}),
+}))
+import { evidenceMediaUrl } from "./api"
+
+it("only loads evidence through the authenticated report media API", () => {
+  const path =
+    "/dashboard/api/reviews/langchain-ai/langchainplus/43396/frontend-reviews/00000000-0000-0000-0000-000000000001/media/before.png"
+  expect(evidenceMediaUrl(path)).toBe(path)
+  const dottedRepo = path.replace("langchainplus", "foo..bar")
+  expect(evidenceMediaUrl(dottedRepo)).toBe(dottedRepo)
+  expect(() => evidenceMediaUrl("https://example.com/before.png")).toThrow(
+    /authenticated/
+  )
+  expect(() =>
+    evidenceMediaUrl("/dashboard/api/reviews/a/b/1/frontend-reviews/../secrets")
+  ).toThrow(/authenticated/)
+  expect(() =>
+    evidenceMediaUrl(path.replaceAll("before.png", "%2e%2e"))
+  ).toThrow(/authenticated/)
+  expect(() =>
+    evidenceMediaUrl(path.replaceAll("before.png", "%2e%2e%2fsecrets"))
+  ).toThrow(/authenticated/)
+  expect(() =>
+    evidenceMediaUrl(path.replaceAll("before.png", "%5csecrets"))
+  ).toThrow(/authenticated/)
+})
+
+it("keeps source-page links on their origin and rejects credential or executable URLs", async () => {
+  const { pageLink } = await import("./pageLinks")
+  expect(
+    pageLink(
+      "https://preview.example.com",
+      "/projects/42?tab=traces&filter=success#details"
+    )
+  ).toBe(
+    "https://preview.example.com/projects/42?tab=traces&filter=success#details"
+  )
+  expect(pageLink("javascript:alert(1)", "/projects")).toBeUndefined()
+  expect(
+    pageLink("https://user:password@example.com", "/projects")
+  ).toBeUndefined()
+  expect(
+    pageLink("https://preview.example.com", "//other.example.com")
+  ).toBeUndefined()
+  expect(
+    pageLink("https://preview.example.com", "/\\other.example.com")
+  ).toBeUndefined()
+})

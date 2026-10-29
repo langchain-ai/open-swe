@@ -126,6 +126,8 @@ class RunConfig(BaseModel):
     review_page_pr_url: str | None = None
     pr_title: str | None = None
     head_sha: str | None = None
+    # A dedicated visual assessment may read and publish only this evidence run.
+    frontend_review_id: str | None = None
     base_sha: str | None = None
     last_reviewed_sha: str | None = None
     re_review: bool | None = None

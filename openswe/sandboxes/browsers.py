@@ -53,6 +53,7 @@ class BrowserWindow(BaseModel):
     id: str
     name: str = ""
     tabs: list[BrowserTab] = []
+    api_cdp_url: str = ""
 
 
 class WindowLinks(BaseModel):
@@ -84,7 +85,13 @@ class LangSmithBrowser:
             raise BrowserGoneError(f"browser {self.name} has no window {name!r}")
         return window
 
-    async def open_window(self, name: str) -> BrowserWindow:
+    async def open_window(
+        self,
+        name: str,
+        *,
+        hidpi: bool = True,
+        idle_ttl_seconds: int = _BROWSER_IDLE_TTL_SECONDS,
+    ) -> BrowserWindow:
         """The window called ``name``, creating the browser and the window when missing.
 
         The window starts with the agent in control, as MDA opens it, so the agent
@@ -96,10 +103,10 @@ class LangSmithBrowser:
                 "/browsers",
                 json={
                     "name": self.name,
-                    "idle_ttl_seconds": _BROWSER_IDLE_TTL_SECONDS,
+                    "idle_ttl_seconds": idle_ttl_seconds,
                     # As mda/rt/browser.py has MDA create it, so the panel's
                     # zoomed-in view is sharp. LangSmith fixes it at creation.
-                    "hidpi": True,
+                    "hidpi": hidpi,
                 },
                 timeout=_BROWSER_START_TIMEOUT_SECONDS,
             )
