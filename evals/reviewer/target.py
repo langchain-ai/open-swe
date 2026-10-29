@@ -13,8 +13,8 @@ import threading
 from typing import Any, Literal, cast
 
 from langgraph_sdk import get_client
+from openswe_shared.input_messages import build_run_input
 
-from openswe.input_messages import build_run_input
 from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,

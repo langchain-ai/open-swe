@@ -568,8 +568,8 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py` on a thread's first run and kept unchanged for the rest of the thread, so the model provider's prompt cache keeps covering the conversation.
-It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the thread.
+The system prompt is the template `packages/shared/src/openswe_shared/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py` on a thread's first run and kept unchanged for the rest of the thread, so the model provider's prompt cache keeps covering the conversation.
+It includes each section from its own file under `packages/shared/src/openswe_shared/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the thread.
 Guidance that can change between turns — the working environment and where the turn came from — is a `TurnContext` instead, told to the model in the conversation when it changes.
 Edit a section's file to customize it:
 

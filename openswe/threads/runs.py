@@ -10,6 +10,14 @@ from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
+from openswe_shared.input_messages import (
+    PersonIdentity,
+    RunMessage,
+    SystemIdentity,
+    build_input_messages,
+    dynamic_context_hashes_from_messages,
+    injected_dynamic_context_hashes_from_metadata,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
@@ -39,14 +47,6 @@ from openswe.dispatch import (
     dispatch_agent_run,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from openswe.input_messages import (
-    PersonIdentity,
-    RunMessage,
-    SystemIdentity,
-    build_input_messages,
-    dynamic_context_hashes_from_messages,
-    injected_dynamic_context_hashes_from_metadata,
-)
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt

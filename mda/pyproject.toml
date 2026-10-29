@@ -22,6 +22,7 @@ dependencies = [
     "mcp>=2.2.0",
     "pydantic>=2.11",
     "open-swe-runtime-api",
+    "open-swe-shared",
 ]
 
 # Not `dev`, which uv installs by default: deploys stay without test tooling.
@@ -39,6 +40,8 @@ managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", 
 langchain-quickjs = { path = "../vendor/langchain-quickjs", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
+# The prompts and input message envelope the backend builds runs from too.
+open-swe-shared = { path = "../packages/shared", editable = true }
 
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.

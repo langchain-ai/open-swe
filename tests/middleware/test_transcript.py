@@ -15,8 +15,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.tools import tool
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
+from openswe_shared.input_messages import build_input_messages
 
-from openswe.input_messages import build_input_messages
 from openswe.middleware import transcript as mw
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (

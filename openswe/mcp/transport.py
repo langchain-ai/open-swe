@@ -4,8 +4,7 @@ import asyncio
 from urllib.parse import urlsplit
 
 import httpx2
-
-from openswe.utils.url_safety import UnsafeUrlError, pinned_url, resolve_and_validate
+from openswe_shared.url_safety import UnsafeUrlError, pinned_url, resolve_and_validate
 
 
 class MCPDiscoveryError(ValueError):

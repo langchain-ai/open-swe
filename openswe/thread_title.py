@@ -8,9 +8,9 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from openswe_shared.input_messages import dynamic_context_hash, human_input, input_message_text
 from pydantic import BaseModel, Field, ValidationError
 
-from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_links import breakout_root_blocks

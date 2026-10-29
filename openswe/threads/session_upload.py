@@ -9,6 +9,7 @@ from typing import Any, Literal, Self
 
 from fastapi import HTTPException, Request
 from langchain_core.messages import BaseMessage, HumanMessage
+from openswe_shared.input_messages import SystemIdentity, build_input_messages
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from openswe.claude_code.hooks import MIRROR_THREAD_KEY, SESSION_ID_KEY, mirror_of
@@ -18,7 +19,6 @@ from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, GitHubError
 from openswe.github.pull_requests import PullRequest
-from openswe.input_messages import SystemIdentity, build_input_messages
 from openswe.prompts import prompt
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.creation import create_thread

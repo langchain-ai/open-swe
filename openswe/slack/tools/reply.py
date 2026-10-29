@@ -12,10 +12,10 @@ from langchain_core.messages.content import create_text_block
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
+from openswe_shared.input_messages import input_message_timestamps
 
 from openswe import event_claims
 from openswe.dashboard.options import model_supports_images
-from openswe.input_messages import input_message_timestamps
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import (

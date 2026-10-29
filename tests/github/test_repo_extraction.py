@@ -1,14 +1,22 @@
 """Tests for openswe.utils.repo and the repository a Linear session works in."""
 
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from runtime_api.linear import (
+    LinearIssue,
+    LinearPerson,
+    LinearSessionDeclined,
+    LinearSessionStart,
+    LinearSessionTurn,
+)
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.linear.session import NO_REPOSITORY, LinearSessionTurn
+from openswe.linear.session import LinearSession
 from openswe.users import User, UserIdentity
 from openswe.utils.repo import extract_repo_from_text
 from openswe.webhooks.common import ThreadRecord
@@ -57,30 +65,22 @@ class TestLinearSessionRepository:
             yield
 
     @staticmethod
-    def _turn(body: str, description: str | None = None) -> LinearSessionTurn:
-        creator = {"id": "user-1", "name": "Test User", "email": "zhen@example.com"}
-        turn = LinearSessionTurn.parse(
-            "AgentSessionEvent.created",
-            {
-                "type": "AgentSessionEvent",
-                "action": "created",
-                "organizationId": "org-1",
-                "webhookTimestamp": 1_700_000_000_000,
-                "agentSession": {
-                    "id": "session-1",
-                    "issue": {
-                        "id": "issue-456",
-                        "identifier": "ENG-1",
-                        "title": "Test issue",
-                        "description": description,
-                    },
-                    "comment": {"id": "comment-123", "body": body},
-                    "creator": creator,
-                },
-            },
+    def _turn(body: str, description: str | None = None) -> LinearSession:
+        return LinearSession(
+            LinearSessionTurn(
+                thread_id=uuid.uuid4(),
+                session_id="session-1",
+                issue=LinearIssue(
+                    id="issue-456",
+                    identifier="ENG-1",
+                    title="Test issue",
+                    description=description,
+                ),
+                author=LinearPerson(id="user-1", name="Test User", email="zhen@example.com"),
+                body=body,
+                comment_id="comment-123",
+            )
         )
-        assert isinstance(turn, LinearSessionTurn)
-        return turn
 
     @pytest.mark.asyncio
     async def test_the_comment_names_the_repository(self) -> None:
@@ -108,10 +108,11 @@ class TestLinearSessionRepository:
     async def test_tells_the_session_a_repository_is_outside_the_allowlist(self) -> None:
         with patch("openswe.webhooks.common.is_repo_allowed", return_value=False):
             chosen = await self._turn("repo:other-org/other-repo").repository(_NEW_THREAD, _ZHEN)
-        assert chosen == {
-            "decline": "I'm not allowed to work in `other-org/other-repo`. Name a repository "
-            "Open SWE may work in, or ask your Open SWE admin to allow this one."
-        }
+        assert chosen == LinearSessionStart(
+            answer=LinearSessionDeclined(
+                reason="repository_not_allowed", repository="other-org/other-repo"
+            )
+        )
 
     @pytest.mark.asyncio
     async def test_asks_which_repository_when_none_is_named_or_set(self) -> None:
@@ -120,7 +121,7 @@ class TestLinearSessionRepository:
             AsyncMock(return_value=WorkspaceSettings({})),
         ):
             chosen = await self._turn("please fix this bug").repository(_NEW_THREAD, _ZHEN)
-        assert chosen == NO_REPOSITORY
+        assert chosen == LinearSessionStart(answer=LinearSessionDeclined(reason="no_repository"))
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

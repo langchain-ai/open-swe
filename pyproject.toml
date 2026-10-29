@@ -47,6 +47,7 @@ dependencies = [
     "langchain-typesafe==0.0.1a3",
     "langchain-quickjs==0.3.10",
     "open-swe-runtime-api",
+    "open-swe-shared",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +62,7 @@ dev = [
 # Shared with mda/: the contract between the backend and its MDA runtime.
 [tool.uv.sources]
 open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
+open-swe-shared = { path = "packages/shared", editable = true }
 managed-deepagents = { path = "vendor/managed-deepagents-sdk/packages/pypi", editable = true }
 
 [tool.uv]

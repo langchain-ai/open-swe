@@ -11,6 +11,9 @@ _REDIRECT_CODES = {301, 302, 303, 307, 308}
 _ENTITY_HEADERS = {"content-encoding", "content-language", "content-length", "content-type"}
 _SENSITIVE_HEADERS = {"authorization", "cookie", "proxy-authorization"}
 
+# The headers to send ``current_url`` while following a request for ``original_url``.
+type HeadersForUrl = Callable[[str, str], Mapping[str, str] | None]
+
 
 class UnsafeUrlError(ValueError):
     def __init__(self, url: str, reason: str) -> None:
@@ -88,7 +91,7 @@ async def request_with_safe_redirects(
     method: str,
     url: str,
     *,
-    headers_for_url: Callable[[str, str], Mapping[str, str] | None] | None = None,
+    headers_for_url: HeadersForUrl | None = None,
     validate_url: Callable[[str], None] | None = None,
     stream: bool = False,
     **kwargs: Any,

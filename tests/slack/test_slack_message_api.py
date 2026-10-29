@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, patch
 
 import httpx2
 import pytest
+from openswe_shared import url_safety
 
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
 from openswe.run_config import RunConfig
 from openswe.slack import client as slack_utils
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.users import User, UserPreferences
-from openswe.utils import url_safety
 from tests.support.slack_api import SlackAPI
 
 

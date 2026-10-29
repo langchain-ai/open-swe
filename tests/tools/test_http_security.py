@@ -18,7 +18,7 @@ importlib.import_module("openswe.tools.fetch_url")
 importlib.import_module("openswe.tools.http_request")
 fetch_url_tool = sys.modules["openswe.tools.fetch_url"]
 http_request_tool = sys.modules["openswe.tools.http_request"]
-url_safety = importlib.import_module("openswe.utils.url_safety")
+url_safety = importlib.import_module("openswe_shared.url_safety")
 
 _NO_JSON = object()
 

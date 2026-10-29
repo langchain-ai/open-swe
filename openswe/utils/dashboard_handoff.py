@@ -1,9 +1,8 @@
 from collections.abc import Sequence
 from typing import Literal
 
+from openswe_shared.input_messages import FieldValue, FieldValues, InputMessageContext
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
-
-from openswe.input_messages import FieldValue, FieldValues, InputMessageContext
 
 DASHBOARD_HANDOFF_SENDER_ID = "system:dashboard-handoff"
 DASHBOARD_HANDOFF_BODY = (

@@ -2,9 +2,9 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from openswe_shared.input_messages import RunMessage
 from runtime_api.catalog import InboxSpec
 
-from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import ReplySurface
 from openswe.threads.inbox import Taken, ThreadInbox

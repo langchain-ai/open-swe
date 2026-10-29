@@ -10,10 +10,10 @@ from weakref import WeakValueDictionary
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import Config
+from openswe_shared.input_messages import RunInput, build_run_input
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
-from openswe.input_messages import RunInput, build_run_input
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig

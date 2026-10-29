@@ -169,7 +169,7 @@ def apply() -> None:
     # would stop exercising them at all, and without the upload the card
     # silently degrades to its text fallback and the suite tests a rendering
     # nobody sees.
-    from openswe.utils import url_safety
+    from openswe_shared import url_safety
 
     _harness_upload = f"{BASE_URL}/fake-slack/upload/"
     _real_validate_upload = slack_client._validate_slack_upload_url

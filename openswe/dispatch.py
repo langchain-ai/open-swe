@@ -34,12 +34,7 @@ from langgraph.types import Durability
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
-from pydantic import BaseModel, ConfigDict
-
-from openswe.agent_api.connections import ACTING_USER_KEY
-from openswe.config import ENV
-from openswe.github.pull_request_key import PullRequestKey
-from openswe.input_messages import (
+from openswe_shared.input_messages import (
     ChannelIdentity,
     InputMessageContext,
     PersonIdentity,
@@ -48,6 +43,11 @@ from openswe.input_messages import (
     SystemIdentity,
     build_run_input,
 )
+from pydantic import BaseModel, ConfigDict
+
+from openswe.agent_api.connections import ACTING_USER_KEY
+from openswe.config import ENV
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext

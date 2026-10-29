@@ -168,7 +168,8 @@ async def test_worker_failure_details_return_to_its_task_coordinator(
 async def test_worker_text_cannot_close_its_untrusted_boundary(
     worker_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, is_message: bool
 ) -> None:
-    from openswe.input_messages import input_message_text
+    from openswe_shared.input_messages import input_message_text
+
     from openswe.tasks import service
 
     payload = (

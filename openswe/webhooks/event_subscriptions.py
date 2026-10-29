@@ -6,6 +6,7 @@ from typing import Self
 from uuid import UUID, uuid7
 
 from langgraph_sdk.errors import NotFoundError
+from openswe_shared.input_messages import Fields
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from sqlalchemy import (
     ColumnElement,
@@ -29,7 +30,6 @@ from openswe.github.comments import fence_github_comment_body
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.input_messages import Fields
 from openswe.prompts import prompt
 from openswe.webhooks.event_log import LoggedEvent, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy

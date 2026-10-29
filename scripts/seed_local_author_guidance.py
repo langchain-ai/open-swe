@@ -21,9 +21,9 @@ import subprocess
 import sys
 
 from langgraph_sdk import get_client
+from openswe_shared.input_messages import human_input
 
 from openswe.github.pull_requests import PullRequest
-from openswe.input_messages import human_input
 from openswe.review.author_guidance import SteeringHistory
 from openswe.thread_ids import pr_comment_thread_id
 

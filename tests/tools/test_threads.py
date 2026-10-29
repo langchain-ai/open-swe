@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from openswe_shared.input_messages import human_input, person_introduction
 
 from openswe import run_config
-from openswe.input_messages import human_input, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.slack import allowed_bots
 

@@ -6,12 +6,12 @@ from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException
 from langgraph_sdk import get_client
+from openswe_shared.input_messages import PersonIdentity
 
 from openswe.config import ENV
 from openswe.incidents import service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.presentation import report_message
-from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     fetch_slack_thread_messages,

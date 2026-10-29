@@ -6,6 +6,13 @@ from typing import Any, Literal
 
 import httpx
 from langgraph_sdk import get_client
+from openswe_shared.input_messages import (
+    PersonIdentity,
+    SystemIdentity,
+    human_input,
+    system_input,
+    system_introduction,
+)
 
 from openswe.dashboard.options import normalize_model_choice
 from openswe.dispatch import create_durable_run
@@ -13,13 +20,6 @@ from openswe.incidents import service
 from openswe.incidents.evidence_tools import redact
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
-from openswe.input_messages import (
-    PersonIdentity,
-    SystemIdentity,
-    human_input,
-    system_input,
-    system_introduction,
-)
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (

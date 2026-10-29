@@ -8,9 +8,9 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx2
+from openswe_shared.input_messages import PersonIdentity
 
 from openswe.analytics.identity import DisplayNameSource
-from openswe.input_messages import PersonIdentity
 from openswe.utils import ttl_cache
 
 if TYPE_CHECKING:

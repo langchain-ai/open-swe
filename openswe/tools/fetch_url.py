@@ -2,9 +2,9 @@ from typing import Any
 
 import httpx2
 from markdownify import markdownify
+from openswe_shared.url_safety import UnsafeUrlError, request_with_safe_redirects
 
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
 

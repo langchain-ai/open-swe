@@ -1,8 +1,8 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from openswe_shared.input_messages import RunInput
 
-from openswe.input_messages import RunInput
 from openswe.run_config import RunConfig
 from openswe.slack import webhook as slack_webhook
 from openswe.slack.request import SlackRequest

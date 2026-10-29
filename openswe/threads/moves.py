@@ -6,12 +6,12 @@ from collections.abc import Mapping
 from typing import Any, Self
 
 from fastapi import HTTPException
+from openswe_shared.input_messages import SystemIdentity, build_input_messages
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.database import postgres
 from openswe.dispatch import thread_workspace
-from openswe.input_messages import SystemIdentity, build_input_messages
 from openswe.threads.summary import TRANSCRIPT_VERSION, thread_is_owner
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import MessageSender, TurnCompleted, TurnRequested

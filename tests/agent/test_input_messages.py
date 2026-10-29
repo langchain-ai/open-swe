@@ -1,13 +1,13 @@
 from xml.etree import ElementTree
 
 from langchain_core.messages import AIMessage, HumanMessage
-
-from openswe.input_messages import (
+from openswe_shared.input_messages import (
     dynamic_context_hash,
     human_input,
     person_introduction,
     visible_dynamic_context_hashes,
 )
+
 from openswe.utils.dashboard_handoff import PassageReply, dashboard_input_context
 
 

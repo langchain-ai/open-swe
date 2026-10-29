@@ -1,8 +1,8 @@
 """One Slack message or interaction addressed to Open SWE, as the routes hand it to processing."""
 
+from openswe_shared.input_messages import SystemIdentity
 from pydantic import BaseModel, Field
 
-from openswe.input_messages import SystemIdentity
 from openswe.slack.failures import SlackRequestTarget
 from openswe.slack.payloads import SlackChannelContext
 from openswe.utils.json_types import JsonObject

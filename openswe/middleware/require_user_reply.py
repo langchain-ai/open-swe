@@ -15,14 +15,14 @@ from typing import Annotated, Any, Literal, NotRequired
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
-
-from openswe.input_messages import (
+from openswe_shared.input_messages import (
     SystemIdentity,
     build_input_messages,
     dynamic_context_hash,
     message_sender_id,
     visible_dynamic_context_hashes,
 )
+
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt

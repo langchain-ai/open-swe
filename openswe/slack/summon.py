@@ -2,8 +2,9 @@
 
 import logging
 
+from openswe_shared.input_messages import SystemIdentity
+
 from openswe.config import ENV
-from openswe.input_messages import SystemIdentity
 from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.client import SlackThreadMappingError, fetch_slack_thread_message_by_ts

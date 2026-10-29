@@ -10,13 +10,13 @@ import time
 import uuid
 
 from langgraph_sdk.client import LangGraphClient
+from openswe_shared.input_messages import build_run_input
 from pydantic import BaseModel, Field
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dispatch import create_durable_run
 from openswe.expedited_review.reviews import github_token_hint
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
-from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
 from openswe.review_guide.github import fetch_head

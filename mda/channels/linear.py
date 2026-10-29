@@ -1,12 +1,13 @@
-"""Linear, through Open SWE's app: mentioning or delegating an issue to it opens a session."""
+"""Linear, through Open SWE's app: mentioning or delegating an issue to it opens a session.
+
+The handlers run here (``rt.linear``): a session turn starts the coding agent's run
+on the session's thread, with what the backend knows of its author, repository and
+workspace; issue and comment events start nothing, and feed the backend's
+automations and event log.
+"""
 
 from managed_deepagents import channels
-from rt.intake import backend_endpoint
-
-# The backend decides what each event starts: a session turn starts the run it
-# prepares; issue and comment events start nothing, and feed automations and the
-# event log.
-backend = backend_endpoint("/linear/channel/events")
+from rt.linear import record, start_session
 
 channel = channels.linear(
     app={
@@ -23,10 +24,10 @@ channel = channels.linear(
     # ignores the app's own changes, so its comments can't trigger it.
     ignore_bots=False,
     on_event={
-        "AgentSessionEvent.created": backend,
-        "AgentSessionEvent.prompted": backend,
-        "Issue.create": backend,
-        "Issue.update": backend,
-        "Comment.create": backend,
+        "AgentSessionEvent.created": start_session,
+        "AgentSessionEvent.prompted": start_session,
+        "Issue.create": record,
+        "Issue.update": record,
+        "Comment.create": record,
     },
 )

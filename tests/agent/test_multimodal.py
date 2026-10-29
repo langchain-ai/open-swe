@@ -3,13 +3,11 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx2
+import openswe_shared.images as images
+import openswe_shared.url_safety as url_safety
+from openswe_shared.images import extract_image_urls
 
-import openswe.utils.multimodal as multimodal
-import openswe.utils.url_safety as url_safety
-from openswe.utils.multimodal import (
-    extract_image_urls,
-    fetch_image_block,
-)
+from openswe.utils.multimodal import fetch_image_block
 
 
 def test_extract_image_urls_markdown_and_direct_dedupes() -> None:
@@ -118,7 +116,7 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
             _addr_info("93.184.216.35", port),
         ],
     )
-    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    monkeypatch.setattr(images, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         if urlparse(url).hostname == "93.184.216.34":
@@ -145,8 +143,8 @@ async def test_fetch_image_block_tries_each_validated_address(monkeypatch: Any) 
 
 async def test_fetch_image_block_accepts_image_at_size_limit(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
-    monkeypatch.setattr(multimodal, "_MAX_IMAGE_BYTES", 3)
-    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    monkeypatch.setattr(images, "_MAX_IMAGE_BYTES", 3)
+    monkeypatch.setattr(images, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         return FakeImageResponse(
@@ -165,8 +163,8 @@ async def test_fetch_image_block_accepts_image_at_size_limit(monkeypatch: Any) -
 
 async def test_fetch_image_block_warns_about_image_above_size_limit(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
-    monkeypatch.setattr(multimodal, "_MAX_IMAGE_BYTES", 3)
-    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    monkeypatch.setattr(images, "_MAX_IMAGE_BYTES", 3)
+    monkeypatch.setattr(images, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         return FakeImageResponse(
@@ -192,7 +190,7 @@ async def test_fetch_image_block_does_not_forward_slack_auth_to_redirect_host(
 ) -> None:
     _patch_image_dns(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
-    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    monkeypatch.setattr(images, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         host = kwargs["headers"]["Host"]
@@ -227,7 +225,7 @@ async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirec
 ) -> None:
     _patch_image_dns(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
-    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    monkeypatch.setattr(images, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         if kwargs["headers"]["Host"] == "example.com":
@@ -257,7 +255,7 @@ async def test_fetch_image_block_does_not_add_slack_auth_after_untrusted_redirec
 async def test_fetch_image_block_keeps_auth_within_slack_host_family(monkeypatch: Any) -> None:
     _patch_image_dns(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
-    monkeypatch.setattr(multimodal, "create_image_block", lambda **kwargs: kwargs)
+    monkeypatch.setattr(images, "create_image_block", lambda **kwargs: kwargs)
 
     def responder(method: str, url: str, **kwargs: Any) -> FakeImageResponse:
         if kwargs["headers"]["Host"] == "files.slack.com":

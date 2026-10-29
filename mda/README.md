@@ -139,7 +139,7 @@ The backend:
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
-| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the boxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those boxes without one. Unset: the backend writes every box's |
 | `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses. Unset: the backend's `EXA_API_KEY` |
 | `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Open SWE knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
@@ -214,11 +214,16 @@ Mentioning the app on an issue, or delegating the issue to it, opens an agent se
 Each session is its own conversation: the channel starts its runs on the session's own thread, so the answer, Stop, interrupt notices and errors reach the session.
 A reply in the session is the next run there; a new mention on the same issue opens a new session and thread.
 
-The channel verifies each delivery (Linear's signature and timestamp).
-The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token.
-Every handled event goes to the backend's endpoint, `POST /linear/channel/events` (the channel's `on_event` names it): MDA posts `{event: {key, deliveryId, payload}, thread}`, with the payload it validated.
-For a session event the backend indexes the thread and answers with the run's input, context, metadata and webhook; issue and comment events start no conversation, so it answers `null`, after logging them for `listen_events` and running Linear automations.
-The endpoint answers only calls MDA signed with `MDA_SERVICE_SECRET`.
+The channel verifies each delivery (Linear's signature and timestamp), and its handlers decide here what it starts (`rt/linear.py`).
+They ask the backend only for what needs Open SWE's data, through the typed channel API (`runtime_api.linear`, `POST /mda/channel-api/{endpoint}`), which answers only calls MDA signed with `MDA_SERVICE_SECRET`:
+
+- `record_linear_delivery`: every handled delivery, once per delivery ID, for the event log, the threads `listen_events` wakes, and the Linear automations an issue event triggers.
+  Issue and comment events start no conversation.
+- `start_linear_session`: a session turn's author, issue and words.
+  The backend checks the author has signed in to Open SWE with the email Linear knows them by, picks the repository (the turn's, the thread's, the issue's, then the defaults) and workspace, indexes the thread and signs its run context; or says why it starts nothing.
+
+The handler then writes the run's input with the prompts and input message envelope the backend uses too (`openswe_shared`), with the images the issue and the turn show, and starts it with the backend's context, metadata and run-complete webhook.
+When the backend starts nothing, the handler tells the session why: no repository named, one outside the allowlist, or the author must sign in first.
 
 Threads of Linear sessions belong to the channel, and MDA scopes threads by owner.
 The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`).

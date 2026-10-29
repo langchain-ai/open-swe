@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import httpx2
 from langgraph_sdk.client import LangGraphClient
+from openswe_shared.url_safety import UnsafeUrlError, request_with_safe_redirects
 from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
@@ -38,7 +39,6 @@ from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.run_usage import RunUsageSummary
-from openswe.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 from openswe.utils.user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)

@@ -14,6 +14,7 @@ on:
     paths:
       - "mda/**"
       - "packages/runtime-api/**"
+      - "packages/shared/**"
       - "vendor/managed-deepagents-sdk/**"
       - "vendor/langchain-quickjs/**"
       - ".github/workflows/deploy_mda.yml"
@@ -74,7 +75,7 @@ jobs:
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/deploy_mda.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api packages/shared vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else

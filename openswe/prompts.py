@@ -1,53 +1,10 @@
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
-from importlib import resources
-from pathlib import PurePosixPath
 
-from jinja2 import Environment, FunctionLoader, StrictUndefined
 from langchain_core.tools import BaseTool, tool
+from openswe_shared.prompting import is_template, prompt
 
 from openswe.config import ENV
-
-_PROMPT_ROOT = resources.files("openswe.resources").joinpath("prompts")
-
-
-def _prompt_path(name: str) -> PurePosixPath:
-    path = PurePosixPath(name)
-    if path.is_absolute() or not path.name.endswith((".md", ".md.jinja")) or ".." in path.parts:
-        raise ValueError(f"invalid prompt resource path: {name!r}")
-    return path
-
-
-@cache
-def _load_prompt(name: str) -> str:
-    path = _prompt_path(name)
-    resource = _PROMPT_ROOT.joinpath(*path.parts)
-    return resource.read_text(encoding="utf-8").strip()
-
-
-_JINJA = Environment(
-    loader=FunctionLoader(_load_prompt),
-    autoescape=False,
-    undefined=StrictUndefined,
-    trim_blocks=True,
-    lstrip_blocks=True,
-)
-
-
-@cache
-def _is_template(name: str) -> bool:
-    path = _prompt_path(f"{name}.md.jinja")
-    return _PROMPT_ROOT.joinpath(*path.parts).is_file()
-
-
-def prompt(name: str, values: Mapping[str, object] | None = None, /, **kwargs: object) -> str:
-    """Render Jinja templates or load static Markdown prompts without substitutions."""
-    substitutions = {**(values or {}), **kwargs}
-    if _is_template(name):
-        return _JINJA.get_template(f"{name}.md.jinja").render(substitutions).strip()
-    if substitutions:
-        raise ValueError(f"prompt {name!r} does not accept variables without a Jinja template")
-    return _load_prompt(f"{name}.md")
 
 
 @cache
@@ -73,7 +30,7 @@ def _description(
     template = f"tools/{name}"
     substitutions = (values or {}).get(name)
     try:
-        if _is_template(template):
+        if is_template(template):
             return prompt(template, substitutions, mcp=mcp)
         return prompt(template, substitutions)
     except FileNotFoundError:

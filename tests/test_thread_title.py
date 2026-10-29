@@ -10,8 +10,8 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from openswe_shared.input_messages import InputMessageContext, human_input
 
-from openswe.input_messages import InputMessageContext, human_input
 from openswe.thread_title import (
     MAX_TITLE_INPUT_CHARS,
     _ThreadTitle,

@@ -94,7 +94,7 @@ It is not ported: the reviewer's published findings are already deduplicated, an
 
 Eval runs score the stock reviewer.
 They skip workspace org guidelines, per-repo review style prompts, the API-standards skill, approval policy, historical PR comments, and the walkthrough.
-They keep the repo's own AGENTS.md and `resources/prompts/reviewer/eval.md`.
+They keep the repo's own AGENTS.md and `packages/shared/src/openswe_shared/prompts/reviewer/eval.md`.
 
 ## Cost
 

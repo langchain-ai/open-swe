@@ -26,7 +26,8 @@ def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.MonkeyPatch) -> None:
-    from openswe.input_messages import build_input_messages
+    from openswe_shared.input_messages import build_input_messages
+
     from openswe.tasks.messages import TaskMessage
     from openswe.tools import threads
 

@@ -41,7 +41,7 @@ repos:
     rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
-        exclude: &generated ^(LICENSE|.*\.(svg|patch|txt|tla))$|^openswe/resources/prompts/tools/
+        exclude: &generated ^(LICENSE|.*\.(svg|patch|txt|tla))$|^packages/shared/src/openswe_shared/prompts/tools/
       - id: trailing-whitespace
         exclude: *generated
       - id: check-yaml

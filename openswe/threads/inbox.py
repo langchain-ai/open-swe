@@ -20,17 +20,17 @@ from uuid import UUID
 
 import httpx2
 from langgraph_sdk import get_client
-from pydantic import JsonValue
-from runtime_api.catalog import InboxSpec
-
-from openswe.dashboard.options import model_supports_images
-from openswe.database import postgres
-from openswe.input_messages import (
+from openswe_shared.input_messages import (
     PersonIdentity,
     RunMessage,
     SystemIdentity,
     build_input_messages,
 )
+from pydantic import JsonValue
+from runtime_api.catalog import InboxSpec
+
+from openswe.dashboard.options import model_supports_images
+from openswe.database import postgres
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,

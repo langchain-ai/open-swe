@@ -27,7 +27,8 @@ async def test_participant_context_resolves_canonical_identity(
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from openswe.input_messages import person_introduction
+    from openswe_shared.input_messages import person_introduction
+
     from openswe.server import _thread_participant
     from openswe.users.models import UserIdentity
 

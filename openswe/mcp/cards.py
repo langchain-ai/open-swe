@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
 from uuid import UUID
 
+from openswe_shared.input_messages import InputMessageContext, SystemIdentity
 from pydantic import BaseModel, Field
 from sqlalchemy import ForeignKey, Text, select
 from sqlalchemy.dialects.postgresql import ARRAY, insert
@@ -24,7 +25,6 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.event_claims import claim, release
-from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.mcp.managed import (
     ConsentLink,
     GatewayStatus,

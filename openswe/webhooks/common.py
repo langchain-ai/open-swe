@@ -14,6 +14,7 @@ import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from openswe_shared.input_messages import PersonIdentity
 from pydantic import BaseModel
 
 from openswe.analytics.usage import update_agent_pr_usage_from_webhook
@@ -66,7 +67,6 @@ from openswe.github.thread_token import (
     invalidate_cached_github_token,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
-from openswe.input_messages import PersonIdentity
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -158,8 +158,6 @@ from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.multimodal import (
-    dedupe_urls,  # noqa: F401
-    extract_image_urls,  # noqa: F401
     fetch_image_block,  # noqa: F401
     vision_not_supported_warning,  # noqa: F401
 )
@@ -240,10 +238,8 @@ __all__ = [
     "create_review_check_run",
     "dashboard_thread_url",
     "decide_workflow_push_approval",
-    "dedupe_urls",
     "default_vision_model_pair",
     "dispatch_agent_run",
-    "extract_image_urls",
     "extract_pr_context",
     "extract_repo_from_text",
     "fetch_github_pr_metadata",

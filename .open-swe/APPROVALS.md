@@ -27,6 +27,6 @@ Always require human review when a pull request touches:
 - authentication, sessions, permissions, credentials, or tokens (for example `openswe/dashboard/oauth.py`, `openswe/dashboard/repo_access.py`, `openswe/api_keys/`, `openswe/github/`);
 - sandboxes, webhooks and their signature checks, or database migrations (`openswe/sandboxes/`, `openswe/webhooks/`, `openswe/database/migrations/`);
 - the reviewer or approval logic itself (`openswe/review/`, `openswe/tools/publish_review.py`);
-- instructions agents follow: anything under `.open-swe/` (including this file, unless criterion 4 applies), `AGENTS.md`, `CLAUDE.md`, `.agents/`, `.claude/`, or `openswe/resources/prompts/`;
+- instructions agents follow: anything under `.open-swe/` (including this file, unless criterion 4 applies), `AGENTS.md`, `CLAUDE.md`, `.agents/`, `.claude/`, or `packages/shared/src/openswe_shared/prompts/`;
 - CI, build, or deployment files (`.github/`, `Dockerfile`, `compose.yaml`, `langgraph*.json`), or dependency manifests and lockfiles;
 - generated pages under `openwiki/`.

@@ -10,9 +10,9 @@ follow-up into a run that's already in flight" path.
 import logging
 
 from langgraph_sdk import get_client
+from openswe_shared.input_messages import system_input
 
 from openswe.config import ENV
-from openswe.input_messages import system_input
 from openswe.message_queue import QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
