@@ -25,10 +25,11 @@
 //! approved or rejected without leaving the terminal.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cliclack::{input, log, note, select, spinner};
 use console::style;
 use serde_json::{json, Map, Value};
@@ -36,6 +37,7 @@ use serde_json::{json, Map, Value};
 use crate::agent_config;
 use crate::cli_output::{self, chat as chat_output, SequenceItem};
 use crate::command::CommandCompletion;
+use crate::dependencies;
 use crate::deploy::env_file;
 use crate::deploy::helpers::{MDA_ASSISTANT_ID_ENV, MDA_PUBLIC_API_URL_ENV};
 use crate::dev;
@@ -43,6 +45,10 @@ use crate::error::{categorized, ErrorCategory};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::agent_server::{AgentServer, PendingInterrupt, RunEvent, RunState};
+use crate::project::Project;
+use crate::telemetry;
+use crate::telemetry::otel_logger;
+use crate::telemetry::stage::Stage;
 use chat_output::{sanitize, TurnRenderer};
 
 /// Where `mda dev` listens when nothing staged a local URL.
@@ -100,14 +106,28 @@ pub fn run(opts: ChatOptions) -> Result<CommandCompletion> {
     cli_output::show_wordmark_intro()?;
     let interrupt = Interrupt::install()?;
 
-    let Some(target) = resolve_target(&opts, &interrupt)? else {
+    // Only for the model-key checks: a project that cannot be read here fails
+    // elsewhere with its own error, or is not needed with `--assistant`.
+    let project = Installation::from_env()
+        .and_then(|installation| installation.load_project(&opts.path))
+        .ok();
+    let Some(target) = resolve_target(&opts, project.as_ref(), &interrupt)? else {
         return Ok(CommandCompletion::Cancelled);
     };
+    // Every target, so a run that fails in the session is recorded as chatting.
+    telemetry::stage::enter(Stage::Chatting);
     // The assistant id is read after the server is up: starting one stages the
     // `.env` this falls back to.
     let staged = env_file::parse_env_file(&dev::dev_out_dir(&opts.path).join(".env"));
     let assistant_id = resolve_assistant_id(&opts, &staged)?;
     let server = AgentServer::new(target.api_url().to_string(), assistant_id)?;
+    let pickup = env_pickup(&target);
+    let model_key = project.as_ref().and_then(model_api_key);
+    let env_path = opts
+        .path
+        .canonicalize()
+        .unwrap_or_else(|_| opts.path.clone())
+        .join(".env");
 
     let mut connection = vec![
         format!("Agent Server: {}", server.api_url),
@@ -139,6 +159,10 @@ pub fn run(opts: ChatOptions) -> Result<CommandCompletion> {
         &interrupt,
         || prompt_message(&interrupt),
         prompt_resume,
+        |message| {
+            let hint = run_failure_hint(message, model_key, &env_path, pickup);
+            Ok(chat_output::show_run_failure(message, hint.as_deref())?)
+        },
     )?;
 
     chat_output::show_notice(&format!(
@@ -150,7 +174,15 @@ pub fn run(opts: ChatOptions) -> Result<CommandCompletion> {
 
 /// Find the Agent Server to talk to, starting one when nothing is serving and
 /// the user named no URL. `None` means they interrupted the startup.
-fn resolve_target(opts: &ChatOptions, interrupt: &Interrupt) -> Result<Option<Target>> {
+///
+/// A local server is checked for the model's API key first, before a start
+/// that the missing key can itself make fail. A pinned server's environment
+/// is its own, so there is nothing to check.
+fn resolve_target(
+    opts: &ChatOptions,
+    project: Option<&Project>,
+    interrupt: &Interrupt,
+) -> Result<Option<Target>> {
     if let Some(url) = flag(opts.url.as_deref()) {
         return Ok(Some(Target::Pinned {
             api_url: normalize_api_url(url)?,
@@ -163,7 +195,18 @@ fn resolve_target(opts: &ChatOptions, interrupt: &Interrupt) -> Result<Option<Ta
             .unwrap_or(DEFAULT_LOCAL_API_URL),
     )?;
     if dev::dev_server_is_up(&api_url) {
+        warn_missing_model_api_key(project, &staged, "attached", ATTACHED_PICKUP)?;
         return Ok(Some(Target::Attached { api_url }));
+    }
+    if let Some(project) = project {
+        // The file the server about to start stages, as `mda dev` picks it.
+        let env = [".env", ".env.local"]
+            .into_iter()
+            .map(|name| project.root.join(name))
+            .find(|path| path.is_file())
+            .map(|path| env_file::parse_env_file(&path))
+            .unwrap_or_default();
+        warn_missing_model_api_key(Some(project), &env, "started", STARTED_PICKUP)?;
     }
 
     // Preparing compiles the project and can stop to ask for a login, so it
@@ -171,6 +214,7 @@ fn resolve_target(opts: &ChatOptions, interrupt: &Interrupt) -> Result<Option<Ta
     log::info("No local dev server is running — starting one for this session")?;
     let pending = dev::prepare_background(&opts.path)?;
 
+    telemetry::stage::enter(Stage::ServerStart);
     let starting = spinner();
     starting.start(format!("Starting the dev server on {}", pending.api_url()));
     match dev::launch_background(pending, interrupt) {
@@ -189,12 +233,16 @@ fn resolve_target(opts: &ChatOptions, interrupt: &Interrupt) -> Result<Option<Ta
     }
 }
 
+/// Converse until the user leaves. A run that fails inside the agent goes to
+/// `report_failure` and the session carries on, so a fix (a key added to
+/// `.env`, say) can be tried without starting over.
 fn chat_loop(
     server: &AgentServer,
     thread_id: &mut String,
     interrupt: &Interrupt,
     mut read_message: impl FnMut() -> Result<Option<String>>,
     mut review: impl FnMut(&[PendingInterrupt]) -> Result<Option<Value>>,
+    mut report_failure: impl FnMut(&str) -> Result<()>,
 ) -> Result<CommandCompletion> {
     let mut pending = server.thread_interrupts(thread_id)?;
     loop {
@@ -220,8 +268,129 @@ fn chat_loop(
             };
             json!({ "command": { "resume": resume } })
         };
-        pending = stream_turn(server, thread_id, body, interrupt)?;
+        pending = match stream_turn(server, thread_id, body, interrupt) {
+            Ok(pending) => pending,
+            Err(err) => {
+                let Some(RunFailed(message)) = err.downcast_ref::<RunFailed>() else {
+                    return Err(err);
+                };
+                otel_logger::warn("chat run failed", &err);
+                report_failure(message)?;
+                // A failed resume can leave the thread paused on its interrupt.
+                server.thread_interrupts(thread_id)?
+            }
+        };
     }
+}
+
+/// A run that failed inside the agent, as opposed to a failure to reach the
+/// Agent Server. Carries the readable, sanitized message.
+#[derive(Debug)]
+struct RunFailed(String);
+
+impl fmt::Display for RunFailed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the run failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for RunFailed {}
+
+/// The readable part of a run's `error` event. The Agent Server sends
+/// `{"error": "<type>", "message": "<text>"}`; anything else is shown as sent.
+///
+/// The type is kept unless it is a bare `Error`: the Python server replaces
+/// messages with "An internal error occurred", which leaves the type
+/// (`OpenAIAuthenticationError`) as the only clue.
+fn run_error_message(raw: &str) -> String {
+    let readable = match serde_json::from_str::<Value>(raw) {
+        Ok(Value::Object(fields)) => {
+            let text = |key| {
+                fields
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+            };
+            match (
+                text("error").filter(|kind| *kind != "Error"),
+                text("message"),
+            ) {
+                (Some(kind), Some(message)) => Some(format!("{kind}: {message}")),
+                (kind, message) => message.or(kind).map(str::to_string),
+            }
+        }
+        Ok(Value::String(message)) => Some(message),
+        _ => None,
+    };
+    sanitize(readable.as_deref().unwrap_or(raw).trim())
+}
+
+const ATTACHED_PICKUP: &str = "and `mda dev` reloads it on save.";
+const STARTED_PICKUP: &str = "then restart `mda chat`.";
+
+/// How the server this session talks to picks up a key added to `.env`.
+fn env_pickup(target: &Target) -> &'static str {
+    match target {
+        Target::Attached { .. } => ATTACHED_PICKUP,
+        Target::Started(_) => STARTED_PICKUP,
+        Target::Pinned { .. } => "then restart the Agent Server.",
+    }
+}
+
+/// Deploy's model-key preflight, as a warning before the first message.
+/// `server` says whether the session attached to a running dev server or
+/// started one, so the two can be told apart in telemetry.
+fn warn_missing_model_api_key(
+    project: Option<&Project>,
+    env: &BTreeMap<String, String>,
+    server: &str,
+    pickup: &str,
+) -> Result<()> {
+    let Some(project) = project else {
+        return Ok(());
+    };
+    let pickup = format!("{pickup} Messages fail until then.");
+    if let Some(warning) = dev::missing_model_api_key_warning(project, env, &pickup) {
+        otel_logger::warn(
+            &format!("model API key missing ({server} dev server)"),
+            &anyhow!(warning.clone()),
+        );
+        log::warning(warning)?;
+    }
+    Ok(())
+}
+
+/// The provider key the project's model authenticates with locally.
+fn model_api_key(project: &Project) -> Option<&'static str> {
+    let model = agent_config::read_agent_static_config(project)
+        .ok()?
+        .model?;
+    match dependencies::deploy_model_api_key_requirement(&model) {
+        dependencies::ModelApiKeyRequirement::DeploymentSecret(key) => Some(key),
+        _ => None,
+    }
+}
+
+/// The fix for a failed run that is about the model's credentials: one that
+/// names a provider key (a missing key, from inside the run), or an
+/// authentication failure (a rejected one) when the model's key is known.
+fn run_failure_hint(
+    message: &str,
+    model_key: Option<&str>,
+    env_path: &Path,
+    pickup: &str,
+) -> Option<String> {
+    let env = env_path.display();
+    let provider_keys = dependencies::provider_api_key_envs();
+    if let Some(key) = message
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|word| provider_keys.contains(word))
+    {
+        return Some(format!("Add `{key}=...` to {env}, {pickup}"));
+    }
+    let key = model_key.filter(|_| message.to_ascii_lowercase().contains("authentication"))?;
+    Some(format!("Set a valid `{key}` in {env}, {pickup}"))
 }
 
 fn resume_command(
@@ -343,10 +512,7 @@ fn stream_turn(
             RunEvent::Error(error) => {
                 waiting.clear();
                 renderer.finish()?;
-                return Err(categorized(
-                    ErrorCategory::Remote,
-                    format!("the run failed: {}", sanitize(&error)),
-                ));
+                return Err(RunFailed(run_error_message(&error)).into());
             }
         }
     }

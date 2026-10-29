@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react"
 const STORAGE_KEY = "open-swe.streaming.use-stream"
 const CHANGE_EVENT = "open-swe-stream-preference"
 
-function readPreference(): boolean {
+export function readPreference(): boolean {
   return (
     typeof window !== "undefined" &&
     window.localStorage.getItem(STORAGE_KEY) === "true"

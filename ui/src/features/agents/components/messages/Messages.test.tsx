@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -41,6 +41,40 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("renders queued passage replies even without plain text", () => {
+    render(
+      <Messages
+        messages={[]}
+        isStreaming={false}
+        queuedMessages={[
+          {
+            id: "quoted-follow-up",
+            content: "",
+            createdAt: 2000,
+            replies: [
+              {
+                source: "conversation",
+                before: "",
+                selection: "The selected passage <example>",
+                after: "",
+                comment: "Please explain this & its tradeoffs.",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const queued = screen.getByTestId("queued-message")
+    expect(queued.querySelector("blockquote")?.textContent).toBe(
+      "The selected passage <example>"
+    )
+    expect(queued.textContent).toContain("Please explain this & its tradeoffs.")
+    expect(queued.textContent).toContain("Queued")
+    expect(queued.querySelector("example")).toBeNull()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
@@ -306,7 +340,66 @@ describe("Messages", () => {
     ).toBeTruthy()
   })
 
+  it("expands a tool call to its arguments as formatted JSON", () => {
+    const { container } = render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "report",
+                title: "report_platform_issue",
+                toolKind: "other",
+                status: "completed",
+                input: {
+                  problem_description: "Sandbox disconnected",
+                  keywords: ["sandbox"],
+                },
+                output: "Recorded",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "ping",
+                title: "ping_service",
+                toolKind: "other",
+                status: "completed",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Worked/ }))
+    expect(screen.getByText("Ping service").closest("[aria-expanded]")).toBe(
+      null
+    )
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Report platform issue Sandbox disconnected",
+      })
+    )
+    expect(container.textContent).toContain(
+      JSON.stringify(
+        {
+          problem_description: "Sandbox disconnected",
+          keywords: ["sandbox"],
+        },
+        null,
+        2
+      )
+    )
+    expect(container.textContent).toContain("Recorded")
+  })
+
   it("folds each stretch of work between the Slack replies around it", () => {
+    vi.useFakeTimers()
     render(
       <Messages
         isStreaming
@@ -345,6 +438,11 @@ describe("Messages", () => {
       />,
       { wrapper }
     )
+
+    // A run that ends right after a reply never flashes an activity row under it.
+    expect(screen.queryByRole("button", { name: "Thinking…" })).toBeNull()
+    act(() => vi.advanceTimersByTime(800))
+    vi.useRealTimers()
 
     const inOrder = [
       screen.getByText("On it!"),

@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import {
   ArrowDownIcon,
   CaretRightIcon,
@@ -24,7 +25,7 @@ import {
 } from "@/features/reviews/lib/conversationApi"
 import { sameLogin } from "@/features/reviews/lib/logins"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { threadLocation } from "./findings"
 import {
   Avatar,
@@ -272,7 +273,11 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
         )}
       </div>
       {awayFromLatest && (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label="Jump to the latest"
           type="button"
           onClick={() =>
             scroller.current?.scrollTo({
@@ -280,11 +285,11 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
               behavior: "smooth",
             })
           }
-          className="flex shrink-0 items-center justify-center gap-space-1 border-t border-default py-space-1 text-xxs font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          className="shrink-0 justify-center gap-space-1 border-t border-default py-space-1 font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           Jump to the latest
           <ArrowDownIcon className="size-3" />
-        </button>
+        </Button>
       )}
       <CommentBox pr={pr} />
     </section>
@@ -318,11 +323,15 @@ function OpenConversations({
   return (
     <div ref={ref} className="mb-space-4 scroll-mt-2">
       <div className="mb-space-2 flex items-center gap-space-2">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={`Open conversations ${threads.length}`}
           type="button"
           aria-expanded={!folded}
           onClick={() => setFolded(!folded)}
-          className="flex items-center gap-space-2 text-xs font-medium text-primary"
+          className="h-auto gap-space-2 font-medium whitespace-normal text-primary"
         >
           <CaretRightIcon
             className={cn(
@@ -334,7 +343,7 @@ function OpenConversations({
           <span className="rounded-full bg-surface-level-3 px-space-1 text-xxs text-secondary tabular-nums">
             {threads.length}
           </span>
-        </button>
+        </Button>
         {answered.length > 0 && (
           <Button
             size="xs"
@@ -399,10 +408,14 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
       <span className="absolute top-0.5 left-[5px] flex size-[13px] items-center justify-center rounded-full bg-surface-level-1 text-secondary ring-4 ring-surface-level-1">
         <GitCommitIcon className="size-3.5" weight="regular" />
       </span>
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={`${authors.join(", ")} pushed ${plural(commits.length, "commit")}`}
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="text-left text-secondary hover:text-primary"
+        className="block h-auto border-0 px-0 text-left whitespace-normal text-secondary hover:text-primary"
       >
         <span className="font-medium text-primary">{authors.join(", ")}</span>{" "}
         pushed {plural(commits.length, "commit")}{" "}
@@ -413,7 +426,7 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
             open && "rotate-90"
           )}
         />
-      </button>
+      </Button>
       {open && (
         <ul className="mt-space-1 flex flex-col gap-0.5">
           {commits.map((commit) => (
@@ -486,11 +499,15 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
       />
     )
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-label={`${threadLocation(thread)} ${plainFirstLine(comment.body)}${thread.resolved ? " Resolved" : ""}`}
       type="button"
       onClick={() => setOpen(true)}
       title={thread.path}
-      className="flex w-full min-w-0 items-baseline gap-space-2 rounded-md px-space-1 py-space-1 text-left text-xs hover:bg-surface-level-1-hover"
+      className="h-auto w-full min-w-0 items-baseline justify-start gap-space-2 px-space-1 py-space-1 text-left whitespace-normal hover:bg-surface-level-1-hover"
     >
       {/* Truncates from the left so the line number, which tells rows apart, stays. */}
       <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-xxs text-secondary [direction:rtl]">
@@ -505,7 +522,7 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
           className="size-3 shrink-0 self-center text-secondary"
         />
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -546,29 +563,37 @@ function ItemBlock({
           verb={verb}
         />
         {earlier.length > 0 && (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="xs"
+            aria-label={`Said the same thing ${earlier.length + 1} times`}
             type="button"
             aria-expanded={showEarlier}
             onClick={() => setShowEarlier((value) => !value)}
-            className="shrink-0 rounded-sm px-space-1 text-xxs text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+            className="h-auto shrink-0 border-0 px-space-1 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
             title="Said the same thing before"
           >
             ×{earlier.length + 1}
-          </button>
+          </Button>
         )}
       </div>
       {showEarlier && (
         <ul className="mt-space-1 flex flex-col gap-0.5 text-xxs text-secondary">
           {earlier.map((said) => (
             <li key={said.id}>
-              <a
+              <MacawLink
+                variant="xs"
                 href={said.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="hover:text-primary hover:underline"
+                className={cn(
+                  INHERITED_LINK,
+                  "hover:text-primary hover:underline"
+                )}
               >
                 Said the same {formatWhen(said.created_at)}
-              </a>
+              </MacawLink>
             </li>
           ))}
         </ul>
@@ -578,23 +603,31 @@ function ItemBlock({
           <div className="mt-space-1 rounded-lg border border-default bg-surface-level-1 px-space-3 py-space-2 text-xs leading-[1.6]">
             <Markdown content={item.body} />
             {bot && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="xs"
+                aria-label="Fold"
                 type="button"
                 onClick={() => setOpen(false)}
-                className="mt-space-1 text-xxs text-secondary hover:text-primary"
+                className="mt-space-1 h-auto border-0 px-0 text-secondary hover:text-primary"
               >
                 Fold
-              </button>
+              </Button>
             )}
           </div>
         ) : (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={plainFirstLine(item.body)}
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-0.5 block w-full truncate text-left text-xs text-secondary hover:text-primary"
+            className="mt-0.5 block h-auto w-full justify-start truncate border-0 px-0 text-left text-secondary hover:text-primary"
           >
             {plainFirstLine(item.body)}
-          </button>
+          </Button>
         ))}
       {started.length > 0 && (
         <ul className="mt-space-1 flex flex-col gap-space-1">

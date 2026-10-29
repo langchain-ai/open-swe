@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 class BatchScheduler:
     def __init__(self, queue: MergeQueue, repo: RepoClient, policy: QueuePolicy):
+        if queue.mode != "custom":
+            raise ValueError("Custom scheduling is disabled for native queues")
         self.queue, self.repo, self.policy = queue, repo, policy
         self.admission = AdmissionReader(repo, queue.target_branch, policy)
 

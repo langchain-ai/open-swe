@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, urlparse
 
 import httpx2
@@ -35,6 +35,7 @@ from openswe.github.queue import (
     Artifact,
     CommitComparison,
     GitReference,
+    NativeQueueSnapshot,
     ValidationArtifacts,
     ValidationJob,
     ValidationJobs,
@@ -42,6 +43,7 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
+from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -221,16 +223,29 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+def github_reauth_message(login: str | None = None) -> str:
+    person = f" for {login}" if login else ""
+    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
+    return (
+        f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
+        "Then retry the action."
+    )
+
+
 class GitHubSignInRequired(Exception):
     """The person has no usable GitHub authorization and must sign in again."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"GitHub sign-in required for {login}")
+        super().__init__(github_reauth_message(login))
         self.login = login
 
 
 class GitHubAppUnavailable(Exception):
     """No GitHub App installation token can be minted for the request."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class RepoFileUnreadableError(RuntimeError):
@@ -324,6 +339,7 @@ class GitHubClient:
             installation_id=installation_id,
             repositories=[repo] if permissions is not None and repo is not None else None,
             permissions=permissions,
+            raise_errors=True,
         )
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
@@ -606,6 +622,37 @@ class RepoClient:
             raise ValueError("GitHub answered the repository without an object")
         return payload
 
+    async def native_queue(self, branch: str) -> NativeQueueSnapshot:
+        """Read a bounded, complete queue view; candidate ancestry determines membership."""
+        data = await self.graphql(
+            """query($owner:String!,$repo:String!,$branch:String!,$ref:String!) {
+              repository(owner:$owner,name:$repo) {
+                databaseId nameWithOwner
+                ref(qualifiedName:$ref) { name target { oid } }
+                mergeQueue(branch:$branch) {
+                  id
+                  entries(first:100) {
+                    totalCount pageInfo { hasNextPage }
+                    nodes {
+                      id position state enqueuedAt
+                      baseCommit { oid }
+                      headCommit { oid parents(first:2) { totalCount nodes { oid } } }
+                      pullRequest {
+                        number headRefOid state reviewDecision isDraft baseRefName
+                        headRepository { nameWithOwner }
+                      }
+                    }
+                  }
+                }
+              }
+            }""",
+            {"branch": branch, "ref": f"refs/heads/{branch}"},
+        )
+        snapshot = NativeQueueSnapshot.model_validate(data.get("repository"))
+        if snapshot.repository.lower() != self.full_name.lower() or snapshot.branch != branch:
+            raise ValueError("Native queue repository or target changed")
+        return snapshot
+
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
 
@@ -877,6 +924,45 @@ def _artifact_destination(location: str) -> None:
         or url.port not in (None, 443)
     ):
         raise ValueError("Untrusted artifact download destination")
+
+
+type ReadStatus = Literal["ok", "transient", "missing", "forbidden", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadResult[T]:
+    """A GitHub read and the reason it could not be completed."""
+
+    value: T | None
+    status: ReadStatus
+
+
+async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
+    """Preserve retryable failures separately from missing or inaccessible resources."""
+    try:
+        return ReadResult(await read, "ok")
+    except httpx2.HTTPStatusError as exc:
+        response = exc.response
+        status: ReadStatus = "unavailable"
+        if (
+            response.status_code == 429
+            or 500 <= response.status_code < 600
+            or _is_secondary_rate_limit(response)
+            or (response.status_code == 403 and "Retry-After" in response.headers)
+        ):
+            status = "transient"
+        elif response.status_code == 404:
+            status = "missing"
+        elif response.status_code in {401, 403}:
+            status = "forbidden"
+        logger.warning("GitHub read failed", extra={"read_status": status}, exc_info=True)
+        return ReadResult(None, status)
+    except httpx2.TransportError:
+        logger.warning("GitHub read transport failed", exc_info=True)
+        return ReadResult(None, "transient")
+    except httpx2.HTTPError, ValueError:
+        logger.warning("GitHub read unavailable", exc_info=True)
+        return ReadResult(None, "unavailable")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:

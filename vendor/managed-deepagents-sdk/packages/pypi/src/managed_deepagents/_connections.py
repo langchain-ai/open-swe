@@ -44,9 +44,9 @@ from managed_deepagents._channels.reserved_connections import (
 from managed_deepagents._channels.source_providers import is_trusted_source_provider
 from managed_deepagents._identity_runtime import (
     build_runtime_identity,
-    on_channel_thread,
     resolve_runtime_configurable,
 )
+from managed_deepagents._managed_thread import on_channel_thread
 
 if TYPE_CHECKING:
     from managed_deepagents.identity import RuntimeIdentity
@@ -132,6 +132,7 @@ _DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 #: Env var holding the deployment id, which is the agent owner's ``owner_id``.
 DEPLOYMENT_ID_ENV = "LANGSMITH_HOST_PROJECT_ID"
 _API_KEY_ENV = "LANGSMITH_API_KEY"
+_LANGCHAIN_API_KEY_ENV = "LANGCHAIN_API_KEY"
 _WORKSPACE_ID_ENV = "LANGSMITH_WORKSPACE_ID"
 #: The workspace a hosted LangSmith deployment runs in. The platform sets it on
 #: every revision; ``LANGSMITH_WORKSPACE_ID`` is what users should set.
@@ -643,9 +644,11 @@ def _external_identity_for_resolve(
 
 def _resolve_agent_auth_config(env: Mapping[str, str] | None) -> _AgentAuthConfig:
     resolved = os.environ if env is None else env
-    api_key = (resolved.get(_API_KEY_ENV) or "").strip()
+    api_key = (resolved.get(_API_KEY_ENV) or "").strip() or (
+        resolved.get(_LANGCHAIN_API_KEY_ENV) or ""
+    ).strip()
     if not api_key:
-        raise ConnectionsNotConfiguredError(_API_KEY_ENV)
+        raise ConnectionsNotConfiguredError(f"{_API_KEY_ENV} or {_LANGCHAIN_API_KEY_ENV}")
     workspace_id = resolve_workspace_id(resolved)
     if workspace_id is None:
         raise ConnectionsNotConfiguredError(WORKSPACE_SETTING)

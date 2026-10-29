@@ -71,3 +71,32 @@ async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatc
         await review_api.get_review("acme", "app", 7)
 
     assert excinfo.value.response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_review_trace_uses_the_reviewer_thread(monkeypatch) -> None:
+    trace_url = "https://smith.langchain.com/trace/reviewer"
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        github_http,
+        "github_request",
+        AsyncMock(
+            return_value=httpx2.Response(
+                200,
+                json={"title": "Example", "state": "open"},
+                request=httpx2.Request("GET", "https://api.github.com"),
+            )
+        ),
+    )
+    thread = _thread("acme", "app", 7, "alice")
+    monkeypatch.setattr(review_api, "_reviewer_thread_for", AsyncMock(return_value=thread))
+    monkeypatch.setattr(review_api, "_scout_target", AsyncMock(return_value=None))
+    trace = AsyncMock(return_value=trace_url)
+    monkeypatch.setattr(review_api, "get_langsmith_trace_url", trace)
+
+    detail = await review_api.get_review("acme", "app", 7)
+
+    assert detail["trace_url"] == trace_url
+    trace.assert_awaited_once_with("acme/app/7")

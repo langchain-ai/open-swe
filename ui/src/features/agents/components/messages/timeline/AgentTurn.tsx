@@ -10,6 +10,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
+import { ExpandableMessageChip } from "../ExpandableMessageChip"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
@@ -20,14 +21,15 @@ import {
   segmentTurn,
 } from "../renderItems"
 import { WorkEntryRow } from "./WorkEntryRow"
-import { describeWorkEntry, latestDiff } from "./workEntry"
+import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
-import { ShellEntryBody } from "./entryBodies"
+import { JsonInputEntryBody, ShellEntryBody, ToolCallBody } from "./entryBodies"
 import { ToolResultBody } from "./ToolResultBody"
 import type { ReactNode } from "react"
 import type { RenderItem, TurnSegment } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import {
   ReplyCard,
@@ -46,6 +48,27 @@ import { formatElapsed } from "@/lib/utils"
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
 
 /**
+ * How long a reply sits at the end of a live turn before an activity row joins
+ * it. A run usually ends right after its answer lands; showing the row at once
+ * flashed it under the answer and dropped everything below when it went.
+ */
+const TRAILING_ACTIVITY_DELAY_MS = 800
+
+/** True once `condition` has held for `delayMs`; false as soon as it stops. */
+function useHeld(condition: boolean, delayMs: number): boolean {
+  const [held, setHeld] = useState(false)
+  useEffect(() => {
+    if (!condition) return
+    const timer = setTimeout(() => setHeld(true), delayMs)
+    return () => {
+      clearTimeout(timer)
+      setHeld(false)
+    }
+  }, [condition, delayMs])
+  return condition && held
+}
+
+/**
  * One row per edit call, showing only what the call targeted. The diff lives in
  * the turn's changed-files card and the side panel, both of which read git —
  * rendering a per-call diff here made repeated edits of one file look duplicated.
@@ -58,19 +81,21 @@ function EditWorkEntry({
   repoPath?: string
 }) {
   const diff = latestDiff(chunk)
+  if (!diff) return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, repoPath)}
       timestamp={chunk.timestamp}
-      body={diff ? <DiffView diffData={diff} snippet /> : undefined}
+      body={<DiffView diffData={diff} snippet />}
       defaultExpanded={chunk.status === "pending"}
     />
   )
 }
 
 /**
- * A code-mode `eval` call, open on the tool calls its code made. Its own output
- * mostly repeats what those returned, so it shows only when the code failed.
+ * A code-mode `eval` call, open on the tool calls its code made, with its code
+ * folded above them. Its own output mostly repeats what those returned, so it
+ * shows only when the code failed or called nothing.
  */
 function CodeWorkEntry({
   chunk,
@@ -83,8 +108,29 @@ function CodeWorkEntry({
   repoPath?: string
 }) {
   const entry = describeWorkEntry(chunk, repoPath)
+  const code =
+    typeof chunk.input?.code === "string" ? chunk.input.code.trim() : ""
   if (calls == null) {
-    return <WorkEntryRow entry={entry} timestamp={chunk.timestamp} />
+    return (
+      <WorkEntryRow
+        entry={entry}
+        timestamp={chunk.timestamp}
+        body={
+          hasToolCallDetail(chunk, Boolean(code))
+            ? ({ loadedText, loadError }) => (
+                <ToolCallBody
+                  chunk={chunk}
+                  loadedText={loadedText}
+                  loadError={loadError}
+                  input={
+                    code && <CodeBlock text={code} language="javascript" />
+                  }
+                />
+              )
+            : undefined
+        }
+      />
+    )
   }
   const failed = chunk.status === "error"
   // Keyed apart from the plain row: calls arrive after the row first renders,
@@ -96,6 +142,11 @@ function CodeWorkEntry({
       timestamp={chunk.timestamp}
       body={({ loadedText, loadError }) => (
         <div className="space-y-space-2">
+          {code && (
+            <ExpandableMessageChip label="Code">
+              <CodeBlock text={code} language="javascript" />
+            </ExpandableMessageChip>
+          )}
           <div>{calls}</div>
           {failed && (
             <ToolResultBody
@@ -105,6 +156,35 @@ function CodeWorkEntry({
         </div>
       )}
       defaultExpanded
+    />
+  )
+}
+
+/** A tool call shown as its arguments and output. */
+function ToolWorkEntry({
+  chunk,
+  repoPath,
+}: {
+  chunk: ToolExecutionChunk
+  repoPath?: string
+}) {
+  const entry = describeWorkEntry(chunk, repoPath)
+  return (
+    <WorkEntryRow
+      entry={entry}
+      timestamp={chunk.timestamp}
+      body={
+        hasToolCallDetail(chunk, Object.keys(chunk.input ?? {}).length > 0)
+          ? ({ loadedText, loadError }) => (
+              <JsonInputEntryBody
+                chunk={chunk}
+                loadedText={loadedText}
+                loadError={loadError}
+              />
+            )
+          : undefined
+      }
+      defaultExpanded={chunk.status === "pending"}
     />
   )
 }
@@ -139,10 +219,10 @@ function WorkGroup({
         />
       )}
       {visible.map((chunk, index) => (
-        <WorkEntryRow
+        <ToolWorkEntry
           key={chunk.toolCallId || `work-${index}`}
-          entry={describeWorkEntry(chunk, repoPath)}
-          timestamp={chunk.timestamp}
+          chunk={chunk}
+          repoPath={repoPath}
         />
       ))}
     </div>
@@ -196,13 +276,22 @@ export function AgentTurn({
     }
   }, [isStreaming])
 
-  const segments = useMemo(() => {
-    const split = segmentTurn(renderItems)
-    if (isStreaming && split.at(-1)?.type !== "work") {
-      split.push({ type: "work", key: "work-live", items: [] })
-    }
-    return split
-  }, [isStreaming, renderItems])
+  const settledSegments = useMemo(() => segmentTurn(renderItems), [renderItems])
+  const endsInReply = settledSegments.at(-1)?.type === "reply"
+  const replyHeld = useHeld(
+    !!isStreaming && endsInReply,
+    TRAILING_ACTIVITY_DELAY_MS
+  )
+  const segments = useMemo(
+    () =>
+      isStreaming && (settledSegments.length === 0 || replyHeld)
+        ? [
+            ...settledSegments,
+            { type: "work" as const, key: "work-live", items: [] },
+          ]
+        : settledSegments,
+    [isStreaming, replyHeld, settledSegments]
+  )
   const workSegmentCount = segments.filter((s) => s.type === "work").length
   const liveItemKey = isStreaming ? renderItems.at(-1)?.key : undefined
 
@@ -336,10 +425,10 @@ export function AgentTurn({
 
       case "tool-item":
         return (
-          <WorkEntryRow
+          <ToolWorkEntry
             key={item.key}
-            entry={describeWorkEntry(item.chunk, repoPath)}
-            timestamp={item.chunk.timestamp}
+            chunk={item.chunk}
+            repoPath={repoPath}
           />
         )
 
@@ -401,7 +490,8 @@ export function AgentTurn({
           : renderWorkSegment(segment, index)
       )}
 
-      <div className="mt-space-1 flex items-center gap-space-1">
+      {/* As tall as the copy button, which only arrives once the run ends. */}
+      <div className="mt-space-1 flex min-h-5 items-center gap-space-1">
         {replyText && !isStreaming && (
           <CopyIconButton
             copy={replyText}
@@ -466,9 +556,15 @@ function SqlResultItem({ chunk }: { chunk: ToolExecutionChunk }) {
     }
   }, [loadOutput])
 
+  const query =
+    typeof chunk.input?.query === "string" ? chunk.input.query.trim() : ""
+
   return (
-    <SqlResultTable
-      output={loaded && loaded.load === loadOutput ? loaded.text : output}
-    />
+    <div>
+      {query && <CodeBlock text={query} language="sql" />}
+      <SqlResultTable
+        output={loaded && loaded.load === loadOutput ? loaded.text : output}
+      />
+    </div>
   )
 }

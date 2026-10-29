@@ -492,7 +492,7 @@ test.describe("Human review in Slack", () => {
     await shootCard(page, "merged");
   });
 
-  test("refused while unreviewable; a request from the review channel's thread is broadcast and leaves the channel when dismissed", async ({
+  test("refuses drafts and missing channels; a conflicted request with failing CI is broadcast and can be dismissed", async ({
     page,
     request,
   }) => {
@@ -503,7 +503,9 @@ test.describe("Human review in Slack", () => {
       title: "Say goodbye politely",
       author: "octocat",
       body: "Adds a farewell helper.",
-      mergeable_state: "blocked",
+      draft: true,
+      mergeable: false,
+      mergeable_state: "dirty",
       check_runs: [
         {
           id: 7002,
@@ -518,26 +520,13 @@ test.describe("Human review in Slack", () => {
     const ask = () =>
       page.request.post(url, { headers: SAME_ORIGIN_HEADERS, data: {} });
 
-    // 1. The dashboard refuses a failing required check, a conflict, and a
-    //    repository with no review channel, each with the reason.
     let refused = await ask();
     expect(refused.status()).toBe(409);
-    expect(await refused.text()).toContain("required checks are failing");
+    expect(await refused.text()).toContain("it is a draft");
 
     await control(request, "/control/pull-request-health", {
       number: seeded.number,
-      mergeable: false,
-      mergeable_state: "dirty",
-      check_runs: GREEN,
-    });
-    refused = await ask();
-    expect(refused.status()).toBe(409);
-    expect(await refused.text()).toContain("merge conflicts");
-
-    await control(request, "/control/pull-request-health", {
-      number: seeded.number,
-      mergeable: true,
-      mergeable_state: "clean",
+      draft: false,
     });
     refused = await ask();
     expect(refused.status()).toBe(409);
@@ -611,9 +600,11 @@ test.describe("Human review in Slack", () => {
     );
   });
 
-  test("approved pull requests do not offer Slack review requests", async ({
+  test("approved pull requests still offer Slack review requests", async ({
     page,
+    request,
   }) => {
+    await setReviewChannel(request);
     await loginAs(page, ALICE);
     await seedOpenPullRequest(page, {
       repo: `${REPO.owner}/${REPO.repo}`,
@@ -629,16 +620,16 @@ test.describe("Human review in Slack", () => {
     await expect(row).toBeVisible();
     await expect(
       row.getByRole("button", { name: "Request review in Slack" }),
-    ).toHaveCount(0);
+    ).toBeEnabled();
   });
 
-  test("unreviewable pull requests explain why a review can't be requested", async ({
+  test("conflicted pull requests can request a review from the dashboard", async ({
     page,
     request,
   }) => {
     await setReviewChannel(request);
     await loginAs(page, ALICE);
-    await seedOpenPullRequest(page, {
+    const seeded = await seedOpenPullRequest(page, {
       repo: `${REPO.owner}/${REPO.repo}`,
       title: "Conflicted change",
       author: ALICE.login,
@@ -652,18 +643,14 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: "Conflicted change" });
     await expect(
       row.getByRole("button", { name: "Request review in Slack" }),
-    ).toBeDisabled();
-    await row
-      .getByRole("button", { name: "Why a review can't be requested" })
-      .click();
+    ).toBeEnabled();
+    await row.getByRole("button", { name: "Request review in Slack" }).click();
     await expect(
-      page.getByText(
-        "A review can't be requested yet: it has merge conflicts.",
-      ),
-    ).toBeVisible();
-    await page.screenshot({
-      path: "test-results/human-review-blocked-reason.png",
-    });
+      row.getByRole("button", { name: "Review requested" }),
+    ).toBeEnabled();
+    await expect
+      .poll(async () => (await latestRequest(request)).pr_number)
+      .toBe(seeded.number);
   });
 
   test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({
@@ -715,7 +702,7 @@ test.describe("Human review in Slack", () => {
       .getByRole("listitem")
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) });
     await row.getByRole("button", { name: "Request review in Slack" }).click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -874,7 +861,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -972,7 +959,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);

@@ -1,5 +1,8 @@
 {% if moved %}
-The pull request changed since your last turn, and the walkthrough was paused until the reader's message above. It is now at head `{{ head_sha }}`. The plan and the reader's walk were carried over by content: lines the reader approved stay approved, unchanged lines keep their chunk, a new line in a hunk a chunk holds joined it, and the other new or edited hunks are unplanned. Tell the reader in one or two sentences what changed, then do what their message asks.
+The pull request changed since your last turn, and the walkthrough was paused until the reader's message above.
+It is now at head `{{ head_sha }}`.
+The plan and the reader's walk were carried over line by line as git moved them: lines the reader approved stay approved, unchanged lines keep their chunk, a new line in a hunk a chunk holds joined it, and the other new or edited hunks are unplanned.
+Tell the reader in one or two sentences what changed, then do what their message asks.
 
 {% endif %}
 {% if clicked %}

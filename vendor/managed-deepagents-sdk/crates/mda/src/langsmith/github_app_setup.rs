@@ -336,9 +336,10 @@ impl Client {
 mod tests {
     use super::*;
     use crate::langsmith::test_support::serve_once;
+    use crate::langsmith::ApiKey;
 
     fn client(base: &str) -> Client {
-        Client::new_with_platform(base, Some(base), "lsv2_key", Some("tenant-1".into())).unwrap()
+        Client::new(base, base, ApiKey::new("lsv2_key"), Some("tenant-1".into())).unwrap()
     }
 
     fn manifest() -> GitHubAppManifest {

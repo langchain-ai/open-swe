@@ -71,6 +71,7 @@ import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   agentMutationKeys,
   agentThreadKeys,
+  useActiveAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -105,7 +106,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -185,7 +185,6 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const newThreadShortcut = useShortcutLabel("mod+n")
-  const chat = useChatRoutes()
   const profile = useProfile()
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -206,9 +205,9 @@ export function AgentsSidebar({
         agentThreadKeys.detail(threadId)
       )?.reviewPage
       if (review) void navigate(reviewPageRoute(review))
-      else void navigate({ to: chat.thread, params: { threadId } })
+      else void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
-    [navigate, chat.thread, queryClient]
+    [navigate, queryClient]
   )
   const {
     prefs,
@@ -599,7 +598,7 @@ export function AgentsSidebar({
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
-      composeTo={group.localRepoPath ? "/agents" : chat.home}
+      composeTo="/agents"
       onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
@@ -669,7 +668,7 @@ export function AgentsSidebar({
 
       <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
         <Link
-          to={chat.home}
+          to="/agents"
           onClick={layout.closeOnMobile}
           className={cn(
             NAV_ROW_CLASS,
@@ -689,7 +688,7 @@ export function AgentsSidebar({
           <a
             href={
               concierge.data?.thread_id
-                ? `${chat.home}/${concierge.data.thread_id}`
+                ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
                   ? `slack://channel?id=${concierge.data.channel_id}`
                   : undefined
@@ -864,7 +863,7 @@ export function AgentsSidebar({
                     icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
-                      void navigate({ to: chat.home })
+                      void navigate({ to: "/agents" })
                     }}
                   />
                 }
@@ -955,11 +954,15 @@ function WorkspaceGroupSection({
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
     <div className="mb-space-1">
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={workspace.name}
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className="group/workspace h-auto w-full justify-start gap-space-2 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:text-primary"
       >
         <StackRegularIcon size={14} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
@@ -970,7 +973,7 @@ function WorkspaceGroupSection({
             collapsed ? "block" : "hidden group-hover/workspace:block"
           )}
         />
-      </button>
+      </Button>
       {!collapsed && (
         <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
       )}
@@ -1017,7 +1020,7 @@ function RepoGroup({
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
-  composeTo: "/agents" | "/assistant"
+  composeTo: "/agents"
   onCompose: () => void
   onTogglePin: () => void
   onLoadMore?: () => void
@@ -1072,15 +1075,19 @@ function RepoGroup({
   return (
     <div className="mb-space-1">
       <div className="group/folder flex items-center gap-space-2 rounded-md pr-space-1 pl-space-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="md"
+          aria-label={group.label}
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-space-2 py-space-1 text-left"
+          className="h-auto min-w-0 flex-1 justify-start gap-space-2 py-space-1 text-left whitespace-normal text-primary hover:bg-transparent dark:hover:bg-transparent"
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
-        </button>
+        </Button>
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
@@ -1131,16 +1138,24 @@ function RepoGroup({
             </p>
           )}
           {repo.isError && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label="Retry loading chats"
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-space-1 pr-space-2 pl-space-5 text-left text-xs text-error-secondary"
+              className="w-full justify-start py-space-1 pr-space-2 pl-space-5 text-left text-error-secondary"
             >
               Retry loading chats
-            </button>
+            </Button>
           )}
           {hasMore && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={loading ? "Loading…" : "Show more"}
               type="button"
               onClick={() => {
                 if (!expanded) onExpand()
@@ -1148,11 +1163,11 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
+              className="h-auto w-full justify-start gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left whitespace-normal text-tertiary hover:text-primary disabled:cursor-wait disabled:bg-transparent disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
               {loading ? "Loading…" : "Show more"}
-            </button>
+            </Button>
           )}
         </>
       )}
@@ -1257,20 +1272,23 @@ function LoadMoreThreadsOnScroll({
   }, [loading, root])
 
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
       ref={sentinel}
       type="button"
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-space-2 py-space-2 text-xs text-tertiary"
+      className="h-auto w-full justify-center gap-space-2 py-space-2 whitespace-normal text-tertiary disabled:bg-transparent"
     >
       {loading ? (
         <Spinner size="xxs" />
       ) : (
         <span className="sr-only">{label}</span>
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -1291,9 +1309,7 @@ export function AgentsShell({
   const pinnedThreads = useSidebarPinnedThreads({
     enabled: Boolean(activeThreadId),
   })
-  const activeThread = useSidebarActiveThread({
-    activeThreadId,
-    loadedThreads: [],
+  const activeThread = useActiveAgentThread(activeThreadId, {
     enabled: Boolean(activeThreadId),
   })
   const sidebarCommands = useMemo(() => {

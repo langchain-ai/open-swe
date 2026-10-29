@@ -666,9 +666,12 @@ def repo_private() -> bool:
 
 # --- LangSmith snapshots ---------------------------------------------------
 # Captures the workspace tools asked for: {"snapshot_id", "name", "sandbox_id"}.
-# The E2E sandbox is the local provider, so there is no real snapshot service —
+# The E2E's sandboxes are stand-ins (sandbox_service.py), so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []
+# Each time the backend planned a run: the thread, and the call it planned it for
+# (``start`` when it started the run).
+PLANS: list[dict[str, str]] = []
 DELETED_SNAPSHOTS: list[str] = []
 _snapshot_seq = [0]
 
@@ -1018,6 +1021,7 @@ def reset() -> None:
     REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    PLANS.clear()
     COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0

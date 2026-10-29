@@ -5,17 +5,19 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
+from langgraph.types import Command
 from runtime_api.operations import RunOperation, ToolEvidence
 
 from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.mcp.instance import instance_mcp_source
+from openswe.mcp.runtime import _tool_name
 from openswe.mcp.workspace import workspace_mcp_source
+from openswe.middleware.model_call_shape import CallShape
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -90,7 +92,18 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     remote = StructuredTool.from_function(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
-    with patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
+    status_page_tools = [
+        StructuredTool.from_function(
+            coroutine=update_incident,
+            name=_tool_name(connection, "status_page_update"),
+            description="Update the public status page",
+            metadata={"mcp_tool_name": "status_page_update"},
+        )
+        for connection in ("incident", "incident_io", "oncall", "incident-" * 10)
+    ]
+    with patch(
+        "openswe.server.load_mcp_tools", AsyncMock(return_value=[remote, *status_page_tools])
+    ) as mcps:
         result = cast(dict[str, Any], await _plan_agent(_incident_config()))
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.
@@ -125,7 +138,6 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert {
         "PrepareAgentRunMiddleware",
         "IncidentMiddleware",
-        "WorkspaceSkillsMiddleware",
     } <= {type(item).__name__ for item in middleware}
     surface = cast(ToolSurface, result["surface"])
     assert "PullRequestCreationGuardMiddleware" in {
@@ -133,6 +145,20 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     }
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     assert remote.name in dynamic.tools[0].description
+    assert {tool.name for tool in await dynamic.catalog_tools()} == {remote.name}
+    for tool in status_page_tools:
+        assert tool.name not in dynamic.tools[0].description
+        load_result = await dynamic.tools[0].ainvoke(
+            {
+                "name": "load_integration_tools",
+                "args": {"tool_names": [tool.name]},
+                "id": "status-page-load",
+                "type": "tool_call",
+            }
+        )
+        assert isinstance(load_result, Command)
+        assert isinstance(load_result.update, dict)
+        assert load_result.update["messages"][0].status == "error"
     subagent = result["subagents"][0]
     assert subagent.tools is not None
     assert ("open_pull_request" in subagent.tools) is explicit
@@ -140,12 +166,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert not (runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}) & set(subagent.tools)
     guard = next(item for item in middleware if isinstance(item, runtime.IncidentMiddleware))
     session.check.side_effect = PermissionError("revoked")
-    handler = AsyncMock()
     with pytest.raises(PermissionError, match="revoked"):
-        await guard.awrap_model_call(
-            ModelRequest(model=MagicMock(), messages=[], tools=[], state={"messages": []}), handler
-        )
-    handler.assert_not_awaited()
+        await guard.ashape_model_call(CallShape(), {"messages": []}, MagicMock())
 
 
 async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread_scope):
@@ -159,8 +181,8 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     registry_db, monkeypatch, saved_thread_scope, requested_action
 ):
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.runs import in_graph_context
 
     await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1"))
     await service.INCIDENTS.put(
@@ -187,7 +209,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
         "openswe.server.PrepareAgentRunMiddleware._prepare",
         AsyncMock(return_value={"work_dir": "/workspace", "rendered_system_prompt": "System"}),
     ):
-        await in_graph_context(config, lambda runtime: session.model_call(state, runtime))
+        await in_graph_context(config, lambda runtime: session.loop.model_call(state, runtime))
     if requested_action:
         # The PR the run opened, as its tool result is recorded and cited.
         cited = await session.record_evidence(

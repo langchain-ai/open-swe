@@ -10,6 +10,8 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
+import { ComposerReplyCards } from "./ComposerReplyCards"
+import type { PendingReply } from "./ComposerReplyCards"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -52,14 +54,17 @@ import type {
   WorkspaceOption,
 } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { slackChannelMatches } from "@/components/SlackChannelCombobox"
 import type { SlackChannelOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import {
+  rankSlackChannels,
+  rememberSlackChannels,
   slackChannelReference,
+  useRecentSlackChannels,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
@@ -101,12 +106,20 @@ export interface SubmitOptions {
   alternate: boolean
 }
 
+/** What the person sends: their text, and what rides along with it. */
+export interface ComposerSubmission {
+  text: string
+  images: Array<ImageChunk>
+  replies: Array<PassageReply>
+}
+
 /** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
 export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
   key: number
   text: string
   images: Array<ImageChunk>
+  replies?: Array<PassageReply>
   /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
   replacesSuggestion?: boolean
 }
@@ -124,8 +137,7 @@ export interface ChatComposerProps {
   /** False when this viewer may not stop the live run. */
   stoppable?: boolean
   onSubmit?: (
-    value: string,
-    images: Array<ImageChunk>,
+    submission: ComposerSubmission,
     options?: SubmitOptions
   ) => void | Promise<void>
   /** What a message sent while a run is live does; drives copy only. */
@@ -133,6 +145,8 @@ export interface ChatComposerProps {
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
+  /** A reply to a passage the user selected; it rides ahead of their next message. */
+  addedReply?: { key: number; reply: PassageReply } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -196,14 +210,13 @@ export function buildCommandItems(
   skills: Array<Skill>,
   includeModelCommand = true,
   includeOffloadCommand = false,
-  slackChannels: Array<SlackChannelOption> = []
+  slackChannels: Array<SlackChannelOption> = [],
+  recentSlackChannels: ReadonlyArray<string> = []
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
   if (trigger.kind === "slack-channel") {
-    return slackChannels
-      .filter((channel) => slackChannelMatches(channel, query))
-      .sort((left, right) => Number(right.is_member) - Number(left.is_member))
+    return rankSlackChannels(slackChannels, query, recentSlackChannels)
       .slice(0, MAX_MENTION_SUGGESTIONS)
       .map((channel) => ({
         id: `channel:${channel.id}`,
@@ -211,7 +224,12 @@ export function buildCommandItems(
         channelId: channel.id,
         name: channel.name,
         label: `#${channel.name}`,
-        description: channel.is_member ? "" : "bot not in channel",
+        description: [
+          recentSlackChannels.includes(channel.id) ? "recently used" : null,
+          channel.is_member ? null : "bot not in channel",
+        ]
+          .filter(Boolean)
+          .join(" · "),
       }))
   }
 
@@ -273,6 +291,7 @@ export const ChatComposer = memo(function ChatComposer({
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
+  addedReply = null,
   models = [],
   selection = null,
   onSelectionChange,
@@ -305,6 +324,16 @@ export const ChatComposer = memo(function ChatComposer({
   const [value, setValue] = useState("")
   const [cursor, setCursor] = useState(0)
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
+  const [pendingReplies, setPendingReplies] = useState<Array<PendingReply>>([])
+  const [appliedReply, setAppliedReply] = useState<typeof addedReply>(null)
+  if (addedReply !== appliedReply) {
+    setAppliedReply(addedReply)
+    if (addedReply)
+      setPendingReplies((prev) => [
+        ...prev,
+        { id: `added:${addedReply.key}`, reply: addedReply.reply },
+      ])
+  }
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -362,6 +391,10 @@ export const ChatComposer = memo(function ChatComposer({
     if (autoFocus) editorRef.current?.focus()
   }, [autoFocus])
 
+  useEffect(() => {
+    if (addedReply) editorRef.current?.focusAtEnd()
+  }, [addedReply])
+
   // Synchronous double-submit guard: blocks a same-tick second send (Enter +
   // click, or two rapid Enters) before React re-renders. Scoped to the send
   // request only — never the run lifecycle.
@@ -375,6 +408,7 @@ export const ChatComposer = memo(function ChatComposer({
   const slackChannels = useSlackChannelDirectory(
     trigger?.kind === "slack-channel"
   ).data?.channels
+  const recentSlackChannels = useRecentSlackChannels()
   const skillNames = useMemo(
     () => new Set(skills.map((skill) => skill.name)),
     [skills]
@@ -388,10 +422,19 @@ export const ChatComposer = memo(function ChatComposer({
             skills,
             models.length > 0,
             canOffload,
-            slackChannels
+            slackChannels,
+            recentSlackChannels
           )
         : [],
-    [mentionPaths, models.length, skills, trigger, canOffload, slackChannels]
+    [
+      mentionPaths,
+      models.length,
+      skills,
+      trigger,
+      canOffload,
+      slackChannels,
+      recentSlackChannels,
+    ]
   )
   const menuOpen =
     trigger !== null &&
@@ -407,7 +450,10 @@ export const ChatComposer = memo(function ChatComposer({
     return models.some((m) => m.id === selection.modelId && m.supports_images)
   }, [models, pendingImages.length, selection])
 
-  const composerEmpty = value.trim().length === 0 && pendingImages.length === 0
+  const composerEmpty =
+    value.trim().length === 0 &&
+    pendingImages.length === 0 &&
+    pendingReplies.length === 0
   const canSubmit =
     !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
 
@@ -437,6 +483,16 @@ export const ChatComposer = memo(function ChatComposer({
       // oxlint-disable-next-line react/set-state-in-effect
       setPendingImages((prev) => [...restoreDraft.images, ...prev])
     }
+    const restoredReplies = restoreDraft.replies ?? []
+    if (restoredReplies.length > 0) {
+      setPendingReplies((prev) => [
+        ...restoredReplies.map((reply, index) => ({
+          id: `restored:${restoreDraft.key}:${index}`,
+          reply,
+        })),
+        ...prev,
+      ])
+    }
     editorRef.current?.focusAtEnd()
   }, [applyPrompt, restoreDraft, value])
 
@@ -447,25 +503,31 @@ export const ChatComposer = memo(function ChatComposer({
       // has not yet round-tripped through state would otherwise be dropped.
       const snapshot = editorRef.current?.readSnapshot()
       const trimmed = (snapshot?.value ?? value).trim()
-      if (trimmed.length === 0 && pendingImages.length === 0) return
+      const attached = pendingImages.length + pendingReplies.length
+      if (trimmed.length === 0 && attached === 0) return
 
-      if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+      if (trimmed === "/offload" && (!canOffload || attached)) {
         setComposerError(
-          pendingImages.length
+          attached
             ? "Offloading does not accept attachments."
             : "Offloading requires an idle, existing conversation."
         )
         return
       }
 
-      const images = pendingImages
+      const submission = {
+        text: trimmed,
+        images: pendingImages,
+        replies: pendingReplies.map((pending) => pending.reply),
+      }
       submittingRef.current = true
       setIsSubmitting(true)
       applyPrompt("", 0)
       setPendingImages([])
+      setPendingReplies([])
       setComposerError(null)
       try {
-        await onSubmit?.(trimmed, images, options)
+        await onSubmit?.(submission, options)
       } catch {
         // Caller surfaces send errors (e.g. via react-query mutation state).
       } finally {
@@ -473,7 +535,15 @@ export const ChatComposer = memo(function ChatComposer({
         setIsSubmitting(false)
       }
     },
-    [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload]
+    [
+      applyPrompt,
+      disabled,
+      onSubmit,
+      pendingImages,
+      pendingReplies,
+      value,
+      canOffload,
+    ]
   )
 
   const selectCommandItem = useCallback(
@@ -496,6 +566,8 @@ export const ChatComposer = memo(function ChatComposer({
         item.type === "skill" ||
         item.type === "slack-channel"
       ) {
+        if (item.type === "slack-channel")
+          rememberSlackChannels([item.channelId])
         const next = replaceTextRange(
           value,
           trigger.rangeStart,
@@ -811,6 +883,15 @@ export const ChatComposer = memo(function ChatComposer({
           onChange={handleFileChange}
           ref={fileInputRef}
           type="file"
+        />
+
+        <ComposerReplyCards
+          replies={pendingReplies}
+          onRemove={(id) =>
+            setPendingReplies((prev) =>
+              prev.filter((pending) => pending.id !== id)
+            )
+          }
         />
 
         {pendingImages.length > 0 && (

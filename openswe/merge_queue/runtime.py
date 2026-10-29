@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ConfigDict
@@ -16,6 +17,9 @@ from openswe.merge_queue.dispatch import DispatchGateway
 from openswe.merge_queue.scheduler import BatchScheduler
 from openswe.merge_queue.store import LeaseLost, MergeQueue
 from openswe.merge_queue.validation import CandidateValidation
+
+if TYPE_CHECKING:
+    from openswe.merge_queue.controller import QueueController
 
 JOB_KIND = "merge_queue_reconcile"
 logger = logging.getLogger(__name__)
@@ -47,7 +51,7 @@ class QueueRuntime:
         if policy is None:
             return
         queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
-        if queue is None:
+        if queue is None or queue.mode != "custom":
             return
         lease = await queue.claim(uuid7(), timedelta(seconds=60))
         if lease is None:
@@ -93,9 +97,29 @@ class QueueRuntime:
 
 
 # Only trusted server composition supplies policy and authentication, never job payloads.
-RUNTIME: QueueRuntime | None = None
+RUNTIME: QueueRuntime | QueueController | None = None
 
 
 async def reconcile_queue(job: Job) -> None:
+    payload = QueueJob.model_validate(job.payload)
+    if RUNTIME is None:
+        from openswe.merge_queue.controller import start_queue
+
+        try:
+            await start_queue()
+        except ValueError:
+            logger.exception("Queue configuration is unavailable")
     if RUNTIME is not None:
-        await RUNTIME.reconcile(QueueJob.model_validate(job.payload))
+        await RUNTIME.reconcile(payload)
+        return
+    queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
+    if queue is None or queue.mode != "native":
+        return
+    lease = await queue.claim(uuid7(), timedelta(seconds=60))
+    if lease is None:
+        return
+    try:
+        async with asyncio.timeout(10):
+            await queue.prune_history(datetime.now(UTC) - timedelta(days=90), lease)
+    finally:
+        await queue.release(lease)

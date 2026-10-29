@@ -160,10 +160,14 @@ class ChangedFile(BaseModel):
         return sum(file.changed_lines for file in files)
 
     @classmethod
-    async def of_pull(cls, pull: PullRequestClient) -> list[ChangedFile] | None:
-        """The PR's first ``MAX_FILES`` changed files, or ``None`` when GitHub could not say."""
+    async def of_pull(
+        cls, pull: PullRequestClient, *, max_pages: int = 1, count: int | None = None
+    ) -> list[ChangedFile] | None:
+        """The PR's changed files up to ``max_pages``, or ``None`` when unavailable."""
         try:
-            return _CHANGED_FILES.validate_python(await pull.files())
+            return _CHANGED_FILES.validate_python(
+                await pull.files(max_pages=max_pages, count=count)
+            )
         except httpx2.HTTPError, ValueError, ValidationError:
             logger.warning(
                 "Could not read the pull request's changed files",

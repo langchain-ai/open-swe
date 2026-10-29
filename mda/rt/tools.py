@@ -9,18 +9,20 @@ own (``rt.file_tools``).
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 from uuid import uuid4
 
 from langchain.tools import ToolRuntime
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langchain_core.tools import StructuredTool
+from langchain_quickjs import UnresolvedToolError
 from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
-from runtime_api.catalog import OperationSpec
-from runtime_api.endpoint import call
+from runtime_api.catalog import ToolSpec
+from runtime_api.endpoint import LONG_CALL_SECONDS, call
+from runtime_api.loop import ToolCallReport
 from runtime_api.operations import (
     OPERATION,
     RECORD_EVIDENCE,
@@ -30,14 +32,16 @@ from runtime_api.operations import (
 )
 
 from rt.backend import (
-    LONG_CALL_SECONDS,
     TOOL_CALL_SLACK_SECONDS,
     BackendCallError,
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
+    git_trace,
+    held_state,
+    issuing_message_id,
+    namespace,
     reported_call,
-    run_body,
 )
 from rt.tracing import TurnTrace
 
@@ -70,26 +74,28 @@ def run_id() -> str | None:
     return str(raw) if raw else None
 
 
-def tool_body(
+def tool_report(
     state: Mapping[str, object],
     *,
     name: str,
     arguments: Mapping[str, JsonValue],
     tool_call_id: str,
-) -> dict[str, JsonValue]:
+) -> ToolCallReport:
     """A tool call as the backend's transcript takes it, with the turn's git evidence."""
-    body = run_body(
-        run_id(), state, name=name, arguments=dict(arguments), tool_call_id=tool_call_id
+    return ToolCallReport(
+        run_id=run_id(),
+        namespace=namespace(),
+        git={**git_trace(state), **TurnTrace.current_evidence()},
+        name=name,
+        arguments=dict(arguments),
+        tool_call_id=tool_call_id,
+        message_id=issuing_message_id(state, tool_call_id),
     )
-    held = body.get("state")
-    body["state"] = {**(held if isinstance(held, dict) else {}), **TurnTrace.current_evidence()}
-    return body
 
 
-def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
+def _reading(spec: ToolSpec, state: Mapping[str, object]) -> RunOperation:
     """A call of ``spec``'s operation, carrying the run state it says it reads."""
-    held = run_body(None, state).get("state")
-    run_state = held if isinstance(held, dict) else {}
+    run_state = held_state(state)
     keys = list(run_state) if spec.reads_all else [k for k in spec.reads if k != "messages"]
     messages = state.get("messages")
     conversation = (
@@ -105,13 +111,13 @@ def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
     )
 
 
-def _seconds(arguments: Mapping[str, JsonValue]) -> float:
+def _seconds(spec: ToolSpec, arguments: Mapping[str, JsonValue]) -> float:
     # A call with its own timeout, such as a long command, must be able to run it out
     # and answer that it did, rather than outlive this one.
     requested = arguments.get("timeout")
     if isinstance(requested, int | float) and not isinstance(requested, bool):
         return max(LONG_CALL_SECONDS, requested + TOOL_CALL_SLACK_SECONDS)
-    return LONG_CALL_SECONDS
+    return spec.seconds if spec.seconds is not None else LONG_CALL_SECONDS
 
 
 def _content(content: str | list[JsonValue]) -> str | list[str | dict]:
@@ -158,16 +164,21 @@ async def cited(
 
 async def _operate(
     backend: OpenSweBackend,
-    spec: OperationSpec,
+    spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     tool_call_id: str,
 ) -> ToolMessage | Command:
     request = _reading(spec, runtime.state).model_copy(
-        update={"run_id": run_id(), "arguments": dict(arguments), "request_id": tool_call_id}
+        update={
+            "run_id": run_id(),
+            "arguments": dict(arguments),
+            "request_id": tool_call_id,
+            "grant": backend.grant(spec),
+        }
     )
     try:
-        answer = await call(backend, OPERATION, request, timeout=_seconds(arguments))
+        answer = await call(backend, OPERATION, request, timeout=_seconds(spec, arguments))
     except BackendTimeoutError:
         logger.warning("The backend did not answer an operation", exc_info=True)
         return ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
@@ -183,7 +194,7 @@ async def _operate(
 
 async def run_operation(
     backend: OpenSweBackend,
-    spec: OperationSpec,
+    spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     *,
@@ -199,20 +210,22 @@ async def run_operation(
     if outer is None or outer == runtime.tool_call_id:
         return await _operate(backend, spec, arguments, runtime, runtime.tool_call_id or "")
     tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
-    body = tool_body(runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id)
-    backend.reports.started(body)
+    report = tool_report(
+        runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
+    )
+    backend.outbox.started(report)
     try:
         result = await _operate(backend, spec, arguments, runtime, tool_call_id)
     except Exception as exc:
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.reports.finished(body, failure)
+        backend.outbox.finished(report, failure)
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
     if cites_evidence:
         message = await cited(backend, spec.name, arguments, message)
-    backend.reports.finished(body, message)
+    backend.outbox.finished(report, message)
     if isinstance(result, ToolMessage):
         return message
     return Command(update={**_update(result), "messages": [message]})
@@ -235,7 +248,7 @@ def _update(result: Command) -> dict[str, object]:
 
 
 def operation_tool(
-    spec: OperationSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
+    spec: ToolSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
 ) -> StructuredTool:
     async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
         return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
@@ -245,4 +258,38 @@ def operation_tool(
         name=spec.name,
         description=spec.description,
         args_schema=spec.parameters,
+    )
+
+
+# Any arguments: what the tool accepts is the backend's to check.
+_ANY_ARGUMENTS: Final[dict[str, JsonValue]] = {"type": "object", "additionalProperties": True}
+
+
+def backend_tool(
+    name: str,
+    backend: OpenSweBackend,
+    resolve: Callable[[str], Awaitable[ToolSpec | None]],
+) -> StructuredTool:
+    """A tool the run's catalog leaves out, called as ``name``.
+
+    The run calls it by the name ``search_tools`` gave, from code mode or directly;
+    ``resolve`` asks the backend which tool that is, with the run's grant of it.
+    Made for no run in particular: the call finds its run.
+    """
+
+    async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+        spec = await resolve(name)
+        if spec is None:
+            # Code mode throws it as a TypeError, as for any name that is not a function.
+            raise UnresolvedToolError(
+                f"{name} is not one of this run's tools; find the tool you want with search_tools"
+            )
+        cites_evidence = backend.run.catalog.incident_evidence
+        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
+
+    return StructuredTool.from_function(
+        coroutine=operate,
+        name=name,
+        description=f"The run's tool it calls as {name}.",
+        args_schema=_ANY_ARGUMENTS,
     )

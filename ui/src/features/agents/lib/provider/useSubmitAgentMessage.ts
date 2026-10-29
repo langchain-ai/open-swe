@@ -84,6 +84,7 @@ export function useSubmitAgentMessage(threadId: string) {
         id,
         content: vars.content.trim(),
         images: vars.images,
+        ...(vars.replies?.length ? { replies: vars.replies } : {}),
         createdAt: Date.now(),
         status: "sending",
         ...(vars.enqueue ? { queued: true } : {}),
@@ -105,7 +106,12 @@ export function useSubmitAgentMessage(threadId: string) {
 
       void source
         .startRun({
-          message: { id, text: vars.content, images: vars.images },
+          message: {
+            id,
+            text: vars.content,
+            images: vars.images,
+            replies: vars.replies,
+          },
           configurable: {
             ...configurable,
             ...(review

@@ -140,9 +140,16 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     // CLI-only: Agent Auth's OAuth callback, which a new Linear app lists, when
     // the CLI cannot derive it (the local stack sets it).
     "MDA_AGENT_AUTH_OAUTH_CALLBACK_URL",
-    // CLI-only: where a new GitHub App is created when deploy cannot ask.
+    // CLI-only: where a new GitHub App is created, or an existing App with its
+    // webhook secret and installation, without a prompt. Agent Auth keeps the
+    // App; the deployment never gets them as env vars (`GH_WEBHOOK_SECRET` is
+    // the runtime's own override and is uploaded).
     "MDA_GITHUB_APP_OWNER",
-    // CLI-only: a Linear app's credentials when deploy cannot ask. Agent Auth
+    "MDA_GITHUB_APP_ID",
+    "MDA_GITHUB_APP_PRIVATE_KEY_FILE",
+    "MDA_GITHUB_APP_INSTALLATION_ID",
+    "MDA_GITHUB_WEBHOOK_SECRET",
+    // CLI-only: a Linear app's credentials instead of the prompts. Agent Auth
     // keeps them; the deployment never gets them as env vars.
     "MDA_LINEAR_CLIENT_ID",
     "MDA_LINEAR_CLIENT_SECRET",
@@ -150,6 +157,10 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     "MDA_LINEAR_WORKSPACE",
     // CLI-only: a brought GitHub App's webhook URL that stays where it is.
     "MDA_GITHUB_WEBHOOK_ELSEWHERE",
+    // CLI-only: the user's own Slack app's credentials instead of the prompts.
+    // Trigger Server keeps them; the deployment never gets them as env vars.
+    "MDA_SLACK_BOT_TOKEN",
+    "MDA_SLACK_SIGNING_SECRET",
 ];
 
 /// Convert env vars into deployment secrets, dropping reserved and empty values.
@@ -349,14 +360,15 @@ pub fn sandbox_registry_name(deployment: &str) -> String {
 /// Hex digest (truncated to [`RECIPE_DIGEST_LENGTH`]) of setup bytes and optional
 /// bake bases. Same inputs always produce the same digest.
 ///
-/// `registry` is only hashed when present so existing digests stay stable for
-/// projects that do not set one.
+/// `registry` and `fs_capacity_bytes` are only hashed when present so existing
+/// digests stay stable for projects that do not set them.
 pub fn recipe_digest(
     setup_bytes: &[u8],
     snapshot_name: Option<&str>,
     snapshot_id: Option<&str>,
     docker_image: Option<&str>,
     registry: Option<&str>,
+    fs_capacity_bytes: Option<u64>,
 ) -> String {
     use sha2::{Digest, Sha256};
 
@@ -371,6 +383,10 @@ pub fn recipe_digest(
     if let Some(registry) = registry {
         hasher.update([0]);
         hasher.update(registry.as_bytes());
+    }
+    if let Some(capacity) = fs_capacity_bytes {
+        hasher.update(b"\0fs_capacity_bytes=");
+        hasher.update(capacity.to_string().as_bytes());
     }
     // digest 0.11's output array no longer implements `LowerHex`; encode bytes.
     let digest = hasher.finalize();
@@ -536,7 +552,7 @@ const MAX_FALLBACK_DEPLOYMENT_COMPONENT_LENGTH: usize = 40;
 /// Hex characters used to distinguish truncated deployment names.
 const SANDBOX_DEPLOYMENT_DIGEST_LENGTH: usize = 8;
 
-fn sandbox_deployment_component(deployment_name: &str, max_length: usize) -> String {
+pub(crate) fn sandbox_deployment_component(deployment_name: &str, max_length: usize) -> String {
     use sha2::{Digest, Sha256};
 
     if deployment_name.chars().count() <= max_length {
@@ -889,41 +905,6 @@ fn local_host_backend_port(host_url: &str) -> Option<u16> {
     port.parse().ok()
 }
 
-/// Derive the LangSmith dashboard base URL from the API host URL.
-pub fn smith_dashboard_base_url(host_url: &str) -> String {
-    let parts = parse_host_url(host_url);
-    const API_HOST: &str = "api.host.langchain.com";
-    if parts.hostname == API_HOST {
-        return "https://smith.langchain.com".to_string();
-    }
-    if let Some(prefix) = parts.hostname.strip_suffix(&format!(".{API_HOST}")) {
-        return format!("https://{prefix}.smith.langchain.com");
-    }
-    self_hosted_dashboard_base_url(parts.trimmed)
-        .unwrap_or_else(|| "https://smith.langchain.com".to_string())
-}
-
-fn self_hosted_dashboard_base_url(host_url: &str) -> Option<String> {
-    let mut url = reqwest::Url::parse(host_url).ok()?;
-    if !matches!(url.scheme(), "http" | "https")
-        || url.host().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return None;
-    }
-    let path = url.path().trim_end_matches('/');
-    let path = path
-        .strip_suffix("/api-host")
-        .or_else(|| path.strip_suffix("/api/v1"))
-        .unwrap_or(path)
-        .to_string();
-    url.set_path(&path);
-    url.set_query(None);
-    url.set_fragment(None);
-    Some(url.as_str().trim_end_matches('/').to_string())
-}
-
 /// Compute the LangSmith plans-and-billing URL for a workspace's organization
 /// (Settings > Billing > Plans and Pricing).
 ///
@@ -935,27 +916,27 @@ fn self_hosted_dashboard_base_url(host_url: &str) -> Option<String> {
 /// `LANGSMITH_WORKSPACE_ID` or `--workspace-id`, and a link is only worth
 /// printing when it is well-formed — a value carrying path or whitespace
 /// characters would render as a misleading URL.
-pub fn plan_upgrade_url(host_url: &str, workspace_id: &str) -> Option<String> {
+pub fn plan_upgrade_url(dashboard_url: &str, workspace_id: &str) -> Option<String> {
     // `Uuid::parse_str` also accepts simple/URN/braced forms; the dashboard
     // path expects the canonical hyphenated id.
     if workspace_id.len() != uuid::fmt::Hyphenated::LENGTH {
         return None;
     }
     uuid::Uuid::parse_str(workspace_id).ok()?;
-    let base = smith_dashboard_base_url(host_url);
-    Some(format!("{base}/o/{workspace_id}/settings/payments"))
+    Some(format!(
+        "{dashboard_url}/o/{workspace_id}/settings/payments"
+    ))
 }
 
 /// Compute the LangSmith dashboard URL for a deployment, if a tenant is known.
 pub fn deployment_status_url(
     deployment: &Value,
     deployment_id: &str,
-    host_url: &str,
+    dashboard_url: &str,
 ) -> Option<String> {
     let tenant_id = deployment_tenant_id(deployment)?;
-    let base = smith_dashboard_base_url(host_url);
     Some(format!(
-        "{base}/o/{tenant_id}/host/deployments/{deployment_id}"
+        "{dashboard_url}/o/{tenant_id}/host/deployments/{deployment_id}"
     ))
 }
 
@@ -1114,10 +1095,7 @@ mod tests {
             name: MDA_LANGSMITH_URL_ENV.to_string(),
             value: "https://stale.example".to_string(),
         }];
-        ensure_langsmith_url_secret(
-            &mut secrets,
-            &smith_dashboard_base_url("https://eu.api.host.langchain.com"),
-        );
+        ensure_langsmith_url_secret(&mut secrets, "https://eu.smith.langchain.com");
         assert_eq!(secrets.len(), 1);
         assert_eq!(secrets[0].name, MDA_LANGSMITH_URL_ENV);
         assert_eq!(secrets[0].value, "https://eu.smith.langchain.com");
@@ -1176,14 +1154,42 @@ mod tests {
 
     #[test]
     fn recipe_digest_is_stable_and_length_bounded() {
-        let a = recipe_digest(b"#!/bin/sh\necho hi\n", Some("base"), None, None, None);
-        let b = recipe_digest(b"#!/bin/sh\necho hi\n", Some("base"), None, None, None);
+        let a = recipe_digest(
+            b"#!/bin/sh\necho hi\n",
+            Some("base"),
+            None,
+            None,
+            None,
+            None,
+        );
+        let b = recipe_digest(
+            b"#!/bin/sh\necho hi\n",
+            Some("base"),
+            None,
+            None,
+            None,
+            None,
+        );
         assert_eq!(a, b);
         assert_eq!(a.len(), RECIPE_DIGEST_LENGTH);
         assert!(a.chars().all(|ch| ch.is_ascii_hexdigit()));
-        let changed = recipe_digest(b"#!/bin/sh\necho bye\n", Some("base"), None, None, None);
+        let changed = recipe_digest(
+            b"#!/bin/sh\necho bye\n",
+            Some("base"),
+            None,
+            None,
+            None,
+            None,
+        );
         assert_ne!(a, changed);
-        let other_base = recipe_digest(b"#!/bin/sh\necho hi\n", None, Some("id-1"), None, None);
+        let other_base = recipe_digest(
+            b"#!/bin/sh\necho hi\n",
+            None,
+            Some("id-1"),
+            None,
+            None,
+            None,
+        );
         assert_ne!(a, other_base);
         let with_registry = recipe_digest(
             b"#!/bin/sh\necho hi\n",
@@ -1191,6 +1197,7 @@ mod tests {
             None,
             Some("ghcr.io/acme/base:1"),
             Some("ghcr"),
+            None,
         );
         assert_ne!(
             with_registry,
@@ -1199,8 +1206,13 @@ mod tests {
                 None,
                 None,
                 Some("ghcr.io/acme/base:1"),
+                None,
                 None
             )
+        );
+        assert_ne!(
+            recipe_digest(b"", None, None, Some("python:3.12"), None, None),
+            recipe_digest(b"", None, None, Some("python:3.12"), None, Some(2 << 30))
         );
     }
 
@@ -1759,49 +1771,17 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_url_maps_regional_and_prod_hosts() {
-        assert_eq!(
-            smith_dashboard_base_url("https://api.host.langchain.com"),
-            "https://smith.langchain.com"
-        );
-        assert_eq!(
-            smith_dashboard_base_url("https://eu.api.host.langchain.com"),
-            "https://eu.smith.langchain.com"
-        );
-    }
-
-    #[test]
-    fn dashboard_url_keeps_self_hosted_origin() {
-        assert_eq!(
-            smith_dashboard_base_url("https://langsmith.acme.internal/api-host/"),
-            "https://langsmith.acme.internal"
-        );
-        assert_eq!(
-            smith_dashboard_base_url("http://10.0.0.5:8080/api-host"),
-            "http://10.0.0.5:8080"
-        );
-    }
-
-    #[test]
-    fn status_url_uses_self_hosted_dashboard_origin() {
+    fn status_url_uses_the_authoritative_byoc_dashboard_origin() {
         let deployment = json!({ "tenant_id": "workspace-1" });
 
         assert_eq!(
             deployment_status_url(
                 &deployment,
                 "deployment-1",
-                "https://eks.smith.langchain.dev/api-host"
+                "https://aws.smith.langchain.com"
             )
             .as_deref(),
-            Some("https://eks.smith.langchain.dev/o/workspace-1/host/deployments/deployment-1")
-        );
-    }
-
-    #[test]
-    fn dashboard_url_strips_self_hosted_sdk_rest_path() {
-        assert_eq!(
-            smith_dashboard_base_url("https://langsmith.example.com/api/v1/"),
-            "https://langsmith.example.com"
+            Some("https://aws.smith.langchain.com/o/workspace-1/host/deployments/deployment-1")
         );
     }
 
@@ -1809,19 +1789,18 @@ mod tests {
     fn status_url_requires_tenant() {
         let with_tenant = json!({ "tenant_id": "t-1" });
         assert_eq!(
-            deployment_status_url(&with_tenant, "dep-1", "https://api.host.langchain.com")
-                .as_deref(),
+            deployment_status_url(&with_tenant, "dep-1", "https://smith.langchain.com").as_deref(),
             Some("https://smith.langchain.com/o/t-1/host/deployments/dep-1")
         );
         assert_eq!(
-            deployment_status_url(&json!({}), "dep-1", "https://api.host.langchain.com"),
+            deployment_status_url(&json!({}), "dep-1", "https://smith.langchain.com"),
             None
         );
         assert_eq!(
             deployment_status_url(
                 &json!({ "tenant_id": "  " }),
                 "dep-1",
-                "https://api.host.langchain.com"
+                "https://smith.langchain.com"
             ),
             None
         );
@@ -1831,7 +1810,7 @@ mod tests {
     fn plan_upgrade_url_points_at_the_workspace_billing_page() {
         assert_eq!(
             plan_upgrade_url(
-                "https://api.host.langchain.com",
+                "https://smith.langchain.com",
                 "7109fb64-c8b8-48d5-a107-4ab03748e980"
             )
             .as_deref(),
@@ -1854,7 +1833,7 @@ mod tests {
             "7109fb64-c8b8-48d5-a107-4ab03748e98g",
         ] {
             assert_eq!(
-                plan_upgrade_url("https://api.host.langchain.com", workspace_id),
+                plan_upgrade_url("https://smith.langchain.com", workspace_id),
                 None,
                 "expected no link for {workspace_id:?}"
             );

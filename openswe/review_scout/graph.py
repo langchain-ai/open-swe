@@ -7,29 +7,34 @@ the lines the carried-over plan does not already cover, and when there are
 none it finishes without a model call.
 """
 
+import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable
+import uuid
+from collections.abc import Mapping
+from functools import partial
 from typing import Any, NotRequired, cast
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
-    ModelRequest,
-    ModelResponse,
     hook_config,
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -38,6 +43,7 @@ from openswe.middleware import (
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
 )
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
@@ -48,7 +54,7 @@ from openswe.runtime import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
-from openswe.sandboxes.repo_prep import prepare_review_repo
+from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
@@ -105,7 +111,7 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
-        allow_replacement=True,
+        abandon_unreachable=True,
     )
 
 
@@ -134,21 +140,57 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         backend = await _ensure_scout_sandbox(self._thread_id, cfg)
         checkout = await PinnedCheckout.locate(backend, cfg.repo.name)
         work_dir = checkout.repo_dir.rpartition("/")[0]
-        ready = await prepare_review_repo(
-            backend,
-            work_dir=work_dir,
-            repo_owner=cfg.repo.owner,
-            repo_name=cfg.repo.name,
-            head_sha=cfg.head_sha,
-            pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
-        )
-        if not ready:
-            raise RuntimeError("review scout could not check out the pull request")
+        nothing_to_plan = {
+            "work_dir": work_dir,
+            "rendered_system_prompt": "",
+            "scout_nothing_to_plan": True,
+            "has_human_input": False,
+        }
+        for attempt in range(2):
+            failure: ReviewRepoPreparationError | None = None
+            try:
+                await prepare_review_repo_or_raise(
+                    backend,
+                    work_dir=work_dir,
+                    repo_owner=cfg.repo.owner,
+                    repo_name=cfg.repo.name,
+                    head_sha=cfg.head_sha,
+                    pr_number=cfg.pr_number,
+                    base_sha=cfg.base_sha,
+                )
+            except ReviewRepoPreparationError as exc:
+                failure = exc
+                logger.warning(
+                    "Review scout repository preparation failed",
+                    extra={"pr_number": cfg.pr_number, "prep_attempt": attempt + 1},
+                    exc_info=True,
+                )
+            try:
+                async with PullRequestClient.as_app(
+                    cfg.repo.owner, cfg.repo.name, cfg.pr_number
+                ) as pull:
+                    if await pull.head_sha() != cfg.head_sha:
+                        logger.info(
+                            "Review scout head is stale; nothing to plan",
+                            extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                        )
+                        return nothing_to_plan
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Review scout could not check the current pull request head",
+                    extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                    exc_info=True,
+                )
+            if failure is None:
+                break
+            if attempt == 1:
+                raise RuntimeError(
+                    f"review scout could not check out the pull request: {failure}"
+                ) from failure
+            await asyncio.sleep(3)
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
             head_sha=cfg.head_sha,
         )
         try:
@@ -161,16 +203,14 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             )
             workspace = None
         if workspace is None or workspace.complete:
-            return {
-                "work_dir": work_dir,
-                "rendered_system_prompt": "",
-                "scout_nothing_to_plan": True,
-                "has_human_input": False,
-            }
+            return nothing_to_plan
         system_prompt = prompt(
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
+        )
+        run_context = prompt(
+            "review-scout/run-context",
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=checkout.repo_dir,
             carried=bool(workspace.plan.chunks),
@@ -179,10 +219,11 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         if history is not None:
             human_input = prompt("review-scout/human-input", messages=history.messages_block())
-            system_prompt = f"{system_prompt}\n\n{human_input}"
+            run_context = f"{run_context}\n\n{human_input}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
             "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,
@@ -196,17 +237,12 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
     ) -> dict[str, Any] | None:
         return {"jump_to": "end"} if state.get("scout_nothing_to_plan") else None
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        call = await super().ashape_model_call(call, state, runtime)
         # Without messages from the people who asked for the PR, the model would summarize its description instead.
-        if not request.state.get("has_human_input"):
-            request = request.override(
-                tools=[t for t in request.tools if getattr(t, "name", None) != _HUMAN_INPUT_TOOL]
-            )
-        return await super().awrap_model_call(request, handler)
+        return call if state.get("has_human_input") else call.hiding([_HUMAN_INPUT_TOOL])
 
 
 class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
@@ -219,38 +255,43 @@ class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         self._config = config
 
     async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        cfg = RunConfig.from_config(self._config)
-        if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
-            return
-        extra = {
-            "pr_repo_full_name": cfg.repo.full_name,
-            "pr_number": cfg.pr_number,
-            "scout_head_sha": cfg.head_sha,
-        }
-        try:
-            workspace = await _workspace(get_cached_sandbox_backend(self._thread_id), cfg)
-            settled = await workspace.settle()
-        except PlanMovedError:
-            logger.info(
-                "Review scout head is stale; leaving the plan to the newer head", extra=extra
-            )
-            return
-        except CheckoutError, PlannerUnavailableError:
-            logger.exception("Review scout could not finish its plan", extra=extra)
-            return
-        if summary := state.get("human_input_summary", ""):
-            await Walkthrough.set_human_input(workspace.pull_request.id, summary)
-        await Topic.PULL_REQUESTS.invalidate(
-            key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
-        )
-        logger.info(
-            "Review scout finished its plan",
-            extra={
-                **extra,
-                "scout_chunks": len(workspace.plan.chunks),
-                "scout_settled_lines": settled,
-            },
-        )
+        await finish_scout_plan(self._thread_id, self._config, state.get("human_input_summary", ""))
+
+
+async def finish_scout_plan(
+    thread_id: str, config: RunnableConfig, human_input_summary: str
+) -> None:
+    """Send whatever the scout left unplanned to Other, and keep what people asked for."""
+    cfg = RunConfig.from_config(config)
+    if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
+        return
+    extra = {
+        "pr_repo_full_name": cfg.repo.full_name,
+        "pr_number": cfg.pr_number,
+        "scout_head_sha": cfg.head_sha,
+    }
+    try:
+        workspace = await _workspace(get_cached_sandbox_backend(thread_id), cfg)
+        settled = await workspace.settle()
+    except PlanMovedError:
+        logger.info("Review scout head is stale; leaving the plan to the newer head", extra=extra)
+        return
+    except CheckoutError, PlannerUnavailableError:
+        logger.exception("Review scout could not finish its plan", extra=extra)
+        return
+    if human_input_summary:
+        await Walkthrough.set_human_input(workspace.pull_request.id, human_input_summary)
+    await Topic.PULL_REQUESTS.invalidate(
+        key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+    )
+    logger.info(
+        "Review scout finished its plan",
+        extra={
+            **extra,
+            "scout_chunks": len(workspace.plan.chunks),
+            "scout_settled_lines": settled,
+        },
+    )
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -282,6 +323,26 @@ async def scout_models(cfg: RunConfig) -> SurfaceModels:
     )
 
 
+def scout_tools() -> list[BaseTool]:
+    """The scout's tools, wherever the graph that calls them runs."""
+    return apply_tool_descriptions(
+        [
+            walkthrough_plan_chunk,
+            walkthrough_split_hunks,
+            walkthrough_move_to_other,
+            walkthrough_describe_other,
+            record_human_input,
+        ]
+    )
+
+
+def scout_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The scout thread's box, connected again whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_ensure_scout_sandbox, thread_id, cfg)
+    )
+
+
 async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
     """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     config = config.copy()
@@ -293,11 +354,6 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
         raise ValueError("A scout run needs a thread")
 
     models = await scout_models(cfg)
-
-    async def reconnect_backend(
-        _thread_id: str = thread_id, _cfg: RunConfig = cfg
-    ) -> SandboxBackendProtocol:
-        return await _ensure_scout_sandbox(_thread_id, _cfg)
 
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
@@ -312,17 +368,17 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )
-    surface.base_tools = apply_tool_descriptions(
-        [
-            walkthrough_plan_chunk,
-            walkthrough_split_hunks,
-            walkthrough_move_to_other,
-            walkthrough_describe_other,
-            record_human_input,
-        ]
-    )
+    surface.base_tools = scout_tools()
     surface.middleware = middleware
-    surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    surface.loop = LoopRules(
+        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
+        # Without messages from the people who asked for the PR, the model would
+        # summarize its description instead.
+        hidden_unless={"has_human_input": [_HUMAN_INPUT_TOOL]},
+        stop_when=["scout_nothing_to_plan"],
+        at_end=["finish_scout_plan"],
+    )
+    surface.files = scout_box(thread_id, cfg)
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

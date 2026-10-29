@@ -1,7 +1,6 @@
 """Standard human review: ask a repository's review channel to review a pull request.
 
-A request is refused while the pull request is closed, a draft, conflicted, or
-failing a required check. People sign up from the card; after
+A request is refused while the pull request is closed or a draft. People sign up from the card; after
 the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
 ``openswe.human_review.picking``), waking an agent to pick when nobody qualifies. The
 pull request, when auto-merge is enabled, merges once every reviewer approves on
@@ -42,6 +41,7 @@ from openswe.github.http import (
     RepoClient,
     or_none,
 )
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -74,11 +74,12 @@ from openswe.slack.client import (
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
+from openswe.threads import index
+from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
-from openswe.utils.thread_ops import langgraph_client
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -146,8 +147,11 @@ class RequestResult(BaseModel):
     error: str = ""
     request_id: str = ""
     channel: str = ""
+    channel_name: str = ""
     permalink: str = ""
     reused: bool = False
+    channel_mismatch: bool = False
+    requested_channel: str = ""
     summary_updated: bool = False
     claimed: bool = False
     auto_merge: bool = True
@@ -196,12 +200,14 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("it is closed")
     if snapshot.draft:
         blockers.append("it is a draft")
-    if snapshot.mergeable is False or snapshot.mergeable_state == "dirty":
-        blockers.append("it has merge conflicts")
-    if snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
-        names = ", ".join(snapshot.failing_checks) or "a required check"
-        blockers.append(f"required checks are failing: {names}")
     return blockers
+
+
+async def _review_author_allowed(author: str) -> bool:
+    return (
+        author.lower() in OPEN_SWE_GITHUB_LOGINS
+        or await User.for_login("github", author) is not None
+    )
 
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
@@ -210,7 +216,7 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     if readiness is None:
         return None
     blockers = request_blockers(readiness.snapshot)
-    if await User.for_login("github", readiness.snapshot.author) is None:
+    if not await _review_author_allowed(readiness.snapshot.author):
         blockers.append("its author is not an Open SWE user")
     return blockers
 
@@ -297,17 +303,14 @@ async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) ->
     return True
 
 
-async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) -> RequestResult:
+async def _existing(
+    active: HumanReviewRequest, auto_merge: bool | None = None, requested_channel: str = ""
+) -> RequestResult:
     if active.kind == "expedited":
         permalink = await _permalink(active)
         return RequestResult(
             success=False,
-            error=(
-                "This pull request has an outstanding expedited review request. "
-                "A standard review cannot run concurrently. Cancel the expedited request "
-                "before asking for a standard review."
-                + (f" Open in Slack: {permalink}" if permalink else "")
-            ),
+            error=prompt("tools/human-review-existing-expedited", permalink=permalink),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
@@ -325,6 +328,8 @@ async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) 
         channel=active.slack_channel_id,
         permalink=await _permalink(active),
         reused=True,
+        channel_mismatch=bool(requested_channel and requested_channel != active.slack_channel_id),
+        requested_channel=requested_channel,
     )
 
 
@@ -408,6 +413,12 @@ async def _request_review(
         result = await _existing(active, auto_merge)
         if not result.success:
             return result
+        if active.kind == "standard" and channel.strip():
+            target = await _target_channel(pr_ref, pull, channel)
+            if isinstance(target, RequestResult):
+                return target
+            if target.id != active.slack_channel_id:
+                return await _existing(active, auto_merge, target.id)
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return result
@@ -459,7 +470,7 @@ async def _request_review(
         winner = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if winner is None:
             raise
-        return await _existing(winner, auto_merge)
+        return await _existing(winner, auto_merge, target.id if channel.strip() else "")
     # Without its deadlines a request could wait forever on a reviewer who never approves.
     scheduled = await _schedule(
         request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
@@ -489,6 +500,7 @@ async def _request_review(
         auto_merge=request.auto_merge,
         request_id=str(request.id),
         channel=target.id,
+        channel_name=target.name,
         permalink=await _permalink(request),
     )
 
@@ -1001,14 +1013,13 @@ async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
     if request.thread_id:
         thread_ids.add(request.thread_id)
     try:
-        client = langgraph_client()
         for thread_id in sorted(thread_ids):
-            thread = await client.threads.get(thread_id)
-            status = thread.get("status")
-            if status == "busy":
-                return "auto-merge paused — a PR thread has an active run"
-            if status not in {"idle", "interrupted", "error"}:
+            thread = await index.get(thread_id)
+            if thread is None or thread.status not in {"idle", "interrupted", "error", "busy"}:
                 return "auto-merge paused — could not verify PR thread activity"
+            if thread.status == "busy":
+                return "auto-merge paused — a PR thread has an active run"
+            client = RUNTIMES.runs_on(thread.runtime).client
             for run_status in ("pending", "running"):
                 if await client.runs.list(thread_id, status=run_status, limit=1):
                     return "auto-merge paused — a PR thread has an active run"
@@ -1027,7 +1038,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     if readiness is None:
         return False
     snapshot = readiness.snapshot
-    if await User.for_login("github", snapshot.author) is None:
+    if not await _review_author_allowed(snapshot.author):
         await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
         return True
     if snapshot.merged:
@@ -1181,7 +1192,7 @@ async def _auto_assign(
     replacing = trigger is not None and trigger.kind in ("declined", "expired")
     if not replacing and (request.reviewers or request.picks):
         return AutoAssignResult("claimed")
-    if await User.for_login("github", request.pull_request.author) is None:
+    if not await _review_author_allowed(request.pull_request.author):
         await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
         return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)

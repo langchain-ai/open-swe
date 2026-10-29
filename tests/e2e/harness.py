@@ -107,9 +107,14 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 
 
 # --- control + Slack compose (the test driver) -----------------------------
+# Where the inbox spec holds its run: the fake model waits on it, the spec releases it.
+INBOX_GATE = {"waiting": False, "released": False}
+
+
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    INBOX_GATE.update(waiting=False, released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -207,6 +212,12 @@ async def control_state() -> JSONResponse:
     return JSONResponse(
         {"channel": CURRENT_THREAD["channel"], "thread_ts": CURRENT_THREAD["thread_ts"]}
     )
+
+
+@app.get("/control/plans")
+async def control_plans(thread_id: str) -> JSONResponse:
+    """Each time the backend planned the thread's runs, by the call that needed the plan."""
+    return JSONResponse([plan["call"] for plan in fakes.PLANS if plan["thread_id"] == thread_id])
 
 
 @app.get("/control/snapshots")
@@ -350,27 +361,22 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
     """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
     from openswe.github.pull_requests import PullRequest
-    from openswe.walkthrough.diff import parse
-    from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+    from openswe.sandbox_scripts.walkthrough import parse_index
+    from openswe.walkthrough.diff import DiffIndex
+    from openswe.walkthrough.plan import Plan, PlanChunk
     from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    changes = parse(
-        "\n".join(
-            f"diff --git a/{file['filename']} b/{file['filename']}\n"
-            f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
-            for file in pull["files"]
-        )
+    diff = "\n".join(
+        f"diff --git a/{file['filename']} b/{file['filename']}\n"
+        f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+        for file in pull["files"]
     )
+    index = DiffIndex.model_validate({"files": parse_index(diff.splitlines())})
     plan = Plan(
         head_sha=pull["head_sha"],
-        chunks=[
-            PlanChunk(
-                title=str(body.get("title") or "Seeded chunk"),
-                lines=[LineRef.of(line) for change in changes for line in change.lines],
-            )
-        ],
+        chunks=[PlanChunk(title=str(body.get("title") or "Seeded chunk"), lines=index.lines)],
     )
     pull_request = await PullRequest(
         owner=pull["owner"], repo=pull["repo"], number=pull["number"]
@@ -380,7 +386,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
         pull_request.id,
         plan,
         merge_base_sha=fakes.base_sha(pull),
-        changes=changes,
+        index=index,
         replacing=None,
     )
     await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))
@@ -417,6 +423,30 @@ async def control_thread_idle(thread_id: str) -> JSONResponse:
             "idle": all(run["status"] not in {"pending", "running"} for run in runs),
         }
     )
+
+
+@app.get("/control/inbox-gate")
+async def control_inbox_gate(waiting: bool = False) -> JSONResponse:
+    """Whether the held run may go on; the fake model asking with ``waiting`` marks it held."""
+    if waiting:
+        INBOX_GATE["waiting"] = True
+    return JSONResponse(INBOX_GATE)
+
+
+@app.post("/control/inbox-gate")
+async def control_release_inbox_gate() -> JSONResponse:
+    INBOX_GATE["released"] = True
+    return JSONResponse(INBOX_GATE)
+
+
+@app.post("/control/monitors/sync")
+async def control_sync_monitors(thread_id: str) -> JSONResponse:
+    """Read the thread's monitors now, as the per-minute poll does, and count the events it is owed."""
+    from openswe.monitors.delivery import poll_monitors
+    from openswe.webhooks.event_matches import EventMatch
+
+    await poll_monitors(thread_id)
+    return JSONResponse({"events": len(await EventMatch.owed(thread_id))})
 
 
 @app.post("/control/collaborator-permission")
@@ -1279,8 +1309,29 @@ def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: 
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
-def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
-    return JSONResponse([])
+def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:
+    required_checks: set[str] = {
+        check[context_key]
+        for pull in fakes.pulls()
+        if (pull["owner"], pull["repo"], pull["base"]) == (owner, repo, branch)
+        for checks, context_key in ((pull["check_runs"], "name"), (pull["statuses"], "context"))
+        for check in checks
+        if check.get("required")
+    }
+    return JSONResponse(
+        [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": name} for name in sorted(required_checks)
+                    ]
+                },
+            }
+        ]
+        if required_checks
+        else []
+    )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")

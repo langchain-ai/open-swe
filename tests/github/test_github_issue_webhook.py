@@ -11,6 +11,7 @@ import pytest
 from openswe.github import routes as github_routes
 from openswe.github import webhook as github_webhooks
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.review.reviews import trigger_re_review
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.payloads import SlackChannelContext
 from openswe.users import User
@@ -67,8 +68,9 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
+@pytest.mark.parametrize("wakeup_fails", [False, True])
 async def test_github_webhook_skips_automatic_review_when_disabled(
-    monkeypatch, registry_db
+    monkeypatch, registry_db, wakeup_fails: bool
 ) -> None:
     called = False
 
@@ -82,6 +84,12 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    if wakeup_fails:
+        monkeypatch.setattr(
+            github_routes,
+            "wake_native_queue",
+            AsyncMock(side_effect=RuntimeError("DB unavailable")),
+        )
 
     response = await _post_github_webhook(
         "pull_request",
@@ -235,39 +243,47 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
 
 
 def _untagged_pr_event(
-    event_type: str, sender: dict[str, str], *, action: str = "", number: int = 1244
+    event_type: str,
+    sender: dict[str, str],
+    *,
+    action: str = "",
+    number: int = 1244,
+    body: str | None = None,
 ) -> dict[object, object]:
     repository = {"owner": {"login": "langchain-ai"}, "name": "open-swe"}
     if event_type == "issue_comment":
         return {
             "action": action or "created",
             "issue": {"number": number, "state": "open", "pull_request": {"url": "u"}},
-            "comment": {"id": 5, "body": "CI is failing on lint"},
+            "comment": {"id": 5, "body": body if body is not None else "CI is failing on lint"},
             "repository": repository,
             "sender": sender,
         }
     return {
         "action": action or "submitted",
         "pull_request": {"number": number, "state": "open", "head": {"ref": "feature"}},
-        "review": {"id": 6, "body": "", "state": "changes_requested"},
+        "review": {"id": 6, "body": body or "", "state": "changes_requested"},
         "repository": repository,
         "sender": sender,
     }
 
 
 @pytest.mark.parametrize(
-    ("event_type", "action", "sender", "accepted"),
+    ("event_type", "action", "sender", "body", "accepted"),
     [
-        ("issue_comment", "", {"login": "octocat"}, True),
-        ("issue_comment", "edited", {"login": "octocat"}, True),
-        ("issue_comment", "deleted", {"login": "octocat"}, False),
-        ("issue_comment", "", {"login": "vercel[bot]"}, False),
-        ("issue_comment", "", {"login": "open-swe[bot]"}, False),
-        ("issue_comment", "", {"login": "stranger"}, False),
-        ("pull_request_review", "", {"login": "octocat"}, True),
-        ("pull_request_review", "edited", {"login": "octocat"}, True),
-        ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, False),
-        ("pull_request_review", "", {"login": "stranger"}, False),
+        ("issue_comment", "", {"login": "octocat"}, None, True),
+        ("issue_comment", "edited", {"login": "octocat"}, None, True),
+        ("issue_comment", "deleted", {"login": "octocat"}, None, False),
+        ("issue_comment", "", {"login": "vercel[bot]"}, None, False),
+        ("issue_comment", "", {"login": "open-swe[bot]"}, None, False),
+        ("issue_comment", "", {"login": "stranger"}, None, False),
+        ("issue_comment", "", {"login": "octocat"}, "!keep-open", False),
+        ("issue_comment", "", {"login": "octocat"}, "@open-swe !keep-open", True),
+        ("pull_request_review", "", {"login": "octocat"}, None, True),
+        ("pull_request_review", "edited", {"login": "octocat"}, None, True),
+        ("pull_request_review", "", {"login": "octocat"}, "!keep-open", True),
+        ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, None, False),
+        ("pull_request_review", "", {"login": "stranger"}, None, False),
     ],
 )
 async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
@@ -276,6 +292,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     event_type: str,
     action: str,
     sender: dict[str, str],
+    body: str | None,
     accepted: bool,
 ) -> None:
     called: dict[str, object] = {}
@@ -303,12 +320,15 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     ).save()
 
     response = await _post_github_webhook(
-        event_type, _untagged_pr_event(event_type, sender, action=action)
+        event_type, _untagged_pr_event(event_type, sender, action=action, body=body)
     )
 
     assert response.status_code == 200
     assert (response.json()["status"] == "accepted") is accepted
-    assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
+    expected_thread_id = None if webhook_common.mentions_open_swe(body) else "agent-thread"
+    assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
+    if body is not None and not accepted and action != "deleted":
+        assert response.json() == {"status": "ignored", "reason": "Untagged workflow command"}
 
 
 @pytest.mark.parametrize(
@@ -438,7 +458,10 @@ def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
     assert ref.url in result["error"]
 
 
-def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
+@pytest.mark.parametrize("dashboard_draft", [False, True])
+def test_trigger_pr_review_from_ref_creates_reviewer_run(
+    monkeypatch, dashboard_draft: bool
+) -> None:
     captured: dict[str, object] = {}
     auto_review_checked = False
 
@@ -459,6 +482,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["metadata_token"] = token
         return {
             "html_url": pr_ref.url,
+            "draft": dashboard_draft,
             "base": {"sha": "base-sha"},
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
@@ -514,7 +538,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
 
     result = asyncio.run(
-        github_webhooks.trigger_pr_review_from_ref(
+        trigger_re_review("langchain-ai", "open-swe", 1244, "octocat")
+        if dashboard_draft
+        else github_webhooks.trigger_pr_review_from_ref(
             GitHubPrRef(
                 owner="langchain-ai",
                 repo="open-swe",
@@ -542,14 +568,17 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert captured["metadata_token"] == "app-token"
     assert "\nbase_sha: base-sha\n" in prompt
     assert "\nhead_sha: head-sha\n" in prompt
-    assert config["source"] == "slack"
+    assert config["source"] == ("dashboard" if dashboard_draft else "slack")
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
-    assert config["slack_thread"] == {
-        "channel_id": "C123",
-        "thread_ts": "1700000000.000100",
-    }
+    if dashboard_draft:
+        assert "slack_thread" not in config
+    else:
+        assert config["slack_thread"] == {
+            "channel_id": "C123",
+            "thread_ts": "1700000000.000100",
+        }
     # The live head must be persisted to metadata so resolve_review_head_sha
     # doesn't return a stale head left by a prior push/ready dispatch.
     metadata_kwargs = cast(dict[str, object], captured["set_metadata_kwargs"])
