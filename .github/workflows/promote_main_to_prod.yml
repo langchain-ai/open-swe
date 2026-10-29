@@ -26,6 +26,8 @@ jobs:
       - name: Read the approved release commit
         id: candidate
         shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           candidate="$(cat .github/production-release)"
           [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || {
@@ -38,7 +40,11 @@ jobs:
             exit 1
           }
           echo "sha=$candidate" >> "$GITHUB_OUTPUT"
-          if [[ "$candidate" == "$(git rev-parse origin/prod)" ]]; then
+          previous_pin=""
+          if git cat-file -e "${BEFORE_SHA}:.github/production-release" 2>/dev/null; then
+            previous_pin="$(git show "${BEFORE_SHA}:.github/production-release")"
+          fi
+          if [[ "$candidate" == "$(git rev-parse origin/prod)" && ( -z "$previous_pin" || "$candidate" == "$previous_pin" ) ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
