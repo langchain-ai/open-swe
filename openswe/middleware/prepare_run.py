@@ -27,6 +27,8 @@ class PrepareRunState(AgentState):
     run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    # How the rendered prompt ends: the part only this thread's says.
+    rendered_thread_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     # Set once the prompt is the thread's for good; a thread from before that renders it once more.
     system_prompt_fixed: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
