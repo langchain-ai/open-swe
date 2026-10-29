@@ -353,7 +353,9 @@ def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
 
 
 # Channel history also serves source-free requests; its own policy gates access.
-SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
+SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset(
+    {"slack_read_channel_messages", "slack_read_thread_messages"}
+)
 
 
 def _tool_description_values() -> dict[str, dict[str, object]]:

@@ -540,7 +540,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_list_channels",
         "slack_move_thread",
         "slack_post_message",
-        "slack_read_thread_messages",
         "slack_breakout_thread",
         "slack_reply",
     }
@@ -610,6 +609,7 @@ async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
 
     gp = next(item for item in subagents if item.name == "general-purpose")
     assert ("slack_read_channel_messages" in (gp.tools or ())) is channel_reads
+    assert ("slack_read_thread_messages" in (gp.tools or ())) is thread_reads
 
 
 @pytest.fixture
