@@ -43,15 +43,17 @@ Every call is authenticated with the run token.
   Code mode's calls skip the checks.
 - **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
   `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
+- **System prompt:** each call's system prompt goes in the order of how many runs share each part, for the provider's prompt cache (`rt/run_prompt.py`): the graph's instructions with what code mode and the browser add, the run's prompt (`ModelCall.system_prompt`), the run's skills, then what only the thread's prompt says (`ModelCall.thread_prompt`).
+  For Anthropic the first two each end in a cache breakpoint; with the system prompt's end and the conversation's they fill the four a request may have, and the tools, sent first, need none of their own.
 - **Incident evidence:** in an incident run, each tool result is recorded as evidence the report can cite (`record_evidence`), and carries the id it was recorded under.
 - **Loop:** `BackendRunMiddleware` (`rt/middleware.py`) prepares the run, reads its inbox and runs its loop:
   - `prepare`: before the run, on the backend (preparation, transcript turn, reply bookkeeping).
     It writes the graph state the loop reads;
   - `git_baseline`, started once `prepare` returns: the backend snapshots the thread's checkouts while the first model call runs, and the run waits for it once the model answers, before any tool runs (`rt/git_baseline.py`);
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
-    Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read waits for it; a run that ends first leaves them owed.
+    Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read names what that receipt holds until the backend took it, so the backend receives it before reading; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;
-  - `RunLoop` (`rt/loop.py`), around each model call, as the catalog's `LoopRules` say: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`), keeps the GitHub proxy fresh (`refresh_github_proxy`), picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
+  - `RunLoop` (`rt/loop.py`), around each model call, as the catalog's `LoopRules` say: it ends the run where a rule says to (a scout with nothing to plan, a client's call still pending), adds the task context (`task_context`) and keeps the GitHub proxy fresh (`refresh_github_proxy`), both asked while the inbox is read, picks the route (`route_model` classifies a request) and the model (`model_choice` for one a person asked for), and assembles the system prompt and tool list.
     After an answer that calls no tool it asks again for the CLI result and the Slack reply the run owes, then posts the answer itself (`reply_on_behalf`).
     At the end it reports the run ended (`run_ended`: transcript, usage, git work) and does the graph's own end-of-run work (`step_limit_reached`, `settle_review_check`, `finish_scout_plan`);
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;

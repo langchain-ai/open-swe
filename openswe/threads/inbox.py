@@ -8,10 +8,11 @@ the conversation stays with the run.
 
 Reading takes nothing, and asks the run for nothing but who it is and how its plan
 reads the inbox (``InboxSpec``): the backend keeps what each thread is owed. All of it stays owed until the run says the model
-call it read it for goes ahead (``receive``), so a run that ends first leaves it
-for the next. A run started to carry events receives them as it is prepared.
+call it read it for goes ahead (``receive``), or names it received on its next
+read, so a run that ends first leaves it for the next. A run started to carry events receives them as it is prepared.
 """
 
+import asyncio
 import logging
 from collections.abc import Collection
 from dataclasses import dataclass, field
@@ -195,37 +196,52 @@ class ThreadInbox:
     async def read(self, run_id: str, spec: InboxSpec) -> Taken:
         """Everything the thread is owed, for ``run_id``'s next model call."""
         taken = Taken()
-        if spec.events and postgres.configured():
-            try:
-                owed = await TaskMessage.owed(self.thread_id)
-            except Exception:
-                logger.warning(
-                    "Loading owed task messages failed",
-                    extra={"agent_thread_id": self.thread_id},
-                    exc_info=True,
-                )
-            else:
-                taken.messages.extend(TaskMessage.messages(owed))
-                taken.events.extend(message.id for message in owed)
+        # Each read takes a connection of its own.
+        messages, matches, _ = await asyncio.gather(
+            self._task_messages(spec),
+            self._event_matches(spec),
+            self._follow_ups(taken, run_id, spec),
+        )
+        taken.messages[:0] = TaskMessage.messages(messages)
+        taken.messages.extend(EventMatch.messages(matches))
+        taken.events.extend(
+            [*(message.id for message in messages), *(match.id for match in matches)]
+        )
+        return taken
+
+    async def _task_messages(self, spec: InboxSpec) -> list[TaskMessage]:
+        if not spec.events or not postgres.configured():
+            return []
+        try:
+            return await TaskMessage.owed(self.thread_id)
+        except Exception:
+            logger.warning(
+                "Loading owed task messages failed",
+                extra={"agent_thread_id": self.thread_id},
+                exc_info=True,
+            )
+            return []
+
+    async def _event_matches(self, spec: InboxSpec) -> list[EventMatch]:
+        if not spec.events or not postgres.configured():
+            return []
+        try:
+            return await EventMatch.owed(self.thread_id)
+        except Exception:
+            logger.warning(
+                "Loading owed event matches failed",
+                extra={"agent_thread_id": self.thread_id},
+                exc_info=True,
+            )
+            return []
+
+    async def _follow_ups(self, taken: Taken, run_id: str, spec: InboxSpec) -> None:
         try:
             await self._read_follow_ups(taken, run_id, spec)
         except Exception:
             logger.exception(
                 "Reading queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
             )
-        if spec.events and postgres.configured():
-            try:
-                matches = await EventMatch.owed(self.thread_id)
-            except Exception:
-                logger.warning(
-                    "Loading owed event matches failed",
-                    extra={"agent_thread_id": self.thread_id},
-                    exc_info=True,
-                )
-            else:
-                taken.messages.extend(EventMatch.messages(matches))
-                taken.events.extend(match.id for match in matches)
-        return taken
 
     async def receive(self, queued: Collection[int] = (), events: Collection[UUID] = ()) -> None:
         """A run holds ``queued`` follow-ups and ``events``: none is owed again."""
