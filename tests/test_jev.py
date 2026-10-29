@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage
 
 from openswe.dashboard.options import available_requested_models
 from openswe.model_request import ModelRequestIntent, infer_requested_model
-from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.utils.jev import JevDecision, JevRoute, select_jev_choice
 
 type ResponseHandler = (
     Callable[[httpx2.Request], httpx2.Response]
@@ -30,6 +30,7 @@ def transport(
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    monkeypatch.setattr(JevRoute, "rejected_direct_key", None)
     client = httpx2.AsyncClient
 
     def install(handler: ResponseHandler) -> None:
@@ -215,6 +216,9 @@ async def test_rejected_direct_credential_retries_gateway_exactly_once(
         if status == 403
         else "classifier_error"
     )
+    await classify()
+    assert len(requests) == 3
+    assert requests[2].headers["Authorization"] == "Bearer gateway-key"
 
 
 @pytest.mark.parametrize("failed_question", [None, "runtime_model", "runtime_effort"])

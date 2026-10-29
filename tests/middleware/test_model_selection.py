@@ -11,6 +11,7 @@ from openswe.middleware.model_selection import (
     ModelSelectionState,
     RouteSelection,
 )
+from openswe.utils.jev import JevRoute
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +19,7 @@ def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.setattr(JevRoute, "rejected_direct_key", None)
 
 
 def _middleware(routing_mode: Literal["auto", "fast"] = "auto") -> ModelSelectionMiddleware:
