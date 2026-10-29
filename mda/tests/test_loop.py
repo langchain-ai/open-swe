@@ -125,6 +125,41 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [BackendCallError("context unavailable"), asyncio.CancelledError()],
+    ids=["backend-error", "cancellation"],
+)
+async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
+    monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def refresh(_held: Mapping[str, object]) -> dict[str, JsonValue]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+        return {}
+
+    async def context() -> TaskContext:
+        await started.wait()
+        raise failure
+
+    monkeypatch.setattr(loop, "_github_proxy", refresh)
+    monkeypatch.setattr(loop, "_task_context", context)
+
+    with pytest.raises(type(failure)) as caught:
+        await loop.before_model(_state())
+
+    assert caught.value is failure
+    assert stopped.is_set()
+
+
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
