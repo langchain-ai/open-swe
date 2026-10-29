@@ -80,6 +80,7 @@ class SandboxSpec(BaseModel):
     """The thread's box, which MDA creates, owns and runs the file and shell tools in."""
 
     create: SandboxCreate
+    sandbox_id: str | None = None
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
 

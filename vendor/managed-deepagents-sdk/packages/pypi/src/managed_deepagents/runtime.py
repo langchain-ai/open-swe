@@ -2165,10 +2165,11 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         """Adopt or create this run's box now, as its first use would, and return its name."""
         return (await self._abackend()).id
 
-    async def areplace(self, sandbox: SandboxDefinition | None = None) -> SandboxReplacement:
+    async def areplace(
+        self, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
+    ) -> SandboxReplacement:
         """Replace this run's box with a fresh one under its name, from ``sandbox``'s options."""
         source = self._source
-        await self._abackend()
         current = self._sandbox()
         backend, replacement = await asyncio.to_thread(
             _replace_managed_sandbox,
@@ -2178,6 +2179,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             source.connectors,
             source.identity,
             source.selection_fingerprint,
+            missing_only=missing_only,
         )
         source.proxy_config_sync.invalidate(replacement.new_name)
         self._keep(backend)
@@ -2232,14 +2234,18 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         return backend
 
     def _recover(self, backend: SandboxBackendProtocol, error: Exception) -> None:
+        from managed_deepagents.sandbox import is_per_thread  # noqa: PLC0415
+
         if not _is_sandbox_not_found_error(error):
             return
         source = self._source
         config = self._config()
-        if _parent_sandbox_scope(config, source.selection_fingerprint) is not None:
-            # The lead recovers its own sandbox; helpers must not recreate it.
-            return
         sandbox = self._sandbox()
+        if (
+            not is_per_thread(sandbox.options)
+            and _parent_sandbox_scope(config, source.selection_fingerprint) is not None
+        ):
+            return
         previous_name = _peek_managed_host_name(
             _sandbox_scope_key(sandbox, config, source.selection_fingerprint)
         )
@@ -2399,6 +2405,10 @@ def _resolve_managed_sandbox(
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
 
+        bound_name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
+        if entry is not None and bound_name is not None and entry.host_name != bound_name:
+            entry = None
+
         if entry is not None:
             # A helper sharing its lead's sandbox only refreshes credentials: the
             # lead's workspace is already set up.
@@ -2467,6 +2477,8 @@ def _recover_managed_sandbox(
 ) -> SandboxBackendProtocol:
     from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
 
+    from managed_deepagents.sandbox import is_per_thread  # noqa: PLC0415
+
     key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
@@ -2483,6 +2495,12 @@ def _recover_managed_sandbox(
             existing = None
         if existing is not None and _sandbox_handle_id(existing) == entry.sandbox_id:
             return current
+        if is_per_thread(sandbox.options):
+            if existing is None:
+                return current
+            existing = _adopt_sandbox(client, entry.host_name, preserve_existing=True)
+            if existing is None:
+                return current
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             sandbox,
             config=config,
@@ -2507,6 +2525,8 @@ def _replace_managed_sandbox(
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
     selection_fingerprint: str | None = None,
+    *,
+    missing_only: bool = False,
 ) -> tuple[SandboxBackendProtocol, SandboxReplacement]:
     """Create a fresh box under the thread's box name; keep the old one, stopped and renamed.
 
@@ -2519,18 +2539,29 @@ def _replace_managed_sandbox(
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
-        if entry is None or entry.host_name is None:
+        name = _string_option(sandbox.options.get("_openswe_sandbox_id"))
+        if name is None and entry is not None:
+            name = entry.host_name
+        if name is None:
+            deployment = _managed_deployment_name()
+            if deployment:
+                name = _managed_sandbox_name(deployment, key)
+        if name is None:
             raise RuntimeError("This run's sandbox has no name to replace it under")
-        name = entry.host_name
         client = _sandbox_client_for(replacement)
-        suffix = f"-old-{secrets.token_hex(2)}"
-        retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
-        _await_if_needed(client.update_sandbox(name, new_name=retired))
+        existing = _fetch_sandbox(client, name, preserve_existing=True)
+        if missing_only and existing is not None:
+            raise RuntimeError(f"Sandbox {name!r} exists; refusing automatic replacement")
+        retired = name
         stop_error: str | None = None
-        try:
-            _await_if_needed(client.stop_sandbox(retired))
-        except Exception as error:  # noqa: BLE001 - the fresh box stands either way; report it
-            stop_error = str(error) or type(error).__name__
+        if existing is not None:
+            suffix = f"-old-{secrets.token_hex(2)}"
+            retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
+            _await_if_needed(client.update_sandbox(name, new_name=retired))
+            try:
+                _await_if_needed(client.stop_sandbox(retired))
+            except Exception as error:  # noqa: BLE001 - the fresh box stands either way; report it
+                stop_error = str(error) or type(error).__name__
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             replacement,
             config=config,
@@ -2932,36 +2963,62 @@ def _sandbox_deployment_component(deployment: str, max_length: int) -> str:
     return f"{deployment[:prefix_length]}-{digest}"
 
 
-def _fetch_sandbox(client: LangSmithSandboxClient, name: str) -> Sandbox | None:
-    """Look up a sandbox by name, treating any failure as "not there"."""
+def _fetch_sandbox(
+    client: LangSmithSandboxClient, name: str, *, preserve_existing: bool = False
+) -> Sandbox | None:
+    """Look up a box, preserving a thread's work when its service is unreachable."""
+    from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
+
     get_sandbox = getattr(client, "get_sandbox", None)
     if not callable(get_sandbox):
+        if preserve_existing:
+            raise RuntimeError("The sandbox client cannot look up an existing sandbox")
         return None
     try:
         return _await_if_needed(get_sandbox(name))
-    except Exception:  # noqa: BLE001 - absent or unreachable; create instead
+    except ResourceNotFoundError:
+        return None
+    except Exception as error:
+        if preserve_existing:
+            raise
+        logger.warning(
+            "Could not look up sandbox",
+            attributes={"sandbox_name": name, "error_type": type(error).__name__},
+        )
         return None
 
 
-def _restart_sandbox(client: LangSmithSandboxClient, name: str, stopped: Sandbox) -> Sandbox | None:
+def _restart_sandbox(
+    client: LangSmithSandboxClient,
+    name: str,
+    stopped: Sandbox,
+    *,
+    preserve_existing: bool = False,
+) -> Sandbox | None:
     """Start a stopped sandbox so it can be adopted; ``None`` when that fails."""
     start_sandbox = getattr(client, "start_sandbox", None)
     if not callable(start_sandbox):
+        if preserve_existing:
+            raise RuntimeError(f"The sandbox client cannot restart existing sandbox {name!r}")
         return None
     try:
         # Some SDK versions return nothing on success; it is the same sandbox.
         return _await_if_needed(start_sandbox(name)) or stopped
-    except Exception:  # noqa: BLE001 - fall back to creating
+    except Exception as error:
+        if preserve_existing:
+            raise
+        logger.warning(
+            "Could not restart sandbox",
+            attributes={"sandbox_name": name, "error_type": type(error).__name__},
+        )
         return None
 
 
-def _adopt_sandbox(client: LangSmithSandboxClient, name: str) -> Sandbox | None:
-    """Return the existing sandbox for ``name`` when usable, else ``None``.
-
-    Best-effort by design: this runs on the sandbox hot path, so a lookup failure
-    falls back to creating rather than failing the run.
-    """
-    existing = _fetch_sandbox(client, name)
+def _adopt_sandbox(
+    client: LangSmithSandboxClient, name: str, *, preserve_existing: bool = False
+) -> Sandbox | None:
+    """Adopt an existing box, failing closed when the thread must keep its work."""
+    existing = _fetch_sandbox(client, name, preserve_existing=preserve_existing)
     if existing is None:
         return None
 
@@ -2971,7 +3028,9 @@ def _adopt_sandbox(client: LangSmithSandboxClient, name: str) -> Sandbox | None:
     if normalized is None or normalized in _ADOPTABLE_SANDBOX_STATUS:
         return existing
     if normalized == _STOPPED_SANDBOX_STATUS:
-        return _restart_sandbox(client, name, existing)
+        return _restart_sandbox(client, name, existing, preserve_existing=preserve_existing)
+    if preserve_existing:
+        raise RuntimeError(f"Existing sandbox {name!r} is not usable (status={status!r})")
     return None
 
 
@@ -2986,6 +3045,8 @@ def _resolve_sandbox_instance(
     name: str | None,
     fallback_name: Callable[[], str] | None = None,
     adopt_aliases: Iterable[str] = (),
+    *,
+    preserve_existing: bool = False,
 ) -> tuple[Sandbox, bool]:
     """Adopt this deployment's existing sandbox for ``name``, or create it.
 
@@ -3007,7 +3068,9 @@ def _resolve_sandbox_instance(
     # otherwise recreate loops on the broken box that just failed provision.
     candidates = [name, *[alias for alias in adopt_aliases if alias != name]]
     for candidate in candidates:
-        existing = _adopt_sandbox(client, candidate)
+        existing = _adopt_sandbox(client, candidate, preserve_existing=preserve_existing)
+        if preserve_existing and _sandbox_name_blocked(candidate):
+            raise RuntimeError(f"Existing sandbox {candidate!r} was invalidated")
         if existing is not None and not _sandbox_name_blocked(candidate):
             return existing, True
 
@@ -3022,9 +3085,11 @@ def _resolve_sandbox_instance(
         # sandbox (failed, mid-delete) still holds the name. Never adopt a name
         # we just invalidated — fall through to a unique suffix instead.
         if not _sandbox_name_blocked(name):
-            winner = _adopt_sandbox(client, name)
+            winner = _adopt_sandbox(client, name, preserve_existing=preserve_existing)
             if winner is not None:
                 return winner, True
+        if preserve_existing:
+            raise
         # Keep the deployment prefix so teardown still finds this sandbox.
         unique = fallback_name() if fallback_name is not None else f"{name}-{secrets.token_hex(4)}"
         created = _await_if_needed(create_sandbox(name=unique, **create_kwargs))
@@ -3063,6 +3128,7 @@ def _create_langsmith_sandbox(
 ) -> tuple[SandboxBackendProtocol, str | None, str | None]:
     """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it."""
     from managed_deepagents.sandbox import (  # noqa: PLC0415
+        BoundSandboxMissingError,
         declared_create_fields,
         is_per_thread,
         owning_thread,
@@ -3091,9 +3157,23 @@ def _create_langsmith_sandbox(
         langsmith_sandbox, adopted = _create_replacement_sandbox(
             client, create_kwargs, recovery_name
         )
+    elif bound_name := _string_option(sandbox.options.get("_openswe_sandbox_id")):
+        bound = _adopt_sandbox(client, bound_name, preserve_existing=True)
+        if bound is None:
+            raise BoundSandboxMissingError(
+                f"The thread's bound sandbox {bound_name!r} no longer exists"
+            )
+        if _sandbox_name_blocked(bound_name):
+            raise RuntimeError(f"The thread's bound sandbox {bound_name!r} was invalidated")
+        langsmith_sandbox, adopted = bound, True
     else:
         langsmith_sandbox, adopted = _resolve_sandbox_instance(
-            client, create_kwargs, sandbox_name, fallback_name, lookup_names[1:]
+            client,
+            create_kwargs,
+            sandbox_name,
+            fallback_name,
+            lookup_names[1:],
+            preserve_existing=is_per_thread(sandbox.options),
         )
     host_name = _sandbox_handle_name(langsmith_sandbox) or sandbox_name
     logger.info(
