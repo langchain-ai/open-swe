@@ -778,7 +778,7 @@ class _ThreadREPL:
         ctx.register(_RESOLVED_TOOL_SYMBOL, _resolved, is_async=True)
 
     async def _acall_tool(self, camel: str, tool: BaseTool, raw_input: Any) -> Any:
-        """Call `tool` as `tools.<camel>`, within the eval's budget and outer runtime."""
+        """Call `tool` as `tools.<camel>`, in the eval's budget and outer runtime."""
         if self._ptc_state is None:
             msg = "PTC bridge called outside active eval"
             raise ConcurrentEvalError(msg)
