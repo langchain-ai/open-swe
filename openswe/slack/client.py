@@ -1636,30 +1636,6 @@ async def slack_thread_mutation_lock(
             )
 
 
-async def slack_reply_is_latest(channel_id: str, thread_ts: str, message_ts: str) -> bool:
-    """Whether nothing was posted in the thread after reply ``message_ts``.
-
-    True when Slack can't say, so a caller that reposts rather than edits never loses
-    a notification.
-    """
-    if not SLACK_BOT_TOKEN:
-        return True
-    try:
-        async with SlackClient.bot() as client:
-            payload = await client.conversations_replies(
-                channel=channel_id, ts=thread_ts, oldest=message_ts, inclusive=False, limit=2
-            )
-    except SLACK_REQUEST_ERRORS as exc:
-        logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
-        return True
-    later = payload.get("messages")
-    after = parse_slack_ts(message_ts)
-    return not any(
-        isinstance(item, dict) and parse_slack_ts(item.get("ts")) > after
-        for item in (later if isinstance(later, list) else [])
-    )
-
-
 async def fetch_slack_thread_message_by_ts(
     channel_id: str, thread_ts: str, message_ts: str
 ) -> dict[str, Any] | None:

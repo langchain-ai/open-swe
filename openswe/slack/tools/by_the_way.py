@@ -85,7 +85,6 @@ async def slack_btw_answer(message: str) -> dict[str, Any]:
         asked_in.slack_by_the_way_thread_ts or "",
         asked_in.slack_by_the_way_message_ts,
         message,
-        placeholder_ts=asked_in.slack_by_the_way_placeholder_ts,
     )
     if result.get("success") is True or result.get("error") == _ALREADY_POSTED:
         # Detached: the DM is the asker's own conversation from here on.

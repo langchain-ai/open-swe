@@ -27,15 +27,12 @@ from openswe.slack.blocks import (
     section,
 )
 from openswe.slack.client import (
-    delete_slack_message,
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
     replace_slack_command_message,
-    slack_reply_is_latest,
     slack_thread_mutation_lock,
-    update_slack_message,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -361,7 +358,6 @@ async def _by_the_way_reply(
         cfg.slack_by_the_way_message_ts,
         message,
         blocks,
-        placeholder_ts=cfg.slack_by_the_way_placeholder_ts,
     )
 
 
@@ -372,15 +368,10 @@ async def post_by_the_way_answer(
     message_ts: str | None,
     message: str,
     blocks: list[dict[str, Any]] | None = None,
-    *,
-    placeholder_ts: str | None = None,
 ) -> dict[str, Any]:
     """Post agent thread ``thread_id``'s one public `/btw` answer in the Slack thread asked in.
 
-    The answer replaces the "Working.." reply ``placeholder_ts``: edited in place when
-    others replied after it, else posted anew, which notifies the thread, and the
-    placeholder deleted. Without one, it clears the hourglass on ``message_ts``, the
-    `/btw` mention.
+    ``message_ts`` is the `/btw` mention, whose hourglass the answer clears.
     """
     if not channel_id:
         return {"success": False, "error": "Missing the Slack channel to answer in"}
@@ -405,7 +396,7 @@ async def post_by_the_way_answer(
             "hint": "Do not post again; end the run.",
         }
     try:
-        await _replace_placeholder(channel_id, thread_ts, placeholder_ts, message, blocks)
+        await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
     except SlackRequestError as exc:
         try:
             await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
@@ -420,36 +411,11 @@ async def post_by_the_way_answer(
             "slack_error": exc.code,
             "hint": _slack_reply_failure_hint(exc.code),
         }
-    if message_ts and not placeholder_ts:
+    if message_ts:
         await remove_slack_reaction(channel_id, message_ts, "hourglass_flowing_sand")
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}
-
-
-async def _replace_placeholder(
-    channel_id: str,
-    thread_ts: str,
-    placeholder_ts: str | None,
-    message: str,
-    blocks: list[dict[str, Any]] | None,
-) -> None:
-    """Put the `/btw` answer where its "Working.." reply is; raises ``SlackRequestError``."""
-    if placeholder_ts and not await slack_reply_is_latest(channel_id, thread_ts, placeholder_ts):
-        try:
-            await update_slack_message(channel_id, placeholder_ts, message, blocks=blocks)
-        except SlackRequestError as exc:
-            # Gone or no longer editable, so the answer goes in a reply of its own.
-            logger.warning(
-                "Could not edit the /btw placeholder; posting the answer",
-                extra={"slack_channel": channel_id, "slack_error": exc.code},
-            )
-        else:
-            return
-    await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
-    # Posted first, so a failed delete leaves a stale "Working.." rather than no answer.
-    if placeholder_ts:
-        await delete_slack_message(channel_id, placeholder_ts)
 
 
 async def _ephemeral_reply(
