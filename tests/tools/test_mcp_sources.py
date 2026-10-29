@@ -222,10 +222,18 @@ async def test_langsmith_tools_never_fall_back_to_a_default_workspace(monkeypatc
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     fake_mcp_server(monkeypatch, call=call)
-    langsmith = record("langsmith", allowed_tools=["list_workspaces", "query_runs"])
-    tools = await runtime.load_mcp_tools(source(("workspace_mcps",), {"langsmith": langsmith}))
+    allowed = {"allowed_tools": ["list_workspaces", "query_runs"]}
+    connections = {
+        "langsmith": record("langsmith", url="https://api.smith.langchain.com/mcp", **allowed),
+        "other": record("other", **allowed),
+    }
+    tools = await runtime.load_mcp_tools(source(("workspace_mcps",), connections))
     query = next(tool for tool in tools if tool.name == "mcp_langsmith_query_runs")
     assert query.args_schema["required"] == ["workspace_id"]
+    other = next(tool for tool in tools if tool.name == "mcp_other_query_runs")
+    assert other.args_schema == scoped
+    assert await other.ainvoke({"workspace_id": "acme"}) == "platform returned 403: forbidden"
+    assert calls.pop() == {"workspace_id": "acme"}
 
     for arguments in ({}, {"workspace_id": "LangChain Inc"}):
         assert "was not called" in await query.ainvoke(arguments)

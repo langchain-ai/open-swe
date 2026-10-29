@@ -7,20 +7,22 @@ one, and says which workspace a LangSmith access error came from.
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Self
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from langchain_core.tools import ToolException
 
 from mcp.types import Tool
+from openswe.config import ENV
 from openswe.prompts import prompt
 
 _WORKSPACE = "workspace_id"
-# LangSmith's MCP lists workspaces beside the tools that take one; no other server
-# Open SWE connects to pairs the two.
-_LIST_WORKSPACES = "list_workspaces"
+_LANGSMITH_DOMAIN = "smith.langchain.com"
+# Managed Tools proxies third-party servers from LangSmith's host; their workspaces aren't LangSmith's.
+_MANAGED_TOOLS_PATH = "/v1/managed-tools/"
 _ACCESS_ERROR = re.compile(r"\b40[134]\b|forbidden|not found|permission", re.IGNORECASE)
 
 
@@ -31,14 +33,12 @@ class WorkspaceScopedTool:
     definition: Tool
 
     @classmethod
-    def of(cls, definition: Tool, catalog: Sequence[Tool]) -> Self | None:
-        """``definition`` when it takes a workspace from a server that lists workspaces."""
+    def of(cls, definition: Tool, url: str) -> Self | None:
+        """``definition`` when it takes a workspace and LangSmith's own MCP at ``url`` serves it."""
         properties = definition.input_schema.get("properties")
         if not isinstance(properties, dict) or _WORKSPACE not in properties:
             return None
-        if not any(tool.name == _LIST_WORKSPACES for tool in catalog):
-            return None
-        return cls(definition)
+        return cls(definition) if _langsmith_mcp(url) else None
 
     @property
     def input_schema(self) -> dict[str, object]:
@@ -76,3 +76,16 @@ class WorkspaceScopedTool:
             return error
         note = prompt("tools/langsmith-workspace-denied", workspace=arguments[_WORKSPACE])
         return ToolException(f"{message}\n\n{note}")
+
+
+def _langsmith_mcp(url: str) -> bool:
+    """Whether ``url`` is LangSmith's own MCP: on LangSmith's domain or its configured API host."""
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    if host is None or _MANAGED_TOOLS_PATH in parsed.path:
+        return False
+    configured = {
+        urlsplit(origin).hostname
+        for origin in (ENV.LANGSMITH_ENDPOINT.get(), ENV.LANGSMITH_CONNECTION_URL.get())
+    }
+    return host == _LANGSMITH_DOMAIN or host.endswith(f".{_LANGSMITH_DOMAIN}") or host in configured

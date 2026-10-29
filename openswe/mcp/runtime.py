@@ -357,7 +357,7 @@ async def _load_tools(
                     scope=source.scope,
                     overridden_scopes=overridden_scopes,
                 ),
-                WorkspaceScopedTool.of(definition, definitions),
+                WorkspaceScopedTool.of(definition, record.url),
             )
             for definition in definitions
             if record.allows_tool(definition.name)
