@@ -191,7 +191,6 @@ from openswe.tools import (
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
-    deliver_automation_result,
     dismiss_human_review_request,
     expedite_pr_approval,
     expose_port,
@@ -624,7 +623,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_only_sql",
         "read_user_settings",
         "connect_managed_tools",
-        "deliver_automation_result",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -689,7 +687,6 @@ AGENT_TOOLS: Final = (
     search_pull_requests,
     get_thread,
     manage_thread,
-    deliver_automation_result,
     task_status,
     message_task_thread,
     control_worker,
@@ -1827,7 +1824,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if cfg.source == "schedule" else (deliver_automation_result,)),
         *(() if monitors_enabled else (monitor,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),

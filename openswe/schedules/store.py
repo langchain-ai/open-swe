@@ -39,7 +39,7 @@ from openswe.github.http import github_reauth_message
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
-from openswe.input_messages import InputMessageContext, build_run_input
+from openswe.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -1007,6 +1007,22 @@ async def _agent_run_config(
     return {"configurable": configurable, "metadata": agent_version_metadata()}
 
 
+async def _automation_identity(record: dict[str, Any]) -> SystemIdentity:
+    """Who the run works for: the automation, and the creator it may DM its result to."""
+    identity: SystemIdentity = {
+        "id": f"system:schedule:{record['id']}",
+        "display_name": record.get("name") or "Scheduled automation",
+        "platform": "open-swe",
+    }
+    creator = record.get("created_by")
+    user = await User.for_login("github", creator) if isinstance(creator, str) and creator else None
+    if user is not None and user.slack_user_id:
+        identity["content"] = prompt(
+            "runs/automation-creator", login=creator, slack_user_id=user.slack_user_id
+        )
+    return identity
+
+
 async def _launch_agent_schedule_record(
     record: dict[str, Any],
     *,
@@ -1077,13 +1093,7 @@ async def _launch_agent_schedule_record(
         input=build_run_input(
             str(record["prompt"]) if prompt is None else prompt,
             input_context,
-            systems=[
-                {
-                    "id": f"system:schedule:{schedule_id}",
-                    "display_name": record.get("name") or "Scheduled automation",
-                    "platform": "open-swe",
-                }
-            ],
+            systems=[await _automation_identity(record)],
         ),
         source="schedule",
         thread_title=None,

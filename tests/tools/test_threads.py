@@ -14,7 +14,7 @@ from openswe.message_queue import QueuedMessage
 from openswe.slack import allowed_bots
 
 threads_tool = importlib.import_module("openswe.tools.threads")
-delivery_tool = importlib.import_module("openswe.tools.deliver_automation_result")
+slack_channels = importlib.import_module("openswe.slack.tools.channels")
 delivery = importlib.import_module("openswe.schedules.delivery")
 
 
@@ -407,14 +407,15 @@ async def test_automation_run_delivers_only_to_its_creator(
     )
     post, _ = _creator_dm(monkeypatch)
 
-    result = await delivery_tool.deliver_automation_result("**12** PRs need review")
+    other = await slack_channels.slack_post_message("U_OTHER", "digest")
+    post.assert_not_awaited()
+    result = await slack_channels.slack_post_message("U_CREATOR", "**12** PRs need review")
 
-    assert result == {
-        "success": True,
-        "recipient": "octocat",
-        "channel_id": "D_CREATOR",
-        "message_ts": "1.2",
+    assert other == {
+        "success": False,
+        "error": "An automation run can DM only the automation's creator.",
     }
+    assert result == {"success": True, "channel_id": "D_CREATOR", "message_ts": "1.2"}
     awaited = post.await_args
     assert awaited is not None
     assert awaited.args[0] == "U_CREATOR"
@@ -432,7 +433,7 @@ async def test_automation_delivery_refuses_creator_failing_login_gate(
         monkeypatch, gate=HTTPException(403, "your GitHub account is not authorized")
     )
 
-    result = await delivery_tool.deliver_automation_result("digest")
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
 
     assert result["success"] is False
     assert "octocat is no longer authorized" in result["error"]
@@ -454,7 +455,7 @@ async def test_automation_delivery_refuses_unrelated_run(
     )
     post, _ = _creator_dm(monkeypatch)
 
-    result = await delivery_tool.deliver_automation_result("digest")
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
 
     assert result["success"] is False
     assert "Only an automation run" in result["error"]
