@@ -42,7 +42,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="quiet_until_ready"
           label="Quiet until ready"
-          description="Open SWE only messages you when it needs something from you, or when its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
+          description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"
