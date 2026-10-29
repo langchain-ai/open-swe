@@ -17,9 +17,7 @@ class BreakoutDestination:
     async def channel_error(self, source_channel: str) -> str | None:
         for channel_id in dict.fromkeys((source_channel, self.channel_id)):
             try:
-                channel = await SlackChannel.load(
-                    channel_id, use_cache=False, raise_unavailable=True
-                )
+                channel = await SlackChannel.load(channel_id, raise_unavailable=True)
             except ChannelLookupUnavailable as exc:
                 logger.info(
                     "Breakout channel verification temporarily unavailable",
