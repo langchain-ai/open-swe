@@ -125,43 +125,6 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
 
-async def test_model_preparation_overlaps_token_refresh_and_task_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    role = '<dynamic-context kind="run" id="task-role">Coordinate the task.</dynamic-context>'
-    backend, _ = _backend(
-        monkeypatch,
-        {
-            "task_context": TaskContext(instructions=role),
-            "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
-        },
-        LoopRules(task_coordination=True, refresh_github_proxy=True),
-    )
-    pending = {name: asyncio.Event() for name in ("task_context", "refresh_github_proxy")}
-    post = backend.post
-
-    async def overlapping_post(
-        path: str,
-        body: dict[str, JsonValue],
-        *,
-        timeout: float,
-        delivery: Delivery,
-        headers: Mapping[str, str] | None = None,
-    ) -> JsonValue:
-        pending[path.rsplit("/", 1)[-1]].set()
-        for started in pending.values():
-            await asyncio.wait_for(started.wait(), timeout=1)
-        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
-
-    monkeypatch.setattr(backend, "post", overlapping_post)
-
-    planned = await RunLoop(backend).before_model(_state())
-
-    assert planned.call is not None
-    assert planned.update["github_proxy_refresh_at"] == "2999-01-01T11:50:00+00:00"
-    assert [message.content for message in messages_from_dict(planned.messages)] == [role]
-
-
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -186,7 +149,23 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         rendered_system_prompt="You are Open SWE.",
     )
 
-    planned = await loop.before_model(state)
+    barrier = asyncio.Barrier(2)
+    post = backend.post
+
+    async def overlapping_post(
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        await asyncio.wait_for(barrier.wait(), timeout=1)
+        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
+
+    with monkeypatch.context() as preparation:
+        preparation.setattr(backend, "post", overlapping_post)
+        planned = await loop.before_model(state)
     await backend.outbox.drain()
 
     assert planned.call is not None
