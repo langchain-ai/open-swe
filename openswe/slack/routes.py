@@ -534,9 +534,6 @@ async def slack_webhook(
         )
 
     if event.type == "reaction_added":
-        if event.reaction == "x":
-            background_tasks.add_task(common.process_slack_stop_reaction, raw_event, event_id)
-            return accepted("Stop reaction queued")
         if event.reaction in common.FEEDBACK_REACTIONS:
             background_tasks.add_task(common.process_slack_reaction_added, raw_event, event_id)
             return accepted("Reaction feedback queued")
