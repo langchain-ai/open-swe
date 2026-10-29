@@ -4,7 +4,8 @@ The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: the route a
 task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
-token, a reply posted on the model's behalf, and what the end of the run records.
+token, the turn's git baseline, a reply posted on the model's behalf, and what the
+end of the run records.
 The transcript and usage hear of each reply and tool call.
 
 Preparation, and every phase of a run still answered from its plan, are phase
@@ -120,6 +121,12 @@ class ToolResultReport(ToolCallReport):
 
 class ToolResultReply(BaseModel):
     # What the call changed in the thread's checkouts, for the turn's git metadata.
+    update: dict[str, JsonValue] = {}
+
+
+class GitBaseline(BaseModel):
+    # The thread's checkouts as the turn starts, as run state: the turn's git trace
+    # measures what its tools change against it.
     update: dict[str, JsonValue] = {}
 
 
@@ -239,6 +246,11 @@ AFTER_MODEL = Endpoint(
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
+# Taken while the run's first model call runs, and waited for before any tool runs.
+# Only reads the box, so it is safe to send again.
+GIT_BASELINE = Endpoint(
+    "git_baseline", RunRequest, GitBaseline, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
 # The runtime replaced the thread's box: the backend connects to the fresh one.
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the box gone: the backend tells the person.

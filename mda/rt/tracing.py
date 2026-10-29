@@ -146,7 +146,7 @@ class TurnTrace:
             if evidence and (root := root or TurnTrace.current_root()) is not None:
                 held = root.metadata.setdefault("open_swe_git_evidence", {})
                 if isinstance(held, dict):
-                    if "git_trace_baseline" in evidence:
+                    if "git_trace_baseline" in evidence and evidence["git_trace_baseline"] is None:
                         held.clear()
                     held.update(evidence)
         except Exception:
