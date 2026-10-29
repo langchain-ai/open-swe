@@ -444,7 +444,20 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if self._loop is not None:
             prepared.update.update(self._loop.prepared(prepared))
         self._baselines.get(self._backend.run).start(self._backend, run_id())
-        return {**_apply(prepared), "open_swe_prepared_for": invocation}
+        update = {**_apply(prepared), "open_swe_prepared_for": invocation}
+        if opened.workspace_lost:
+            messages = update.get("messages", [])
+            update["messages"] = [
+                *(messages if isinstance(messages, list) else []),
+                HumanMessage(
+                    id=f"run-guidance:workspace-lost:{invocation}",
+                    content="The sandbox provider confirmed that this thread's bound workspace "
+                    "was deleted. A fresh workspace was created under the same name. "
+                    "Tell the user that local files and unpushed work from the deleted "
+                    "workspace are unavailable; do not claim they were recovered.",
+                ),
+            ]
+        return update
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
         if self._open_sandbox is None or self._backend.run.planned.sandbox is None:
