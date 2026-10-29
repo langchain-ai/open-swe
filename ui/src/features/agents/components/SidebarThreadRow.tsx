@@ -21,7 +21,6 @@ import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
 import { CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr/CalendarBlank"
-import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
@@ -87,23 +86,23 @@ function LinearLogoIcon({
 
 const ICON_SIZE = 14
 
-const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
-  {
-    dashboard: { icon: ChatCircleIcon, label: "Started from the dashboard" },
-    github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
-    slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
-    linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
-    schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
-    claude_code: {
-      icon: TerminalWindowIcon,
-      label: "Mirrored from Claude Code",
-    },
-  }
+const SOURCE_META: Record<
+  Exclude<AgentSource, "dashboard" | "slack">,
+  { icon: IconComponent; label: string }
+> = {
+  github: { icon: GithubLogoIcon, label: "Triggered from GitHub" },
+  linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
+  schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+  claude_code: {
+    icon: TerminalWindowIcon,
+    label: "Mirrored from Claude Code",
+  },
+}
 
 const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
 
 function sourceMeta(item: SidebarThreadItem) {
-  if (item.source && item.source !== "dashboard")
+  if (item.source && item.source !== "dashboard" && item.source !== "slack")
     return SOURCE_META[item.source]
   return runsOnAMac(item.thread) ? THIS_MAC_META : null
 }
