@@ -327,6 +327,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
+        read_ahead: Sequence[Callable[[], None]] = (),
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
@@ -335,6 +336,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._traces = RunLocal(TurnTrace)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
+        # What later hooks read from the backend, started while the run prepares.
+        self._read_ahead = read_ahead
 
     @property
     def _inbox(self) -> InboxSpec | None:
@@ -400,18 +403,25 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
-        await self._backend.run.load_tool_specs(run_id())
+        for read in self._read_ahead:
+            read()
         # What an earlier run left unsent goes out before anything this one does.
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
+            await self._backend.run.load_tool_specs(run_id())
             trace.record_evidence(state.get(STATE_KEY, {}))
             return None
-        opened = (
-            await self._open_sandbox(runtime)
-            if self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
-            else OpenedSandbox()
-        )
+        # The box takes seconds to open; reading the tool specs and sending what the
+        # outbox holds need none of it.
+        opening = asyncio.create_task(self._opened(runtime))
+        try:
+            await asyncio.gather(
+                self._backend.run.load_tool_specs(run_id()), self._backend.outbox.drain()
+            )
+            opened = await opening
+        finally:
+            opening.cancel()
         prepared = await self._phase(
             PREPARE,
             run_call(
@@ -423,6 +433,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             ),
         )
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
+
+    async def _opened(self, runtime: Runtime) -> OpenedSandbox:
+        if self._open_sandbox is None or self._backend.run.planned.sandbox is None:
+            return OpenedSandbox()
+        return await self._open_sandbox(runtime)
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
