@@ -478,10 +478,10 @@ async def lookup_slack_link_thread_id(url: str) -> str | None:
         return thread_id
     try:
         async with SlackClient.bot() as client:
-            data = await client.reactions_get(channel=channel, timestamp=timestamp)
-        message = data.get("message")
-        if isinstance(message, Mapping):
-            root = message.get("thread_ts")
+            data = await client.conversations_replies(channel=channel, ts=timestamp, limit=1)
+        messages = data.get("messages", [])
+        if messages and isinstance(messages[0], Mapping):
+            root = messages[0].get("thread_ts") or messages[0].get("ts")
             if isinstance(root, str) and root != timestamp:
                 return await lookup_slack_thread_id(channel, root)
     except SLACK_REQUEST_ERRORS as exc:

@@ -259,7 +259,6 @@ The app posts events to your deployment's URL, so it needs the same public URL a
         ],
         "scopes": {
             "bot": [
-                "reactions:read",
                 "reactions:write",
                 "commands",
                 "app_mentions:read",
@@ -426,7 +425,6 @@ In a kitchen channel, a top-level human message starts a new agent thread and re
 Other channels still require mentions.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
 
-Existing installations also need the `reactions:read` scope and a reinstall to resolve links to arbitrary thread replies that Open SWE has not recorded.
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
 
 **Native Stop.**

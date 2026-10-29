@@ -1,5 +1,4 @@
 const BASE_BOT_SCOPES = [
-  "reactions:read",
   "reactions:write",
   "commands",
   "app_mentions:read",
