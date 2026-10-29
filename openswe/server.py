@@ -2008,23 +2008,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
-    if not ENV.SLACK_BOT_TOKEN.get():
-        static_tools = [
-            tool
-            for tool in static_tools
-            if tool
-            not in (
-                request_human_review,
-                assign_human_reviewer,
-                auto_assign_human_reviewer,
-                dismiss_human_review_request,
-                get_human_review_status,
-            )
-        ]
-    if (
-        not ENV.SLACK_BOT_TOKEN.get()
-        or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
-    ):
+    if not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled:
         static_tools = [
             tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
         ]
