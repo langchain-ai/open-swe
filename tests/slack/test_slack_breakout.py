@@ -67,6 +67,10 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     ("text", "expected"),
     [
         ("<@U0BOT> /breakout fix it", Command("fix it")),
+        ("<@U0BOT> /breakout in <#C2> fix it", Command("fix it", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in <#C2>", Command("", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in #target fix it", Command("fix it", "#target")),
+        ("<@U0BOT> /breakout in the parser", Command("in the parser")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),

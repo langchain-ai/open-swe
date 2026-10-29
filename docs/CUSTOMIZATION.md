@@ -77,7 +77,7 @@ Either variable can be set independently.
 When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used.
 The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
-These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults.
+These defaults apply below explicit run, thread, workspace, and instance selections, including inherited reviewer and subagent defaults.
 Existing selections are not overwritten.
 Restart the backend after changing its environment.
 
@@ -126,13 +126,12 @@ surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_ga
 ### Auto model routing with Jev
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
-When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe.
-Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
+A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); this requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
 Routing is independent of the provider-proxy gateway toggle below.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
 Jev receives the latest human task text (up to 8,000 characters).
-Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off.
+Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or workspace default), the same model used when routing is off.
 The confidence cutoff is an initial heuristic, not a calibrated correctness probability.
 Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
@@ -148,7 +147,7 @@ It remains selected on follow-ups; explicit UI/API model choices take precedence
 A clearly unavailable model or failure to persist the selection stops the run.
 No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
 
-Run the live intent cases from the repository root with an activated Python environment and configured TypeSafe or gateway credentials:
+Run the live intent cases from the repository root with an activated Python environment and configured gateway credentials:
 
 ```bash
 LANGSMITH_TRACING=false python -m evals.model_request
@@ -542,14 +541,16 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`.
-It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run.
+The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py` on a thread's first run and kept unchanged for the rest of the thread, so the model provider's prompt cache keeps covering the conversation.
+It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the thread.
+Guidance that can change between turns — the working environment and where the turn came from — is a `TurnContext` instead, told to the model in the conversation when it changes.
 Edit a section's file to customize it:
 
 | File | What it controls |
 |---|---|
-| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-local.md` for bridged runs) |
-| `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
+| `working-environment.md.jinja` | Sandbox paths, execution constraints, and repository setup steps (`working-environment-local.md.jinja` for bridged runs); sent per turn |
+| `source-context.md.jinja` | How to communicate on the surface the turn came from; sent per turn |
+| `repository-setup.md.jinja` | Repository freshness, read-only requests, and repository skills |
 | `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
 | `dependencies.md` | Installing, vetting, and managing project dependencies |
 | `commit-pr.md` | PR title/body format, lint/format steps, and commit conventions (plus `commit-pr-desktop.md` for desktop runs) |

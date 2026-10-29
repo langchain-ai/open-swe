@@ -35,6 +35,7 @@ from runtime_api.loop import (
     MODEL_RESULT,
     TOOL_RESULT,
     TOOL_STARTED,
+    InboxItems,
     InboxReceipt,
     ModelResult,
     ToolCallReport,
@@ -42,7 +43,16 @@ from runtime_api.loop import (
     ToolResultReport,
 )
 from runtime_api.operations import RunRequest
-from runtime_api.reports import REPORTS, Item, Reports, ReportsTaken, Sent, ToolFinished, item
+from runtime_api.reports import (
+    REPORTS,
+    Item,
+    Received,
+    Reports,
+    ReportsTaken,
+    Sent,
+    ToolFinished,
+    item,
+)
 
 from rt.tracing import TurnTrace
 
@@ -165,7 +175,6 @@ class Outbox:
         self._known: set[str] = set()
         self._settled: set[str] = set()
         self._last = 0
-        self._receipt: _Waiting | None = None
         self._sending: asyncio.Task[None] | None = None
         # Set while a phase waits on the outbox, so what waits goes out at once.
         self._hurry = asyncio.Event()
@@ -190,7 +199,7 @@ class Outbox:
         )
 
     def received(self, receipt: InboxReceipt) -> None:
-        self._receipt = self._add(INBOX_RECEIVED, receipt, uuid.uuid4().hex)
+        self._add(INBOX_RECEIVED, receipt, uuid.uuid4().hex)
 
     def notify[Request: RunRequest, Response: BaseModel](
         self, endpoint: Endpoint[Request, Response], request: Request
@@ -206,10 +215,17 @@ class Outbox:
         """Wait until the backend took every item made so far, or it is too long."""
         await self._until(list(self._waiting.values()))
 
-    async def receipts(self) -> None:
-        """Wait until the backend has every inbox receipt made so far."""
-        if self._receipt is not None:
-            await self._until([self._receipt])
+    def receiving(self) -> InboxItems:
+        """What the inbox receipts the backend has yet to take hold."""
+        receipts = [
+            waiting.item.request
+            for waiting in self._waiting.values()
+            if isinstance(waiting.item, Received)
+        ]
+        return InboxItems(
+            queued=[seq for receipt in receipts for seq in receipt.items.queued],
+            events=[event for receipt in receipts for event in receipt.items.events],
+        )
 
     def adopt(self, state: Mapping[str, object]) -> None:
         """Take over what ``state`` carries that this process never held: a restarted

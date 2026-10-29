@@ -208,7 +208,8 @@ Admins can also toggle the gateway per team in the dashboard.
 
 **Which model runs.**
 The deployment default comes from the supported-model list in `openswe/dashboard/options.py` (an Anthropic model when only an Anthropic key is configured, otherwise an OpenAI one); override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails.
-Admins set the instance default, which each workspace can override, under **Admin → Defaults**, and each user can pick their own model and effort under **Settings → Agent**.
+Admins set the instance default under **Admin → Defaults** and can override model and effort defaults per workspace.
+Users can override the model for an individual thread, for example by asking the agent to switch to the performance model there.
 Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.**
@@ -477,6 +478,7 @@ The **Postmortem** tab renders it and **Copy incident** copies the text and sour
 There is no document editor or revision-history UI.
 
 Public status-page publishing is not implemented.
+For status-page requests, the agent drafts a message for responders to publish using incident.io's Slack command or web dashboard; its unavailable status-page update MCP tool is excluded from incident runs.
 Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action.
 Automatic turns investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes.
 Personal integrations remain unavailable in these system-owned threads.

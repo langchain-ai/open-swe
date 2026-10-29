@@ -19,6 +19,7 @@ import asyncio
 import logging
 import posixpath
 import re
+import uuid
 import warnings
 from functools import partial
 from typing import Any, NamedTuple, NotRequired, cast
@@ -38,8 +39,10 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMidd
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 
+from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
@@ -54,8 +57,10 @@ from openswe.middleware import (
     settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -72,7 +77,6 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -85,6 +89,7 @@ from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_revi
 from openswe.sandboxes.state import SandboxHandedOverError, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
+from openswe.threads.store import THREADS
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -108,7 +113,6 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.utils.startup_trace import aphase
-from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 
@@ -136,13 +140,10 @@ def _repo_checkout_note(
 
 
 def _reviewer_system_prompt(
-    working_dir: str,
     *,
     repo_owner: str,
     repo_name: str,
     pr_number: int | str,
-    repo_ready: bool = True,
-    head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
     approval_policy: str | None = None,
@@ -153,20 +154,11 @@ def _reviewer_system_prompt(
 ) -> str:
     return prompt(
         "reviewer/main",
-        working_dir=working_dir,
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         reviewer_eval=reviewer_eval,
         approval_policy=approval_policy or "",
-        repo_checkout_note=_repo_checkout_note(
-            repo_ready=repo_ready,
-            working_dir=working_dir,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            pr_number=pr_number,
-            head_sha=head_sha,
-        ),
         org_guidelines=org_guidelines or "",
         repo_style_prompt=repo_style_prompt or "",
         agents_md_content=agents_md_content or "",
@@ -194,45 +186,6 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     safe_title = _escape_for_data_block(title)
     safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
     return prompt("reviewer/pr-overview", title=safe_title, body=safe_body)
-
-
-def _format_human_input(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's summary of what people asked for, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.human_input:
-        return ""
-    return prompt("reviewer/human-input", summary=walkthrough.human_input)
-
-
-def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
-    return [
-        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
-    ]
-
-
-def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.steps:
-        return ""
-    steps: list[str] = []
-    for step in walkthrough.steps:
-        files = "\n".join(
-            " ".join(
-                [
-                    _escape_for_data_block(file.path),
-                    *_format_line_ranges("+", file.added),
-                    *_format_line_ranges("-", file.deleted),
-                ]
-            )
-            for file in step.files
-        )
-        steps.append(
-            f'<step index="{step.index}">\n'
-            f"<title>{_escape_for_data_block(step.title)}</title>\n"
-            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
-            f"<files>\n{files}\n</files>\n"
-            "</step>"
-        )
-    return prompt("reviewer/walkthrough", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -578,10 +531,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        model: ReviewerModelChoice,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._model = model
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -600,7 +555,36 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        await self._record_run()
         return await prepare_reviewer_run(self._thread_id, self._config, runtime)
+
+    async def _record_run(self) -> None:
+        """Attribute the run to its model before the transcript and usage observers read it."""
+        cfg = RunConfig.from_config(self._config)
+        try:
+            async with aphase(self._thread_id, "prepare.record_run"):
+                await THREADS.update(
+                    self._thread_id,
+                    {
+                        "agent_kind": "reviewer",
+                        "model": self._model.model_id,
+                        "effort": self._model.effort,
+                    },
+                )
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
+                        thread_id=self._thread_id,
+                        github_login=cfg.github_login,
+                        github_user_id=cfg.github_user_id,
+                        user_email=cfg.user_email,
+                        model_id=self._model.model_id,
+                        effort=self._model.effort,
+                        source=cfg.source,
+                        repository=cfg.repo_full_name or None,
+                    )
+        except Exception:
+            logger.warning("Failed to record the reviewer run", exc_info=True)
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
         await ensure_reviewer_github_token(self._thread_id, RunConfig.from_config(self._config))
@@ -650,8 +634,6 @@ async def prepare_reviewer_run(
                     sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
                 )
                 if skill_sources:
-                    # Reading every SKILL.md takes seconds on skill-heavy repos;
-                    # here it overlaps the walkthrough wait.
                     skills_prompt = await _trusted_skills_prompt(
                         sandbox_backend, skill_sources, runtime, config
                     )
@@ -751,26 +733,6 @@ async def prepare_reviewer_run(
             )
             return ""
 
-    async def _await_walkthrough() -> WalkthroughView | None:
-        if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
-            return None
-        pr_title, _ = await pr_overview_task
-        target = ReviewScoutTarget(
-            owner=repo_owner,
-            repo=repo_name,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            workspace_slug=cfg.workspace_slug,
-        )
-        try:
-            async with aphase(thread_id, "prepare.walkthrough"):
-                return await target.await_walkthrough()
-        except Exception:
-            logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
-            return None
-
     # Benchmark runs score the stock reviewer, without our workspace's
     # guidelines, per-repo style prompts, or API standards.
     async def _fetch_org_guidelines() -> str | None:
@@ -818,12 +780,10 @@ async def prepare_reviewer_run(
             return None
         return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
-    # Only the diff waits on the checkout; the walkthrough above all, a whole
-    # scout run in its own sandbox, must not queue behind the clone.
+    # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
-    walkthrough_task = asyncio.create_task(_await_walkthrough())
     existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
     repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
@@ -835,7 +795,6 @@ async def prepare_reviewer_run(
         checkout_task,
         diff_context_task,
         pr_overview_task,
-        walkthrough_task,
         existing_threads_task,
         repo_style_task,
         agents_md_task,
@@ -855,11 +814,10 @@ async def prepare_reviewer_run(
         org_guidelines = await org_guidelines_task
         approval_policy = await approval_policy_task
         api_standards_skill = await api_standards_task
-        walkthrough = await walkthrough_task
     finally:
-        # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
 
@@ -909,12 +867,9 @@ async def prepare_reviewer_run(
             )
 
     system_prompt = _reviewer_system_prompt(
-        f"{work_dir}/{repo_name}" if repo_name else work_dir,
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number if isinstance(pr_number, int) else "",
-        repo_ready=repo_ready,
-        head_sha=head_sha,
         reviewer_eval=reviewer_eval,
         org_guidelines=org_guidelines,
         approval_policy=approval_policy,
@@ -923,20 +878,31 @@ async def prepare_reviewer_run(
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
     )
-    if review_context:
-        system_prompt = f"{system_prompt}\n\n{review_context}"
-    walkthrough_block = _format_walkthrough(walkthrough)
-    if walkthrough_block:
-        system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
-    human_input_block = _format_human_input(walkthrough)
-    if human_input_block:
-        system_prompt = f"{system_prompt}\n\n{human_input_block}"
+    run_context = prompt(
+        "reviewer/run-context",
+        blocks=[
+            block
+            for block in (
+                _repo_checkout_note(
+                    repo_ready=repo_ready,
+                    working_dir=f"{work_dir}/{repo_name}" if repo_name else work_dir,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_number=pr_number if isinstance(pr_number, int) else "",
+                    head_sha=head_sha,
+                ),
+                review_context,
+            )
+            if block
+        ],
+    )
     if checkout.skills_prompt:
         system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
     prepared: dict[str, Any] = {
         "work_dir": work_dir,
         "rendered_system_prompt": system_prompt,
+        "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
         "review_approval_policy": approval_policy,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
@@ -947,6 +913,7 @@ async def prepare_reviewer_run(
 class ReviewerModelChoice(NamedTuple):
     model_id: str
     kwargs: ModelKwargs
+    effort: str | None
 
 
 class ReviewerModels(NamedTuple):
@@ -997,6 +964,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            reasoning_effort,
         ),
         subagent=ReviewerModelChoice(
             subagent_model_id,
@@ -1006,6 +974,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            subagent_effort,
         ),
         use_gateway=settings.effective_gateway_enabled,
     )
@@ -1063,7 +1032,10 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
                 thread_id=thread_id,
                 config=config,
                 use_gateway=use_gateway,
+                model=models.main,
             ),
+            TranscriptMiddleware(),
+            record_run_usage,
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),

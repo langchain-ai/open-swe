@@ -25,6 +25,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph_sdk import get_client
 
 from openswe.github.token_scope import token_repositories_from_metadata
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,12 @@ class SandboxBackendProxy(BaseSandbox):
     @property
     def id(self) -> str:
         return self._get_backend().id
+
+    def get_work_dir(self) -> str | None:
+        """Expose the current backend's declared directory once connected."""
+        from openswe.sandboxes.paths import declared_work_dir
+
+        return declared_work_dir(self._backend) if self._backend is not None else None
 
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
@@ -435,7 +442,7 @@ async def thread_token_repositories(thread_id: str) -> list[str] | None:
     if thread_id in _TOKEN_SCOPES:
         _TOKEN_SCOPES.move_to_end(thread_id)
         return _TOKEN_SCOPES[thread_id]
-    thread = await get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id, get_client())
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     scope = token_repositories_from_metadata(metadata if isinstance(metadata, dict) else {})
     _TOKEN_SCOPES[thread_id] = scope

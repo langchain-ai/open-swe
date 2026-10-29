@@ -56,6 +56,8 @@ _SUMMARY_FIELDS = {
     "slug",
     "prompt",
     "repos",
+    "slack_channel_ids",
+    "kitchen_channel_ids",
     "mem_bytes",
     "vcpus",
     "fs_capacity_bytes",
@@ -101,6 +103,27 @@ async def list_workspaces() -> dict[str, Any]:
             for record in records
         ],
     }
+
+
+@expose_mcp(access="admin")
+@audit_tool(target_workspace="workspace")
+@access(_WRITE)
+async def configure_workspace(
+    workspace: str,
+    changes: store.WorkspaceUpdate,
+) -> dict[str, object]:
+    """Update a workspace definition without capturing the calling sandbox."""
+    from openswe.workspaces.configuration import configure_workspace as save_configuration
+
+    try:
+        slug = store.slugify(workspace)
+        previous = await store.WORKSPACES.get(slug)
+        if previous is None:
+            raise ValueError(f"no workspace named {slug!r}")
+        record = await save_configuration(previous, changes)
+    except (ValueError, refresh.RefreshStartError) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "workspace": _summary(record)}
 
 
 @audit_tool(target_workspace="name")

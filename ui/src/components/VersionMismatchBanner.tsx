@@ -3,16 +3,34 @@ import { useQuery } from "@tanstack/react-query"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 
-import { normalizeBuildInfo } from "@/lib/api"
 import { useIsHydrated } from "@/lib/hydration"
 import { sessionQueryOptions } from "@/lib/session"
 
 export function VersionMismatchBanner() {
   const hydrated = useIsHydrated()
-  // `InvalidationStream` refetches the session when a stream reports another backend.
   const { data: user } = useQuery(sessionQueryOptions)
   const running = hydrated ? window.__OPEN_SWE_BUNDLE__?.commit : null
-  const deployed = normalizeBuildInfo(user?.build_info)?.backend.commit
+  const { data: deployed } = useQuery({
+    queryKey: ["dashboard-build"],
+    queryFn: async ({ signal }) => {
+      const response = await fetch(
+        `${import.meta.env.BASE_URL}open-swe-build-info.json`,
+        { cache: "no-store", signal }
+      )
+      if (!response.ok) throw new Error("Dashboard build info unavailable")
+      const info: unknown = await response.json()
+      return typeof info === "object" &&
+        info !== null &&
+        "commit" in info &&
+        typeof info.commit === "string"
+        ? info.commit
+        : null
+    },
+    enabled: !!running && !!user && !window.openSweDesktop,
+    refetchInterval: 60_000,
+    staleTime: 60_000,
+    retry: false,
+  })
   const shown =
     !!running && !!deployed && running !== deployed && !window.openSweDesktop
 
