@@ -331,11 +331,11 @@ export function FrontendReportView({
       )}
       {report && (
         <Card
-          aria-label="AI Recap"
+          aria-label="Recap"
           className="flex flex-col gap-space-3 p-space-4"
         >
           <div className="flex items-center gap-space-2">
-            <h3 className="text-sm font-semibold">AI Recap</h3>
+            <h3 className="text-sm font-semibold">Recap</h3>
             {report.ai_review_status !== "complete" && (
               <Badge color="secondary" size="xs">
                 {report.ai_review_status === "running"

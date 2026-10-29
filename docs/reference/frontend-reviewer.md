@@ -12,7 +12,7 @@ Surface roles follow LangChainPlus's `smith-frontend/STYLES.md`: level 1 for the
 
 For a login-free designer walkthrough, build the UI and run `pnpm --dir ui demo:design-qa`, then open `http://127.0.0.1:4189/agents/qa`. This temporary local server supplies scripted PRs, recap text, interaction checkpoints, and capture progress while exercising the real pixel viewer and chat attachment flow. Setup, walkthrough, limitations, and removal steps are documented in [`ui/scripts/design-qa-demo/README.md`](../../ui/scripts/design-qa-demo/README.md).
 
-**AI Recap** shows the saved assessment summary and up to three evidence-linked notes when an AI review has completed. A capture summary is not presented as an AI recap while assessment is pending, not run, or failed. Design QA starts with a full-width, side-by-side comparison; **Chat** or **Ask about this change** opens the conversation. All saved comparisons appear as cards on the same page, with notes and capture details collapsed.
+**Recap** shows the saved assessment summary and up to three evidence-linked notes when an AI review has completed. A capture summary is not presented as an AI recap while assessment is pending, not run, or failed. Design QA starts with a full-width, side-by-side comparison; **Chat** or **Ask about this change** opens the conversation. All saved comparisons appear as cards on the same page, with notes and capture details collapsed.
 
 ## Capture and inspect
 

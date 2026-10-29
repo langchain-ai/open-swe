@@ -14,9 +14,9 @@ Open <http://127.0.0.1:4189/agents/qa>. For another port, run `pnpm --dir ui dem
 ## Walkthrough
 
 1. The **For you & your teams** inbox has four saved reviews: a direct request, requests to the fictional `design` and `frontend` teams, and an authentication blocker. Cards show paired-state coverage, interaction counts, requested reviewers, capture date, and **Small/Large visual change**. The labels describe the largest changed-pixel fraction (small <2%, moderate <15%, large ≥15%), not issue severity; thresholds may differ between captures. The stale card is visibly marked. **My PRs** shows a separate authored example. Filter by title, repo, or number, then clear the filter.
-2. Open **Refine trace controls and project dialog**. Read **AI Recap**, then use **Inspect** to jump to its evidence.
+2. Open **Refine trace controls and project dialog**. Read **Recap**, then use **Inspect** to jump to its evidence.
 3. All six comparisons appear on the same page: faint button color, table/button sizing, hover contrast, selected filter height, dialog clipping, and filled input. None are hidden behind interaction tabs.
-4. Switch each card between **2-up**, **Swipe**, and **Onion Skin**. Drag the divider or opacity slider and use **100%**, **200%**, or **400%** for small edge changes. Original screenshots stay unobscured by pixel coloring.
+4. Switch each card between **2-up**, **Swipe**, and **Onion Skin**. Drag the Swipe line directly or adjust the Onion Skin opacity slider and use **100%**, **200%**, or **400%** for small edge changes. Original screenshots stay unobscured by pixel coloring.
 5. Follow **Production**, **Preview**, or **Base** on a card. These open fictional local pages and preserve the example route and query. They do not link to a real customer workspace. Expand **Interaction & notes** for replay steps and authored design observations.
 6. Choose **Ask about this change**. The real chat composer opens with the selected PNGs and replay steps. Edit/remove attachments. Sending deliberately returns a demo-only error: no model is connected and nothing is transmitted elsewhere.
 7. Enter **43399** (or **#43399**) in the lookup and choose **Open PR** to open **Polish project settings**. Numbers default to `langchain-ai/langchainplus`; a full `owner/repo#number` reference or GitHub PR URL can target another repository in the real app. This demo serves only fictional PRs 43396–43401, never GitHub. Open **Capture settings**, enter syntactically valid preview URLs, and submit. The server simulates queued → capturing → AI reviewing → ready in about four seconds. The URLs and auth selection do not cause a login or browser request.
@@ -36,4 +36,4 @@ Exact mode exposes any different pixel, including antialiasing and unstable data
 
 Delete `ui/scripts/design-qa-demo/`, remove `demo:design-qa` from `ui/package.json`, and remove the local-demo paragraph in `docs/reference/frontend-reviewer.md`. No production UI/backend code imports this folder. The mock session, fake activity, and reset endpoint exist only in this server. There is no feature flag, schema field, migration, or authentication bypass to remove.
 
-Keep **AI Recap**, its evidence links, comparison cards, and collapsed capture details: they work with normal saved reports and contain no scripted responses.
+Keep **Recap**, its evidence links, comparison cards, and collapsed capture details: they work with normal saved reports and contain no scripted responses.

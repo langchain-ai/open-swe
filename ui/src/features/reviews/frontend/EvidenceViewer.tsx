@@ -1,7 +1,7 @@
 import { Card } from "@langchain/macaw-components/Card"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Slider } from "@langchain/macaw-components/Slider"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type PointerEvent } from "react"
 
 import { evidenceMediaUrl, type FrontendScenario } from "./api"
 import { ComparisonViewport } from "./ComparisonViewport"
@@ -62,6 +62,20 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
   const source = JSON.stringify([beforeUrl, afterUrl])
   const loaded = state?.source === source ? state.pair : undefined
   const error = state?.source === source ? state.error : undefined
+
+  function moveDivider(event: PointerEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
+    if (bounds.width)
+      setSwipe(
+        Math.round(
+          Math.max(
+            0,
+            Math.min(100, ((event.clientX - bounds.left) / bounds.width) * 100)
+          )
+        )
+      )
+  }
+
   useEffect(() => {
     if (!beforeUrl || !afterUrl) return
     const controller = new AbortController()
@@ -147,8 +161,53 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
       </div>
       {mode === "swipe" && (
         <div
-          className="pointer-events-none absolute inset-y-0 border-l-2 border-focus"
+          role="slider"
+          aria-label="Before after divider"
+          aria-orientation="horizontal"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={swipe}
+          aria-valuetext={`${swipe}% before, ${100 - swipe}% after`}
+          tabIndex={0}
+          className="absolute inset-y-0 w-6 -translate-x-1/2 cursor-col-resize touch-none outline-offset-2 before:absolute before:inset-y-0 before:left-1/2 before:-translate-x-1/2 before:border-l-2 before:border-focus hover:before:border-l-4 focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]"
           style={{ left: `${swipe}%` }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            event.preventDefault()
+            event.stopPropagation()
+            event.currentTarget.focus({ preventScroll: true })
+            event.currentTarget.setPointerCapture(event.pointerId)
+            moveDivider(event)
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            event.stopPropagation()
+            moveDivider(event)
+          }}
+          onPointerUp={(event) => {
+            event.stopPropagation()
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId)
+          }}
+          onPointerCancel={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId)
+          }}
+          onKeyDown={(event) => {
+            if (event.ctrlKey || event.metaKey || event.altKey) return
+            const step = event.shiftKey ? 10 : 1
+            let next: number
+            if (event.key === "ArrowLeft" || event.key === "ArrowDown")
+              next = swipe - step
+            else if (event.key === "ArrowRight" || event.key === "ArrowUp")
+              next = swipe + step
+            else if (event.key === "Home") next = 0
+            else if (event.key === "End") next = 100
+            else return
+            event.preventDefault()
+            event.stopPropagation()
+            setSwipe(Math.max(0, Math.min(100, next)))
+          }}
         />
       )}
     </div>
@@ -200,28 +259,21 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
             { value: "onion", display: "Onion Skin" },
           ]}
         />
-        {mode !== "split" && (
+        {mode === "onion" && (
           <div className="flex w-64 max-w-full items-center gap-space-3 text-xs text-secondary">
-            <span className="shrink-0">
-              {mode === "swipe" ? "Divider" : "After opacity"}
-            </span>
+            <span className="shrink-0">After opacity</span>
             <Slider
-              aria-label={
-                mode === "swipe" ? "Before after divider" : "After opacity"
-              }
+              aria-label="After opacity"
               className="flex-1"
               min={0}
               max={100}
-              value={mode === "swipe" ? swipe : opacity}
+              value={opacity}
               onChange={(next) => {
                 const value = Array.isArray(next) ? (next[0] ?? 50) : next
-                if (mode === "swipe") setSwipe(value)
-                else setOpacity(value)
+                setOpacity(value)
               }}
             />
-            <span className="w-8 text-right tabular-nums">
-              {mode === "swipe" ? swipe : opacity}%
-            </span>
+            <span className="w-8 text-right tabular-nums">{opacity}%</span>
           </div>
         )}
       </div>
