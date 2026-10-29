@@ -169,6 +169,8 @@ class RunConfig(BaseModel):
     # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None
+    # The "Working.." reply the `/btw` answer replaces.
+    slack_by_the_way_placeholder_ts: str | None = None
     # A turn in the DM a `/btw` question continues in, before its answer is posted.
     slack_btw_follow_up: bool | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
