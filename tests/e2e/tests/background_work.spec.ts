@@ -1,26 +1,16 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 
 import {
   SAME_USER,
   dismissOnboardingIfShown,
+  enableMonitors,
   loginAs,
 } from "./helpers/dashboard";
 
-// `monitor` is off by default; the sender opts in on their profile.
-async function enableMonitors(page: Page) {
-  const saved = await page.request.get("/dashboard/api/profile");
-  expect(saved.ok()).toBeTruthy();
-  const response = await page.request.put("/dashboard/api/profile", {
-    headers: { origin: new URL(saved.url()).origin },
-    data: { ...(await saved.json()), experimental_monitor: true },
-  });
-  expect(response.ok(), await response.text()).toBeTruthy();
-}
-
 // The real agent starts a `background_execute` command and a `monitor` in its
-// (local-provider) sandbox; the thread page lists both in its right sidebar,
-// read live from the sandbox through the dashboard API.
-test.describe("background work sidebar (real dashboard UI)", () => {
+// (local-provider) sandbox; the thread's right panel lists both in its
+// Background work surface, read live from the sandbox through the dashboard API.
+test.describe("background work panel (real dashboard UI)", () => {
   test("lists the running monitor and background command", async ({
     page,
   }, testInfo) => {
@@ -44,14 +34,18 @@ test.describe("background work sidebar (real dashboard UI)", () => {
     await expect(page).toHaveURL(/\/agents\//);
     await dismissOnboardingIfShown(page);
 
-    // The tools may still be starting when the page opens: the sidebar appears
-    // when the backend invalidates the thread's background work.
-    const sidebar = page.getByRole("complementary", {
-      name: "Background work",
-    });
-    await expect(sidebar).toBeVisible({ timeout: 60_000 });
-    const monitors = sidebar.getByRole("region", { name: "Monitors" });
-    const commands = sidebar.getByRole("region", { name: "Commands" });
+    await page.getByRole("button", { name: "Show panel" }).click();
+    // The tools may still be starting when the page opens: the surface becomes
+    // available when the backend invalidates the thread's background work.
+    const launcher = page
+      .getByLabel("Open a surface")
+      .getByRole("button", { name: /Background work/ });
+    await expect(launcher).toBeVisible({ timeout: 60_000 });
+    await launcher.click();
+    const panel = page.getByTestId("background-work-panel");
+    await expect(panel).toBeVisible();
+    const monitors = panel.getByRole("region", { name: "Monitors" });
+    const commands = panel.getByRole("region", { name: "Commands" });
     await expect(monitors).toContainText("errors in the dev server log", {
       timeout: 60_000,
     });
@@ -59,6 +53,15 @@ test.describe("background work sidebar (real dashboard UI)", () => {
     await expect(commands).toContainText("echo 'building assets'; sleep 110", {
       timeout: 60_000,
     });
+    await commands.getByRole("button", { expanded: false }).first().click();
+    await expect(commands.getByLabel("Latest output")).toContainText(
+      "building assets",
+    );
+    await monitors.getByRole("button", { expanded: false }).first().click();
+    await expect(monitors.getByLabel("Latest output")).toContainText(
+      /^GET \/health 200/,
+      { timeout: 30_000 },
+    );
 
     const pagePath = testInfo.outputPath("background-work-thread.png");
     await page.screenshot({ path: pagePath });
@@ -66,10 +69,10 @@ test.describe("background work sidebar (real dashboard UI)", () => {
       path: pagePath,
       contentType: "image/png",
     });
-    const sidebarPath = testInfo.outputPath("background-work-sidebar.png");
-    await sidebar.screenshot({ path: sidebarPath });
-    await testInfo.attach("background-work-sidebar", {
-      path: sidebarPath,
+    const panelPath = testInfo.outputPath("background-work-panel.png");
+    await panel.screenshot({ path: panelPath });
+    await testInfo.attach("background-work-panel", {
+      path: panelPath,
       contentType: "image/png",
     });
   });

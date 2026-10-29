@@ -17,6 +17,39 @@ const identitySchema = z.object({
 
 export type Identity = z.infer<typeof identitySchema>
 
+const workerSchema = z.object({
+  worker_thread_id: z.string(),
+  thread_url: z.string().nullable(),
+  instructions: z.string(),
+  state: z.string(),
+  run_status: z.string().nullish(),
+  error: z.string().nullish(),
+  active: z.boolean(),
+})
+
+const activitySchema = z.object({
+  runs: z.array(z.string()),
+  settled: z.boolean(),
+  workers: z.array(workerSchema),
+})
+
+export type WorkerActivity = z.infer<typeof workerSchema>
+
+/**
+ * What a thread's coordinator is still doing: its runs since the one the CLI
+ * last followed, oldest first, and the workers it launched.
+ */
+export type TaskActivity = z.infer<typeof activitySchema>
+
+/** One thread the CLI serves, as its coordinator and that coordinator's workers. */
+export interface CoordinatorThread {
+  events(): Promise<Response>
+  /** Null when the backend predates task workers, so there are none to wait for. */
+  activity(after: string | null): Promise<TaskActivity | null>
+  /** Cancels the workers still running, then the coordinator's own runs. */
+  stop(): Promise<void>
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -196,6 +229,52 @@ export class ApiClient {
 
   async cancelThread(threadId: string): Promise<void> {
     await this.send("POST", `/threads/${encodeURIComponent(threadId)}/cancel`)
+  }
+
+  async taskActivity(
+    threadId: string,
+    after: string | null
+  ): Promise<TaskActivity | null> {
+    const query = after === null ? "" : `?after=${encodeURIComponent(after)}`
+    let payload: unknown
+    try {
+      payload = await this.json(
+        "GET",
+        `/threads/${encodeURIComponent(threadId)}/workers${query}`
+      )
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 404) return null
+      throw cause
+    }
+    const parsed = activitySchema.safeParse(payload)
+    if (!parsed.success)
+      throw new ProtocolError("worker activity response is malformed")
+    return parsed.data
+  }
+
+  async cancelWorkers(threadId: string): Promise<void> {
+    try {
+      await this.send(
+        "POST",
+        `/threads/${encodeURIComponent(threadId)}/workers/cancel`
+      )
+    } catch (cause) {
+      if (!(cause instanceof ApiError && cause.status === 404)) throw cause
+    }
+  }
+
+  coordinator(threadId: string, events: EventStreamInput): CoordinatorThread {
+    return {
+      events: () => this.openEventStream(threadId, events),
+      activity: (after) => this.taskActivity(threadId, after),
+      stop: async () => {
+        try {
+          await this.cancelWorkers(threadId)
+        } finally {
+          await this.cancelThread(threadId)
+        }
+      },
+    }
   }
 
   async openEventStream(

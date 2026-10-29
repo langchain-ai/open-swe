@@ -1,0 +1,10 @@
+This pull request just merged.
+Read `.agents/skills/rollout-check/SKILL.md` at {% if merge_sha %}merge commit {{ merge_sha }}{% else %}the merge commit recorded for this pull request{% endif %}, not from a stale checkout.
+Look at what merged.
+Ask the person, on this thread's existing channel, whether to monitor its rollout only when that skill says this change qualifies.
+Ask once.
+If the skill file is missing, or it does not say to offer monitoring for this change, stop without messaging them.
+If they decline, stop.
+If they agree, follow that skill's accepted-offer steps.
+Do not call request_rollout_check until those steps say to.
+Do not call listen_events yourself.

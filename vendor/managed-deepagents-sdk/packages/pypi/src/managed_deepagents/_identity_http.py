@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
+from managed_deepagents._channel_icon import channel_icon_headers, load_channel_icon
 from managed_deepagents._channels.messaging_registry import (
     register_channel_messaging,
     register_connector_messaging,
@@ -36,6 +37,7 @@ from managed_deepagents._identity_auth import (
     ManagedAuthError,
     resolve_request_identity,
 )
+from managed_deepagents._ingress import with_ingress_log_context
 from managed_deepagents._log import logger
 from managed_deepagents.identity import (
     IdentityConfig,
@@ -112,12 +114,14 @@ def build_managed_http_app(
     identity: IdentityDefinitionLike | IdentityConfig | None = None,
     connectors: Sequence[HttpConnectorLike | object] | None = None,
     channels: Sequence[object] | None = None,
+    root: str | None = None,
 ) -> AsgiApp:
     """Build the managed HTTP app (a Starlette app) from identity + channels + connectors.
 
     Mounts channel Events under ``/channels/{name}/events``, each connector's
     ``http`` routes under ``/connectors/{name}``, and connector Events (e.g.
-    GitHub) under ``/connectors/{name}/events``.
+    GitHub) under ``/connectors/{name}/events``. A channel's ``icon``, read
+    from the project at ``root``, is served at ``/channels/{name}/icon``.
     """
     applications = import_module("starlette.applications")
 
@@ -136,6 +140,11 @@ def build_managed_http_app(
         name = _channel_mount_name(channel)
         if callable(getattr(channel, "events", None)):
             routes.append(_channel_events_route(channel, name, mounted))
+        icon = getattr(channel, "icon", None)
+        if isinstance(icon, str) and icon:
+            route = _channel_icon_route(icon, root, name, mounted)
+            if route is not None:
+                routes.append(route)
 
     for connector in connector_list:
         name = _connector_mount_name(connector)
@@ -202,6 +211,16 @@ def _channel_events_route(
     )
 
     async def events_handler(request: HttpRequestLike) -> object:
+        headers = getattr(request, "headers", None)
+        traceparent = headers.get("traceparent") if headers is not None else None
+        transport = getattr(channel, "transport", None) or "http"
+        return await with_ingress_log_context(
+            traceparent,
+            {"channel": name, "transport": transport},
+            lambda: _handle_channel_events(request),
+        )
+
+    async def _handle_channel_events(request: HttpRequestLike) -> object:
         responses = import_module("starlette.responses")
         events = getattr(channel, "events", None)
         if not callable(events):
@@ -222,10 +241,46 @@ def _channel_events_route(
                 result = await result
             return result
         except Exception as error:  # noqa: BLE001 - log a safe label, keep the HTTP body opaque
-            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error))
+            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error), error=error)
             return responses.JSONResponse({"error": "internal error"}, status_code=500)
 
     return cast("StarletteRoute", routing.Route(path, events_handler, methods=["POST"]))
+
+
+def _channel_icon_route(
+    file: str, root: str | None, name: str, mounted: list[MountedRoute]
+) -> StarletteRoute | None:
+    """Serve a channel's icon, read from the project once, at ``/channels/{name}/icon``.
+
+    Public, so a provider can load it; an icon that can't be served is logged
+    and left out.
+    """
+    path = f"/channels/{name}/icon"
+    if not root:
+        logger.warning("not serving %s: the project directory is unknown", path)
+        return None
+    try:
+        icon = load_channel_icon(root, file)
+    except (OSError, ValueError) as error:
+        logger.warning("not serving %s (%s)", path, logger.safe_error_label(error))
+        return None
+    headers = channel_icon_headers(icon)
+    mounted.append(
+        {
+            "connector": f"channel:{name}",
+            "method": "get",
+            "path": path,
+            "secured": False,
+            "absolute": True,
+        }
+    )
+    routing = import_module("starlette.routing")
+
+    async def icon_handler(_request: HttpRequestLike) -> object:
+        responses = import_module("starlette.responses")
+        return responses.Response(icon.data, headers=headers)
+
+    return cast("StarletteRoute", routing.Route(path, icon_handler, methods=["GET"]))
 
 
 async def _read_limited_events_body(request: HttpRequestLike) -> bytes | None:
@@ -284,7 +339,7 @@ def _connector_events_route(
                 result = await result
             return result
         except Exception as error:  # noqa: BLE001 - log a safe label, keep the HTTP body opaque
-            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error))
+            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error), error=error)
             return responses.JSONResponse({"error": "internal error"}, status_code=500)
 
     return cast("StarletteRoute", routing.Route(path, events_handler, methods=["POST"]))

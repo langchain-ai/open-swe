@@ -4,10 +4,11 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
+from runtime_api.loop import VISIBLE_FROM
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
@@ -73,8 +74,10 @@ Identity = PersonIdentity | ChannelIdentity | SystemIdentity
 
 
 type FieldValue = str | int | float | bool
-# A scalar is an attribute of the envelope; a mapping is a ``Fields`` element inside it.
-type EnvelopeData = Mapping[str, FieldValue | Mapping[str, FieldValue | None]]
+type FieldValues = Mapping[str, FieldValue | None]
+# A scalar is an attribute of the envelope; a mapping is a ``Fields`` element inside it,
+# and a list of mappings is one such element apiece, all with the same tag.
+type EnvelopeData = Mapping[str, FieldValue | FieldValues | list[FieldValues]]
 
 
 class InputMessageContext(TypedDict):
@@ -210,6 +213,11 @@ def input_message_timestamps(content: object) -> set[str]:
     }
 
 
+# Starts the id of every message that carries an event sent to the thread, such as
+# monitor output or a task report.
+EVENT_MESSAGE_PREFIX: Final = "event-match:"
+
+
 def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     """Ids of the event matches whose envelopes are already among ``messages``."""
     return {
@@ -279,7 +287,7 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
     event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else state.get(VISIBLE_FROM)
     if isinstance(cutoff, int) and cutoff >= 0:
         messages = messages[cutoff:]
     return dynamic_context_hashes_from_messages(messages)
@@ -295,7 +303,7 @@ class Fields:
     the envelope escapes.
     """
 
-    values: Mapping[str, FieldValue | None]
+    values: FieldValues
 
     def text(self) -> str:
         return self._lines(escape=False)
@@ -339,6 +347,19 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     }
 
 
+def run_context(context_id: str, guidance: str) -> str:
+    """Guidance for the run that can change between turns, kept out of the system prompt.
+
+    The latest block with each ``context_id`` is the one in force, so it is added
+    again only when it changes or the model no longer sees it.
+    """
+    body = guidance.strip().replace("]]>", "]]]]><![CDATA[>")
+    return (
+        f'<dynamic-context kind="run" id="{_xml_attr(context_id)}">'
+        f"<![CDATA[\n{body}\n]]></dynamic-context>"
+    )
+
+
 def person_introduction(person: PersonIdentity) -> RunMessage:
     return _entity_message(person, "person")
 
@@ -365,6 +386,8 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     for name, value in context.get("data", {}).items():
         if isinstance(value, Mapping):
             children.append(Fields(value).element(name))
+        elif isinstance(value, list):
+            children.extend(Fields(item).element(name) for item in value)
         else:
             attributes.append(f'{_validate_name(name)}="{_xml_attr(value)}"')
     body = "\n".join([_xml_text(text), *children])
@@ -385,6 +408,12 @@ def _structured_content(
             blocks.append({**block, "text": _serialize_message(block["text"], context)})
         else:
             blocks.append(block)
+    # Data elements live in the envelope, so a message without text still needs one.
+    carries_elements = any(
+        isinstance(value, Mapping | list) for value in context.get("data", {}).values()
+    )
+    if carries_elements and not any(block.get("type") == "text" for block in content):
+        blocks.append({"type": "text", "text": _serialize_message("", context)})
     return blocks
 
 

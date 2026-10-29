@@ -20,17 +20,13 @@ use anyhow::{Context, Result};
 
 use crate::agent_config;
 use crate::command::CommandCompletion;
-use crate::deploy::helpers::{
-    resolve_langsmith_api_bases, resolve_platform_api_url, REMOVED_WORKSPACE_ID_ENVS,
-    WORKSPACE_ID_ENV,
-};
+use crate::deploy::langsmith_context::{LangSmithContext, WORKSPACE_FLAG_HINT};
 use crate::deploy::{env_file, resolve_api_key, resolve_deployment_id};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
-use crate::langsmith::{
-    self, resolve_preferred_env, LogEntry, LogLevel, LogOrder, LogQuery, LogTimestamp,
-};
+use crate::langsmith::{LogEntry, LogLevel, LogOrder, LogQuery, LogTimestamp};
 use crate::naming::normalize_name;
+use crate::telemetry::update_facts;
 
 /// Delay between polls while following.
 const FOLLOW_INTERVAL: Duration = Duration::from_secs(3);
@@ -69,31 +65,17 @@ pub fn run(opts: LogsOptions) -> Result<CommandCompletion> {
     let env_path = opts.path.join(".env");
     let env_vars = env_file::parse_env_file(&env_path);
     let name = resolve_deployment_name(&opts)?;
-    let (default_host, _) = resolve_langsmith_api_bases(&env_vars);
-    let host_url = opts
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_host.as_str());
-
-    let platform_api_url = resolve_platform_api_url(host_url, &env_vars);
-    let credential = resolve_api_key(&env_vars, &env_path, &platform_api_url)?;
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        opts.workspace_id.as_deref(),
+    update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
+    let ctx = LangSmithContext::resolve(
         &env_vars,
-        |key| std::env::var(key).ok(),
-        " or pass --workspace-id instead",
+        opts.host_url.as_deref(),
+        opts.workspace_id.as_deref(),
+        WORKSPACE_FLAG_HINT,
+        |platform_api_url| resolve_api_key(&env_vars, &env_path, platform_api_url),
     )?;
-    let client = langsmith::Client::with_credential_and_platform(
-        host_url,
-        Some(platform_api_url.as_str()),
-        credential,
-        workspace_id,
-    )?;
-    let deployment_id = resolve_deployment_id(&client, &name, host_url)?;
+    let client = ctx.client()?;
+    let deployment_id = resolve_deployment_id(&client, &name)?;
+    update_facts(|facts| facts.deployment.deployment_id = Some(deployment_id.clone()));
 
     let recent = client
         .deployment_logs(

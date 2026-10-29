@@ -12,11 +12,10 @@
 //! travel out of band ([`SYNTAX_ERROR_EXIT_CODE`] plus stderr) because scripts
 //! print authored values verbatim and must not be able to spell a diagnostic.
 
-use std::io::Write;
-use std::process::Stdio;
+use anyhow::{anyhow, Context, Error, Result};
 
-use anyhow::{anyhow, bail, Context, Error, Result};
-
+use crate::child;
+use crate::error::child_failed;
 use crate::toolchain;
 
 /// Prepended to every extractor script: binds the parsed source to `tree`.
@@ -53,41 +52,24 @@ pub(crate) fn run_python_extractor(
         "{SYNTAX_ERROR_EXIT_CODE_BINDING} = {SYNTAX_ERROR_EXIT_CODE}\n{PARSE_PRELUDE}\n{script}"
     );
     let python = toolchain::python3_program();
-    let mut child = toolchain::python3()
-        .arg("-c")
-        .arg(program)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to run {python} to read {purpose} from {file_label} (is Python 3 installed?)"
-            )
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(source.as_bytes())
-            .with_context(|| format!("failed to send {file_label} to {python}"))?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .with_context(|| format!("failed to read {purpose} from {file_label}"))?;
+    let output = child::output_with_stdin(
+        toolchain::python3().arg("-c").arg(program),
+        source.as_bytes(),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {python} to read {purpose} from {file_label} (is Python 3 installed?)"
+        )
+    })?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     if output.status.code() == Some(SYNTAX_ERROR_EXIT_CODE) {
         return Err(syntax_error(file_label, stderr.trim()));
     }
     if !output.status.success() {
-        bail!(
-            "{python} failed to read {purpose} from {file_label}{}",
-            if stderr.trim().is_empty() {
-                String::new()
-            } else {
-                format!(": {}", stderr.trim())
-            }
-        );
+        return Err(child_failed(
+            &output,
+            format!("{python} failed to read {purpose} from {file_label}"),
+        ));
     }
 
     let text = String::from_utf8(output.stdout).with_context(|| {
@@ -118,9 +100,7 @@ pub(crate) mod scripts {
     pub(crate) const IDENTITY_SUMMARY: &str = include_str!("python_extract/identity_summary.py");
     /// Root `memory` declaration scope extraction.
     pub(crate) const MEMORY_LAYERS: &str = include_str!("python_extract/memory_layers.py");
-    pub(crate) const CONNECTOR_INGRESS: &str = include_str!("python_extract/connector_ingress.py");
     pub(crate) const CHANNEL_INGRESS: &str = include_str!("python_extract/channel_ingress.py");
-    pub(crate) const CONNECTOR_FACTORY: &str = include_str!("python_extract/connector_factory.py");
 }
 
 #[cfg(test)]

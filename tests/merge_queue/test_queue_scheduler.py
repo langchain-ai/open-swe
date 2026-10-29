@@ -24,7 +24,7 @@ async def test_stalled_admission_does_not_consume_reconciliation_window(
     request = Mock(
         spec=MergeRequest, state="queued", last_checked_at=None, created_at=datetime.now(UTC)
     )
-    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main")
+    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main", mode="custom")
     queue.repository_name = AsyncMock(return_value="acme/widgets")
     queue.renew = AsyncMock()
     queue.entries = AsyncMock(return_value=[QueueEntry(request, 1)])
@@ -51,7 +51,8 @@ async def test_stalled_admission_does_not_consume_reconciliation_window(
     assert cancelled.is_set()
 
 
-async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() -> None:
+@pytest.mark.parametrize("scenario", ["replaced_ref", "stalled", "slow_provisioning"])
+async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(scenario: str) -> None:
     candidate = Candidate(
         repository="https://github.com/acme/widgets.git",
         branch="main",
@@ -63,7 +64,7 @@ async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() ->
     batches = [
         Mock(spec=Batch, id=uuid7(), candidate=candidate.model_dump(mode="json")) for _ in range(3)
     ]
-    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main")
+    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main", mode="custom")
     queue.repository_name = AsyncMock(return_value="acme/widgets")
     queue.renew = AsyncMock()
     queue.entries = AsyncMock(return_value=[])
@@ -75,7 +76,9 @@ async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() ->
     git = Mock(spec=CandidateGit)
 
     async def delete(batch_id: UUID, sha: str) -> None:
-        if batch_id == batches[1].id:
+        if batch_id == batches[1].id and scenario != "slow_provisioning":
+            if scenario == "stalled":
+                await asyncio.Event().wait()
             raise ValueError("Candidate ref changed; refusing deletion")
 
     git.delete = AsyncMock(side_effect=delete)
@@ -85,12 +88,19 @@ async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() ->
     async def candidate_git() -> AsyncIterator[CandidateGit]:
         nonlocal sandboxes
         sandboxes += 1
+        if scenario == "slow_provisioning":
+            await asyncio.sleep(0.2)
         yield git
 
     repo.candidate_git = candidate_git
-    await scheduler.BatchScheduler(queue, repo, QueuePolicy(checks={})).reconcile(Lease(uuid7(), 1))
+    await scheduler.BatchScheduler(queue, repo, QueuePolicy(checks={})).cleanup(
+        Lease(uuid7(), 1), seconds=0.1
+    )
     assert sandboxes == 1
-    assert {call.args[0] for call in queue.candidate_deleted.await_args_list} == {
-        batches[0].id,
-        batches[2].id,
-    }
+    deleted = {call.args[0] for call in queue.candidate_deleted.await_args_list}
+    expected = {batch.id for batch in batches}
+    if scenario == "stalled":
+        expected = {batches[0].id}
+    elif scenario == "replaced_ref":
+        expected.remove(batches[1].id)
+    assert deleted == expected

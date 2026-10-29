@@ -18,6 +18,13 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* A passage being replied to keeps its selection look after focus moves to the
+   reply field (SelectionReply). */
+::highlight(selection-reply) {
+    background-color: Highlight;
+    color: HighlightText;
+}
+
 /* A class, not `body:has(.version-mismatch-banner)`: Chrome restyles the whole
    document for a `:has()` on `body` after every DOM change. */
 body.version-mismatch {
@@ -27,6 +34,13 @@ body.version-mismatch {
     @media (width < 48rem) {
         [data-sidebar-frame] { top: 2.5rem; }
     }
+}
+
+/* Macaw's stack plus `system-ui`. On Linux without any named family, generic
+   `sans-serif` can resolve to nothing, leaving Noto Color Emoji as the first
+   installed font, which then draws every space and digit. */
+@theme {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
 @theme inline {
@@ -84,6 +98,12 @@ body.version-mismatch {
 }
 
 @layer utilities {
+  /* Placeholder instructions need readable contrast on every field surface. */
+  input:placeholder-shown::placeholder,
+  textarea:placeholder-shown::placeholder {
+    color: var(--text-secondary);
+  }
+
   /* Menus are opaque: a translucent tint let page content bleed through. */
   .dropdown-glass {
     background: var(--dropdown-glass-background, var(--bg-elevated));

@@ -68,11 +68,14 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
 
 async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db, monkeypatch):
     migrations = postgres.load_migrations()
-    (head,) = migrations.get_heads()
+    heads = migrations.get_heads()
     async with postgres.engine().begin() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
         await conn.run_sync(
-            postgres.upgrade, migrations, "open_swe", migrations.get_revision(head).down_revision
+            postgres.upgrade,
+            migrations,
+            "open_swe",
+            migrations.get_revision(heads[0]).down_revision,
         )
         await conn.execute(text("INSERT INTO alembic_version VALUES ('a8caff4f6051')"))
     with pytest.raises(CommandError, match="a8caff4f6051"):
@@ -80,7 +83,8 @@ async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db
     monkeypatch.setenv("OPENSWE_ENV", "preview")
     await postgres.migrate()
     async with postgres.connection() as conn:
-        assert await conn.scalar(text("SELECT version_num FROM open_swe.alembic_version")) == head
+        versions = await conn.scalars(text("SELECT version_num FROM open_swe.alembic_version"))
+        assert set(versions) == set(heads)
 
 
 @pytest.mark.parametrize(
