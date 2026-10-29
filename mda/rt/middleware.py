@@ -419,7 +419,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         else:
             # Without a box of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)
-        turn_git(run).start(files, held.get("work_dir"))
+        turn_git(run).start(files, held.get("work_dir"), box_setup(run).booted)
         return self._carrying(state, update)
 
     @property

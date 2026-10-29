@@ -5,7 +5,8 @@ the box MDA opened for it, in the background as the run starts, with one command
 leaves a readied box as it was. The run asks for a new box without waiting for it to
 boot, so readying it first waits for the boot. A call that needs the box waits for the
 boot (``booted``), and a tool that may change a checkout for the readying (``done``),
-both in ``rt.file_tools``; nothing else does.
+both in ``rt.file_tools``; the turn's git baseline (``rt.git_evidence``) waits for the
+boot too, so a box that never booted is never reached for, and so never made again.
 """
 
 import asyncio

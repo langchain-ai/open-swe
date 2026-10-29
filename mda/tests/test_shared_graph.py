@@ -78,6 +78,8 @@ def _thread(thread_id: str) -> ManagedRunConfig:
 
 # Each run's catalog by its token, whose tool specs the fake backend reads to it.
 _CATALOGS: dict[str, Catalog] = {}
+# What the fake backend's preparation writes to each run's state.
+_PREPARE_UPDATE: dict[str, JsonValue] = {}
 
 
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
@@ -156,6 +158,7 @@ def backend_calls(
         calls.append((hook, headers["Authorization"], operation))
         if hook == "prepare":
             prepared.append((json.get("sandbox_id"), json.get("sandbox_error")))
+            return httpx2.Response(200, request=request, json={"update": _PREPARE_UPDATE})
         if hook == "browser":
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
@@ -353,11 +356,15 @@ async def test_a_box_that_never_boots_ends_the_run_at_its_first_shell_call_with_
     """The run prepares with the box it asked for, before the box boots; the first call that
     needs the box finds it failed, and the backend hears why so it can tell the person."""
     unreachable: list[JsonValue] = []
+    # Where the box's checkouts are, so the turn's git baseline is taken.
+    monkeypatch.setitem(_PREPARE_UPDATE, "work_dir", "/workspace")
     monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", lambda *args: "box-thread-1")
     monkeypatch.setattr(
         mda_runtime,
         "_resolve_managed_sandbox",
-        MagicMock(side_effect=ResourceCreationError("Image pull failed", resource_type="sandbox")),
+        opened := MagicMock(
+            side_effect=ResourceCreationError("Image pull failed", resource_type="sandbox")
+        ),
     )
     notify = Outbox.notify
 
@@ -380,6 +387,8 @@ async def test_a_box_that_never_boots_ends_the_run_at_its_first_shell_call_with_
 
     assert prepared == [("box-thread-1", None)]
     assert unreachable == ["ResourceCreationError: Image pull failed"]
+    # Only the boot opens the box: nothing reaches for it again, which would make another.
+    assert opened.call_count == 1
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
