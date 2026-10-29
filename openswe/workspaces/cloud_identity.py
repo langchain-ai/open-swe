@@ -85,6 +85,19 @@ _MANAGED_NAMES = {
 }
 
 
+def federated_cloud(rule: object) -> str | None:
+    """The cloud a proxy rule federates with; LangSmith fixes these rules at sandbox creation."""
+    if not isinstance(rule, dict):
+        return None
+    cloud = rule.get("type")
+    if not isinstance(cloud, str) or cloud not in _CLOUDS:
+        return None
+    settings = rule.get(cloud)
+    if not isinstance(settings, dict) or not _FEDERATION_FIELDS[cloud] & settings.keys():
+        return None
+    return cloud
+
+
 def _validate_federated(cloud: str, settings: object, tag_ids: set[str]) -> bool:
     """Validate ``settings`` when they federate; whether they do."""
     if not isinstance(settings, dict) or not _FEDERATION_FIELDS[cloud] & settings.keys():

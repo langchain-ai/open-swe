@@ -578,8 +578,10 @@ test.describe("Workspaces", () => {
     expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
     expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
 
-    // A later run is told about the workspace: the prompt is appended verbatim.
-    await typeIntoComposer(page, "Thanks — anything else needed?");
+    // A later thread is told about the workspace: the prompt is appended verbatim.
+    // This thread's own system prompt was fixed by its first run, before the save.
+    await openNewAgentHome(page);
+    await typeIntoComposer(page, "Anything else to do? E2E_FOLLOWUP");
     await expect(
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();

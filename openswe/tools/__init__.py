@@ -40,13 +40,14 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "execute_database_sql": ".repair_data",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
-    "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
+    "configure_workspace": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
@@ -63,6 +64,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
+    "snapshotctl": ".workspaces",
     "send_announcement": ".send_announcement",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
@@ -123,13 +125,14 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "execute_database_sql",
     "write_database_rows",
     "read_only_sql",
     "read_user_settings",
     "record_human_input",
     "recreate_sandbox",
-    "refresh_workspace_start",
     "configure_repository",
+    "configure_workspace",
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
@@ -146,6 +149,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_pull_requests",
+    "snapshotctl",
     "send_announcement",
     "start_thread",
     "slack_add_reaction",
@@ -219,7 +223,7 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
-    from openswe.tools.repair_data import write_database_rows
+    from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
     from openswe.tools.request_human_review import (
@@ -245,10 +249,11 @@ if TYPE_CHECKING:
     from openswe.tools.web_search import web_search
     from openswe.tools.workspaces import (
         configure_repository,
+        configure_workspace,
         delete_workspace,
         list_workspaces,
         publish_workspace,
-        refresh_workspace_start,
+        snapshotctl,
     )
 
 

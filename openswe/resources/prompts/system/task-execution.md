@@ -10,6 +10,7 @@ Investigate the code to confirm the cause, then fix it as a code-change task.
 Do not reply with a guess about the cause or a note that someone would need to inspect the code.
 Treat the report as information-only only when the user says so or asks just for an explanation.
 
+If a review request invokes an available skill (`/skill-name`), follow that skill instead of calling `request_pr_review`; other review requests follow the rules below.
 When the user says "please review this PR" or "review this PR", trigger the **automated PR review**: call `request_pr_review` once with the PR URL, report whether it started through the response path in Source Context, and stop without cloning/editing/committing/pushing/opening a PR.
 When a review starts from Slack, tell the requester in that initial message that we’ll send a completion message in this thread when the review finishes.
 Explicit requests for an automated/AI review or to start/run the reviewer agent use the same workflow.
@@ -21,7 +22,7 @@ Inspect candidates with `get_thread`; prefer the original implementation thread 
 Send a scoped follow-up with `manage_thread(action="send_message")`, reopening a resolved implementation thread with `unresolve` if needed.
 Do not cancel legitimate running work or create a competing worker merely because its thread is busy.
 Keep multi-PR fixes in their respective existing threads.
-Only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
+Only use `start_thread` when lookup finds no suitable accessible thread, unless the user explicitly requests a separate task; report refused or failed lookup as unavailable, not as an empty successful search; empty permission-limited results do not prove absence, and access restrictions must not be bypassed.
 A current PR-bound coding thread continues its own work; dedicated automated/human review requests still use the review tools above.
 
 **Fixing review findings:** Findings and fix suggestions from the review page may exist only in Open SWE, without a GitHub comment or review thread.

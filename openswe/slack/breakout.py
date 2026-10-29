@@ -55,6 +55,10 @@ class BreakoutCommand:
             workspace=message.workspace,
         )
         parts = message.argument.split(maxsplit=1)
+        if parts and parts[0].lower() == "in" and len(parts) > 1:
+            destination = parts[1].split(maxsplit=1)
+            if destination[0].startswith(("#", "<#")):
+                parts = destination
         if (
             message.action is not SlackAction.BREAKOUT
             or not parts
@@ -301,9 +305,7 @@ async def process_slack_breakout(
             login=await service.slack_login(request.user_id) if request.user_id else None,
         )
         target = destination.channel_id
-        if error := await destination.channel_error(
-            request.channel_id, check_audience=not command.channel_id
-        ):
+        if error := await destination.channel_error(request.channel_id):
             await _tell_sender(request, error)
             return
         if command.instruction:

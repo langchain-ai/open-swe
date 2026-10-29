@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { useState } from "react"
 import {
   HoverCard,
@@ -63,12 +64,15 @@ export function ContextWindowMeter({
       openDelay={150}
     >
       <HoverCardTrigger asChild>
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
           aria-label={label}
           className={cn(
-            "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-secondary transition-colors outline-none",
-            "hover:bg-surface-level-1-hover data-[state=open]:bg-surface-level-1-hover",
-            "focus-visible:ring-2 focus-visible:ring-focus"
+            "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+            "size-7 cursor-pointer justify-center rounded-full border border-transparent p-0 text-secondary outline-none",
+            "hover:bg-surface-level-1-hover data-[state=open]:bg-surface-level-1-hover"
           )}
           data-testid="context-window-indicator"
           // Touch screens never hover, so a tap opens the detail too.
@@ -84,7 +88,7 @@ export function ContextWindowMeter({
             size={20}
             strokeWidth={3}
           />
-        </button>
+        </Button>
       </HoverCardTrigger>
       <HoverCardContent
         align="end"

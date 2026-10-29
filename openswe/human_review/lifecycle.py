@@ -923,8 +923,9 @@ class ReviewPicks:
             message = participant.pick_message
             if message is None:
                 continue
-            status = "Review submitted on GitHub. This assignment is no longer active."
-            if not await message.show(status):
+            pr = self.request.pull_request
+            status = f"Review submitted for <{pr.url}|{pr.label}>."
+            if not await message.replace(status):
                 continue
             if participant.user.slack_user_id:
                 await note_for_concierge(
@@ -932,7 +933,7 @@ class ReviewPicks:
                     message.channel_id,
                     prompt(
                         "slack/concierge-dm-edited",
-                        text=message.text,
+                        text=status,
                         status=status,
                     ),
                 )

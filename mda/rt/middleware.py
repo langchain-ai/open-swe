@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -93,8 +94,10 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
+from rt.git_baseline import TurnBaseline
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
+from rt.model_calls import PROMPT_CACHE_TTL
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.tools import STATE_KEY, cited, run_id, tool_report
@@ -128,7 +131,8 @@ def _merge(
     left: dict[str, JsonValue] | None, right: dict[str, JsonValue] | None
 ) -> dict[str, JsonValue]:
     held = left or {}
-    if right is not None and "git_trace_baseline" in right:
+    # A cleared baseline starts the turn's git trace afresh; the baseline itself joins it.
+    if right is not None and "git_trace_baseline" in right and right["git_trace_baseline"] is None:
         held = {key: value for key, value in held.items() if not key.startswith("git_trace_")}
     return {**held, **(right or {})}
 
@@ -181,6 +185,12 @@ def _decode(value: object) -> object:
     if isinstance(value, list):
         return [_decode(v) for v in value]
     return value
+
+
+def _holding(values: Mapping[str, object], held: Mapping[str, JsonValue]) -> dict[str, object]:
+    """``values``, with ``held`` added to the graph state the backend keeps."""
+    prior = values.get(STATE_KEY)
+    return {**values, STATE_KEY: {**(prior if isinstance(prior, Mapping) else {}), **held}}
 
 
 def _apply(reply: PhaseResult) -> dict[str, object]:
@@ -289,6 +299,31 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**tool_call, "args": args}))
 
 
+def _with_run_prompt(
+    static: SystemMessage | None, prompt: str, model: BaseChatModel | str
+) -> SystemMessage:
+    """The graph's own system prompt, then the run's.
+
+    What the graph adds is the same for every run, so it leads and, for Anthropic,
+    ends in a cache breakpoint of its own: a later run with the same tools reuses it
+    whatever its prompt.
+    """
+    if static is None or not static.content:
+        return SystemMessage(content=prompt)
+    blocks: list[str | dict] = (
+        [{"type": "text", "text": static.content}]
+        if isinstance(static.content, str)
+        else list(static.content)
+    )
+    if isinstance(model, ChatAnthropic):
+        last = blocks[-1]
+        blocks[-1] = {
+            **({"type": "text", "text": last} if isinstance(last, str) else last),
+            "cache_control": {"type": "ephemeral", "ttl": PROMPT_CACHE_TTL},
+        }
+    return static.model_copy(update={"content": [*blocks, {"type": "text", "text": prompt}]})
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
 
@@ -306,6 +341,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
+        self._baselines = RunLocal(TurnBaseline)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
 
@@ -373,6 +409,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
+        await self._backend.run.load_tool_specs(run_id())
         # What an earlier run left unsent goes out before anything this one does.
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
@@ -394,6 +431,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 sandbox_error=opened.error,
             ),
         )
+        # Off the first model call's path: nothing changes the box before a tool runs.
+        self._baselines.get(self._backend.run).start(self._backend, run_id())
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
@@ -495,35 +534,47 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if own is not None:
             # The run's own model, unless the loop names another for this call.
             request = request.override(model=own)
+            models = self._backend.run.catalog.models
+            if models is not None:
+                self._traces.get(self._backend.run).record_model(models.model.model_id)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
             return await handler(request)
         planned = ModelCall.model_validate(raw)
-        existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
-        request = request.override(system_message=SystemMessage(content=prompt))
+        static = request.system_message
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
+            self._traces.get(self._backend.run).record_model(model.model_id)
         try:
-            return await handler(request)
+            return await handler(
+                request.override(
+                    system_message=_with_run_prompt(static, planned.system_prompt, request.model)
+                )
+            )
         except Exception as exc:
             if planned.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
+            fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            self._traces.get(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(
                 request.override(
-                    model=build_model(planned.fallback, use_gateway=planned.use_gateway)
+                    model=fallback,
+                    system_message=_with_run_prompt(static, planned.system_prompt, fallback),
                 )
             )
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         self._backend.outbox.adopt(state)
-        return self._carrying(state, await self._after_model(state))
+        # Before any tool the model called runs.
+        baseline = await self._baselines.get(self._backend.run).taken()
+        update = await self._after_model(state)
+        return self._carrying(state, _holding(update or {}, baseline) if baseline else update)
 
     async def _after_model(self, state: RunState) -> dict[str, object] | None:
         if self._loop is None:
@@ -539,9 +590,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # What the backend has not taken by now waits in the thread's state for its next run.
         return self._carrying(state, await self._after_agent(state))
 
-    async def _after_agent(self, state: RunState) -> dict[str, object] | None:
+    async def _after_agent(self, run_state: RunState) -> dict[str, object] | None:
         metadata = self._trace_metadata()
         trace = self._traces.get(self._backend.run)
+        # A run that ended before its first model call answered reconciles against it too.
+        state = _holding(run_state, await self._baselines.get(self._backend.run).taken())
         try:
             if self._loop is not None:
                 ended = await self._loop.after_agent(state, trace.evidence)
@@ -842,7 +895,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                             reply.grant,
                             # A worker runs on its coordinator's catalog until it adopts its own.
                             _json_object.validate_python(
-                                self._backend.run.catalog.model_dump(mode="json")
+                                self._backend.run.catalog.names_only().model_dump(mode="json")
                             ),
                         ),
                     )
