@@ -2,8 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from openswe_shared.input_messages import PersonIdentity
 
+from openswe.input_messages import PersonIdentity
 from openswe.users import User
 from openswe.utils import thread_participants as participants
 

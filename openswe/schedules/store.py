@@ -16,7 +16,6 @@ from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
-from openswe_shared.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -40,6 +39,7 @@ from openswe.github.http import github_reauth_message
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
+from openswe.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt

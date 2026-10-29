@@ -14,7 +14,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, cast
 
-import httpx2
 from langchain_core.messages.content import create_text_block
 from managed_deepagents import (
     ChannelRunOptions,
@@ -25,15 +24,6 @@ from managed_deepagents import (
     LinearSessionPromptedEvent,
 )
 from managed_deepagents._channels.http.endpoint import EndpointDeclined  # noqa: PLC2701
-from openswe_shared.images import dedupe_urls, extract_image_urls, fetch_image_block
-from openswe_shared.input_messages import (
-    PersonIdentity,
-    RunInput,
-    human_input,
-    system_input,
-    system_introduction,
-)
-from openswe_shared.prompting import prompt
 from pydantic import JsonValue
 from runtime_api.linear import (
     RECORD_LINEAR_DELIVERY,
@@ -46,9 +36,10 @@ from runtime_api.linear import (
     LinearSessionTurn,
 )
 
+from rt.images import extract_image_urls, fetch_image_block
+from rt.input_messages import RunInput, human_input, system_input, system_introduction
 from rt.intake import ask_backend
-
-_IMAGE_TIMEOUT: Final = httpx2.Timeout(30.0, connect=10.0)
+from rt.prompts import prompt
 
 UNREADABLE_SESSION: Final = (
     "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
@@ -106,14 +97,10 @@ def _person(person: object) -> LinearPerson | None:
     )
 
 
-def _identity(author: LinearPerson) -> PersonIdentity:
+def _sender_id(author: LinearPerson) -> str:
+    """The author as the agent knows Linear people, as the backend names them."""
     key = author.id or author.email or author.name or "unknown"
-    person: PersonIdentity = {"id": f"linear:{key.replace(' ', '-')}"}
-    if author.name:
-        person["display_name"] = author.name
-    if author.email:
-        person["email"] = author.email
-    return person
+    return f"linear:{key.replace(' ', '-')}"
 
 
 @dataclass(frozen=True)
@@ -170,7 +157,7 @@ class SessionTurn:
         """The issue, as the system tells it, then the author's words, each with its images."""
         issue, author = self.turn.issue, self.turn.author
         issue_prompt = prompt(
-            "runs/linear-issue",
+            "linear-issue",
             repository=run.repository,
             title=run.title,
             triggered_by=author.name or None,
@@ -182,13 +169,13 @@ class SessionTurn:
         description_urls = extract_image_urls(issue.description or "")
         comment_urls = extract_image_urls(self.turn.body)
         images = await _images([*description_urls, *comment_urls])
-        issue_blocks: list[dict[str, JsonValue]] = [
-            cast(dict[str, JsonValue], create_text_block(issue_prompt)),
+        issue_blocks: list[dict[str, object]] = [
+            cast(dict[str, object], create_text_block(issue_prompt)),
             *(images[url] for url in description_urls if url in images),
         ]
         comment_images = [images[url] for url in comment_urls if url in images]
-        body: str | list[dict[str, JsonValue]] = (
-            [cast(dict[str, JsonValue], create_text_block(self.turn.body)), *comment_images]
+        body: str | list[dict[str, object]] = (
+            [cast(dict[str, object], create_text_block(self.turn.body)), *comment_images]
             if comment_images
             else self.turn.body
         )
@@ -221,7 +208,7 @@ class SessionTurn:
                 human_input(
                     body,
                     {
-                        "sender_id": _identity(author)["id"],
+                        "sender_id": _sender_id(author),
                         "surface": "linear",
                         "kind": "human",
                         "data": {
@@ -234,15 +221,12 @@ class SessionTurn:
         }
 
 
-async def _images(urls: list[str]) -> dict[str, dict[str, JsonValue]]:
+async def _images(urls: list[str]) -> dict[str, dict[str, object]]:
     """Image blocks by URL, for the images that could be fetched."""
-    urls = dedupe_urls(urls)
-    if not urls:
-        return {}
-    async with httpx2.AsyncClient(timeout=_IMAGE_TIMEOUT) as client:
-        fetched = await asyncio.gather(*(fetch_image_block(url, client) for url in urls))
+    urls = list(dict.fromkeys(urls))
+    fetched = await asyncio.gather(*(fetch_image_block(url) for url in urls))
     return {
-        url: cast(dict[str, JsonValue], block)
+        url: cast(dict[str, object], block)
         for url, block in zip(urls, fetched, strict=True)
         if block
     }

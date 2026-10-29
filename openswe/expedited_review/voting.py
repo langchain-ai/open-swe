@@ -11,7 +11,6 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
-from openswe_shared.input_messages import PersonIdentity, split_person_id
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.channels import sendable_channel, still_internal
@@ -33,6 +32,7 @@ from openswe.human_review.people import (
     resolve_writer,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload, context
 from openswe.slack.client import update_slack_message

@@ -10,7 +10,6 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import APIStatusError
-from openswe_shared.input_messages import dynamic_context_hash, person_introduction
 
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, profiles
@@ -20,6 +19,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads import diffs as thread_diffs

@@ -21,10 +21,10 @@ import re
 from collections.abc import Mapping
 from typing import Any, Self
 
-from openswe_shared.input_messages import input_message_text, message_sender_id
 from pydantic import BaseModel, ConfigDict
 
 from openswe.github.pull_requests import PullRequest
+from openswe.input_messages import input_message_text, message_sender_id
 from openswe.review_guide.buttons import LABELS as BUTTON_LABELS
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.utils.thread_ops import langgraph_client

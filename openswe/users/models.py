@@ -14,7 +14,6 @@ from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from openswe_shared.input_messages import PersonIdentity, split_person_id
 from sqlalchemy import (
     ForeignKey,
     Select,
@@ -33,6 +32,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.users.authorization import UnauthorizedUser, is_authorized_github_login
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject

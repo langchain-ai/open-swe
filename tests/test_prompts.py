@@ -68,7 +68,7 @@ def test_prompt_rejects_paths_outside_resources() -> None:
 
 def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     source = StructuredTool.from_function(sample_tool)
-    monkeypatch.setattr("openswe_shared.prompting.load_prompt", lambda _: "Resource description.")
+    monkeypatch.setattr("openswe.prompts._load_prompt", lambda _: "Resource description.")
 
     [described] = apply_tool_descriptions([source])
 
@@ -80,7 +80,7 @@ def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPat
 
 def test_described_function_tools_are_reused_across_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     # Reuse keeps each tool's memoized model-facing schema from being rebuilt every run.
-    monkeypatch.setattr("openswe_shared.prompting.load_prompt", lambda _: "Resource description.")
+    monkeypatch.setattr("openswe.prompts._load_prompt", lambda _: "Resource description.")
 
     [first] = apply_tool_descriptions([sample_tool])
     [second] = apply_tool_descriptions([sample_tool])

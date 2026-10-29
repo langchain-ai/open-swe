@@ -4,14 +4,14 @@ from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
-from openswe_shared.input_messages import (
+
+from openswe.github.proxy import maybe_refresh_proxy_token
+from openswe.input_messages import (
     RunMessage,
     dynamic_context_hash,
     run_context,
     visible_dynamic_context_hashes,
 )
-
-from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.schemas import Thread

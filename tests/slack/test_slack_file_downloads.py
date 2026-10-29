@@ -5,10 +5,10 @@ from urllib.parse import urlparse
 
 import httpx2
 import pytest
-from openswe_shared import url_safety
 
 from openswe.slack import client as slack_client
 from openswe.slack import staged_files
+from openswe.utils import url_safety
 
 
 class DownloadStream(httpx2.AsyncByteStream):

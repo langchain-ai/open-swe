@@ -1,7 +1,9 @@
+import socket
 import uuid
 from typing import cast
 
 import pytest
+import rt.images as images
 import rt.linear as linear
 from managed_deepagents import (
     LinearChannelThread,
@@ -111,7 +113,7 @@ def _created(**session: object) -> LinearSessionCreatedEvent:
 async def test_a_session_turn_starts_the_run_the_backend_planned(
     backend: _Backend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def image(url: str, _client: object) -> dict[str, str]:
+    async def image(url: str) -> dict[str, str]:
         return {"type": "image", "url": url}
 
     monkeypatch.setattr(linear, "fetch_image_block", image)
@@ -228,3 +230,24 @@ async def test_issue_events_start_nothing(backend: _Backend) -> None:
     (delivery,) = backend.recorded
     assert (delivery.key, delivery.delivery_id) == ("Issue.create", "delivery-1")
     assert backend.turns == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "address"),
+    [
+        ("https://uploads.example/a.png", "169.254.169.254"),
+        ("https://uploads.example/a.png", "10.0.0.5"),
+        ("http://uploads.example/a.png", "93.184.216.34"),
+    ],
+    ids=["metadata-address", "private-address", "plain-http"],
+)
+async def test_a_linked_image_is_fetched_only_over_https_from_a_public_address(
+    monkeypatch: pytest.MonkeyPatch, url: str, address: str
+) -> None:
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443))],
+    )
+    assert await images.fetch_image_block(url) is None

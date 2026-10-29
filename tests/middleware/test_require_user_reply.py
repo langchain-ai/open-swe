@@ -21,8 +21,8 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import StateSnapshot
-from openswe_shared.input_messages import message_sender_id
 
+from openswe.input_messages import message_sender_id
 from openswe.middleware.require_user_reply import (
     REPLY_GUARD,
     SLACK_REPLY_SURFACE,

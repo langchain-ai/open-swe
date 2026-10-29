@@ -12,8 +12,11 @@ from typing import Any, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
-from openswe_shared import images
-from openswe_shared.input_messages import (
+from pydantic import JsonValue
+
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.human_review.requests import HumanReviewRequest
+from openswe.input_messages import (
     ChannelIdentity,
     InputMessageContext,
     MessageKind,
@@ -30,10 +33,6 @@ from openswe_shared.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from pydantic import JsonValue
-
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-from openswe.human_review.requests import HumanReviewRequest
 from openswe.prompts import prompt
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
@@ -978,8 +977,8 @@ async def _process_slack_mention_impl(
     clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
-    image_urls = images.dedupe_urls(
-        [url for msg in source_messages for url in images.extract_image_urls(msg.get("text", ""))]
+    image_urls = common.dedupe_urls(
+        [url for msg in source_messages for url in common.extract_image_urls(msg.get("text", ""))]
         + [url for msg in source_messages for url in slack_utils.slack_image_file_urls(msg)]
         + image_urls_from_links
     )

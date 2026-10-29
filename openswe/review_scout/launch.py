@@ -2,11 +2,11 @@ import asyncio
 import logging
 
 from langgraph_sdk.errors import NotFoundError
-from openswe_shared.input_messages import build_run_input
 from pydantic import BaseModel, ValidationError
 
 from openswe.database import postgres
 from openswe.dispatch import create_durable_run, dispatch_client
+from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
 from openswe.thread_ids import review_scout_thread_id

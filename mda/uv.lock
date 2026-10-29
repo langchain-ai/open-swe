@@ -1664,6 +1664,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "deepagents" },
     { name = "httpx2" },
+    { name = "jinja2" },
     { name = "langchain", extra = ["mcp"] },
     { name = "langchain-anthropic" },
     { name = "langchain-fireworks" },
@@ -1673,7 +1674,6 @@ dependencies = [
     { name = "managed-deepagents" },
     { name = "mcp" },
     { name = "open-swe-runtime-api" },
-    { name = "open-swe-shared" },
     { name = "pydantic" },
     { name = "stagehand" },
     { name = "stagehand-middleware" },
@@ -1689,6 +1689,7 @@ test = [
 requires-dist = [
     { name = "deepagents", specifier = "==0.7.32" },
     { name = "httpx2", specifier = ">=2.12.0" },
+    { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.7" },
     { name = "langchain-anthropic", specifier = ">=1.7.6" },
     { name = "langchain-fireworks", specifier = ">=1.7.1,<2.0.0" },
@@ -1698,7 +1699,6 @@ requires-dist = [
     { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0" },
     { name = "open-swe-runtime-api", editable = "../packages/runtime-api" },
-    { name = "open-swe-shared", editable = "../packages/shared" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "stagehand", specifier = "==4.3.0" },
     { name = "stagehand-middleware", specifier = "==0.1.0" },
@@ -1720,23 +1720,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
-
-[[package]]
-name = "open-swe-shared"
-version = "0.0.0"
-source = { editable = "../packages/shared" }
-dependencies = [
-    { name = "httpx2" },
-    { name = "jinja2" },
-    { name = "langchain-core" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx2", specifier = ">=2.12.0" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "langchain-core", specifier = ">=1.4.0" },
-]
 
 [[package]]
 name = "openai"

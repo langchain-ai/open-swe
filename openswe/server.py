@@ -58,12 +58,6 @@ from langchain_core.tools import BaseTool
 from langchain_core.tools import tool as as_tool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
-from openswe_shared.input_messages import (
-    dynamic_context_hash,
-    message_sender_id,
-    person_introduction,
-    visible_dynamic_context_hashes,
-)
 
 from openswe.agent_api.connections import acting_user
 from openswe.analytics.usage import record_agent_invocation_usage
@@ -91,6 +85,12 @@ from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
+from openswe.input_messages import (
+    dynamic_context_hash,
+    message_sender_id,
+    person_introduction,
+    visible_dynamic_context_hashes,
+)
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.managed import instance_gateway, managed_mcp_source

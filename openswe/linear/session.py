@@ -12,7 +12,6 @@ on the same issue is a new conversation, with the issue's title.
 
 from typing import cast
 
-from openswe_shared.images import extract_image_urls
 from pydantic import JsonValue
 from runtime_api.linear import (
     DeclineReason,
@@ -32,6 +31,7 @@ from openswe.threads.router import (
 )
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
+from openswe.utils.multimodal import extract_image_urls
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace
 

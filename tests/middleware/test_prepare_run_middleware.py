@@ -9,8 +9,8 @@ import pytest
 from langchain.agents.middleware import AgentState
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
-from openswe_shared.input_messages import human_input, person_introduction
 
+from openswe.input_messages import human_input, person_introduction
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from openswe.run_config import RunConfig
 from openswe.server import PrepareAgentRunMiddleware, _thread_participants

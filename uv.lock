@@ -2215,7 +2215,6 @@ dependencies = [
     { name = "markdown-it-py" },
     { name = "markdownify" },
     { name = "open-swe-runtime-api" },
-    { name = "open-swe-shared" },
     { name = "openai" },
     { name = "pillow" },
     { name = "pygments" },
@@ -2266,7 +2265,6 @@ requires-dist = [
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "open-swe-runtime-api", editable = "packages/runtime-api" },
-    { name = "open-swe-shared", editable = "packages/shared" },
     { name = "openai", specifier = ">=3.10.0" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
@@ -2294,23 +2292,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
-
-[[package]]
-name = "open-swe-shared"
-version = "0.0.0"
-source = { editable = "packages/shared" }
-dependencies = [
-    { name = "httpx2" },
-    { name = "jinja2" },
-    { name = "langchain-core" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx2", specifier = ">=2.12.0" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "langchain-core", specifier = ">=1.4.0" },
-]
 
 [[package]]
 name = "openai"

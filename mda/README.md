@@ -222,7 +222,7 @@ They ask the backend only for what needs Open SWE's data, through the typed chan
 - `start_linear_session`: a session turn's author, issue and words.
   The backend checks the author has signed in to Open SWE with the email Linear knows them by, picks the repository (the turn's, the thread's, the issue's, then the defaults) and workspace, indexes the thread and signs its run context; or says why it starts nothing.
 
-The handler then writes the run's input with the prompts and input message envelope the backend uses too (`openswe_shared`), with the images the issue and the turn show, and starts it with the backend's context, metadata and run-complete webhook.
+The handler then writes the run's input: the `linear-issue` prompt (`prompts/`) and the backend's input message envelope, copied in `rt/input_messages.py` (AGENTS.md's exception for channel input), with the images the issue and the turn show, fetched only over HTTPS from public addresses (`rt/images.py`). It starts the run with the backend's context, metadata and run-complete webhook.
 When the backend starts nothing, the handler tells the session why: no repository named, one outside the allowlist, or the author must sign in first.
 
 Threads of Linear sessions belong to the channel, and MDA scopes threads by owner.

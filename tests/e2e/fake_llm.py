@@ -263,7 +263,7 @@ class SystemPromptRecord:
 
 LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
-# Opening line of packages/shared/src/openswe_shared/prompts/thread-title.md. Title calls get an
+# Opening line of openswe/resources/prompts/thread-title.md. Title calls get an
 # empty reply so background titling never renames threads or code channels mid-spec.
 _THREAD_TITLE_PROMPT_PREFIX = "Generate a title that will help the user recognize"
 

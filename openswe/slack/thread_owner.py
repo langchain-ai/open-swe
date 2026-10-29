@@ -3,8 +3,7 @@
 import logging
 import time
 
-from openswe_shared.input_messages import SystemIdentity
-
+from openswe.input_messages import SystemIdentity
 from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.channels import SlackChannel

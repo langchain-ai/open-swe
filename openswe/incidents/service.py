@@ -8,7 +8,6 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import HTTPException
-from openswe_shared.input_messages import PersonIdentity
 from pydantic import ValidationError
 
 from openswe.config import ENV
@@ -27,6 +26,7 @@ from openswe.incidents.records import (
     IncidentReports,
     Incidents,
 )
+from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackClient
 from openswe.utils.langsmith import get_langsmith_trace_url

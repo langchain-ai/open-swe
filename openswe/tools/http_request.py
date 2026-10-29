@@ -3,11 +3,11 @@ import logging
 from typing import Any
 
 import httpx2
-from openswe_shared.url_safety import UnsafeUrlError
-from openswe_shared.url_safety import request_with_safe_redirects as _request_with_safe_redirects
 
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
+from openswe.utils.url_safety import UnsafeUrlError
+from openswe.utils.url_safety import request_with_safe_redirects as _request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 

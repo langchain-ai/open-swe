@@ -3,11 +3,11 @@
 import logging
 
 from fastapi import BackgroundTasks
-from openswe_shared.input_messages import PersonIdentity
 from pydantic import ValidationError
 
 from openswe.expedited_review import card
 from openswe.expedited_review.voting import CardAction, process_vote
+from openswe.input_messages import PersonIdentity
 from openswe.slack.blocks import conversation_input, modal, view_payload
 from openswe.slack.client import open_slack_modal
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction, SlackModalOrigin

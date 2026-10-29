@@ -15,12 +15,8 @@ from typing import Any
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
-from openswe_shared.input_messages import (
-    dynamic_context_hash,
-    run_context,
-    visible_dynamic_context_hashes,
-)
 
+from openswe.input_messages import dynamic_context_hash, run_context, visible_dynamic_context_hashes
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.review_guide.advance import approve_click

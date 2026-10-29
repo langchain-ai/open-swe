@@ -14,13 +14,6 @@ from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from openswe_shared.input_messages import (
-    EVENT_MESSAGE_PREFIX,
-    RunMessage,
-    Surface,
-    SystemIdentity,
-    build_input_messages,
-)
 from pydantic import BaseModel, JsonValue
 from sqlalchemy import Text, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -30,6 +23,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.dispatch import create_durable_run, dispatch_client
+from openswe.input_messages import (
+    EVENT_MESSAGE_PREFIX,
+    RunMessage,
+    Surface,
+    SystemIdentity,
+    build_input_messages,
+)
 from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
 

@@ -16,8 +16,6 @@ Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents,
 
 MDA owns the run: the model loop, checkpoints, the thread's sandbox, every tool call, and every hook and middleware around them.
 The backend is a set of stateless APIs MDA calls: typed endpoints at `/agent-api/{endpoint}` (`packages/runtime-api`, imported by both sides), each answered from the run token the router signs and the request alone, on whichever replica it lands.
-MDA's channels call the backend the same way, under `/mda/channel-api/{endpoint}`, signed with `MDA_SERVICE_SECRET` instead of a run token.
-Code both sides build runs from (the prompts, the input message envelope, fetching linked images) lives in `packages/shared` (`openswe_shared`), imported by both; when `mda/` needs a backend helper, move it there rather than copying it.
 Shape new behavior to fit:
 
 - Control flow (when to nudge, route, stop, refresh) is middleware in `mda/rt`; checks around the file and shell tools go in `rt/file_tools.py`.
@@ -46,14 +44,15 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - Absolute imports across packages; same-package imports may start with one dot.
   Never use parent-relative imports.
 - New dashboard endpoints go in the `router` of the package that owns the feature, never in `openswe/dashboard/routes.py`.
-- Model-facing prompts live in `packages/shared/src/openswe_shared/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")` (`openswe_shared.prompting`), on the backend and in `mda/` alike.
+- Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
+  Exception: a prompt only an MDA channel handler renders lives in `mda/prompts/`, rendered with `rt.prompts.prompt`.
 - Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
   Preserve structured messages through delivery instead of wrapping their envelopes again.
   For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
 - Keep comments minimal and only explain non-obvious reasons.
-- Before asking a clarifying question about Open SWE's behavior or guidance, read where it lives (prompts in `packages/shared/src/openswe_shared/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
+- Before asking a clarifying question about Open SWE's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions.
   Typed and slash commands are optional shortcuts, never the only way.
@@ -94,6 +93,8 @@ Never run the full test suite locally; run only tests related to the change.
 
 `mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`).
 Never import `openswe` there; test each side of an endpoint against the models it exchanges.
+Exception for channel input: a channel handler in `mda/` that writes a run's input keeps its own copy of what it needs from the backend, and only that: the `<input-message>` envelope (`mda/rt/input_messages.py`, standard library only, held byte-identical to `openswe.input_messages` by `tests/agent/test_mda_input_messages.py`) and fetching the images a message links to (`mda/rt/images.py`, over `rt.public_http`).
+Change the backend's envelope and the copy together.
 
 Tests are maintenance cost.
 Add one only when you can name a concrete regression existing coverage would miss.

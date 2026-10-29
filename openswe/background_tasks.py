@@ -14,10 +14,10 @@ from typing import Any, Literal, NamedTuple
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
-from openswe_shared.input_messages import InputMessageContext, SystemIdentity
 from pydantic import JsonValue
 
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
+from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox

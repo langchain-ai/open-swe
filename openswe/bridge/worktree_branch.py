@@ -17,9 +17,9 @@ from collections.abc import Sequence
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from openswe_shared.input_messages import dynamic_context_hash, input_message_text
 from pydantic import BaseModel, Field
 
+from openswe.input_messages import dynamic_context_hash, input_message_text
 from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)

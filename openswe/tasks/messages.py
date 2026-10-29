@@ -6,12 +6,6 @@ from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
-from openswe_shared.input_messages import (
-    EVENT_MESSAGE_PREFIX,
-    RunMessage,
-    SystemIdentity,
-    build_input_messages,
-)
 from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import ColumnElement, ForeignKey, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -21,6 +15,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.dispatch import create_durable_run, dispatch_client
+from openswe.input_messages import (
+    EVENT_MESSAGE_PREFIX,
+    RunMessage,
+    SystemIdentity,
+    build_input_messages,
+)
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.store import TaskDelegation
 

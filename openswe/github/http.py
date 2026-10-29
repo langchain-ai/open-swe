@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, urlparse
 
 import httpx2
-from openswe_shared.url_safety import request_with_safe_redirects
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.github.queue import (
@@ -46,6 +45,7 @@ from openswe.github.queue import (
 )
 from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.http_pool import pooled_transport
+from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient

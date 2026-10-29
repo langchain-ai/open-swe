@@ -5,10 +5,10 @@ from collections.abc import Collection, Mapping
 from typing import Any
 
 from langgraph_sdk import get_client
-from openswe_shared.input_messages import PersonIdentity
 
 from openswe.github.comments import fetch_github_thread_participants
 from openswe.github.thread_token import resolve_thread_github_token
+from openswe.input_messages import PersonIdentity
 from openswe.slack.client import fetch_slack_thread_messages
 from openswe.source_context import SourceContext
 from openswe.users import User

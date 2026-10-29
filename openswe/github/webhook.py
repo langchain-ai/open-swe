@@ -9,17 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from langgraph_sdk.errors import NotFoundError
-from openswe_shared.input_messages import (
-    EnvelopeData,
-    FieldValue,
-    PersonIdentity,
-    RunInput,
-    SystemIdentity,
-    human_input,
-    person_introduction,
-    system_input,
-    system_introduction,
-)
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
@@ -33,6 +22,17 @@ from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequ
 from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import settle_pull_request, settle_repository
+from openswe.input_messages import (
+    EnvelopeData,
+    FieldValue,
+    PersonIdentity,
+    RunInput,
+    SystemIdentity,
+    human_input,
+    person_introduction,
+    system_input,
+    system_introduction,
+)
 from openswe.prompts import prompt
 from openswe.review.approvals import approval_mode_for, approval_policy_for_review
 from openswe.review.findings import (

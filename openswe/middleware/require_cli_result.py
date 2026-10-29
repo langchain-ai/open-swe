@@ -8,12 +8,12 @@ from typing import Annotated, Any, NotRequired
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
-from openswe_shared.input_messages import (
+
+from openswe.input_messages import (
     SystemIdentity,
     build_input_messages,
     visible_dynamic_context_hashes,
 )
-
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.require_user_reply import reported_failure, turn_tail
 from openswe.middleware.trace import OpenSWEMiddleware

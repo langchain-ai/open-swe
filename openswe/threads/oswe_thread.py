@@ -4,8 +4,9 @@ import hashlib
 from typing import Self
 
 from langgraph_sdk.client import LangGraphClient
-from openswe_shared.input_messages import message_sender_id
 from pydantic import BaseModel, ConfigDict, JsonValue
+
+from openswe.input_messages import message_sender_id
 
 
 class OsweThreadMessage(BaseModel):

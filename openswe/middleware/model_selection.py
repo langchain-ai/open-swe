@@ -7,8 +7,8 @@ from langchain.agents.middleware.types import AgentState, OmitFromOutput
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from openswe_shared.input_messages import input_message_text, message_sender_id
 
+from openswe.input_messages import input_message_text, message_sender_id
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.utils.jev import JevDecision, select_jev_choice
