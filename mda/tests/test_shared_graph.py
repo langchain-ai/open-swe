@@ -16,6 +16,7 @@ from deepagents.backends.protocol import ExecuteResponse
 from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -50,13 +51,14 @@ from runtime_api.catalog import (
     Catalog,
     LoopRules,
     ModelSpec,
-    OperationSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
     SubagentSpec,
+    ToolSpec,
 )
 from runtime_api.reports import Reports
+from runtime_api.tool_search import ResolvedTool, ToolSpecs
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
@@ -69,20 +71,25 @@ def _thread(thread_id: str) -> ManagedRunConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
+# Each run's catalog by its token, whose tool specs the fake backend reads to it.
+_CATALOGS: dict[str, Catalog] = {}
+
+
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
-    """A run as dispatch starts it."""
+    """A run as dispatch starts it: its catalog's tools by name alone."""
+    _CATALOGS[token] = catalog
     return {
         "graph": graph,
         "__run_token": token,
         "invocation_id": f"invocation-{token}",
-        "__catalog": catalog.model_dump(mode="json"),
+        "__catalog": catalog.names_only().model_dump(mode="json"),
     }
 
 
 def _catalog(operation: str, grant: str, *, snapshot: str | None = None) -> Catalog:
     return Catalog(
         operations=[
-            OperationSpec(name=operation, description="An operation.", parameters={}, grant=grant)
+            ToolSpec(name=operation, description="An operation.", parameters={}, grant=grant)
         ],
         subagents=[SubagentSpec(name="reviewer", description="Reviews.", system_prompt="")],
         skill_sources=["/skills/org/"],
@@ -148,6 +155,26 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
+        if hook == "tool_specs":
+            catalog = _CATALOGS[headers["Authorization"].removeprefix("Bearer ")]
+            names = json["names"]
+            assert isinstance(names, list)
+            listed = ToolSpecs(tools=[tool for tool in catalog.operations if tool.name in names])
+            return httpx2.Response(200, request=request, json=listed.model_dump(mode="json"))
+        if hook == "resolve_tool":
+            calls[-1] = (hook, headers["Authorization"], str(json["name"]))
+            resolved = ResolvedTool(
+                tool=ToolSpec(
+                    name="withheld_lookup",
+                    description="A tool the catalog leaves out.",
+                    parameters={},
+                    code_name="withheldLookup",
+                    grant="found-grant",
+                )
+                if json["name"] == "withheldLookup"
+                else None
+            )
+            return httpx2.Response(200, request=request, json=resolved.model_dump(mode="json"))
         if hook == "reports":
             taken = {"replies": [{} for _ in Reports.model_validate(json).items]}
             return httpx2.Response(200, request=request, json=taken)
@@ -359,6 +386,56 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     assert not interpreter._ptc_tools_by_slot
 
 
+async def test_code_mode_calls_tools_its_catalog_leaves_out(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """The backend names what ``tools.<name>`` is, with the run's grant; a name it has none for throws."""
+    code = "await tools.withheldLookup({}); await tools.withheldLookup({}); await tools.notOne({})"
+    seen: list[BaseMessage] = []
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen[:] = messages
+        return await generate(model, messages, stop, run_manager)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    replies = [
+        AIMessage(content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]),
+        # Called directly too, by the name a search gave, and by one that is no tool.
+        AIMessage(content="", tool_calls=[ToolCall(name="withheldLookup", args={}, id="direct")]),
+        AIMessage(content="", tool_calls=[ToolCall(name="noTool", args={}, id="no-tool")]),
+        AIMessage(content="done"),
+    ]
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(replies)))
+    catalog = _catalog("lookup", "grant").model_copy(update={"search_tools": True})
+
+    await _run(InMemoryStore(), "withheld", _context("agent", "token", catalog))
+
+    [evaluated] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "eval"]
+    # The run goes on past a call of no tool, as the tool node answers it.
+    [missing] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "no-tool"]
+    assert missing.status == "error" and "noTool" in missing.text
+    assert '<error type="TypeError">notOne is not one of this run' in evaluated.text
+    called = [(hook, detail) for hook, _, detail in backend_calls if detail]
+    # Its context names its own tools, whose specs it reads once.
+    assert [hook for hook, _, _ in backend_calls].count("tool_specs") == 1
+    # The rest resolved once, each called with the grant the backend gave.
+    assert called == [
+        ("resolve_tool", "withheldLookup"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("resolve_tool", "notOne"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("resolve_tool", "noTool"),
+    ]
+
+
 async def test_concurrent_runs_offer_and_call_only_their_own_operations(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
@@ -460,7 +537,7 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
         catalog = _catalog("lookup", "grant").model_copy(
             update={
                 "operations": [
-                    OperationSpec(
+                    ToolSpec(
                         name="lookup",
                         description=f"Uses {parameter}",
                         parameters={

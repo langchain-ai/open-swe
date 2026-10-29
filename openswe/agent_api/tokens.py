@@ -49,6 +49,9 @@ class RunSettings(BaseModel):
     # The model and effort the run calls, once settings and overrides are applied.
     model_id: str | None = None
     effort: str | None = None
+    # The digest of every tool the run started with, kept in ``run_tool_sets``;
+    # its catalog lists only those the model is offered.
+    tools: str | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""

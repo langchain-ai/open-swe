@@ -77,10 +77,10 @@ from runtime_api.catalog import (
     FilesSpec,
     InboxSpec,
     ModelSpec,
-    OperationSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
+    ToolSpec,
 )
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
@@ -400,9 +400,7 @@ async def test_a_tool_call_the_backend_never_answered(
     client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     served = operation_tool(
-        OperationSpec(
-            name="background_execute", description="Execute", parameters={"type": "object"}
-        ),
+        ToolSpec(name="background_execute", description="Execute", parameters={"type": "object"}),
         _run_backend(),
     )
     runtime = ToolRuntime(
@@ -445,7 +443,7 @@ async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
     client.post = post
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     served = operation_tool(
-        OperationSpec(
+        ToolSpec(
             name="get_thread",
             description="Operation",
             parameters={"type": "object"},
@@ -675,7 +673,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
     _answering(monkeypatch, backend, phase)
     tools = [
         operation_tool(
-            OperationSpec(name=name, description=name, parameters={"type": "object"}), backend
+            ToolSpec(name=name, description=name, parameters={"type": "object"}), backend
         )
         for name in (
             "walkthrough_describe_other",
@@ -1474,7 +1472,7 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     monkeypatch.setattr(backend.outbox, "started", started)
     monkeypatch.setattr(backend.outbox, "finished", finished)
     search = operation_tool(
-        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
+        ToolSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
         backend,
         cites_evidence=True,
     )
