@@ -110,7 +110,6 @@ class _Harness:
         mda_runtime._http = httpx.AsyncClient(
             base_url=mda_runtime.url, transport=httpx.MockTransport(mda)
         )
-        mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
         monkeypatch.setattr(router, "RUNTIMES", self.runtimes)
         monkeypatch.setattr(store, "RUNTIMES", self.runtimes)
@@ -242,6 +241,7 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
         "assistant_id": "agent",
         "input": {},
         "config": {"configurable": {"github_login": "ada"}},
+        "if_not_exists": "reject",
     }
 
     status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", run)
@@ -252,6 +252,8 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     assert harness.reached_here == []
     [(path, sent)] = harness.forwarded
     assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
+    # The index has the thread, so MDA makes its copy if it swept or never got one.
+    assert sent["if_not_exists"] == "create"
 
 
 @pytest.mark.parametrize(

@@ -11,6 +11,7 @@ The backend answers only what needs its data or credentials, one named call each
 state (``open_swe_state``), which preparation fills.
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -280,8 +281,13 @@ class RunLoop:
         held = _held(state)
         if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        update = await self._github_proxy(held)
-        context = await self._task_context()
+        proxy = asyncio.create_task(self._github_proxy(held))
+        try:
+            context = await self._task_context()
+            update = await proxy
+        finally:
+            proxy.cancel()
+            await asyncio.gather(proxy, return_exceptions=True)
         visible = _visible(state)
         visible_guidance = _run_guidance(visible)
         added: list[BaseMessage] = [

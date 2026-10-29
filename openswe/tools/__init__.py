@@ -40,6 +40,7 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "execute_database_sql": ".repair_data",
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
     "read_user_settings": ".read_user_settings",
@@ -123,6 +124,7 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "execute_database_sql",
     "write_database_rows",
     "read_only_sql",
     "read_user_settings",
@@ -219,7 +221,7 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
-    from openswe.tools.repair_data import write_database_rows
+    from openswe.tools.repair_data import execute_database_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
     from openswe.tools.request_human_review import (
