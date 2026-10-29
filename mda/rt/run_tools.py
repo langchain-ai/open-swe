@@ -281,7 +281,6 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._toolsets = toolsets
         self._named = list(named)
         self._active = active
-        self._prompts = RunLocal[list[tuple[frozenset[str], str] | None]](lambda: [None])
         self._slots: dict[str, asyncio.Lock] = {}
         super().__init__(
             ptc=[],
@@ -292,15 +291,6 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
 
     def __del__(self) -> None:
         """The invocation owns cleanup; transient middleware copies share the registry."""
-
-    @property
-    def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
-        return self._prompts.get(current_run())[0]
-
-    @_ptc_prompt_cache.setter
-    def _ptc_prompt_cache(self, value: tuple[frozenset[str], str] | None) -> None:
-        if value is not None:
-            self._prompts.get(current_run())[0] = value
 
     def _slot_id(self, state: Mapping[str, object]) -> str:
         slot_id = super()._slot_id(state)
