@@ -16,6 +16,7 @@ from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
 from openswe.prompts import prompt
+from openswe.review_guide.launch import GuideOrigin, GuideStart, GuideStartError, start_review_guide
 from openswe.slack.blocks import (
     InputBlock,
     ModalView,
@@ -25,12 +26,14 @@ from openswe.slack.blocks import (
     static_select,
     view_payload,
 )
-from openswe.slack.client import open_slack_modal
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import open_slack_modal, post_slack_ephemeral_message
 from openswe.slack.dm import note_for_concierge
-from openswe.slack.payloads import SlackButtonValue, SlackInteraction
+from openswe.slack.payloads import SlackButtonValue, SlackChannelPayload, SlackInteraction
 from openswe.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
+from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +156,24 @@ async def handle_pick_modal_submission(
     return {}
 
 
+async def _open_code_channel(request: HumanReviewRequest, origin: GuideOrigin) -> Outcome:
+    if request.state != "open":
+        return Outcome("This review request is no longer open.")
+    channel = await SlackChannel.fetch(origin.channel_id)
+    origin.is_private = channel is None or not SlackChannelPayload.of(channel).is_public
+    pr = request.pull_request
+    origin.workspace_slug = await workspace_for_slack_channel(
+        origin.channel_id
+    ) or await workspace_for_repo(pr.owner, pr.repo)
+    try:
+        started = await start_review_guide(
+            GuideStart(owner=pr.owner, repo=pr.repo, number=pr.number, origin=origin)
+        )
+    except GuideStartError as exc:
+        return Outcome(f"Could not open a review code channel: {exc}")
+    return Outcome(f"Review in <#{started.channel_id}>.")
+
+
 async def _process(
     request_id: str,
     action: str,
@@ -162,13 +183,28 @@ async def _process(
     slack_user_id: str,
     choice: str = "",
     message: PickMessage | None = None,
+    team_id: str = "",
 ) -> None:
+    if action == "code_channel":
+        await post_slack_ephemeral_message(
+            channel_id, slack_user_id, "Opening a review code channel…", thread_ts
+        )
     if message is not None:
         await message.show(_PENDING[action])
     handled: list[Outcome] = []
 
     async def handle(request: HumanReviewRequest) -> Outcome:
-        if action == "dismiss":
+        if action == "code_channel":
+            outcome = await _open_code_channel(
+                request,
+                GuideOrigin(
+                    requester_slack_id=slack_user_id,
+                    team_id=team_id,
+                    channel_id=channel_id,
+                    message_ts=thread_ts,
+                ),
+            )
+        elif action == "dismiss":
             outcome = await ReviewCard(request).dismiss(slack_user_id)
         else:
             user = await User.for_person({"id": f"slack:{slack_user_id}"})
@@ -253,7 +289,7 @@ async def handle_button(
             logger.warning("Could not open a reviewer pick modal", extra=extra)
             return ignored("Could not open pick modal")
         return accepted("Pick modal opened")
-    if button.action not in {"review", "dismiss"}:
+    if button.action not in {"review", "dismiss", "code_channel"}:
         logger.warning("Ignored an unknown human review click", extra=extra)
         return ignored("Unknown human review action")
     logger.info("Queued a human review click", extra=extra)
@@ -265,5 +301,6 @@ async def handle_button(
         thread_ts=thread_ts,
         slack_user_id=user_id,
         message=message,
+        team_id=interaction.team.id,
     )
     return accepted("Human review click queued")
