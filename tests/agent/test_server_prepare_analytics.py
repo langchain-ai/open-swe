@@ -6,6 +6,7 @@ lookup hit / null-name / failure / cache paths, and the system prompt a thread
 keeps from one turn to the next.
 """
 
+import asyncio
 import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -163,6 +164,47 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     return await middleware._prepare(
         cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
     )
+
+
+async def test_prepare_records_start_before_return_even_when_metadata_is_slow_and_fails(
+    prepare_harness: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage_started = asyncio.Event()
+    release_usage = asyncio.Event()
+    metadata_started = asyncio.Event()
+    release_metadata = asyncio.Event()
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_started.set()
+        await release_usage.wait()
+        prepare_harness["recorded"] = kwargs
+
+    async def update_metadata(**kwargs: object) -> None:
+        metadata_started.set()
+        await release_metadata.wait()
+        raise RuntimeError("metadata update failed")
+
+    monkeypatch.setattr(server, "record_agent_invocation_usage", record_usage)
+    monkeypatch.setattr(server.client.threads, "update", update_metadata)
+    preparing = asyncio.create_task(_prepare(_middleware(_slack_config())))
+    try:
+        await asyncio.wait_for(usage_started.wait(), timeout=1)
+        assert not preparing.done()
+        release_usage.set()
+        await asyncio.wait_for(asyncio.shield(preparing), timeout=1)
+        assert prepare_harness["recorded"] is not None
+        await asyncio.wait_for(metadata_started.wait(), timeout=1)
+    finally:
+        release_usage.set()
+        release_metadata.set()
+        await preparing
+        await asyncio.gather(*tuple(server._DETACHED))
+
+    assert "metadata update failed" in caplog.text
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
