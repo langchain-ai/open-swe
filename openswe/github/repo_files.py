@@ -86,20 +86,32 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="reviewChannelRules"
     )
 
-    @field_validator("supplementary_reviews")
+    @field_validator("supplementary_reviews", mode="before")
     @classmethod
-    def _unique_ids(
-        cls, policies: list[SupplementaryReviewPolicy]
-    ) -> list[SupplementaryReviewPolicy]:
-        ids = [policy.id for policy in policies]
-        if len(ids) != len(set(ids)):
-            raise ValueError("supplementaryReviews ids must be unique")
+    def _valid_policies(cls, raw: object) -> list[SupplementaryReviewPolicy]:
+        """Drop invalid or duplicate policies so one mistake never discards the rest of the file."""
+        if not isinstance(raw, list):
+            logger.warning("supplementaryReviews is not a list; ignoring it")
+            return []
+        policies: list[SupplementaryReviewPolicy] = []
+        for index, entry in enumerate(raw):
+            try:
+                policy = SupplementaryReviewPolicy.model_validate(entry)
+            except ValidationError:
+                logger.warning(
+                    "Ignoring an invalid supplementary review policy",
+                    extra={"policy_index": index},
+                    exc_info=True,
+                )
+                continue
+            if any(existing.id == policy.id for existing in policies):
+                logger.warning(
+                    "Ignoring a duplicate supplementary review policy",
+                    extra={"policy_id": policy.id},
+                )
+                continue
+            policies.append(policy)
         return policies
-
-    def supplementary_review(self, policy_id: str) -> SupplementaryReviewPolicy | None:
-        return next(
-            (policy for policy in self.supplementary_reviews if policy.id == policy_id), None
-        )
 
     @property
     def review_channels(self) -> set[str]:

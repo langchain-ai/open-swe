@@ -422,3 +422,22 @@ async def test_agent_request_is_refused_when_its_policy_cannot_apply(
         else:
             await SupplementaryReviews(review).ask(MagicMock(), policy_id, "New flow")
     assert _state(review).reason == ("" if refusal else "New flow")
+
+
+def test_invalid_policies_are_dropped_without_discarding_other_settings() -> None:
+    settings = RepoSettings.model_validate_json(
+        """{
+            "reviewChannel": "#eng-reviews",
+            "supplementaryReviews": [
+                {"id": "Design", "label": "Design review", "team": "a/b", "paths": ["*"],
+                 "criteria": "x"},
+                {"id": "design", "label": "Design review", "team": "a/b", "paths": ["*"],
+                 "criteria": "first"},
+                {"id": "design", "label": "Design review", "team": "a/b", "paths": ["*"],
+                 "criteria": "second"},
+                {"id": "security", "label": "Security review", "team": "a/c", "paths": ["*"]}
+            ]
+        }"""
+    )
+    assert settings.review_channel == "#eng-reviews"
+    assert [(p.id, p.criteria) for p in settings.supplementary_reviews] == [("design", "first")]
