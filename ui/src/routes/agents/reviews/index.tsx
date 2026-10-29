@@ -8,7 +8,6 @@ import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { OpenPullRequests } from "@/features/reviews/OpenPullRequests"
-import { RecentReviewPages } from "@/features/reviews/RecentReviewPages"
 import { ReviewedPullRequests } from "@/features/reviews/ReviewedPullRequests"
 import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
 import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
@@ -47,7 +46,6 @@ function storeRepos(repos: string[] | undefined) {
 const tabs = [
   ["mine", "Mine"],
   ["to-review", "To Review"],
-  ["recent", "Recent"],
   ["all", "All Reviews"],
 ] as const
 
@@ -81,10 +79,7 @@ function ReviewsPage() {
     if (!filters.repo && stored) changeFilters({ repo: stored }, true)
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const selection =
-    tab !== "all" && tab !== "recent"
-      ? parsePullRequestSelection(filters.pr)
-      : null
+  const selection = tab !== "all" ? parsePullRequestSelection(filters.pr) : null
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -133,9 +128,7 @@ function ReviewsPage() {
           </div>
 
           {session.data &&
-            (tab === "recent" ? (
-              <RecentReviewPages login={session.data.login} />
-            ) : tab === "all" ? (
+            (tab === "all" ? (
               <ReviewedPullRequests
                 page={filters.page ?? 0}
                 onPageChange={(page) =>
