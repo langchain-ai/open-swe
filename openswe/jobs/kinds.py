@@ -33,6 +33,7 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
+from openswe.reconcile import reconcile_stale_runs
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
     is_transient_sandbox_error,
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 AGENT_COST: Final = "agent_cost"
 SESSION_COST: Final = "session_cost"
+RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
@@ -162,6 +164,11 @@ async def _human_review_deadline(job: Job) -> object:
     if request_id is None or step is None:
         return None
     return await run_deadline(request_id, step)
+
+
+@_sandbox_work(RECONCILE)
+async def _reconcile(_job: Job) -> object:
+    return await reconcile_stale_runs()
 
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
