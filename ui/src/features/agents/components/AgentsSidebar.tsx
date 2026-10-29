@@ -28,7 +28,8 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
@@ -244,6 +245,70 @@ export function AgentsSidebar({
   } = useScrollEdges()
   const { openPalette } = useAppCommandControls()
   const queryClient = useQueryClient()
+  const [fleetArchivedOpen, setFleetArchivedOpen] = useState(false)
+  const updateFleetThread = useMutation({
+    mutationFn: ({
+      thread,
+      metadata,
+    }: {
+      thread: Thread
+      metadata: Record<string, boolean>
+    }) =>
+      fleetClient(fleetWorkspace!).threads.update(thread.thread_id, {
+        metadata,
+      }),
+    onMutate: async ({ thread, metadata }) => {
+      const key = ["fleet-threads", fleetWorkspace]
+      await queryClient.cancelQueries({ queryKey: key })
+      queryClient.setQueryData<Thread[]>(key, (threads) =>
+        threads?.map((item) =>
+          item.thread_id === thread.thread_id
+            ? { ...item, metadata: { ...item.metadata, ...metadata } }
+            : item
+        )
+      )
+      return { key, thread }
+    },
+    onError: (error, _variables, context) => {
+      if (context)
+        queryClient.setQueryData<Thread[]>(context.key, (threads) =>
+          threads?.map((thread) =>
+            thread.thread_id === context.thread.thread_id
+              ? context.thread
+              : thread
+          )
+        )
+      toast.error("Could not update chat", { description: error.message })
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["fleet-threads", fleetWorkspace],
+      }),
+  })
+  const fleetSections = [
+    {
+      label: "Pinned",
+      threads: (fleetThreads.data ?? []).filter(
+        (thread) =>
+          thread.metadata?.is_pinned === true &&
+          thread.metadata?.openswe_archived !== true
+      ),
+    },
+    {
+      label: "Recents",
+      threads: (fleetThreads.data ?? []).filter(
+        (thread) =>
+          thread.metadata?.is_pinned !== true &&
+          thread.metadata?.openswe_archived !== true
+      ),
+    },
+    {
+      label: "Archived",
+      threads: (fleetThreads.data ?? []).filter(
+        (thread) => thread.metadata?.openswe_archived === true
+      ),
+    },
+  ]
   const openThread = useCallback(
     (threadId: string) => {
       const review = queryClient.getQueryData<AgentThread>(
@@ -756,7 +821,7 @@ export function AgentsSidebar({
             )}
           >
             <PlusIcon size={20} className="-mx-0.5" />
-            New
+            New chat
           </Link>
           <div className="py-space-3">
             <Select
@@ -802,30 +867,63 @@ export function AgentsSidebar({
             </>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <SidebarSectionHeader
-              label="Recents"
-              collapsed={sectionCollapsed("recents")}
-              onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-            />
             {fleetThreads.isLoading && (
               <ThreadListSkeleton compact={prefs.compact} />
             )}
-            {!sectionCollapsed("recents") &&
-              (fleetThreads.data ?? []).map((thread) => (
-                <SidebarConversationRow
-                  key={thread.thread_id}
-                  title={String(
-                    thread.metadata?.thread_title ??
-                      thread.metadata?.first_message_preview ??
-                      "New chat"
-                  )}
-                  workspaceId={fleetWorkspace!}
-                  threadId={thread.thread_id}
-                  active={thread.thread_id === fleetThread}
-                  compact={prefs.compact}
-                  onNavigate={layout.closeOnMobile}
-                />
-              ))}
+            {fleetSections.map(
+              ({ label, threads }) =>
+                threads.length > 0 && (
+                  <div key={label}>
+                    <SidebarSectionHeader
+                      label={label}
+                      collapsed={
+                        label === "Archived" ? !fleetArchivedOpen : undefined
+                      }
+                      onToggleCollapsed={
+                        label === "Archived"
+                          ? () => setFleetArchivedOpen(!fleetArchivedOpen)
+                          : undefined
+                      }
+                    />
+                    {(label !== "Archived" || fleetArchivedOpen) &&
+                      threads.map((thread) => (
+                        <SidebarConversationRow
+                          key={thread.thread_id}
+                          title={String(
+                            thread.metadata?.thread_title ??
+                              thread.metadata?.first_message_preview ??
+                              "New chat"
+                          )}
+                          workspaceId={fleetWorkspace!}
+                          threadId={thread.thread_id}
+                          active={thread.thread_id === fleetThread}
+                          compact={prefs.compact}
+                          onNavigate={layout.closeOnMobile}
+                          pinned={thread.metadata?.is_pinned === true}
+                          archived={thread.metadata?.openswe_archived === true}
+                          pending={updateFleetThread.isPending}
+                          onPin={() =>
+                            updateFleetThread.mutate({
+                              thread,
+                              metadata: {
+                                is_pinned: thread.metadata?.is_pinned !== true,
+                              },
+                            })
+                          }
+                          onArchive={() =>
+                            updateFleetThread.mutate({
+                              thread,
+                              metadata: {
+                                openswe_archived:
+                                  thread.metadata?.openswe_archived !== true,
+                              },
+                            })
+                          }
+                        />
+                      ))}
+                  </div>
+                )
+            )}
             {fleetWorkspace && fleetThreads.data?.length === 0 && (
               <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
                 No threads yet.

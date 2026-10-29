@@ -81,6 +81,30 @@ test("rejects other origins, workspaces and arbitrary paths without forwarding",
   assert.equal(calls.length, 2);
 });
 
+test("metadata updates allow only a thread in the connected workspace", async () => {
+  const calls = [];
+  const connection = new FleetConnection(transport(calls));
+  await connection.connect({ apiKey, workspaceId });
+  const body = JSON.stringify({
+    metadata: { is_pinned: true, openswe_archived: false },
+  });
+  const url = `open-swe://app/fleet-api/${workspaceId}/threads/${organizationId}`;
+  await connection.proxy(new Request(url, { method: "PATCH", body }));
+  assert.equal(calls.at(-1).init.method, "PATCH");
+  assert.equal(new TextDecoder().decode(calls.at(-1).init.body), body);
+  for (const rejected of [
+    `${url}/state`,
+    url.replace(`/fleet-api/${workspaceId}/`, `/fleet-api/${organizationId}/`),
+  ]) {
+    assert.equal(
+      (await connection.proxy(new Request(rejected, { method: "PATCH", body })))
+        .status,
+      403,
+    );
+  }
+  assert.equal(calls.length, 3);
+});
+
 test("disconnect aborts in-flight requests and removes credentials", async () => {
   const calls = [];
   const connection = new FleetConnection(transport(calls));

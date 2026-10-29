@@ -2,6 +2,7 @@ const API = "https://api.smith.langchain.com";
 const ID = "[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}";
 const UUID = new RegExp(`^${ID}$`);
 const PATHS = {
+  PATCH: new RegExp(`^threads/${ID}$`),
   GET: new RegExp(`^threads/${ID}(?:/state|/runs(?:/${ID}(?:/stream)?)?)?$`),
   POST: new RegExp(
     `^threads(?:/search|/${ID}/runs(?:/stream|/${ID}/cancel)?)?$`,

@@ -260,6 +260,11 @@ export function SidebarConversationRow({
   active,
   compact,
   onNavigate,
+  pinned,
+  archived,
+  pending,
+  onPin,
+  onArchive,
 }: {
   title: string
   workspaceId: string
@@ -267,6 +272,11 @@ export function SidebarConversationRow({
   active: boolean
   compact: boolean
   onNavigate: () => void
+  pinned: boolean
+  archived: boolean
+  pending: boolean
+  onPin: () => void
+  onArchive: () => void
 }) {
   const marquee = useTitleMarquee()
   return (
@@ -284,11 +294,39 @@ export function SidebarConversationRow({
           compact,
           active,
           paddingLeft: "pl-space-2",
-          archived: false,
+          archived,
         })}
       >
         <SidebarRowTitle title={title} marquee={marquee} />
       </Link>
+      <span className="right-space-1 absolute inset-y-0 flex items-center rounded-lg bg-surface-level-2 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+        <IconButton
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+          label={pinned ? "Unpin chat" : "Pin chat"}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onPin()
+          }}
+        />
+        <IconButton
+          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+          label={archived ? "Unarchive chat" : "Archive chat"}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onArchive()
+          }}
+        />
+      </span>
     </div>
   )
 }
