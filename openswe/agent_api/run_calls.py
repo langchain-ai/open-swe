@@ -163,6 +163,7 @@ from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import mda_proxy_config, take_stale_boot
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
+from openswe.utils.startup_trace import aphase
 from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
@@ -402,7 +403,9 @@ class TokenRun:
         )
         if request.in_sandbox:
             # MDA opened the sandbox before preparing; the thread is bound to it from here on.
-            await self._sandbox.bind(request)
+            # The phase is replayed into this run's trace when `before_agent` flushes phases.
+            async with aphase(self.run.thread_id, "prepare.bind_sandbox"):
+                await self._sandbox.bind(request)
         notices = self._turn_notices()
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
