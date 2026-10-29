@@ -285,6 +285,21 @@ async def test_a_run_context_summarized_away_is_sent_again(
     )
     assert again.messages == []
 
+    edited = '<dynamic-context kind="run" id="source">Edited</dynamic-context>'
+    history[4].content = [{"type": "text", "text": edited}]
+    history[7] = HumanMessage(
+        content='<dynamic-context kind="run" id="review-guide">Reopened</dynamic-context>'
+    )
+    history[5] = AIMessage(content=history[5].content)
+    changed = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
+    )
+    assert [message.content for message in messages_from_dict(changed.messages)] == [
+        edited,
+        history[7].content,
+        "# Run context\nhead_sha: new",
+    ]
+
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
     monkeypatch: pytest.MonkeyPatch,
