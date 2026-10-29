@@ -7,8 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe import completion
-from openswe.input_messages import system_input
-from openswe.message_queue import REVIEW_WALKTHROUGH_SENDER, QueuedMessage
+from openswe.message_queue import QueuedMessage
 from openswe.review import run_failure
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
@@ -184,14 +183,13 @@ async def test_interrupted_reviewer_leaves_one_status_comment(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("status", "metadata", "worker", "cancelled", "walkthrough_only", "picks_up"),
+    ("status", "metadata", "worker", "cancelled", "picks_up"),
     [
-        ("success", {}, False, False, False, True),
-        ("error", {}, False, False, False, False),
-        ("success", {"kind": "follow_up_pickup"}, False, False, False, False),
-        ("success", {}, True, False, False, True),
-        ("success", {}, True, True, False, False),
-        ("success", {}, False, False, True, False),
+        ("success", {}, False, False, True),
+        ("error", {}, False, False, False),
+        ("success", {"kind": "follow_up_pickup"}, False, False, False),
+        ("success", {}, True, False, True),
+        ("success", {}, True, True, False),
     ],
 )
 async def test_leftover_follow_ups_get_one_pickup_run(
@@ -201,19 +199,10 @@ async def test_leftover_follow_ups_get_one_pickup_run(
     metadata: dict[str, object],
     worker: bool,
     cancelled: bool,
-    walkthrough_only: bool,
     picks_up: bool,
 ) -> None:
-    walkthrough = dict(
-        system_input(
-            "Walkthrough ready",
-            {"sender_id": REVIEW_WALKTHROUGH_SENDER, "surface": "automation", "kind": "system"},
-        )
-    )
     pending = {"text": "Check logout too", "source": "dashboard"}
-    contents = [walkthrough] if walkthrough_only else [walkthrough, pending]
-    for content in contents:
-        await QueuedMessage.put("t1", content)
+    await QueuedMessage.put("t1", pending)
     client = SimpleNamespace(
         threads=_FakeThreads({"source": "dashboard", "owner_login": "owner"}),
         runs=SimpleNamespace(list=AsyncMock(return_value=[])),
@@ -259,7 +248,7 @@ async def test_leftover_follow_ups_get_one_pickup_run(
         if picks_up
         else []
     )
-    assert [message.content for message in await QueuedMessage.for_thread("t1")] == contents
+    assert [message.content for message in await QueuedMessage.for_thread("t1")] == [pending]
 
 
 @pytest.mark.asyncio

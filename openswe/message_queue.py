@@ -23,10 +23,6 @@ from openswe.utils.json_types import JsonObject
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
-SLACK_NOTE_SENDER = "system:slack-note"
-REVIEW_WALKTHROUGH_SENDER = "system:review-walkthrough"
-# Model-only context: kept out of pending previews, as the dashboard keeps it out of the transcript.
-_SILENT_SENDERS = frozenset({SLACK_NOTE_SENDER, REVIEW_WALKTHROUGH_SENDER})
 
 type QueuedContent = str | list[JsonObject] | JsonObject
 
@@ -101,16 +97,6 @@ class QueuedMessage(Base):
             await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
     @classmethod
-    async def discard(cls, thread_id: str, *, prefix: str, keep: str | None = None) -> None:
-        """Take every message whose ``queue_id`` starts with ``prefix`` off the queue, but ``keep``."""
-        query = delete(cls).where(cls.thread_id == thread_id, cls.queue_id.startswith(prefix))
-        if keep is not None:
-            query = query.where(cls.queue_id != keep)
-        async with postgres.session() as session:
-            await session.execute(query)
-            await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
-
-    @classmethod
     async def clear(cls, thread_id: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(cls).where(cls.thread_id == thread_id))
@@ -132,16 +118,7 @@ class QueuedMessage(Base):
         message = self.run_message
         return (
             message is not None
-            and message_sender_id(message["content"], kind="system") in _SILENT_SENDERS
-        )
-
-    @property
-    def starts_follow_up(self) -> bool:
-        """Whether this message warrants a new run if the current run misses it."""
-        message = self.run_message
-        return (
-            message is None
-            or message_sender_id(message["content"], kind="system") != REVIEW_WALKTHROUGH_SENDER
+            and message_sender_id(message["content"], kind="system") == "system:slack-note"
         )
 
     async def preview(self) -> QueuedPreview:

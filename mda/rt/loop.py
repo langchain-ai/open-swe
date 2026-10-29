@@ -593,12 +593,10 @@ class RunLoop:
             if work == "settle_review_check":
                 outbox.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
             else:
-                held = _held(state)
-                summary = held.get("human_input_summary")
+                summary = _held(state).get("human_input_summary")
                 finished = ScoutPlanEnd(
                     run_id=current,
                     human_input_summary=summary if isinstance(summary, str) else "",
-                    planned=not held.get("scout_nothing_to_plan"),
                 )
                 outbox.notify(FINISH_SCOUT_PLAN, finished)
         # The transcript has every reply and tool call, and the backend the work, before

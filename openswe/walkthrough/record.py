@@ -21,8 +21,6 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.prompts import prompt
-from openswe.utils.data_block import escape_for_data_block
 from openswe.utils.json_types import JsonObject
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LineRange, LineSet
@@ -252,15 +250,6 @@ class WalkthroughFileView(BaseModel):
     added: list[LineRange]
     deleted: list[LineRange]
 
-    def reviewer_line(self) -> str:
-        """The path with its ``+`` added and ``-`` deleted line ranges."""
-        ranges = [
-            f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}"
-            for prefix, spans in (("+", self.added), ("-", self.deleted))
-            for start, end in spans
-        ]
-        return " ".join([escape_for_data_block(self.path), *ranges])
-
 
 class WalkthroughStepView(BaseModel):
     index: int
@@ -322,22 +311,3 @@ class WalkthroughView(BaseModel):
             return None
         walkthrough = await Walkthrough.for_head(owner, repo, number, head_sha)
         return cls.of(walkthrough) if walkthrough else None
-
-    def reviewer_blocks(self) -> list[str]:
-        """The steps, then the summary of what people asked for, as the reviewer reads them."""
-        blocks: list[str] = []
-        if self.steps:
-            steps: list[str] = []
-            for step in self.steps:
-                files = "\n".join(file.reviewer_line() for file in step.files)
-                steps.append(
-                    f'<step index="{step.index}">\n'
-                    f"<title>{escape_for_data_block(step.title)}</title>\n"
-                    f"<summary>{escape_for_data_block(step.summary)}</summary>\n"
-                    f"<files>\n{files}\n</files>\n"
-                    "</step>"
-                )
-            blocks.append(prompt("reviewer/walkthrough", steps="\n".join(steps)))
-        if self.human_input:
-            blocks.append(prompt("reviewer/human-input", summary=self.human_input))
-        return blocks
