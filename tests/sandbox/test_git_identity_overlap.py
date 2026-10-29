@@ -180,12 +180,17 @@ async def test_identity_is_reset_each_run_in_the_first_command(
             SANDBOX_BACKENDS, "thread-reset", SandboxBackendProxy(backend, thread_id="thread-reset")
         )
         monkeypatch.setattr(session, "bind_sandbox", AsyncMock())
-        monkeypatch.setattr(TurnGitMetadata, "begin", AsyncMock(return_value={}))
+        monkeypatch.setattr(
+            TurnGitMetadata,
+            "begin",
+            AsyncMock(side_effect=AssertionError("baseline must be deferred")),
+        )
         with pytest.raises(RuntimeError, match="Failed to configure sandbox Git identity"):
             await session.prepare(Prepare())
 
         (home / ".gitconfig.lock").unlink()
-        await session.prepare(Prepare())
+        prepared = await session.prepare(Prepare())
+        assert prepared.update["git_trace_baseline"] is None
         result = await run(f"touch {target}")
         assert result.exit_code == 0
         assert target.exists()

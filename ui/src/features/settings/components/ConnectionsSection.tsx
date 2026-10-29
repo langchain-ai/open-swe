@@ -84,8 +84,10 @@ export function useLangSmithConnection() {
 
 export function ConnectLangSmithButton({
   size = "xs",
+  className,
 }: {
-  size?: "xs" | "sm"
+  size?: "xs" | "sm" | "md"
+  className?: string
 }) {
   const qc = useQueryClient()
   const status = useLangSmithConnection()
@@ -94,6 +96,7 @@ export function ConnectLangSmithButton({
     <Button
       size={size}
       color="primary"
+      className={className}
       onClick={() => {
         setConnecting(true)
         void connectService("langsmith", window.location.href)?.finally(() => {

@@ -12,7 +12,7 @@ import hashlib
 import logging
 import time
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from functools import cache, partial
 from typing import Any, Final, Self, cast
 from uuid import UUID
@@ -185,6 +185,7 @@ from openswe.tools import (
     background_task,
     code_channel_set_view,
     configure_repository,
+    configure_workspace,
     connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
@@ -590,6 +591,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "publish_workspace",
         "snapshotctl",
         "configure_repository",
+        "configure_workspace",
         "delete_workspace",
         "create_automation",
         "update_automation",
@@ -669,6 +671,7 @@ ADMIN_TOOLS = (
     publish_workspace,
     snapshotctl,
     configure_repository,
+    configure_workspace,
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
@@ -981,9 +984,29 @@ def _integration_middleware(
     return candidate if candidate.has_groups else None
 
 
-async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
+async def _timed[T](thread_id: str | None, name: str, work: Awaitable[T]) -> T:
     async with aphase(thread_id, name):
-        return await loader()
+        return await work
+
+
+async def _credential_scope(config: RunnableConfig) -> tuple[str | None, bool]:
+    """Whose personal integrations the run may use, and whether that could be told."""
+    try:
+        return await private_credential_login(config), True
+    except Exception:
+        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+        return None, False
+
+
+async def _thread_settings(thread_id: str) -> tuple[ThreadSettings, bool]:
+    return normalize_thread_settings(await load_thread_settings(client, thread_id))
+
+
+async def _scoped_mcp_tools(
+    thread_id: str, scope: Awaitable[tuple[str | None, bool]], workspace: str
+) -> tuple[str | None, MCPTools]:
+    login, known = await scope
+    return await _run_mcp_tools(thread_id, login, workspace) if known else (None, MCPTools())
 
 
 async def _cached_profile(profile_login: str | None):
@@ -1572,26 +1595,30 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
-    walkthrough = await ReviewGuideSession.get(thread_id)
-    guide = walkthrough if walkthrough is not None and not walkthrough.closed else None
-    profile_login = await resolve_github_login(as_json_object(config))
-    credential_login = None
-    credential_scope_known = False
-    try:
-        credential_login = await private_credential_login(config)
-        credential_scope_known = True
-    except Exception:
-        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
-
-    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    credential_scope = asyncio.ensure_future(_credential_scope(config))
     # MCP loading needs only who the run acts for and where, and it is the slowest
-    # lookup here, so it overlaps the settings and access lookups below.
-    mcp_tools_task = (
-        asyncio.ensure_future(_run_mcp_tools(thread_id, credential_login, workspace))
-        if credential_scope_known
-        else None
+    # lookup here, so it overlaps every lookup below.
+    mcp_tools_task = asyncio.ensure_future(
+        _scoped_mcp_tools(
+            thread_id, credential_scope, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+        )
     )
-    task_coordination = await TaskCoordinationMiddleware.for_thread(thread_id)
+    (
+        walkthrough,
+        profile_login,
+        (credential_login, _),
+        task_coordination,
+        bridge_client,
+        (thread_settings, settings_changed),
+    ) = await asyncio.gather(
+        ReviewGuideSession.get(thread_id),
+        resolve_github_login(as_json_object(config)),
+        credential_scope,
+        TaskCoordinationMiddleware.for_thread(thread_id),
+        _timed(thread_id, "factory.bridged_thread", _bridge_client(thread_id)),
+        _timed(thread_id, "factory.thread_settings", _thread_settings(thread_id)),
+    )
+    guide = walkthrough if walkthrough is not None and not walkthrough.closed else None
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -1603,30 +1630,31 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     # Every settings read below is keyed by this slug. A factory runs outside the
     # graph's own context, so the settings module cannot recover it on its own.
     settings_workspace = workspace_slug(cfg)
-    async with aphase(thread_id, "factory.bridged_thread"):
-        bridge_client = await _bridge_client(thread_id)
-    async with aphase(thread_id, "factory.thread_settings"):
-        thread_settings, settings_changed = normalize_thread_settings(
-            await load_thread_settings(client, thread_id)
-        )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
-    async with aphase(thread_id, "factory.settings_defaults"):
-        settings, profile = await asyncio.gather(
-            cached_workspace_settings(settings_workspace),
-            _cached_profile(
-                profile_login
-                if reset_model_selection or not thread_settings.get("model_id")
-                else None
+    (settings, profile), admin_thread, tool_access = await asyncio.gather(
+        _timed(
+            thread_id,
+            "factory.settings_defaults",
+            asyncio.gather(
+                cached_workspace_settings(settings_workspace),
+                _cached_profile(
+                    profile_login
+                    if reset_model_selection or not thread_settings.get("model_id")
+                    else None
+                ),
             ),
-        )
-        model_defaults = settings.default_model_pair("agent")
-        routing_defaults = dict(settings.agent_routing_models)
-        title_defaults = settings.default_thread_title_model
-        use_gateway = settings.effective_gateway_enabled
-        fable_enabled = settings.fable_enabled
+        ),
+        _timed(thread_id, "factory.admin_thread", _admin_thread(config, profile_login)),
+        _timed(thread_id, "factory.tool_access", resolve_access(cfg, login=profile_login)),
+    )
+    model_defaults = settings.default_model_pair("agent")
+    routing_defaults = dict(settings.agent_routing_models)
+    title_defaults = settings.default_thread_title_model
+    use_gateway = settings.effective_gateway_enabled
+    fable_enabled = settings.fable_enabled
 
     slack_ask_mode = _slack_ask_mode(cfg)
 
@@ -1802,16 +1830,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     configurable["resolved_agent_effort"] = profile_effort
     user_email = cfg.user_email or ""
 
-    async with aphase(thread_id, "factory.admin_thread"):
-        admin_thread = await _admin_thread(config, profile_login)
-    async with aphase(thread_id, "factory.tool_access"):
-        tool_access = await resolve_access(cfg, login=profile_login)
-
     cli_result_required = bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
-    managed_gateway, mcp_tools = (
-        await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
-    )
+    managed_gateway, mcp_tools = await mcp_tools_task
     if incident_session is not None:
         # incident.io refuses publishing from this MCP client (surface_cannot_publish).
         mcp_tools = [
