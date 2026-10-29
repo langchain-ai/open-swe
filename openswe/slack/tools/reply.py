@@ -246,7 +246,15 @@ async def send_slack_reply(
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
-    return {"success": True, "message_ts": message_ts}
+    return {
+        "success": True,
+        "message_ts": message_ts,
+        "message_url": (
+            f"https://slack.com/archives/{channel_id}/p{message_ts.replace('.', '')}"
+            if message_ts
+            else None
+        ),
+    }
 
 
 async def _stale_reply_guard(
