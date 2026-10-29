@@ -145,6 +145,7 @@ it("shows all saved states together and preserves route queries in page links", 
         ...run,
         status: "complete",
         error: null,
+        base_url: "https://smith.langchain.com",
         report: { ...run.report!, scenarios },
       }}
     />
@@ -157,89 +158,15 @@ it("shows all saved states together and preserves route queries in page links", 
     expect(
       card.getByRole("link", { name: "Preview" }).getAttribute("href")
     ).toBe("https://pr.example.com/projects/42?tab=traces&filter=success")
-    expect(card.getByRole("link", { name: "Base" }).getAttribute("href")).toBe(
-      "https://base.example.com/projects/42?tab=traces&filter=success"
-    )
+    expect(card.queryByRole("link", { name: "Base" })).toBeNull()
   }
 })
 
-it("keeps an in-flight start disabled after remount and never navigates from its unmounted form", async () => {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  vi.spyOn(frontendReviewApi, "list")
-    .mockResolvedValueOnce({ runs: [] })
-    .mockResolvedValue({ runs: [run] })
-  vi.spyOn(frontendReviewApi, "get").mockResolvedValue(run)
-  let resolveStart!: (value: FrontendReviewRun) => void
-  const start = vi.spyOn(frontendReviewApi, "start").mockImplementation(
-    () =>
-      new Promise<FrontendReviewRun>((resolve) => {
-        resolveStart = resolve
-      })
-  )
-  const originalNavigation = vi.fn()
-  const remountedNavigation = vi.fn()
-  const pr = { owner: "acme", repo: "repo", number: 7 }
-  const original = render(
-    <QueryClientProvider client={client}>
-      <FrontendReviewer pr={pr} onRunChange={originalNavigation} />
-    </QueryClientProvider>
-  )
-  await screen.findByRole("button", { name: "Create dummy-auth review" })
-  fireEvent.change(screen.getByRole("textbox", { name: "Base preview URL" }), {
-    target: { value: "https://base.vercel.app" },
-  })
-  fireEvent.change(screen.getByRole("textbox", { name: "PR preview URL" }), {
-    target: { value: "https://head.vercel.app" },
-  })
-  fireEvent.click(
-    screen.getByRole("button", { name: "Create dummy-auth review" })
-  )
-  await waitFor(() => expect(start).toHaveBeenCalledTimes(1))
-  original.unmount()
-  render(
-    <QueryClientProvider client={client}>
-      <FrontendReviewer pr={pr} onRunChange={remountedNavigation} />
-    </QueryClientProvider>
-  )
-  const pendingButton = await screen.findByRole("button", {
-    name: "Starting Design QA review…",
-  })
-  expect((pendingButton as HTMLButtonElement).disabled).toBe(true)
-  fireEvent.click(pendingButton)
-  expect(start).toHaveBeenCalledTimes(1)
-  await act(async () => {
-    resolveStart(run)
-  })
-  await screen.findByText("Authentication required")
-  expect(originalNavigation).not.toHaveBeenCalled()
-  expect(remountedNavigation).not.toHaveBeenCalled()
-  expect(client.getQueryData(["frontend-review", "acme", "repo", 7])).toEqual({
-    runs: [run],
-  })
-  client.clear()
-})
-
-it("refreshes terminal progress when the worker finishes before the enqueue response arrives", async () => {
+it("shows capture as unavailable without offering a blocked start", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const finished: FrontendReviewRun = {
-    ...run,
-    auth_mode: "none",
-    report: null,
-    error: "Browser provider network isolation is required",
-  }
-  vi.spyOn(frontendReviewApi, "list")
-    .mockResolvedValueOnce({ runs: [] })
-    .mockResolvedValue({ runs: [finished] })
-  vi.spyOn(frontendReviewApi, "get").mockResolvedValue(finished)
-  vi.spyOn(frontendReviewApi, "start").mockResolvedValue({
-    ...finished,
-    status: "pending",
-    error: null,
-  })
+  vi.spyOn(frontendReviewApi, "list").mockResolvedValue({ runs: [] })
   render(
     <QueryClientProvider client={client}>
       <FrontendReviewer
@@ -248,22 +175,9 @@ it("refreshes terminal progress when the worker finishes before the enqueue resp
       />
     </QueryClientProvider>
   )
-  await screen.findByRole("button", { name: "Create dummy-auth review" })
-  fireEvent.change(screen.getByRole("textbox", { name: "Base preview URL" }), {
-    target: { value: "https://base.vercel.app" },
-  })
-  fireEvent.change(screen.getByRole("textbox", { name: "PR preview URL" }), {
-    target: { value: "https://head.vercel.app" },
-  })
-  fireEvent.click(screen.getByText("Public preview"))
-  fireEvent.click(
-    screen.getByRole("button", { name: "Check public preview capture" })
-  )
-  await screen.findByText("Capture blocked")
-  expect(
-    screen.getByText("Browser provider network isolation is required")
-  ).toBeTruthy()
-  expect(screen.queryByText("Frontend review queued…")).toBeNull()
+  expect(await screen.findByText(/Live capture is unavailable/)).toBeTruthy()
+  expect(screen.queryByRole("textbox")).toBeNull()
+  expect(screen.queryByRole("button")).toBeNull()
   client.clear()
 })
 

@@ -8,7 +8,6 @@ import {
 } from "react"
 
 import { cn } from "@/lib/utils"
-import type { PixelRect } from "./pixels"
 
 type Zoom = "fit" | number
 interface Point {
@@ -18,9 +17,7 @@ interface Point {
 interface Gesture {
   pointerId: number
   element: HTMLDivElement
-  mode: "pan" | "select"
   client: Point
-  start: Point
   scroll: Point
 }
 
@@ -28,36 +25,18 @@ export interface ComparisonViewportProps {
   width: number
   height: number
   panes: { id: string; label: string; content: ReactNode }[]
-  focus?: PixelRect | null
-  interaction?: "pan" | "select"
-  onSelect?: (rect: PixelRect) => void
-}
-
-function rectangle(start: Point, end: Point): PixelRect {
-  const x = Math.floor(Math.min(start.x, end.x))
-  const y = Math.floor(Math.min(start.y, end.y))
-  return {
-    x,
-    y,
-    width: Math.ceil(Math.max(start.x, end.x)) - x,
-    height: Math.ceil(Math.max(start.y, end.y)) - y,
-  }
 }
 
 export function ComparisonViewport({
   width,
   height,
   panes,
-  focus,
-  interaction = "pan",
-  onSelect,
 }: ComparisonViewportProps) {
   const viewports = useRef(new Map<string, HTMLDivElement>())
   const sources = useRef(new Map<string, HTMLDivElement>())
   const gesture = useRef<Gesture | null>(null)
   const scroll = useRef<Point>({ x: 0, y: 0 })
   const pendingCenter = useRef<(Point & { zoom: Zoom }) | null>(null)
-  const lastFocus = useRef<PixelRect | null>(null)
   const [zoom, setZoom] = useState<Zoom>("fit")
   const [viewport, setViewport] = useState({
     width: 0,
@@ -65,7 +44,6 @@ export function ComparisonViewport({
     paneWidth: 0,
   })
   const [dragging, setDragging] = useState(false)
-  const [selection, setSelection] = useState<PixelRect | null>(null)
   const paneIds = panes.map((pane) => pane.id).join(":")
   const fitScale = Math.min(
     1,
@@ -73,6 +51,8 @@ export function ComparisonViewport({
     (viewport.height || height) / height
   )
   const scale = zoom === "fit" ? fitScale : zoom
+  const canPan =
+    width * scale > viewport.width + 1 || height * scale > viewport.height + 1
 
   useLayoutEffect(() => {
     const first = viewports.current.values().next().value
@@ -98,32 +78,6 @@ export function ComparisonViewport({
   }, [paneIds])
 
   useLayoutEffect(() => {
-    if (!focus) {
-      lastFocus.current = null
-      return
-    }
-    if (!viewport.width || !viewport.height || lastFocus.current === focus)
-      return
-    lastFocus.current = focus
-    const next = Math.min(
-      4,
-      Math.max(
-        fitScale,
-        Math.min(
-          (viewport.width * 0.8) / Math.max(1, focus.width),
-          (viewport.height * 0.8) / Math.max(1, focus.height)
-        )
-      )
-    )
-    pendingCenter.current = {
-      x: focus.x + focus.width / 2,
-      y: focus.y + focus.height / 2,
-      zoom: next,
-    }
-    setZoom(next)
-  }, [focus, viewport.width, viewport.height, fitScale])
-
-  useLayoutEffect(() => {
     const center = pendingCenter.current
     if (center && center.zoom !== zoom) return
     for (const element of viewports.current.values()) {
@@ -135,7 +89,7 @@ export function ComparisonViewport({
         : scroll.current.y * scale
     }
     pendingCenter.current = null
-  }, [zoom, scale, paneIds, focus])
+  }, [zoom, scale, paneIds])
 
   function synchronize(element: HTMLDivElement) {
     scroll.current = {
@@ -181,33 +135,12 @@ export function ComparisonViewport({
     setZoom(next)
   }
 
-  function point(event: ReactPointerEvent<HTMLDivElement>, id: string): Point {
-    const bounds = sources.current.get(id)!.getBoundingClientRect()
-    return {
-      x: Math.max(0, Math.min(width, (event.clientX - bounds.left) / scale)),
-      y: Math.max(0, Math.min(height, (event.clientY - bounds.top) / scale)),
-    }
-  }
-
-  function finishGesture(event: ReactPointerEvent<HTMLDivElement>, id: string) {
-    const current = gesture.current
-    if (!current || current.pointerId !== event.pointerId) return
+  function finishGesture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (gesture.current?.pointerId !== event.pointerId) return
     gesture.current = null
     setDragging(false)
-    setSelection(null)
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId)
-    if (current.mode !== "select" || event.type === "pointercancel") return
-    const selected = rectangle(current.start, point(event, id))
-    if (
-      selected.width >= 4 &&
-      selected.height >= 4 &&
-      Math.hypot(
-        event.clientX - current.client.x,
-        event.clientY - current.client.y
-      ) >= 4
-    )
-      onSelect?.(selected)
   }
 
   return (
@@ -227,15 +160,14 @@ export function ComparisonViewport({
           ]}
         />
         <span className="px-space-1 text-xs text-secondary" role="status">
-          {Math.round(scale * 100)}% ·{" "}
-          {panes.length > 1 ? "Synced viewports" : "Drag to pan"}
+          {Math.round(scale * 100)}%{canPan ? " · Drag to pan" : ""}
         </span>
       </div>
       <div
-        className="grid min-w-0 divide-x divide-default"
-        style={{
-          gridTemplateColumns: `repeat(${panes.length}, minmax(0, 1fr))`,
-        }}
+        className={cn(
+          "grid min-w-0 divide-y divide-default sm:divide-y-0",
+          panes.length > 1 && "sm:grid-cols-2 sm:divide-x"
+        )}
       >
         {panes.map((pane) => (
           <div key={pane.id} className="min-w-0">
@@ -249,23 +181,15 @@ export function ComparisonViewport({
               }}
               role="region"
               aria-label={`${pane.label} screenshot viewport`}
-              aria-description={
-                interaction === "select"
-                  ? "Drag to select an area to ignore. Escape cancels the selection."
-                  : "Drag to pan or use the arrow keys to scroll. Plus and minus zoom. Zero fits the screenshot."
-              }
+              aria-description={`${canPan ? "Drag to pan or use the arrow keys to scroll. " : ""}Plus and minus zoom. Zero fits the screenshot.`}
               tabIndex={0}
               className={cn(
                 "overflow-auto overscroll-contain bg-surface-level-3 outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]",
-                interaction === "select"
-                  ? "cursor-crosshair"
-                  : dragging
-                    ? "cursor-grabbing"
-                    : "cursor-grab"
+                canPan && (dragging ? "cursor-grabbing" : "cursor-grab")
               )}
               style={{
                 height: `clamp(180px, ${((viewport.paneWidth || width) * height) / width}px, min(60vh, 560px))`,
-                touchAction: "none",
+                touchAction: canPan ? "none" : "auto",
               }}
               onScroll={(event) => synchronize(event.currentTarget)}
               onKeyDown={(event) => {
@@ -275,7 +199,6 @@ export function ComparisonViewport({
                   if (current?.element.hasPointerCapture(current.pointerId))
                     current.element.releasePointerCapture(current.pointerId)
                   gesture.current = null
-                  setSelection(null)
                   setDragging(false)
                 } else if (event.target !== event.currentTarget) return
                 else if (event.key === "0") {
@@ -290,9 +213,8 @@ export function ComparisonViewport({
                 }
               }}
               onPointerDown={(event) => {
-                if (event.button !== 0 || gesture.current) return
+                if (!canPan || event.button !== 0 || gesture.current) return
                 if (
-                  interaction === "pan" &&
                   event.target instanceof Element &&
                   event.target.closest("button, a, input, select, textarea")
                 )
@@ -300,41 +222,31 @@ export function ComparisonViewport({
                 event.preventDefault()
                 event.currentTarget.focus({ preventScroll: true })
                 event.currentTarget.setPointerCapture(event.pointerId)
-                const start = point(event, pane.id)
                 gesture.current = {
                   pointerId: event.pointerId,
                   element: event.currentTarget,
-                  mode: interaction,
                   client: { x: event.clientX, y: event.clientY },
-                  start,
                   scroll: {
                     x: event.currentTarget.scrollLeft,
                     y: event.currentTarget.scrollTop,
                   },
                 }
                 setDragging(true)
-                if (interaction === "select")
-                  setSelection(rectangle(start, start))
               }}
               onPointerMove={(event) => {
                 const current = gesture.current
                 if (!current || current.pointerId !== event.pointerId) return
-                if (current.mode === "select")
-                  setSelection(rectangle(current.start, point(event, pane.id)))
-                else {
-                  event.currentTarget.scrollLeft =
-                    current.scroll.x + current.client.x - event.clientX
-                  event.currentTarget.scrollTop =
-                    current.scroll.y + current.client.y - event.clientY
-                  synchronize(event.currentTarget)
-                }
+                event.currentTarget.scrollLeft =
+                  current.scroll.x + current.client.x - event.clientX
+                event.currentTarget.scrollTop =
+                  current.scroll.y + current.client.y - event.clientY
+                synchronize(event.currentTarget)
               }}
-              onPointerUp={(event) => finishGesture(event, pane.id)}
-              onPointerCancel={(event) => finishGesture(event, pane.id)}
+              onPointerUp={finishGesture}
+              onPointerCancel={finishGesture}
               onLostPointerCapture={() => {
                 gesture.current = null
                 setDragging(false)
-                setSelection(null)
               }}
             >
               <div
@@ -346,17 +258,6 @@ export function ComparisonViewport({
                 style={{ width: width * scale, height: height * scale }}
               >
                 {pane.content}
-                {selection && (
-                  <div
-                    className="pointer-events-none absolute rounded-sm border-2 border-warning bg-warning/10"
-                    style={{
-                      left: selection.x * scale,
-                      top: selection.y * scale,
-                      width: selection.width * scale,
-                      height: selection.height * scale,
-                    }}
-                  />
-                )}
               </div>
             </div>
           </div>

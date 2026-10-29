@@ -4,7 +4,13 @@ import {
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
 import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
-import type { PixelRect } from "./pixels"
+
+export interface PixelRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
 export type FrontendRunStatus =
   | "pending"
@@ -89,13 +95,6 @@ export interface FrontendReviewInbox {
   incomplete: boolean
 }
 
-export interface FrontendReviewInput {
-  base_url: string
-  head_url: string
-  paths: string[]
-  auth_mode: "dummy" | "none"
-}
-
 function path(pr: PullRequestRef) {
   return `/reviews/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/${pr.number}/frontend-reviews`
 }
@@ -139,11 +138,6 @@ export const frontendReviewApi = {
     request<{ runs: FrontendReviewRun[] }>(path(pr)),
   get: (pr: PullRequestRef, id: string) =>
     request<FrontendReviewRun>(`${path(pr)}/${encodeURIComponent(id)}`),
-  start: (pr: PullRequestRef, input: FrontendReviewInput) =>
-    request<FrontendReviewRun>(path(pr), {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
 }
 
 export function evidenceMediaUrl(url: string): string {

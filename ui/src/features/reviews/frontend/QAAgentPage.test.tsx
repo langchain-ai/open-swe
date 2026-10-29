@@ -205,7 +205,7 @@ it("does not classify unpaired capture as a small or unchanged visual result", a
   mount()
   await screen.findByText("Capture failed")
   expect(screen.queryByText("Small visual change")).toBeNull()
-  expect(screen.queryByText("No pixel changes")).toBeNull()
+  expect(screen.queryByText("No changes above threshold")).toBeNull()
   expect(screen.getByText("0/1 states compared · 0 interactions")).toBeTruthy()
 })
 

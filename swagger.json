@@ -2015,7 +2015,7 @@
             "type": "number"
           },
           "threshold": {
-            "default": 18,
+            "default": 0,
             "maximum": 255.0,
             "minimum": 0.0,
             "title": "Threshold",
@@ -2286,6 +2286,106 @@
         "title": "FixIntent",
         "type": "object"
       },
+      "FrontendInteractionStep": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "hover",
+              "press",
+              "click",
+              "focus",
+              "type",
+              "escape"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "checkpoint": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint"
+          },
+          "expect_visible": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expect Visible"
+          },
+          "selector": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "action",
+          "selector"
+        ],
+        "title": "FrontendInteractionStep",
+        "type": "object"
+      },
+      "FrontendJourney": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/FrontendInteractionStep"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Steps",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "path",
+          "steps"
+        ],
+        "title": "FrontendJourney",
+        "type": "object"
+      },
       "FrontendReport": {
         "properties": {
           "ai_review_status": {
@@ -2332,11 +2432,23 @@
             "title": "Build Verification",
             "type": "string"
           },
+          "production_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Production Url"
+          },
           "scenarios": {
             "items": {
               "$ref": "#/components/schemas/FrontendScenario"
             },
-            "maxItems": 5,
+            "maxItems": 10,
             "title": "Scenarios",
             "type": "array"
           },
@@ -2359,6 +2471,71 @@
           "summary"
         ],
         "title": "FrontendReport",
+        "type": "object"
+      },
+      "FrontendReviewInbox": {
+        "properties": {
+          "incomplete": {
+            "title": "Incomplete",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FrontendReviewInboxItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          }
+        },
+        "required": [
+          "items",
+          "next_page",
+          "incomplete"
+        ],
+        "title": "FrontendReviewInbox",
+        "type": "object"
+      },
+      "FrontendReviewInboxItem": {
+        "properties": {
+          "pr": {
+            "$ref": "#/components/schemas/OpenPullRequest"
+          },
+          "requested_reviewers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Reviewers",
+            "type": "array"
+          },
+          "requested_teams": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requested Teams",
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/FrontendReviewView"
+          }
+        },
+        "required": [
+          "pr",
+          "run",
+          "requested_reviewers",
+          "requested_teams"
+        ],
+        "title": "FrontendReviewInboxItem",
         "type": "object"
       },
       "FrontendReviewList": {
@@ -2477,6 +2654,26 @@
       },
       "FrontendScenario": {
         "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Actions",
+            "type": "array"
+          },
+          "after_error": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Error"
+          },
           "after_url": {
             "anyOf": [
               {
@@ -2506,6 +2703,18 @@
             "maxItems": 100,
             "title": "Annotations",
             "type": "array"
+          },
+          "before_error": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Error"
           },
           "before_url": {
             "anyOf": [
@@ -2569,6 +2778,19 @@
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$",
             "title": "Id",
             "type": "string"
+          },
+          "interaction": {
+            "default": false,
+            "title": "Interaction",
+            "type": "boolean"
+          },
+          "layout_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Layout Warnings",
+            "type": "array"
           },
           "mask_rects": {
             "items": {
@@ -7889,6 +8111,14 @@
             "title": "Head Url",
             "type": "string"
           },
+          "journeys": {
+            "items": {
+              "$ref": "#/components/schemas/FrontendJourney"
+            },
+            "maxItems": 3,
+            "title": "Journeys",
+            "type": "array"
+          },
           "paths": {
             "items": {
               "type": "string"
@@ -11909,6 +12139,71 @@
         "tags": [
           "dashboard",
           "fleet-chat"
+        ]
+      }
+    },
+    "/dashboard/api/frontend-reviews/inbox": {
+      "get": {
+        "operationId": "api_frontend_review_inbox_dashboard_api_frontend_reviews_inbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "review-requested",
+              "enum": [
+                "mine",
+                "review-requested"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrontendReviewInbox"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Frontend Review Inbox",
+        "tags": [
+          "dashboard",
+          "frontend-review"
         ]
       }
     },

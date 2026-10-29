@@ -49,6 +49,44 @@ function Screenshot({
 }
 
 export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
+  const container = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(
+    () => typeof IntersectionObserver === "undefined"
+  )
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setVisible(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: "200px" }
+    )
+    observer.observe(container.current!)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div ref={container} className="min-w-0">
+      {visible ? (
+        <LoadedEvidence scenario={scenario} />
+      ) : (
+        <div
+          className="flex min-h-[180px] items-center justify-center text-sm text-secondary"
+          style={{
+            aspectRatio: `${scenario.width ?? 900} / ${scenario.height ?? 560}`,
+            maxHeight: "min(60vh, 560px)",
+          }}
+        >
+          Loading screenshots…
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
   const [mode, setMode] = useState<ViewMode>("split")
   const [swipe, setSwipe] = useState(50)
   const [opacity, setOpacity] = useState(50)
@@ -134,6 +172,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
               src={evidenceMediaUrl((afterUrl || beforeUrl)!)}
               alt={afterUrl ? "PR interaction state" : "Base interaction state"}
               className="h-auto max-w-full rounded-md border border-default"
+              loading="lazy"
             />
           </figure>
         )}

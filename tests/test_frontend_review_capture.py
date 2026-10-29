@@ -49,6 +49,12 @@ def test_exact_mask_uses_threshold_and_preserves_unchanged_pixels() -> None:
         assert mask.getpixel((1, 2)) == (226, 61, 117, 255)
     assert len(comparison.regions) == 1
     assert comparison.regions[0].pixels == 4
+    subtle = before.copy()
+    subtle.putpixel((1, 1), (28, 28, 28))
+    exact = compare(_png(before), _png(subtle))
+    assert exact.metrics.threshold == 0
+    assert exact.metrics.changed_pixels == 1
+    assert compare(_png(before), _png(subtle), threshold=18).metrics.changed_pixels == 0
     with pytest.raises(ValueError, match="same dimensions"):
         compare(_png(before), _png(Image.new("RGB", (32, 32))))
 

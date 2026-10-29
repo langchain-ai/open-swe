@@ -125,6 +125,7 @@ export function ReviewPage({
           />
           {frontendActive && (
             <Button
+              className="sm:hidden"
               size="xs"
               color="secondary"
               variant="plain"

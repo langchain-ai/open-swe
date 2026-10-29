@@ -1,17 +1,10 @@
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
-import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
-import { Input } from "@langchain/macaw-components/Input"
 import { Link as ExternalLink } from "@langchain/macaw-components/Link"
 import { Select } from "@langchain/macaw-components/Select"
-import {
-  useIsMutating,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
-import { useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { useRef } from "react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { Link } from "@tanstack/react-router"
 
@@ -23,7 +16,6 @@ import {
   frontendReviewApi,
   frontendReviewKey,
   type FrontendReviewRun,
-  type FrontendReviewInput,
 } from "./api"
 import { EvidenceViewer } from "./EvidenceViewer"
 import { AskAboutChange } from "./AskAboutChange"
@@ -40,7 +32,6 @@ export function FrontendReviewer({
   runId?: string
   onRunChange: (id: string) => void
 }) {
-  const client = useQueryClient()
   const key = frontendReviewKey(pr)
   const list = useQuery({
     queryKey: key,
@@ -54,64 +45,11 @@ export function FrontendReviewer({
     enabled: Boolean(selectedId),
     ...sharedReviewOptions(pr),
   })
-  const [setupOpen, setSetupOpen] = useState(false)
-  const mutationKey = [...key, "start"]
-  const starting = useIsMutating({ mutationKey, exact: true }) > 0
-  const captureInProgress =
-    list.data?.runs.some(
-      (run) => run.status === "pending" || run.status === "running"
-    ) ?? false
-  const start = useMutation({
-    mutationKey,
-    mutationFn: (input: FrontendReviewInput) =>
-      frontendReviewApi.start(pr, input),
-    onSuccess: async (run) => {
-      client.setQueryData([...key, run.id], run)
-      client.setQueryData<{ runs: FrontendReviewRun[] }>(key, (current) => ({
-        runs: [
-          run,
-          ...(current?.runs ?? []).filter((item) => item.id !== run.id),
-        ],
-      }))
-      await client.invalidateQueries({ queryKey: key })
-    },
-    meta: { errorTitle: "Could not start Design QA review" },
-  })
-
   const run = detail.data
   const empty = !list.isPending && !list.isError && !selectedId
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-space-5 p-space-5 max-sm:p-space-3">
-        <div className="flex flex-wrap items-start justify-between gap-space-3">
-          <h2 className="text-lg font-semibold">Design QA</h2>
-          <div className="flex items-center gap-space-2">
-            <Button
-              size="sm"
-              color="secondary"
-              variant="outlined"
-              disabled={list.isPending || starting || captureInProgress}
-              onClick={() => setSetupOpen(!setupOpen)}
-            >
-              {setupOpen ? "Cancel" : "Capture settings"}
-            </Button>
-          </div>
-        </div>
-        {(setupOpen || empty) && (
-          <ReviewSetup
-            pr={pr}
-            pending={list.isPending || starting || captureInProgress}
-            error={start.error?.message}
-            onStart={(input) =>
-              start.mutate(input, {
-                onSuccess: (created) => {
-                  onRunChange(created.id)
-                  setSetupOpen(false)
-                },
-              })
-            }
-          />
-        )}
         {list.isError ? (
           <ErrorCard message={list.error.message} />
         ) : detail.isError ? (
@@ -124,9 +62,10 @@ export function FrontendReviewer({
               </p>
             )}
             {empty && (
-              <p className="text-sm text-secondary">
-                No saved comparisons yet.
-              </p>
+              <Card role="status" className="p-space-4 text-sm text-secondary">
+                No saved comparisons. Live capture is unavailable until browser
+                isolation is connected.
+              </Card>
             )}
             {list.data && list.data.runs.length > 1 && (
               <label className="flex items-center gap-space-3 text-xs text-secondary">
@@ -163,135 +102,6 @@ export function FrontendReviewer({
         )}
       </div>
     </div>
-  )
-}
-
-function ReviewSetup({
-  pr,
-  pending,
-  error,
-  onStart,
-}: {
-  pr: PullRequestRef
-  pending: boolean
-  error?: string
-  onStart: (input: {
-    base_url: string
-    head_url: string
-    paths: string[]
-    auth_mode: "dummy" | "none"
-  }) => void
-}) {
-  const [base, setBase] = useState("")
-  const [head, setHead] = useState(
-    pr.owner === "langchain-ai" && pr.repo === "langchainplus"
-      ? `https://pr-${pr.number}-fe.review.smith.langchain.com`
-      : ""
-  )
-  const [paths, setPaths] = useState("/")
-  const [auth, setAuth] = useState<"dummy" | "none">("dummy")
-  return (
-    <Card className="p-space-4">
-      <form
-        className="flex flex-col gap-space-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          onStart({
-            base_url: base.trim(),
-            head_url: head.trim(),
-            paths: paths
-              .split(",")
-              .map((path) => path.trim())
-              .filter(Boolean),
-            auth_mode: auth,
-          })
-        }}
-      >
-        <div>
-          <h3 className="text-sm font-medium">Capture a Design QA review</h3>
-          <p className="mt-space-1 text-xs text-secondary">
-            Use matching routes on the base and PR previews.
-          </p>
-          <p
-            role="status"
-            className="mt-space-2 text-xs text-warning-secondary"
-          >
-            Live capture requires browser network isolation. Dummy login does
-            not sign in.
-          </p>
-        </div>
-        <div className="grid gap-space-3 md:grid-cols-2">
-          <label className="flex flex-col gap-space-2 text-xs font-medium">
-            Base preview URL
-            <Input
-              aria-label="Base preview URL"
-              type="url"
-              required
-              value={base}
-              onChange={setBase}
-              placeholder="https://base-preview.example.com"
-              disabled={pending}
-            />
-          </label>
-          <label className="flex flex-col gap-space-2 text-xs font-medium">
-            PR preview URL
-            <Input
-              aria-label="PR preview URL"
-              type="url"
-              required
-              value={head}
-              onChange={setHead}
-              placeholder="https://pr-preview.example.com"
-              disabled={pending}
-            />
-          </label>
-        </div>
-        <label className="flex flex-col gap-space-2 text-xs font-medium">
-          Routes to inspect
-          <Input
-            aria-label="Routes to inspect"
-            required
-            value={paths}
-            onChange={setPaths}
-            placeholder="/, /projects"
-            disabled={pending}
-          />
-          <span className="font-normal text-secondary">
-            Up to 5 routes, separated by commas.
-          </span>
-        </label>
-        <div className="flex flex-wrap items-center gap-space-3">
-          <GroupedTabs
-            size="sm"
-            value={auth}
-            onChange={setAuth}
-            options={[
-              { value: "dummy", display: "Dummy login" },
-              { value: "none", display: "Public preview" },
-            ]}
-          />
-          <p className="text-xs text-secondary">
-            {auth === "dummy"
-              ? "Records an authentication blocker."
-              : "Records the browser isolation blocker."}
-          </p>
-        </div>
-        {error && (
-          <p role="alert" className="text-sm text-error-secondary">
-            {error}
-          </p>
-        )}
-        <div>
-          <Button type="submit" size="sm" disabled={pending}>
-            {pending
-              ? "Starting Design QA review…"
-              : auth === "dummy"
-                ? "Create dummy-auth review"
-                : "Check public preview capture"}
-          </Button>
-        </div>
-      </form>
-    </Card>
   )
 }
 
@@ -431,7 +241,9 @@ export function FrontendReportView({
               </h3>
               <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-secondary">
                 {scenario.metrics && (
-                  <span title="Saved changed-pixel count; change extent is not issue severity">
+                  <span
+                    title={`Saved pixel threshold: ${scenario.metrics.threshold}. Change extent is not issue severity.`}
+                  >
                     {(scenario.metrics.changed_ratio * 100).toFixed(2)}% changed
                   </span>
                 )}
@@ -441,24 +253,33 @@ export function FrontendReportView({
                     ["Preview", run.head_url],
                     ["Base", run.base_url],
                   ] as const
-                ).map(([label, origin]) => {
-                  const href = origin && pageLink(origin, scenario.path)
-                  return (
-                    href && (
-                      <ExternalLink
-                        key={label}
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        variant="xs"
-                        rightDecorator={ArrowSquareOutIcon}
-                        title={href}
-                      >
-                        {label}
-                      </ExternalLink>
-                    )
+                )
+                  .map(([label, origin]) => ({
+                    label,
+                    href: origin && pageLink(origin, scenario.path),
+                  }))
+                  .filter(
+                    (link, linkIndex, links) =>
+                      link.href &&
+                      links.findIndex((item) => item.href === link.href) ===
+                        linkIndex
                   )
-                })}
+                  .map(
+                    ({ label, href }) =>
+                      href && (
+                        <ExternalLink
+                          key={label}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          variant="xs"
+                          rightDecorator={ArrowSquareOutIcon}
+                          title={href}
+                        >
+                          {label}
+                        </ExternalLink>
+                      )
+                  )}
               </div>
             </div>
             <AskAboutChange

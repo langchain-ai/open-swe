@@ -269,7 +269,7 @@ function QAPullRequestCard({
     maxRatio === null
       ? null
       : maxRatio === 0
-        ? "No pixel changes"
+        ? "No changes above threshold"
         : maxRatio < 0.02
           ? "Small visual change"
           : maxRatio < 0.15

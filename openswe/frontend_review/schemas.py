@@ -83,7 +83,7 @@ class DifferenceMetrics(BaseModel):
     changed_pixels: int = Field(ge=0)
     total_pixels: int = Field(gt=0)
     changed_ratio: float = Field(ge=0, le=1)
-    threshold: int = Field(default=18, ge=0, le=255)
+    threshold: int = Field(default=0, ge=0, le=255)
 
     @model_validator(mode="after")
     def consistent_counts(self) -> Self:

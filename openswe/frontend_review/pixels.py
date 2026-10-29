@@ -25,7 +25,7 @@ def _png(image: Image.Image) -> bytes:
     return output.getvalue()
 
 
-def compare(before: bytes, after: bytes, *, threshold: int = 18) -> PixelComparison:
+def compare(before: bytes, after: bytes, *, threshold: int = 0) -> PixelComparison:
     """Highlight only pixels whose largest RGBA channel difference exceeds threshold."""
     if not 0 <= threshold <= 255:
         raise ValueError("Pixel threshold must be between 0 and 255")
