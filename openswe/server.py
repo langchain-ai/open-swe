@@ -997,43 +997,17 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
     return cfg.stop_summary is not True and not bridged
 
 
-def _slack_tools_enabled(cfg: RunConfig) -> bool:
-    """Return whether the run has trusted Slack source context.
-
-    A web follow-up counts: its `slack_thread` is copied from the thread's own
-    metadata, never from the client, and keeping the tools registered across a
-    surface switch is what keeps the prompt prefix cacheable.
-    """
-    if cfg.source not in {"slack", "schedule", "incidents_agent", "github", DASHBOARD_SOURCE}:
-        return False
-    if cfg.slack_thread is None:
-        return False
-    if _slack_ask_mode(cfg):
-        return bool(cfg.slack_thread.channel_id.strip())
-    return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
-
-
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
     """Where this run owes its answer, before anything moves mid-run."""
-    if cfg.source in {DASHBOARD_SOURCE, "github"} or not _slack_tools_enabled(cfg):
+    if cfg.source in {DASHBOARD_SOURCE, "github"} or not cfg.slack_context:
         return WEB_REPLY_SURFACE
     return SLACK_REPLY_SURFACE
-
-
-def _slack_ask_mode(cfg: RunConfig) -> bool:
-    """A one-off `/oswe` question (ephemeral answer, no Slack thread), until it continues on the web."""
-    return (
-        cfg.source == "slack"
-        and cfg.slack_ask is True
-        and cfg.slack_thread is not None
-        and bool(cfg.slack_thread.triggering_user_id.strip())
-    )
 
 
 def _slack_concierge_run(cfg: RunConfig) -> bool:
     """Whether this run answers in a bot DM its owner runs in concierge mode."""
     return (
-        _slack_tools_enabled(cfg)
+        cfg.slack_context
         and cfg.slack_thread is not None
         and is_concierge_thread(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
@@ -1445,9 +1419,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         turn = TurnContext(
             working_dir=work_dir,
             source="background_task" if cfg.background_task_completion else self._source,
-            slack_context=_slack_tools_enabled(cfg),
-            slack_ask=_slack_ask_mode(cfg),
-            slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
+            slack_context=cfg.slack_context,
+            slack_ask=cfg.slack_ask_mode,
+            slack_by_the_way=cfg.slack_ask_mode and bool(cfg.slack_by_the_way_thread_ts),
             slack_breakout=cfg.slack_breakout is True,
             slack_follow_up_suggestions=_slack_concierge_run(cfg)
             or (await cached_workspace_settings(workspace_slug(cfg))).get(
@@ -1618,7 +1592,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         use_gateway = settings.effective_gateway_enabled
         fable_enabled = settings.fable_enabled
 
-    slack_ask_mode = _slack_ask_mode(cfg)
+    slack_ask_mode = cfg.slack_ask_mode
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
     for route, stored_route in thread_settings.get("routing_models", {}).items():
@@ -1821,7 +1795,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_move_thread,
         slack_no_reply_needed,
         slack_post_message,
-        slack_read_thread_messages,
         slack_reply,
         slack_breakout_thread,
         slack_start_review_channel,
@@ -1842,7 +1815,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
-    if not _slack_tools_enabled(cfg):
+    if not cfg.slack_context:
         # An automation run has no Slack thread, but its prompt may ask it to
         # report to a channel.
         kept = (slack_list_channels, slack_post_message) if cfg.source == "schedule" else ()

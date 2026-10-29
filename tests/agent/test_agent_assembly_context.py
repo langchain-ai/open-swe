@@ -446,7 +446,6 @@ SLACK_TOOL_NAMES = {
     "slack_list_channels",
     "slack_no_reply_needed",
     "slack_post_message",
-    "slack_read_thread_messages",
     "slack_breakout_thread",
     "slack_reply",
 }
@@ -563,20 +562,30 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("thread_scope", ["private", "public", "bot"])
+@pytest.mark.parametrize(
+    ("thread_scope", "source", "channel_reads", "thread_reads"),
+    [
+        ("private", "slack", True, True),
+        ("public", "slack", False, True),
+        ("bot", "slack", True, True),
+        ("private", "dashboard", True, True),
+        ("public", "dashboard", False, False),
+    ],
+)
 async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
-    thread_scope: str, saved_thread_scope: dict[str, object]
+    thread_scope: str,
+    source: str,
+    channel_reads: bool,
+    thread_reads: bool,
+    saved_thread_scope: dict[str, object],
 ) -> None:
     saved_thread_scope["visibility"] = "private" if thread_scope == "private" else "public"
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
-    configurable.update(
-        {
-            "source": "slack",
-            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
-        }
-    )
+    configurable["source"] = source
+    if source == "slack":
+        configurable["slack_thread"] = {"channel_id": "C123", "thread_ts": "1700000000.000100"}
     if thread_scope == "bot":
         slack_thread = {
             "channel_id": "C123",
@@ -595,12 +604,12 @@ async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
     assert isinstance(subagents, list)
 
     tool_names = {_registered_tool_name(tool) for tool in tools}
-    assert ("slack_read_channel_messages" in tool_names) is (thread_scope != "public")
-    # A thread-bound Slack read is unaffected either way.
-    assert "slack_read_thread_messages" in tool_names
+    assert ("slack_read_channel_messages" in tool_names) is channel_reads
+    # A run started from Slack reads threads with the bot's own reach; a web one as channel history.
+    assert ("slack_read_thread_messages" in tool_names) is thread_reads
 
     gp = next(item for item in subagents if item.name == "general-purpose")
-    assert ("slack_read_channel_messages" in (gp.tools or ())) is (thread_scope != "public")
+    assert ("slack_read_channel_messages" in (gp.tools or ())) is channel_reads
 
 
 @pytest.fixture

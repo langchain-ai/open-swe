@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R", bound=Mapping[str, object])
 
-Place = Literal["anywhere", "private", "admin_thread", "admin_surface", "channel_history"]
+Place = Literal[
+    "anywhere", "private", "admin_thread", "admin_surface", "channel_history", "thread_history"
+]
 Actor = Literal["anyone", "owner", "admin"]
 Mode = Literal["full", "sole"]
 Projection = Callable[[Mapping[str, object]], Mapping[str, object]]
@@ -116,6 +118,13 @@ class Access:
     sole: bool = False
     direct: bool = False
     slack_bot_channel: str | None = None
+    # The run was started from a Slack thread; the bot's own reach applies there.
+    slack_context: bool = False
+
+    @property
+    def channel_history(self) -> bool:
+        """Whether public channels the bot is in may be read on the asker's behalf."""
+        return self.private or bool(self.slack_bot_channel)
 
     def mode(self, policy: Policy) -> Mode | None:
         if policy.direct and not self.direct:
@@ -125,7 +134,8 @@ class Access:
             "private": self.private,
             "admin_thread": self.admin_thread,
             "admin_surface": self.admin_surface,
-            "channel_history": self.private or bool(self.slack_bot_channel),
+            "channel_history": self.channel_history,
+            "thread_history": self.slack_context or self.channel_history,
         }[policy.trusted]
         if trusted and self._actor(policy.actor, sole=False):
             return "full"
@@ -277,6 +287,7 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
         slack_bot_channel=slack_bot_channel,
+        slack_context=cfg.slack_context,
     )
 
 

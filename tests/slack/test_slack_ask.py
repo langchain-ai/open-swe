@@ -106,9 +106,8 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     resumed = await task_service.recipient_config(request.thread_id)
 
     from openswe.run_config import RunConfig
-    from openswe.server import _slack_tools_enabled
 
-    assert _slack_tools_enabled(RunConfig.parse(resumed))
+    assert RunConfig.parse(resumed).slack_context
     monkeypatch.setattr(slack_reply, "get_config", lambda: {"configurable": resumed})
     monkeypatch.setattr(slack_reply, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(slack_reply.event_claims, "claim", AsyncMock(return_value=True))
