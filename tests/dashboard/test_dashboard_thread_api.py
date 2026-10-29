@@ -1028,6 +1028,56 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
     return threads
 
 
+@pytest.mark.parametrize("readable", [True, False])
+async def test_slack_link_search_checks_thread_access(monkeypatch, readable: bool) -> None:
+    thread = {"thread_id": "linked", "metadata": {"visibility": "private"}}
+    monkeypatch.setattr(
+        thread_listing, "lookup_slack_link_thread_id", AsyncMock(return_value="linked")
+    )
+    monkeypatch.setattr(
+        thread_listing,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread))),
+    )
+    monkeypatch.setattr(thread_listing, "thread_is_readable", lambda *args: readable)
+    monkeypatch.setattr(
+        thread_listing, "_summarize_thread", AsyncMock(return_value={"id": "linked"})
+    )
+
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat",
+        query="https://example.slack.com/archives/C123/p1788431248678809",
+        scope="interactive",
+    )
+
+    assert page["items"] == ([{"id": "linked"}] if readable else [])
+    assert page["hasMore"] is False
+
+
+async def test_pr_link_search_finds_exact_associations_outside_participation(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    for thread, number in zip(threads, [42, 420], strict=True):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["pr_url"] = f"https://github.com/acme/repo/pull/{number}"
+        metadata["latest_run_status"] = "success"
+    search = AsyncMock(return_value=threads)
+    client = SimpleNamespace(threads=SimpleNamespace(search=search))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        thread_listing,
+        "_summarize_threads",
+        AsyncMock(side_effect=lambda client, rows: [{"id": row["thread_id"]} for row in rows]),
+    )
+
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat", query="https://github.com/acme/repo/pull/42/files#diff-123"
+    )
+
+    assert page["items"] == [{"id": threads[0]["thread_id"]}]
+    assert search.call_args.kwargs["metadata"] == {}
+    assert search.call_args.kwargs["params"] == {"text": "https://github.com/acme/repo/pull/42"}
+
+
 async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
     page_size = thread_listing._THREADS_SEARCH_PAGE
     threads = _make_threads(page_size + 50, resolved_before=page_size)
