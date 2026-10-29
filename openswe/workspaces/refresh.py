@@ -33,6 +33,7 @@ from typing import Any
 
 from openswe.config import ENV, EnvVar
 from openswe.jobs import queue
+from openswe.sandboxes.paths import declared_work_dir
 from openswe.utils.time import parse_iso
 from openswe.workspaces.store import (
     WORKSPACES,
@@ -171,7 +172,9 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
     return backend
 
 
-def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str, int]]:
+def _scripts_to_run(
+    record: Workspace, kind: RefreshKind, *, work_dir: str = "/workspace"
+) -> list[tuple[str, str, int]]:
     """The scripts a refresh runs, in order, as ``(label, command, timeout)``.
 
     A full rebuild runs the update script too, so a broken one is caught nightly
@@ -190,7 +193,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "update",
-                script_command(record.update_script, "update", record.repos),
+                script_command(record.update_script, "update", record.repos, work_dir=work_dir),
                 _seconds(ENV.WORKSPACE_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
@@ -331,7 +334,9 @@ async def refresh_workspace(
         await attempt.publish_builder(sandbox_id)
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
-        for label, command, timeout in _scripts_to_run(record, kind):
+        for label, command, timeout in _scripts_to_run(
+            record, kind, work_dir=declared_work_dir(backend) or "/workspace"
+        ):
             step = label
             await attempt.start_step(label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)

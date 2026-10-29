@@ -269,7 +269,9 @@ def script_log_path(label: str) -> str:
     return f"{script_root()}/logs/{label}.log"
 
 
-def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
+def script_command(
+    script: str, label: str, repos: Sequence[str] = (), *, work_dir: str = "/workspace"
+) -> str:
     """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
@@ -294,7 +296,7 @@ def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
     commands = []
     if label == "update":
         for repo in repos:
-            checkout = shlex.quote(f"/workspace/{repo.rsplit('/', 1)[-1]}")
+            checkout = shlex.quote(f"{work_dir}/{repo.rsplit('/', 1)[-1]}")
             url = shlex.quote(f"https://github.com/{repo}.git")
             commands.append(
                 f"if [ ! -e {checkout} ] && [ ! -L {checkout} ]; then "
