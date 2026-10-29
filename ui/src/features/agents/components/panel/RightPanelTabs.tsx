@@ -24,6 +24,7 @@ import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
+import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import type {
@@ -63,6 +64,8 @@ interface RightPanelTabsProps {
   onAddBrowser?: () => void
   /** Offered only where a thread can run commands and monitors in the background. */
   onAddBackgroundWork?: () => void
+  /** Offered once the thread's agent previews an app it builds. */
+  onAddApp?: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
   browserAvailable?: boolean
@@ -94,6 +97,7 @@ type SurfaceLauncherProps = Pick<
   | "onAddFiles"
   | "onAddBrowser"
   | "onAddBackgroundWork"
+  | "onAddApp"
   | "terminalAvailable"
   | "diffAvailable"
   | "browserAvailable"
@@ -172,6 +176,20 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
               "Nothing is running in the background for this thread.",
             unavailableHint: "Available while a command or monitor runs.",
             onClick: props.onAddBackgroundWork,
+          },
+        ]
+      : []),
+    ...(props.onAddApp
+      ? [
+          {
+            label: "App",
+            description: "Use the app the agent is building.",
+            icon: PuzzlePieceIcon,
+            shortcut: "A",
+            available: true,
+            disabledReason: "",
+            unavailableHint: "",
+            onClick: props.onAddApp,
           },
         ]
       : []),
@@ -450,6 +468,8 @@ export function surfaceTitle(
       return "Browser"
     case "background":
       return "Background work"
+    case "app":
+      return "App"
   }
 }
 
@@ -461,6 +481,7 @@ const SURFACE_ICONS = {
   terminal: TerminalWindowIcon,
   agents: RobotIcon,
   background: PulseIcon,
+  app: PuzzlePieceIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {

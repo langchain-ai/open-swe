@@ -12,6 +12,8 @@ import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
+import { ThreadAppPreview } from "@/features/plugins/components/ThreadAppPreview"
+import { useAppPreview } from "@/features/plugins/lib/queries"
 import {
   BackgroundWorkPanel,
   useHasBackgroundWork,
@@ -97,6 +99,22 @@ export function AgentGitPanel({
   }, [browserOpened, onCollapsedChange, openSurface, threadRef])
 
   const backgroundWorkAvailable = useHasBackgroundWork(thread.id)
+  // The app the agent builds shows on its own each time it previews a build.
+  const appPreview = useAppPreview(thread.id)
+  const previewed = appPreview.data
+    ? (appPreview.data.running?.version.id ??
+      appPreview.data.waiting?.id ??
+      null)
+    : undefined
+  const previewSeenRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    if (previewed === undefined) return
+    const seen = previewSeenRef.current
+    previewSeenRef.current = previewed
+    if (seen === undefined || previewed === null || previewed === seen) return
+    openSurface(threadRef, "app")
+    onCollapsedChange(false)
+  }, [onCollapsedChange, openSurface, previewed, threadRef])
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
@@ -226,6 +244,16 @@ export function AgentGitPanel({
       )}
       backgroundWorkAvailable={backgroundWorkAvailable}
       renderBackgroundWork={() => <BackgroundWorkPanel threadId={thread.id} />}
+      {...(previewed
+        ? {
+            renderApp: () => (
+              <ThreadAppPreview
+                threadId={thread.id}
+                active={!collapsed && activeSurfaceId === "app"}
+              />
+            ),
+          }
+        : {})}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       onReply={onReply}

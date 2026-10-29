@@ -15,6 +15,7 @@ import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
@@ -184,7 +185,6 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
           line: range.endLine,
           side: range.side,
         }),
-      emptyState: <ChatStarters pr={pr} />,
       excerpts,
       removeExcerpt,
       clearExcerpts,
@@ -200,6 +200,10 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       question,
       clearQuestion,
     ]
+  )
+  const embedded = useMemo(
+    () => ({ emptyState: <ChatStarters pr={pr} /> }),
+    [pr]
   )
   if (meta.isPending)
     return (
@@ -217,13 +221,15 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
     )
   return (
     <ReviewChatActionsContext.Provider value={actions}>
-      <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
-        <AgentThreadPage
-          threadId={meta.data.thread_id}
-          composerDraft={chatDraft}
-          ownsTitle={false}
-        />
-      </div>
+      <EmbeddedThreadContext.Provider value={embedded}>
+        <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
+          <AgentThreadPage
+            threadId={meta.data.thread_id}
+            composerDraft={chatDraft}
+            ownsTitle={false}
+          />
+        </div>
+      </EmbeddedThreadContext.Provider>
     </ReviewChatActionsContext.Provider>
   )
 }

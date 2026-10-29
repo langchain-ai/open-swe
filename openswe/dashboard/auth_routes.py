@@ -51,6 +51,7 @@ from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
+from openswe.users.authorization import allowed_orgs
 from openswe.utils.build_info import build_info
 from openswe.utils.dashboard_links import dashboard_api_base_url
 
@@ -274,6 +275,8 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
+        # The web UI shows these organizations' repositories by name alone; plugins never see the list.
+        "base_orgs": list(allowed_orgs()),
         "follow_up_behavior": preferences["follow_up_behavior"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.

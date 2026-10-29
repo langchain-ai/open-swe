@@ -1,4 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { PaperclipIcon } from "@phosphor-icons/react/dist/ssr/Paperclip"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { useEffect, useRef, useState } from "react"
@@ -159,6 +160,18 @@ function StandardUserMessage({ message }: { message: Message }) {
             </Button>
           )}
         </div>
+      )}
+      {message.contextLabel && (
+        <span
+          className={cn(
+            "flex max-w-full items-center gap-space-1 pr-space-1 text-xxs text-tertiary",
+            isSystem && "pl-space-1"
+          )}
+          title="Sent with what you had open, for the agent; not part of your message"
+        >
+          <PaperclipIcon size={11} className="shrink-0" />
+          <span className="truncate">{message.contextLabel}</span>
+        </span>
       )}
       {!message.timestampIsFallback && (
         <MessageTimestamp
