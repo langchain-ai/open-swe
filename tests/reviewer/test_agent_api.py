@@ -481,7 +481,11 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": metadata})
     client.threads.update = AsyncMock(side_effect=lambda *_, **kw: metadata.update(kw["metadata"]))
-    monkeypatch.setattr(reviewer, "get_client", lambda: client)
+    monkeypatch.setattr(
+        reviewer.THREADS,
+        "update",
+        AsyncMock(side_effect=lambda _id, update: metadata.update(update)),
+    )
     monkeypatch.setattr("openswe.middleware.transcript.get_client", lambda: client)
     monkeypatch.setattr(reviewer, "prepare_reviewer_run", AsyncMock(return_value={}))
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
