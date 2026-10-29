@@ -5,6 +5,7 @@ from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain.agents import create_agent
 from langchain.agents.middleware.types import (
     AgentState,
     ExtendedModelResponse,
@@ -13,6 +14,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -21,6 +23,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -30,6 +33,7 @@ from rt.model_calls import (
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
+    model_call_guards,
 )
 from rt.models import ModelSpec
 from runtime_api.catalog import Catalog
@@ -188,8 +192,81 @@ async def test_a_hanging_model_call_fails_as_a_timeout() -> None:
         await ModelCallTimeoutMiddleware(timeout_seconds=0.01).awrap_model_call(
             cast(ModelRequest, MagicMock()), hang
         )
-    # The retry and the fallback both act on TimeoutError.
     assert isinstance(raised.value, TimeoutError)
+
+
+async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None:
+    error = TimeoutError("provider timed out before the overall deadline")
+    handler = AsyncMock(side_effect=error)
+
+    with pytest.raises(TimeoutError) as raised:
+        await ModelCallTimeoutMiddleware().awrap_model_call(
+            cast(ModelRequest, MagicMock()), handler
+        )
+
+    assert raised.value is error
+
+
+async def test_guard_does_not_retry_a_provider_exhausted_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = TimeoutError("provider exhausted its retries")
+    generate = AsyncMock(
+        side_effect=[
+            error,
+            ChatResult(generations=[ChatGeneration(message=AIMessage(content="retried"))]),
+        ]
+    )
+    monkeypatch.setattr(FakeListChatModel, "_agenerate", generate)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]), middleware=model_call_guards()
+    )
+
+    with pytest.raises(TimeoutError) as raised:
+        await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+
+    assert raised.value is error
+
+
+@pytest.mark.parametrize("primary_stalls", [False, True])
+async def test_primary_and_fallback_share_one_elapsed_budget(
+    monkeypatch: pytest.MonkeyPatch, primary_stalls: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, *, use_gateway: _OPENAI)
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    call = ModelCall(
+        system_prompt="prompt",
+        fallback=ModelSpec(model_id="openai:fallback", kwargs={}),
+        use_gateway=False,
+    )
+    messages: list[AnyMessage] = [HumanMessage(content="go")]
+    request = ModelRequest(
+        model=_ANTHROPIC,
+        messages=messages,
+        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+    )
+    attempted: list[BaseChatModel | str] = []
+    cancelled: list[BaseChatModel | str] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        attempted.append(request.model)
+        try:
+            await asyncio.sleep(60 if primary_stalls else 0.03)
+            if request.model is _ANTHROPIC:
+                raise TimeoutError("provider timeout")
+            return ModelResponse(result=[AIMessage(content="too late")])
+        except asyncio.CancelledError:
+            cancelled.append(request.model)
+            raise
+
+    with pytest.raises(ModelCallTimeoutError):
+        await BackendRunMiddleware(run.backend, model_timeout_seconds=0.05).awrap_model_call(
+            request, handler
+        )
+
+    assert attempted == ([_ANTHROPIC] if primary_stalls else [_ANTHROPIC, _OPENAI])
+    assert cancelled == [attempted[-1]]
 
 
 @pytest.mark.parametrize("with_image", [True, False])
