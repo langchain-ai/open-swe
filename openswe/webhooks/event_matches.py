@@ -1,14 +1,15 @@
-"""Events owed to a thread, delivered by being in its state.
+"""Events owed to a thread, until a run of it says it holds them.
 
 A matched event is written here before any run is started for it, and it counts
-as delivered only once a message in the thread's checkpointed state carries its
-id. LangGraph's own run queue is never trusted with it: an ``interrupt`` run
-cancels every queued run on the thread, so whichever run comes next delivers
-everything still owed, oldest first.
+as delivered only once a run of the thread received it: a run it started, once
+that run begins, or a running one, once the model call it read the event for goes
+ahead (``received``). LangGraph's own run queue is never trusted with it: an
+``interrupt`` run cancels every queued run on the thread, so whichever run comes
+next delivers everything still owed, oldest first.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import UUID, uuid7
@@ -23,11 +24,11 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import (
+    EVENT_MESSAGE_PREFIX,
     RunMessage,
     Surface,
     SystemIdentity,
     build_input_messages,
-    delivered_event_match_ids,
 )
 from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
@@ -53,14 +54,6 @@ EVENT_MATCH_KIND = "event_match"
 _MAX_ATTEMPTS = 3
 
 
-class _ThreadValues(BaseModel):
-    messages: list[JsonValue] = []
-
-
-class _ThreadState(BaseModel):
-    values: _ThreadValues | None = None
-
-
 class _Thread(BaseModel):
     status: str = ""
 
@@ -77,6 +70,7 @@ class EventMatch(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delivery_attempts: Mapped[int] = mapped_column(server_default="0", init=False)
     matched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     async def record(self, session: AsyncSession) -> bool:
         """Save in ``session``; ``False`` when the thread already owes or holds this delivery."""
@@ -104,28 +98,35 @@ class EventMatch(Base):
         return recorded is not None
 
     @classmethod
-    async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
-        """Matches no message in ``messages`` carries yet, oldest first."""
-        delivered: list[UUID] = []
-        for match_id in delivered_event_match_ids(messages):
-            try:
-                delivered.append(UUID(match_id))
-            except ValueError:
-                logger.warning(
-                    "Ignoring a malformed delivered event-match id",
-                    extra={"agent_thread_id": thread_id, "event_match_id": match_id},
-                )
+    async def owed(cls, thread_id: str) -> list[Self]:
+        """Matches no run of the thread has received yet, oldest first."""
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
                 .where(
                     cls.thread_id == thread_id,
                     cls.matched_at >= func.now() - _RETAINED,
-                    cls.id.not_in(delivered),
+                    cls.delivered_at.is_(None),
                 )
                 .order_by(cls.matched_at, cls.id)
             )
             return list(rows)
+
+    @classmethod
+    async def received(cls, thread_id: str, match_ids: Collection[UUID]) -> None:
+        """A run of ``thread_id`` holds ``match_ids``: none is owed again."""
+        if not match_ids:
+            return
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls)
+                .where(
+                    cls.thread_id == thread_id,
+                    cls.id.in_(list(match_ids)),
+                    cls.delivered_at.is_(None),
+                )
+                .values(delivered_at=func.now())
+            )
 
     @classmethod
     def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
@@ -145,7 +146,7 @@ class EventMatch(Base):
                 systems=[system],
                 injected_dynamic_context_hashes=introduced,
             )
-            built[-1]["id"] = f"event-match:{match.id}"
+            built[-1]["id"] = f"{EVENT_MESSAGE_PREFIX}{match.id}"
             messages.extend(built)
         return messages
 
@@ -175,8 +176,7 @@ class EventMatch(Base):
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
                 if thread.status == "busy":
                     return False
-            state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
-            owed = await cls.owed(thread_id, state.values.messages if state.values else [])
+            owed = await cls.owed(thread_id)
             if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
                 return False
             # Monitor output alone may start only so many runs between human

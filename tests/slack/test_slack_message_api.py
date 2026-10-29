@@ -1,5 +1,6 @@
 """Slack message behavior exercised through the SDK's real HTTP requests."""
 
+import importlib
 import json
 import logging
 from unittest.mock import AsyncMock, patch
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
+from openswe import completion
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
 from openswe.run_config import RunConfig
 from openswe.slack import client as slack_utils
@@ -211,6 +213,62 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("status", "reason_code"),
+    [("error", "provider_rate_limited"), ("error", None), ("timeout", None)],
+)
+async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    reason_code: str | None,
+) -> None:
+    thread: list[dict[str, object]] = [{"ts": "1.0", "text": "Fix it"}]
+
+    def handle(method: str, params: dict[str, object], _headers: object):
+        if method == "chat.postMessage":
+            blocks = params.get("blocks")
+            message = {
+                "ts": f"{len(thread) + 1}.0",
+                "text": params["text"],
+                "blocks": json.loads(blocks) if isinstance(blocks, str) else blocks or [],
+            }
+            thread.append(message)
+            return 200, {"ok": True, "ts": message["ts"], "message": message}, {}
+        parent = thread[0] | {"latest_reply": thread[-1]["ts"]}
+        found = [m for m in [parent, *thread[1:]] if m["ts"] == params.get("oldest", "1.0")]
+        return 200, {"ok": True, "messages": found}, {}
+
+    slack_api.handler = handle
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    sandbox = slack_utils.SlackNotice("sandbox_unreachable", "Sandbox stopped responding")
+
+    for _ in range(2):
+        assert await slack_utils.post_slack_thread_reply("C1", "1.0", sandbox.key, notice=sandbox)
+        assert await completion._post_failure_reply(
+            "t1", metadata, "error", reason_code="sandbox_unreachable"
+        )
+    assert [message["text"] for message in thread] == ["Fix it", sandbox.key]
+
+    for _ in range(2):
+        assert await completion._post_failure_reply("t1", metadata, status, reason_code)
+    thread.append({"ts": "9.0", "text": "@Open SWE stop please"})
+    assert await completion._post_failure_reply("t1", metadata, status, reason_code)
+
+    failure = completion._failure_text(status, reason_code=reason_code)
+    assert [message["text"] for message in thread] == [
+        "Fix it",
+        sandbox.key,
+        failure,
+        "@Open SWE stop please",
+        failure,
+    ]
+
+
 @pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
 async def test_review_link_flag_changes_displayed_links_not_code_or_button_values(
     slack_api: SlackAPI,
@@ -267,6 +325,39 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
     assert blocks[0]["text"] == text
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_direct_github_reply_override_is_scoped_to_one_delivery(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, fail: bool
+) -> None:
+    reply = importlib.import_module("openswe.slack.tools.reply")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
+    monkeypatch.setattr(
+        User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
+    )
+    url = "https://github.com/acme/app/pull/7"
+    blocks = block_payload([markdown(f"[GitHub]({url})"), section(f"<{url}|GitHub>")])
+
+    async def send(message: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+        await slack_utils.post_slack_top_level_message_with_ts("C1", message, blocks=blocks)
+        if fail:
+            raise RuntimeError("delivery failed")
+        return {"success": True}
+
+    monkeypatch.setattr(reply, "send_slack_reply", send)
+    if fail:
+        with pytest.raises(RuntimeError, match="delivery failed"):
+            await reply.slack_reply(url, "final", preserve_github_links=True)
+    else:
+        assert await reply.slack_reply(url, "final", preserve_github_links=True) == {
+            "success": True
+        }
+    assert slack_api.calls[-1][1]["text"] == url
+    assert slack_api.calls[-1][1]["blocks"] == blocks
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
 
 
 @pytest.mark.usefixtures("registry_db")

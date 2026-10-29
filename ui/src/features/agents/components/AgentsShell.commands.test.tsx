@@ -79,16 +79,19 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => stub.noop,
-  useRouterState: () => undefined,
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: {
+      location: { pathname: string; search: Record<string, unknown> }
+    }) => unknown
+  }) => select({ location: { pathname: "/agents/thread-1", search: {} } }),
   useSearch: () => undefined,
   useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
 
 vi.mock("@/lib/session", () => ({ useSession: () => stub.session }))
 vi.mock("@/lib/theme", () => ({ useTheme: () => stub.theme }))
-vi.mock("@/lib/chatRoutes", () => ({
-  useChatRoutes: () => ({ home: "/agents", thread: "/agents/$threadId" }),
-}))
 
 vi.mock("@/features/agents/lib/queries", async (actual) => ({
   ...((await actual()) as object),

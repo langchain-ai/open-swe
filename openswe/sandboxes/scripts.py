@@ -17,6 +17,10 @@ if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
 
+# Linux caps one command-line argument at 128 KiB; the command wraps it, so stay well under.
+_MAX_ARGUMENT_BYTES = 64 * 1024
+
+
 @cache
 def source(name: str) -> str:
     """The text of ``openswe/sandbox_scripts/<name>``, e.g. ``"monitor.py"``."""
@@ -37,13 +41,18 @@ class SandboxScript:
     Each call runs it with a base64 JSON request and reads back the one JSON
     line it prints. The copy is written only when that version is missing, so
     the common case is one exec, and a sandbox always runs the script this
-    backend ships.
+    backend ships. A script made with ``reads_request_files`` may get a request
+    too long for a command line: it is written to a file instead, and the script
+    gets ``@<path>`` to read it from. Other scripts refuse such a request.
     """
 
-    def __init__(self, name: str, root: str, *, text: str | None = None) -> None:
+    def __init__(
+        self, name: str, root: str, *, text: str | None = None, reads_request_files: bool = False
+    ) -> None:
         self.name = name
         self.root = root
         self._text = text
+        self._reads_request_files = reads_request_files
 
     @cached_property
     def text(self) -> str:
@@ -55,27 +64,52 @@ class SandboxScript:
         digest = hashlib.sha256(self.text.encode()).hexdigest()[:16]
         return f"{self.root}/{stem}-{digest}.py"
 
+    async def _write_request(
+        self, backend: SandboxBackendProtocol, argument: str, *, timeout: int
+    ) -> str:
+        """Write ``argument`` to a file through the shell, in pieces that each fit a command line.
+
+        Not ``upload_files``: a local sandbox maps an uploaded path under its own root,
+        where the shell running the script would not find it.
+        """
+        path = shlex.quote(f"/tmp/open-swe-request-{secrets.token_hex(16)}")
+        for at in range(0, len(argument), _MAX_ARGUMENT_BYTES):
+            piece = shlex.quote(argument[at : at + _MAX_ARGUMENT_BYTES])
+            written = await backend.aexecute(f"printf %s {piece} >> {path}", timeout=timeout)
+            if written.exit_code not in (0, None):
+                raise RuntimeError(f"could not write a request for {self.name}")
+        return path.strip("'")
+
     async def run(
-        self, backend: SandboxBackendProtocol, request: Mapping[str, JsonValue]
+        self,
+        backend: SandboxBackendProtocol,
+        request: Mapping[str, JsonValue],
+        *,
+        timeout: int = 30,
     ) -> dict[str, JsonValue]:
         """The script's answer to ``request``; raises ``SandboxScriptError`` when it refuses."""
         script = shlex.quote(self.path)
         # Fresh each call, so nothing a script or the sandbox prints can pass for it.
         missing = f"open-swe-script-missing-{secrets.token_hex(16)}"
+        argument = encoded(json.dumps(request))
+        if len(argument) > _MAX_ARGUMENT_BYTES:
+            if not self._reads_request_files:
+                raise RuntimeError(f"the request is too long for {self.name}'s command line")
+            argument = f"@{await self._write_request(backend, argument, timeout=timeout)}"
         run = (
             "command -v python3 >/dev/null || "
             '{ echo \'{"error": "this needs python3 in the sandbox"}\'; exit 0; }; '
-            f"python3 {script} {shlex.quote(encoded(json.dumps(request)))}"
+            f"python3 {script} {shlex.quote(argument)}"
         )
         response = await backend.aexecute(
-            f"[ -f {script} ] || {{ echo {missing}; exit 0; }}; {run}", timeout=30
+            f"[ -f {script} ] || {{ echo {missing}; exit 0; }}; {run}", timeout=timeout
         )
         if response.output.strip() == missing:
             response = await backend.aexecute(
                 f"mkdir -p {shlex.quote(self.root)} && "
                 f"printf %s {shlex.quote(encoded(self.text))} | base64 -d > {script}.$$ && "
                 f"mv {script}.$$ {script}; {run}",
-                timeout=30,
+                timeout=timeout,
             )
         lines = response.output.strip().splitlines()
         try:

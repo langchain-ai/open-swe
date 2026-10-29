@@ -7,7 +7,9 @@ import {
   PushPinRegularIcon,
   StackRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { getLastSectionLocation, useHrefLinkOptions } from "@/lib/appLocation"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
@@ -26,7 +28,8 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
@@ -45,8 +48,18 @@ import type {
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { useLangSmithConnection } from "@/features/settings/components/ConnectionsSection"
+import {
+  fleetClient,
+  FLEET_ASSISTANT_ID,
+  FLEET_THREADS_KEY,
+  type Thread,
+} from "@/features/agents/lib/fleetChat"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
-import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarThreadRow,
+  SidebarConversationRow,
+} from "@/features/agents/components/SidebarThreadRow"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -71,6 +84,7 @@ import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   agentMutationKeys,
   agentThreadKeys,
+  useActiveAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -105,7 +119,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -184,9 +197,14 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
-  const newThreadShortcut = useShortcutLabel("mod+n")
-  const chat = useChatRoutes()
   const profile = useProfile()
+  const fleetEnabled = profile.data?.experimental_fleet === true
+  const onFleetRoute = useRouterState({
+    select: (state) => state.location.pathname === "/agents/chat",
+  })
+  const fleetSelected = fleetEnabled && onFleetRoute
+  const linkOptions = useHrefLinkOptions()
+  const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
     queryFn: api.concierge,
@@ -206,9 +224,9 @@ export function AgentsSidebar({
         agentThreadKeys.detail(threadId)
       )?.reviewPage
       if (review) void navigate(reviewPageRoute(review))
-      else void navigate({ to: chat.thread, params: { threadId } })
+      else void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
-    [navigate, chat.thread, queryClient]
+    [navigate, queryClient]
   )
   const {
     prefs,
@@ -257,6 +275,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     sort: prefs.sortChats,
     enabled: true,
   })
@@ -264,6 +283,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -547,6 +567,14 @@ export function AgentsSidebar({
           Show automations
         </MenuCheckItem>
         <MenuCheckItem
+          checked={prefs.filters.includeClaudeCode}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeClaudeCode: checked })
+          }
+        >
+          Show Claude Code
+        </MenuCheckItem>
+        <MenuCheckItem
           checked={prefs.filters.ownedOnly}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, ownedOnly: checked })
@@ -582,13 +610,14 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
+      includeClaudeCode={prefs.filters.includeClaudeCode}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
-      composeTo={group.localRepoPath ? "/agents" : chat.home}
+      composeTo="/agents"
       onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
@@ -656,9 +685,52 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
+      {fleetEnabled && (
+        <div className="px-space-2 pb-space-4">
+          <GroupedTabs
+            size="md"
+            className="w-full"
+            value={fleetSelected ? "fleet" : "openswe"}
+            options={[
+              {
+                value: "openswe",
+                display: "Open SWE",
+                className: "flex-1",
+              },
+              {
+                value: "fleet",
+                display: "Fleet",
+                className: "flex-1",
+              },
+            ]}
+            onChange={(value) => {
+              void navigate(
+                linkOptions(
+                  value === "fleet"
+                    ? getLastSectionLocation("/agents/chat")
+                    : "/agents"
+                )
+              )
+              layout.closeOnMobile()
+            }}
+          />
+        </div>
+      )}
+      {fleetSelected && (
+        <FleetThreadList
+          compact={prefs.compact}
+          onNavigate={layout.closeOnMobile}
+        />
+      )}
+
+      <div
+        className={cn(
+          "flex flex-col gap-0.5 px-space-2 pb-space-1",
+          fleetSelected && "hidden"
+        )}
+      >
         <Link
-          to={chat.home}
+          to="/agents"
           onClick={layout.closeOnMobile}
           className={cn(
             NAV_ROW_CLASS,
@@ -678,7 +750,7 @@ export function AgentsSidebar({
           <a
             href={
               concierge.data?.thread_id
-                ? `${chat.home}/${concierge.data.thread_id}`
+                ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
                   ? `slack://channel?id=${concierge.data.channel_id}`
                   : undefined
@@ -703,7 +775,12 @@ export function AgentsSidebar({
         )}
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col",
+          fleetSelected && "hidden"
+        )}
+      >
         {scrollEdges.top && (
           <>
             <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
@@ -853,7 +930,7 @@ export function AgentsSidebar({
                     icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
-                      void navigate({ to: chat.home })
+                      void navigate({ to: "/agents" })
                     }}
                   />
                 }
@@ -884,7 +961,6 @@ export function AgentsSidebar({
           )}
         </div>
       </div>
-
       <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (
@@ -944,11 +1020,15 @@ function WorkspaceGroupSection({
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
     <div className="mb-space-1">
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={workspace.name}
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className="group/workspace h-auto w-full justify-start gap-space-2 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:text-primary"
       >
         <StackRegularIcon size={14} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
@@ -959,7 +1039,7 @@ function WorkspaceGroupSection({
             collapsed ? "block" : "hidden group-hover/workspace:block"
           )}
         />
-      </button>
+      </Button>
       {!collapsed && (
         <div className="pl-space-2">{workspace.repos.map(renderRepoGroup)}</div>
       )}
@@ -976,6 +1056,7 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   owned,
+  includeClaudeCode,
   sort,
   activeThreadId,
   openThread,
@@ -998,13 +1079,14 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   owned: boolean
+  includeClaudeCode: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
-  composeTo: "/agents" | "/assistant"
+  composeTo: "/agents"
   onCompose: () => void
   onTogglePin: () => void
   onLoadMore?: () => void
@@ -1021,6 +1103,7 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     owned,
+    includeClaudeCode,
     sort,
     enabled: !collapsed,
   })
@@ -1058,15 +1141,19 @@ function RepoGroup({
   return (
     <div className="mb-space-1">
       <div className="group/folder flex items-center gap-space-2 rounded-md pr-space-1 pl-space-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="md"
+          aria-label={group.label}
           type="button"
           onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-space-2 py-space-1 text-left"
+          className="h-auto min-w-0 flex-1 justify-start gap-space-2 py-space-1 text-left whitespace-normal text-primary hover:bg-transparent dark:hover:bg-transparent"
         >
           <Folder size={16} weight="regular" className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
-        </button>
+        </Button>
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
@@ -1117,16 +1204,24 @@ function RepoGroup({
             </p>
           )}
           {repo.isError && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label="Retry loading chats"
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-space-1 pr-space-2 pl-space-5 text-left text-xs text-error-secondary"
+              className="w-full justify-start py-space-1 pr-space-2 pl-space-5 text-left text-error-secondary"
             >
               Retry loading chats
-            </button>
+            </Button>
           )}
           {hasMore && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={loading ? "Loading…" : "Show more"}
               type="button"
               onClick={() => {
                 if (!expanded) onExpand()
@@ -1134,11 +1229,11 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left text-xs text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
+              className="h-auto w-full justify-start gap-space-2 rounded-lg py-space-1 pr-space-2 pl-space-5 text-left whitespace-normal text-tertiary hover:text-primary disabled:cursor-wait disabled:bg-transparent disabled:opacity-60"
             >
               {loading && <Spinner size="xxs" />}
               {loading ? "Loading…" : "Show more"}
-            </button>
+            </Button>
           )}
         </>
       )}
@@ -1243,20 +1338,23 @@ function LoadMoreThreadsOnScroll({
   }, [loading, root])
 
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
       ref={sentinel}
       type="button"
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-space-2 py-space-2 text-xs text-tertiary"
+      className="h-auto w-full justify-center gap-space-2 py-space-2 whitespace-normal text-tertiary disabled:bg-transparent"
     >
       {loading ? (
         <Spinner size="xxs" />
       ) : (
         <span className="sr-only">{label}</span>
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -1277,9 +1375,7 @@ export function AgentsShell({
   const pinnedThreads = useSidebarPinnedThreads({
     enabled: Boolean(activeThreadId),
   })
-  const activeThread = useSidebarActiveThread({
-    activeThreadId,
-    loadedThreads: [],
+  const activeThread = useActiveAgentThread(activeThreadId, {
     enabled: Boolean(activeThreadId),
   })
   const sidebarCommands = useMemo(() => {
@@ -1366,5 +1462,157 @@ export function AgentsShell({
         </div>
       </TooltipProvider>
     </SidebarLayoutProvider>
+  )
+}
+
+const FLEET_SECTIONS = ["Pinned", "Recents", "Archived"] as const
+
+function fleetSection(thread: Thread): (typeof FLEET_SECTIONS)[number] {
+  if (thread.metadata?.openswe_archived === true) return "Archived"
+  return thread.metadata?.is_pinned === true ? "Pinned" : "Recents"
+}
+
+/** The caller's Fleet chats, most recently active first. */
+function FleetThreadList({
+  compact,
+  onNavigate,
+}: {
+  compact: boolean
+  onNavigate: () => void
+}) {
+  const activeThread = useRouterState({
+    select: ({ location: { search } }) =>
+      "chat" in search && typeof search.chat === "string"
+        ? search.chat
+        : undefined,
+  })
+  const connected = useLangSmithConnection().data?.connected === true
+  const queryClient = useQueryClient()
+  const [archivedOpen, setArchivedOpen] = useState(false)
+  const threads = useQuery({
+    queryKey: FLEET_THREADS_KEY,
+    queryFn: () =>
+      fleetClient().threads.search({
+        metadata: { assistant_id: FLEET_ASSISTANT_ID },
+        sortBy: "updated_at",
+        sortOrder: "desc",
+        limit: 50,
+      }) as Promise<Thread[]>,
+    enabled: connected,
+    retry: false,
+  })
+  const update = useMutation({
+    mutationFn: ({
+      thread,
+      metadata,
+    }: {
+      thread: Thread
+      metadata: Record<string, boolean>
+    }) => fleetClient().threads.update(thread.thread_id, { metadata }),
+    onMutate: async ({ thread, metadata }) => {
+      await queryClient.cancelQueries({ queryKey: FLEET_THREADS_KEY })
+      queryClient.setQueryData<Thread[]>(FLEET_THREADS_KEY, (current) =>
+        current?.map((item) =>
+          item.thread_id === thread.thread_id
+            ? { ...item, metadata: { ...item.metadata, ...metadata } }
+            : item
+        )
+      )
+    },
+    onError: (error, { thread }) => {
+      queryClient.setQueryData<Thread[]>(FLEET_THREADS_KEY, (current) =>
+        current?.map((item) =>
+          item.thread_id === thread.thread_id ? thread : item
+        )
+      )
+      toast.error("Could not update chat", { description: error.message })
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: FLEET_THREADS_KEY }),
+  })
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col px-space-2 pb-space-2">
+      <Link
+        to="/agents/chat"
+        onClick={onNavigate}
+        className={cn(
+          NAV_ROW_CLASS,
+          "group mb-space-3 bg-surface-level-3 hover:bg-surface-level-4"
+        )}
+      >
+        <PlusIcon size={20} className="-mx-0.5" />
+        New chat
+      </Link>
+      {threads.error && (
+        <ThreadSourceError
+          label={threads.error.message}
+          onRetry={() => void threads.refetch()}
+        />
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {threads.isLoading && <ThreadListSkeleton compact={compact} />}
+        {FLEET_SECTIONS.map((label) => {
+          const rows = (threads.data ?? []).filter(
+            (thread) => fleetSection(thread) === label
+          )
+          if (!rows.length) return null
+          const collapsible = label === "Archived"
+          return (
+            <div key={label}>
+              <SidebarSectionHeader
+                label={label}
+                collapsed={collapsible ? !archivedOpen : undefined}
+                onToggleCollapsed={
+                  collapsible ? () => setArchivedOpen(!archivedOpen) : undefined
+                }
+              />
+              {(!collapsible || archivedOpen) &&
+                rows.map((thread) => {
+                  const pinned = thread.metadata?.is_pinned === true
+                  const archived = thread.metadata?.openswe_archived === true
+                  return (
+                    <SidebarConversationRow
+                      key={thread.thread_id}
+                      title={String(
+                        thread.metadata?.thread_title ??
+                          thread.metadata?.first_message_preview ??
+                          "New chat"
+                      )}
+                      threadId={thread.thread_id}
+                      active={thread.thread_id === activeThread}
+                      compact={compact}
+                      onNavigate={onNavigate}
+                      pinned={pinned}
+                      archived={archived}
+                      pending={
+                        update.isPending &&
+                        update.variables.thread.thread_id === thread.thread_id
+                      }
+                      onPin={() =>
+                        update.mutate({
+                          thread,
+                          metadata: { is_pinned: !pinned },
+                        })
+                      }
+                      onArchive={() =>
+                        update.mutate({
+                          thread,
+                          metadata: { openswe_archived: !archived },
+                        })
+                      }
+                    />
+                  )
+                })}
+            </div>
+          )
+        })}
+        {threads.data?.length === 0 && (
+          <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
+            No chats yet.
+          </p>
+        )}
+      </div>
+    </div>
   )
 }

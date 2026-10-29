@@ -6,6 +6,7 @@ from typing import Literal, TypedDict
 from fastapi import HTTPException
 
 from openswe.run_config import RunConfig
+from openswe.schedules.delivery import CreatorDelivery, DeliveryRefused
 from openswe.slack.availability import SlackUserInfo
 from openswe.slack.blocks import block_payload
 from openswe.slack.cards import origin_footer, run_slack_location
@@ -178,11 +179,43 @@ async def slack_list_channel_members(
     }
 
 
+async def _dm_automation_creator(
+    slack_user_id: str, message: str
+) -> SlackMessageReceipt | SlackChannelError:
+    """DM an automation run's result to the automation's creator, the one person it may reach."""
+    if not message.strip():
+        return {"success": False, "error": "message is required"}
+    cfg = RunConfig.from_runtime()
+    try:
+        delivery = await CreatorDelivery.for_run(cfg)
+        if delivery.slack_user_id != slack_user_id:
+            return {
+                "success": False,
+                "error": "An automation run can DM only the automation's creator.",
+            }
+        dm_channel_id, message_ts = await delivery.send(message)
+    except DeliveryRefused as exc:
+        return {"success": False, "error": str(exc)}
+    except SlackRequestError as exc:
+        logger.warning(
+            "Slack refused an automation result DM",
+            extra={
+                "schedule_id": cfg.schedule_id,
+                "agent_thread_id": cfg.thread_id,
+                "slack_error": exc.code,
+            },
+        )
+        return {"success": False, "error": exc.code or "post_failed"}
+    return {"success": True, "channel_id": dm_channel_id, "message_ts": message_ts}
+
+
 async def slack_post_message(
     channel_id: str, message: str
 ) -> SlackMessageReceipt | SlackChannelError:
     """Post a standalone message to a channel the Open SWE bot belongs to."""
     channel_id = channel_id.strip()
+    if SLACK_USER_ID_RE.fullmatch(channel_id):
+        return await _dm_automation_creator(channel_id, message)
     if not _CHANNEL_ID_RE.fullmatch(channel_id):
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
     if not message.strip():

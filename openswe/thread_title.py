@@ -4,12 +4,16 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
+from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, Field, ValidationError
 
 from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
 from openswe.prompts import prompt
+from openswe.slack.blocks import block_payload
+from openswe.slack.breakout_links import breakout_root_blocks
 from openswe.slack.client import append_slack_web_link_footer, update_slack_message
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from openswe.slack.http import SlackRequestError
@@ -22,6 +26,7 @@ logger = logging.getLogger(__name__)
 MAX_THREAD_TITLE_CHARS = 80
 MAX_TITLE_INPUT_CHARS = 8_000
 TITLE_GENERATION_MAX_TOKENS = 256
+ANTHROPIC_TITLE_GENERATION_MAX_TOKENS = 1024
 TITLE_GENERATION_TIMEOUT_SECONDS = 10
 _background_tasks: set[asyncio.Task[None]] = set()
 _inflight_thread_ids: set[str] = set()
@@ -44,7 +49,7 @@ def _thread_metadata(thread: Any) -> dict[str, Any]:
 
 def _title_input(messages: Sequence[BaseMessage]) -> str | None:
     texts: list[str] = []
-    for message in messages:
+    for message in reversed(messages):
         if dynamic_context_hash(message.content) is not None:
             continue
         text = (input_message_text(message.content) or message.text).strip()
@@ -80,7 +85,6 @@ async def generate_and_store_thread_title(
     ):
         return
 
-    structured = model.with_structured_output(_ThreadTitle)
     title_input = human_input(
         conversation,
         {
@@ -91,19 +95,36 @@ async def generate_and_store_thread_title(
     )["content"]
     if not isinstance(title_input, str):
         return
+    messages = [
+        SystemMessage(content=_TITLE_SYSTEM_PROMPT),
+        HumanMessage(content=title_input),
+    ]
+    # Empty callbacks keep title tokens out of the thread's message stream.
+    config: RunnableConfig = {"callbacks": [], "run_name": "thread-title"}
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
-        result = await structured.ainvoke(
-            [
-                SystemMessage(content=_TITLE_SYSTEM_PROMPT),
-                HumanMessage(content=title_input),
-            ],
-            # Empty callbacks, so this call cannot inherit the run's handlers and
-            # stream its tokens into the thread the user is watching.
-            config={"callbacks": [], "run_name": "thread-title"},
-        )
-    if not isinstance(result, _ThreadTitle):
-        return
-    title = _normalize_title(result.title)
+        try:
+            structured = model.with_structured_output(_ThreadTitle)
+            result = await structured.ainvoke(messages, config=config)
+        except OutputParserException, ValidationError:
+            logger.warning(
+                "Thread title extraction failed; retrying as text",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            response = await model.ainvoke(
+                [
+                    SystemMessage(
+                        content=_TITLE_SYSTEM_PROMPT + "\n\n" + prompt("thread-title-plain")
+                    ),
+                    HumanMessage(content=title_input),
+                ],
+                config=config,
+            )
+            title = _normalize_title(response.text)
+        else:
+            if not isinstance(result, _ThreadTitle):
+                return
+            title = _normalize_title(result.title)
     if not title:
         return
 
@@ -138,11 +159,12 @@ async def generate_and_store_thread_title(
                 and ref.breakout_root_suffix is not None
             ):
                 try:
+                    root_text = f"`/breakout`: {title}{ref.breakout_root_suffix}"
                     await update_slack_message(
                         *ref.location,
-                        append_slack_web_link_footer(
-                            f"`/breakout`: {title}{ref.breakout_root_suffix}",
-                            dashboard_thread_url(thread_id),
+                        append_slack_web_link_footer(root_text, dashboard_thread_url(thread_id)),
+                        blocks=block_payload(
+                            breakout_root_blocks(root_text, dashboard_thread_url(thread_id))
                         ),
                         unfurl_links=False,
                         unfurl_media=False,

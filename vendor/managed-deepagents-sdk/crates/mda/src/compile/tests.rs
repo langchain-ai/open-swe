@@ -14,7 +14,10 @@ use super::test_support::{
     compile_refresh, npm_available, python3_available, setup_mock_ts_runtime,
     with_live_npm_lockfile, with_py_runtime,
 };
-use super::{load_sandbox_recipe_manifest, DeployContext, BUILD_MARKER, LANGGRAPH_API_VERSION};
+use super::{
+    load_sandbox_recipe_manifest, DeployContext, MemoryDecision, BUILD_MARKER,
+    LANGGRAPH_API_VERSION,
+};
 use crate::project::{load, Language, Project};
 use crate::test_support::write_file;
 use crate::toolchain;
@@ -148,8 +151,6 @@ fn compile_copies_files_verbatim_and_generates_a_managed_entry() {
     let out_dir = root.path().join(".mda").join("build");
     let summary = compile(&project, &out_dir).unwrap();
 
-    assert_eq!(summary.entry_file, PathBuf::from("_mda_entry.ts"));
-    assert_eq!(summary.langgraph_graph, "./_mda_entry.ts:agent");
     assert_eq!(summary.assistant_id, "agent");
 
     // The user's agent file is carried over byte-for-byte: no transform.
@@ -219,7 +220,6 @@ fn compile_normalizes_static_name_as_assistant_id() {
     let summary = compile(&project, &out_dir).unwrap();
 
     assert_eq!(summary.assistant_id, "research-assistant");
-    assert_eq!(summary.langgraph_graph, "./_mda_entry.ts:agent");
 
     let manifest = fs::read_to_string(out_dir.join("langgraph.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
@@ -341,8 +341,13 @@ fn compile_builds_typescript_factory_entry_without_running_factory() {
     assert!(summary.has_skills);
     let langgraph: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
-    assert_eq!(langgraph["graphs"]["support"], "./_mda_entry.ts:agent");
-    assert_eq!(langgraph["graphs"].as_object().unwrap().len(), 1);
+    assert_eq!(
+        langgraph["graphs"],
+        serde_json::json!({
+            "support": "./_mda_entry.ts:agent",
+            "support--general-purpose": "./_mda_entry.ts:agent__general_purpose",
+        })
+    );
     let entry = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(!entry.contains("assertStaticAgentDefinition"), "{entry}");
     assert!(entry.contains("connectors"), "{entry}");
@@ -461,8 +466,13 @@ fn compile_builds_python_factory_entry_without_running_factory() {
     assert!(summary.has_skills);
     let langgraph: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
-    assert_eq!(langgraph["graphs"]["support"], "./_mda_entry.py:agent");
-    assert_eq!(langgraph["graphs"].as_object().unwrap().len(), 1);
+    assert_eq!(
+        langgraph["graphs"],
+        serde_json::json!({
+            "support": "./_mda_entry.py:agent",
+            "support--general-purpose": "./_mda_entry.py:agent__general_purpose",
+        })
+    );
     let entry = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
     assert!(!entry.contains("assert_static_agent_definition"), "{entry}");
     assert!(entry.contains("_connectors"), "{entry}");
@@ -1220,8 +1230,6 @@ fn compile_generates_a_python_entry() {
     let out_dir = root.path().join("build");
     let summary = with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
 
-    assert_eq!(summary.entry_file, PathBuf::from("_mda_entry.py"));
-    assert_eq!(summary.langgraph_graph, "./_mda_entry.py:agent");
     assert_eq!(summary.assistant_id, "agent");
 
     let agent_out = fs::read_to_string(out_dir.join("agent.py")).unwrap();
@@ -1248,6 +1256,228 @@ fn compile_generates_a_python_entry() {
         format!("{LANGGRAPH_API_VERSION}-py3.14")
     );
     assert_eq!(value["graphs"]["agent"], "./_mda_entry.py:agent");
+}
+
+#[test]
+fn compile_builds_a_graph_per_async_subagent() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        concat!(
+            "agent = define_deep_agent(name=\"lead\", subagents=[\n",
+            "    {\"name\": \"researcher\", \"description\": \"d\", \"async\": True},\n",
+            "    {\"name\": \"helper\", \"description\": \"d\"},\n",
+            "])\n",
+        ),
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+    let out_dir = root.path().join("build");
+
+    with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"],
+        serde_json::json!({
+            "lead": "./_mda_entry.py:agent",
+            "lead--researcher": "./_mda_entry.py:agent__researcher",
+            "lead--general-purpose": "./_mda_entry.py:agent__general_purpose",
+        })
+    );
+    let entry = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
+    assert!(
+        entry.contains(
+            "_async_subagent_graphs = {\"researcher\": \"lead--researcher\", \"general-purpose\": \"lead--general-purpose\"}"
+        ),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async_subagent_graphs=_async_subagent_graphs"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains(
+            "@asynccontextmanager\nasync def agent__researcher(config, runtime: ServerRuntime):\n    async with parent_run(config):"
+        ),
+        "{entry}"
+    );
+    assert!(entry.contains("async_subagent=\"researcher\")"), "{entry}");
+}
+
+#[test]
+fn compile_builds_a_graph_per_typescript_async_subagent() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        concat!(
+            "export const agent = defineDeepAgent({ name: \"lead\", subagents: [\n",
+            "  { name: \"researcher\", description: \"d\", async: true },\n",
+            "  { name: \"helper\", description: \"d\" },\n",
+            "] });\n",
+        ),
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![PathBuf::from("agent.ts")],
+    };
+    let out_dir = root.path().join(".mda/build");
+
+    compile(&project, &out_dir).unwrap();
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"],
+        serde_json::json!({
+            "lead": "./_mda_entry.ts:agent",
+            "lead--researcher": "./_mda_entry.ts:agent__researcher",
+            "lead--general-purpose": "./_mda_entry.ts:agent__general_purpose",
+        })
+    );
+    let entry = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
+    assert!(
+        entry.contains(
+            "const asyncSubagentGraphs = { \"researcher\": \"lead--researcher\", \"general-purpose\": \"lead--general-purpose\" };"
+        ),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("asyncSubagentGraphs }, runtime);"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains(
+            "export function agent__researcher(config: ManagedRunConfig, runtime: ManagedServerRuntime) {"
+        ),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("asyncSubagent: \"researcher\" }, runtime);"),
+        "{entry}"
+    );
+}
+
+#[test]
+fn eval_rejects_typescript_async_subagents() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"lead\", subagents: [{ name: \"r\", description: \"d\", async: true }] });\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![PathBuf::from("agent.ts")],
+    };
+
+    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+
+    assert!(
+        error.to_string().contains("not supported in eval"),
+        "{error}"
+    );
+}
+
+#[test]
+fn eval_builds_no_async_general_purpose_subagent() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\")\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+    let out_dir = root.path().join("build");
+
+    with_py_runtime(root.path(), || compile_for_eval(&project, &out_dir)).unwrap();
+
+    let entry = fs::read_to_string(out_dir.join("_mda_eval_entry.py")).unwrap();
+    assert!(!entry.contains("general_purpose"), "{entry}");
+    assert!(!entry.contains("async_subagent_graphs"), "{entry}");
+}
+
+#[test]
+fn eval_rejects_async_subagents() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[{\"name\": \"r\", \"description\": \"d\", \"async\": True}])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+
+    assert!(
+        error.to_string().contains("not supported in eval"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compile_warns_about_subagents_it_cannot_read() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[make_subagent()])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let summary = with_py_runtime(root.path(), || {
+        compile(&project, &root.path().join("build"))
+    })
+    .unwrap();
+
+    assert!(
+        summary
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("1 subagent entry")),
+        "{:?}",
+        summary.warnings
+    );
 }
 
 #[test]
@@ -1796,7 +2026,7 @@ fn compile_wires_local_context_hub_for_typescript() {
     assert!(entry_out.contains(&format!("const contextRoot = \"{hub_literal}\";")));
     assert!(entry_out.contains("const hasSkills = false;"));
     assert!(entry_out
-        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills }, runtime)"));
+        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills, asyncSubagentGraphs }, runtime)"));
     assert!(!entry_out.contains("systemPrompt"));
 }
 
@@ -1829,7 +2059,7 @@ fn compile_for_deploy_wires_context_hub_metadata_for_typescript() {
     assert!(entry_out.contains("const contextRepo = \"my-agent\";"));
     assert!(entry_out.contains("const hasSkills = true;"));
     assert!(entry_out
-        .contains("compileManagedAgent(definition, config, { contextRepo, hasSkills }, runtime)"));
+        .contains("compileManagedAgent(definition, config, { contextRepo, hasSkills, asyncSubagentGraphs }, runtime)"));
     // Commit pinning is not wired in the runtime yet — do not emit it.
     assert!(!entry_out.contains("contextCommit"));
     assert!(!entry_out.contains("systemPrompt"));
@@ -1865,7 +2095,7 @@ fn compile_wires_local_context_hub_when_instructions_are_absent() {
     assert!(!entry_out.contains("systemPrompt"));
     assert!(entry_out.contains("const contextRoot = "));
     assert!(entry_out
-        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills }, runtime)"));
+        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills, asyncSubagentGraphs }, runtime)"));
 }
 
 #[test]
@@ -1898,7 +2128,7 @@ fn compile_wires_local_context_hub_for_python() {
     assert!(entry_out.contains("_context_root = "));
     assert!(entry_out.contains("_has_skills = False"));
     assert!(entry_out.contains(
-        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, runtime=runtime)"
+        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
     assert!(!entry_out.contains("_system_prompt"));
 }
@@ -1943,7 +2173,7 @@ fn compile_for_deploy_wires_context_hub_metadata_for_python() {
     assert!(entry_out.contains("_context_repo = \"my-agent\""));
     assert!(entry_out.contains("_has_skills = False"));
     assert!(entry_out.contains(
-        "await compile_managed_agent_async(_definition, config, context_repo=_context_repo, has_skills=_has_skills, runtime=runtime)"
+        "await compile_managed_agent_async(_definition, config, context_repo=_context_repo, has_skills=_has_skills, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
     // Commit pinning is not wired in the runtime yet — do not emit it.
     assert!(!entry_out.contains("_context_commit"));
@@ -2050,7 +2280,7 @@ fn compile_wires_typescript_sandbox_without_setup_script() {
     assert!(entry_out.contains("import { sandbox } from \"./sandbox/index\";"));
     assert!(!entry_out.contains("setupScript"));
     assert!(entry_out.contains(
-        "compileManagedAgent(definition, config, { contextRoot, hasSkills, sandbox }, runtime)"
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, sandbox, asyncSubagentGraphs }, runtime)"
     ));
     assert!(
         entry_out.contains("import { compileManagedAgent } from \"managed-deepagents/runtime\";")
@@ -2103,7 +2333,7 @@ fn compile_wires_python_sandbox_without_setup_script() {
     assert!(!entry_out.contains("setup_script="));
     assert!(entry_out
         .contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         ));
     assert!(
         entry_out.contains("from managed_deepagents.runtime import compile_managed_agent_async")
@@ -2134,7 +2364,7 @@ fn compile_omits_sandbox_wiring_when_absent() {
     assert!(!entry_out.contains("import { sandbox }"));
     assert!(!entry_out.contains("setupScript"));
     assert!(entry_out
-        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills }, runtime)"));
+        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills, asyncSubagentGraphs }, runtime)"));
 }
 
 #[test]
@@ -2167,7 +2397,7 @@ fn compile_ignores_setup_script_without_sandbox_declaration() {
     assert!(!entry_out.contains("setupScript"));
     assert!(!entry_out.contains("sandboxSetup"));
     assert!(entry_out
-        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills }, runtime)"));
+        .contains("compileManagedAgent(definition, config, { contextRoot, hasSkills, asyncSubagentGraphs }, runtime)"));
     assert!(!out_dir.join("sandbox-recipe.json").exists());
 }
 
@@ -2199,7 +2429,7 @@ fn compile_bakes_factory_setup_script_without_sandbox_declaration() {
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(entry_out.contains("const sandboxSetup = true;"));
     assert!(entry_out.contains(
-        "compileManagedAgent(definition, config, { contextRoot, hasSkills, sandboxSetup }, runtime)"
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, sandboxSetup, asyncSubagentGraphs }, runtime)"
     ));
     let manifest = load_sandbox_recipe_manifest(&out_dir).unwrap().unwrap();
     assert!(manifest.has_setup_script);
@@ -2241,7 +2471,7 @@ fn compile_marks_python_factory_sandbox_setup() {
 
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
     assert!(entry_out.contains(
-        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, sandbox_setup=True, runtime=runtime)"
+        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, sandbox_setup=True, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
 }
 
@@ -2302,7 +2532,7 @@ fn compile_wires_tools_typescript_mcp() {
     // aggregator and passes it in shorthand form to the managed runtime.
     assert!(entry_out.contains("import { connectors } from \"./_mda_connectors\";"));
     assert!(entry_out.contains(
-        "compileManagedAgent(definition, config, { contextRoot, hasSkills, connectors }, runtime)"
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, connectors, asyncSubagentGraphs }, runtime)"
     ));
 
     // The aggregator imports each connector module name-agnostically and
@@ -2366,7 +2596,7 @@ fn compile_wires_tools_python_mcp() {
     assert!(entry_out.contains("from _mda_connectors import connectors as _connectors"));
     assert!(entry_out
         .contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, connectors=_connectors, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, connectors=_connectors, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         ));
 
     let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.py")).unwrap();
@@ -2396,7 +2626,7 @@ fn compile_wires_tools_python_mcp() {
 }
 
 #[test]
-fn compile_skips_typescript_connector_without_a_connector_export() {
+fn compile_rejects_a_typescript_module_under_the_removed_connectors_layout() {
     let root = tempfile::tempdir().unwrap();
     setup_mock_ts_runtime(root.path());
     write_file(
@@ -2412,73 +2642,6 @@ fn compile_skips_typescript_connector_without_a_connector_export() {
             "export const connector = defineMcp({\n",
             "  servers: { docs: { transport: \"http\", url: \"https://docs.example.com/mcp\" } },\n",
             "});\n",
-        ),
-    );
-    // Co-located unit test / helper: no `connector` export, must not be imported.
-    write_file(
-        root.path(),
-        "connectors/mcp.test.ts",
-        concat!(
-            "import { describe, it, expect } from \"@jest/globals\";\n",
-            "import { connector } from \"./mcp\";\n",
-            "describe(\"mcp\", () => {\n",
-            "  it(\"is defined\", () => { expect(connector).toBeDefined(); });\n",
-            "});\n",
-        ),
-    );
-    write_file(
-        root.path(),
-        "connectors/helper.ts",
-        "export const sharedUrl = \"https://docs.example.com/mcp\";\n",
-    );
-    write_file(
-        root.path(),
-        "package.json",
-        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
-    );
-
-    let project = Project {
-        root: root.path().to_path_buf(),
-        language: Language::TypeScript,
-        agent_file: PathBuf::from("agent.ts"),
-        files: vec![
-            PathBuf::from("agent.ts"),
-            PathBuf::from("connectors/helper.ts"),
-            PathBuf::from("connectors/mcp.test.ts"),
-            PathBuf::from("connectors/mcp.ts"),
-            PathBuf::from("package.json"),
-        ],
-    };
-
-    let out_dir = root.path().join(".mda").join("build");
-    let summary = compile(&project, &out_dir).unwrap();
-    assert_eq!(summary.connectors, vec![PathBuf::from("connectors/mcp.ts")]);
-
-    let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.ts")).unwrap();
-    assert!(connectors_out.contains("import * as _connector0 from \"./connectors/mcp\";"));
-    assert!(!connectors_out.contains("mcp.test"));
-    assert!(!connectors_out.contains("helper"));
-    // Non-connector files are still copied into the build (uploaded on deploy)
-    // but must not be imported at startup.
-    assert!(out_dir.join("connectors/mcp.test.ts").exists());
-    assert!(out_dir.join("connectors/helper.ts").exists());
-}
-
-#[test]
-fn compile_rejects_a_typescript_connector_exported_as_default() {
-    let root = tempfile::tempdir().unwrap();
-    setup_mock_ts_runtime(root.path());
-    write_file(
-        root.path(),
-        "agent.ts",
-        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
-    );
-    write_file(
-        root.path(),
-        "connectors/mcp.ts",
-        concat!(
-            "import { defineMcp } from \"managed-deepagents\";\n",
-            "export default defineMcp({ servers: {} });\n",
         ),
     );
     write_file(
@@ -2500,16 +2663,62 @@ fn compile_rejects_a_typescript_connector_exported_as_default() {
 
     let out_dir = root.path().join(".mda").join("build");
     let error = compile(&project, &out_dir).unwrap_err().to_string();
-    // Silently skipping the old shape would deploy an agent missing its tools.
+    // Silently skipping the old layout would deploy an agent missing its tools.
     assert!(
-        error.contains("connectors/mcp.ts has a default export but no `connector` export"),
+        error.contains("connectors/mcp.ts uses the removed `connectors/` MCP layout"),
         "{error}"
     );
-    assert!(error.contains("export const connector ="), "{error}");
+    assert!(error.contains("tools/mcp.ts"), "{error}");
 }
 
 #[test]
-fn compile_skips_python_connector_without_named_connector() {
+fn compile_rejects_a_default_export_under_the_removed_connectors_layout() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "connectors/mcp.ts",
+        concat!(
+            "import { defineMcp } from \"managed-deepagents\";\n",
+            "export default defineMcp({\n",
+            "  servers: { docs: { transport: \"http\", url: \"https://docs.example.com/mcp\" } },\n",
+            "});\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("connectors/mcp.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = compile(&project, &out_dir).unwrap_err().to_string();
+    // A default export was a hard error before the removal; treating it as a
+    // helper would drop the MCP tools without a word.
+    assert!(
+        error.contains("connectors/mcp.ts uses the removed `connectors/` MCP layout"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compile_rejects_a_python_module_under_the_removed_connectors_layout() {
     let root = tempfile::tempdir().unwrap();
     write_file(
         root.path(),
@@ -2524,22 +2733,6 @@ fn compile_skips_python_connector_without_named_connector() {
             "connector = define_mcp(servers={\"docs\": {\"transport\": \"http\", \"url\": \"https://docs.example.com/mcp\"}})\n",
         ),
     );
-    // Co-located unit test (filename pattern) / helper (no `connector =`).
-    write_file(
-        root.path(),
-        "connectors/test_mcp.py",
-        concat!(
-            "import pytest\n",
-            "from connectors.mcp import connector\n",
-            "def test_connector_kind():\n",
-            "    assert connector.kind == \"mcp_servers\"\n",
-        ),
-    );
-    write_file(
-        root.path(),
-        "connectors/helper.py",
-        "SHARED_URL = \"https://docs.example.com/mcp\"\n",
-    );
     write_file(
         root.path(),
         "pyproject.toml",
@@ -2552,26 +2745,58 @@ fn compile_skips_python_connector_without_named_connector() {
         agent_file: PathBuf::from("agent.py"),
         files: vec![
             PathBuf::from("agent.py"),
-            PathBuf::from("connectors/helper.py"),
             PathBuf::from("connectors/mcp.py"),
-            PathBuf::from("connectors/test_mcp.py"),
             PathBuf::from("pyproject.toml"),
         ],
     };
 
     let out_dir = root.path().join("build");
-    let summary = with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
-    assert_eq!(summary.connectors, vec![PathBuf::from("connectors/mcp.py")]);
-    assert!(summary.warnings.iter().any(|warning| {
-        warning.contains("connectors/") && warning.contains("removed in 0.8.0")
-    }));
+    let error = with_py_runtime(root.path(), || compile(&project, &out_dir))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("connectors/mcp.py uses the removed `connectors/` MCP layout"),
+        "{error}"
+    );
+    assert!(error.contains("tools/mcp.py"), "{error}");
+}
 
-    let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.py")).unwrap();
-    assert!(connectors_out.contains("import connectors.mcp as _connector0"));
-    assert!(!connectors_out.contains("test_mcp"));
-    assert!(!connectors_out.contains("helper"));
-    assert!(out_dir.join("connectors/test_mcp.py").exists());
-    assert!(out_dir.join("connectors/helper.py").exists());
+#[test]
+fn compile_ignores_connectors_helpers_without_a_connector_export() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "connectors/helper.ts",
+        "export const sharedUrl = \"https://docs.example.com/mcp\";\n",
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("connectors/helper.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let summary = compile(&project, &out_dir).unwrap();
+    assert!(summary.connectors.is_empty());
+    assert!(!out_dir.join("_mda_connectors.ts").exists());
+    assert!(out_dir.join("connectors/helper.ts").exists());
 }
 
 #[test]
@@ -2615,7 +2840,7 @@ fn compile_omits_connectors_wiring_when_absent() {
     );
 }
 
-// Ingress channels (Slack `on:`) and connectors (GitHub `events:`), aggregators,
+// Ingress channels (Slack `on:`), aggregators,
 // and the managed HTTP app. Helpers / co-located tests under plugin dirs must not be
 // imported; HTTP wiring uses live `_mda_connectors`, never compile-time embeds.
 
@@ -2846,6 +3071,91 @@ fn compile_requires_identity_for_python_ingress_channel() {
 }
 
 #[test]
+fn compile_requires_identity_for_github_channel() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "channels/github.ts",
+        concat!(
+            "import { channels } from \"managed-deepagents\";\n",
+            "export const channel = channels.github({ onEvent: {} });\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("channels/github.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = compile(&project, &out_dir).unwrap_err().to_string();
+    assert!(
+        error.contains("require a root identity"),
+        "expected identity gate for GitHub channel, got: {error}"
+    );
+}
+
+#[test]
+fn compile_requires_identity_for_python_github_channel() {
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"agent\", model=\"openai:gpt-5\")\n",
+    );
+    write_file(
+        root.path(),
+        "channels/github.py",
+        concat!(
+            "from managed_deepagents import channels\n",
+            "channel = channels.github(on_event={})\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "pyproject.toml",
+        "[project]\nname = \"example\"\nversion = \"0.0.0\"\ndependencies = []\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![
+            PathBuf::from("agent.py"),
+            PathBuf::from("channels/github.py"),
+            PathBuf::from("pyproject.toml"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = with_py_runtime(root.path(), || compile(&project, &out_dir))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("require a root identity"),
+        "expected identity gate for GitHub channel, got: {error}"
+    );
+}
+
+#[test]
 fn compile_wires_typescript_http_app_to_live_channels() {
     let root = tempfile::tempdir().unwrap();
     setup_mock_ts_runtime(root.path());
@@ -2904,7 +3214,9 @@ fn compile_wires_typescript_http_app_to_live_channels() {
 
     let http_out = fs::read_to_string(out_dir.join("_mda_http.ts")).unwrap();
     assert!(
-        http_out.contains("buildManagedHttpApp({ identity, channels })"),
+        http_out.contains(
+            "buildManagedHttpApp({ identity, channels, root: fileURLToPath(new URL(\".\", import.meta.url)) })"
+        ),
         "expected channels kwargs in buildManagedHttpApp call:\n{http_out}"
     );
     assert!(
@@ -2971,7 +3283,7 @@ fn compile_wires_python_http_app_to_live_channels() {
 
     let http_out = fs::read_to_string(out_dir.join("_mda_http.py")).unwrap();
     assert!(
-        http_out.contains("channels=_channels"),
+        http_out.contains("channels=_channels, root=str(_Path(__file__).resolve().parent)"),
         "expected channels kwargs in build_managed_http_app call:\n{http_out}"
     );
     assert!(
@@ -3086,7 +3398,7 @@ fn compile_wires_typescript_identity() {
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(entry_out.contains("import { identity } from \"./identity\";"));
     assert!(entry_out.contains(
-        "compileManagedAgent(definition, config, { contextRoot, hasSkills, identity }, runtime)"
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, identity, asyncSubagentGraphs }, runtime)"
     ));
 
     // The thin custom-auth module is generated and delegates to the runtime.
@@ -3158,7 +3470,7 @@ fn compile_wires_python_identity() {
     assert!(entry_out.contains("from identity import identity as _identity"));
     assert!(
         entry_out.contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, identity=_identity, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, identity=_identity, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         )
     );
 
@@ -3504,7 +3816,8 @@ fn compile_materializes_a_registry_npm_lockfile_for_typescript_builds() {
         npm.args(["install", "--ignore-scripts"])
             .current_dir(&out_dir);
         let output =
-            toolchain::output_with_timeout(&mut npm, std::time::Duration::from_secs(90)).unwrap();
+            crate::child::output_with_timeout(&mut npm, std::time::Duration::from_secs(90))
+                .unwrap();
         assert!(
             output.status.success(),
             "npm install failed against the materialized lockfile: {}",
@@ -3575,7 +3888,7 @@ fn compile_resolves_authored_langchain_and_mcp_tool_dependencies() {
         deps["@langchain/mcp-adapters"],
         managed_mcp_adapter_version()
     );
-    assert_eq!(deps["deepagents"], "^1.12.1");
+    assert_eq!(deps["deepagents"], "^1.15.1");
     assert!(out_dir.join("package-lock.json").is_file());
 }
 
@@ -4010,15 +4323,15 @@ fn compile_wires_typescript_memory() {
 
     // Agent memory does not require identity.
     assert!(summary.memory.agent_enabled());
-    assert_eq!(
-        summary.memory.path().map(PathBuf::as_path),
-        Some(Path::new("memory.ts"))
-    );
+    assert!(matches!(
+        &summary.memory,
+        MemoryDecision::Declared(memory) if memory.path == Path::new("memory.ts")
+    ));
 
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(entry_out.contains("import { memory } from \"./memory\";"));
     assert!(entry_out.contains(
-        "compileManagedAgent(definition, config, { contextRoot, hasSkills, memory }, runtime)"
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, memory, asyncSubagentGraphs }, runtime)"
     ));
 
     // Carried over verbatim, like every other authored declaration.
@@ -4091,14 +4404,16 @@ fn compile_preserves_named_memory_policies() {
             fs::read_to_string(out_dir.join(memory_file)).unwrap(),
             memory_source
         );
-        let entry_out = fs::read_to_string(out_dir.join(summary.entry_file)).unwrap();
+        let entry_out =
+            fs::read_to_string(out_dir.join(format!("_mda_entry.{}", language.extension())))
+                .unwrap();
         assert!(entry_out.contains(language.ident(
             "import { memory } from \"./memory\";",
             "from memory import memory as _memory",
         )));
         assert!(entry_out.contains(language.ident(
-            "identity, memory }, runtime)",
-            "identity=_identity, memory=_memory, runtime=runtime)",
+            "identity, memory, asyncSubagentGraphs }, runtime)",
+            "identity=_identity, memory=_memory, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         )));
         assert!(!entry_out.contains("must not run at build time"));
     }
@@ -4177,7 +4492,7 @@ fn compile_wires_python_memory() {
     assert!(entry_out.contains("from memory import memory as _memory"));
     assert!(entry_out.contains(
         "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
-         has_skills=_has_skills, memory=_memory, runtime=runtime)"
+         has_skills=_has_skills, memory=_memory, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
 }
 
@@ -4221,16 +4536,106 @@ fn compile_wires_python_browser_and_adds_stagehand() {
     assert!(entry_out.contains("from browser import browser as _browser"));
     assert!(entry_out.contains(
         "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
-         has_skills=_has_skills, browser=_browser, runtime=runtime)"
+         has_skills=_has_skills, browser=_browser, async_subagent_graphs=_async_subagent_graphs, \
+         runtime=runtime)"
     ));
+    // The handoff watcher's graph, beside the agent's.
+    assert!(entry_out
+        .contains("from managed_deepagents.browser import handoff_watcher as _handoff_watcher"));
+    assert!(entry_out.contains(concat!(
+        "async def browser_handoff_watcher(config, runtime: ServerRuntime):\n",
+        "    async with parent_run(config):\n",
+        "        yield _handoff_watcher\n",
+    )));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"]["mda-browser-handoff"],
+        "./_mda_entry.py:browser_handoff_watcher"
+    );
     let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
     assert!(pyproject.contains("stagehand==4.3.0"));
+    assert!(pyproject.contains("stagehand-middleware==0.1.0"));
 
-    // Eval trials never get a browser, so they never install its client.
+    // Eval trials never get a browser, so they never install its client or tools.
     let eval_dir = root.path().join("eval");
     with_py_runtime(root.path(), || compile_for_eval(&project, &eval_dir)).unwrap();
     let eval_pyproject = fs::read_to_string(eval_dir.join("pyproject.toml")).unwrap();
     assert!(!eval_pyproject.contains("stagehand"));
+}
+
+#[test]
+fn compile_wires_typescript_browser_and_adds_stagehand() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "browser.ts",
+        "export const browser = defineBrowser({ scope: \"user\" });\n",
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("browser.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    compile(&project, &out_dir).unwrap();
+
+    let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
+    assert!(entry_out.contains("import { browser } from \"./browser\";"));
+    assert!(entry_out.contains(
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, browser, \
+         asyncSubagentGraphs }, runtime)"
+    ));
+    // Async subagents run with the lead's browser.
+    assert!(entry_out.contains(
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, browser, \
+         asyncSubagent: \"general-purpose\" }, runtime)"
+    ));
+    // The handoff watcher's graph, beside the agent's.
+    assert!(entry_out.contains(
+        "export { browserHandoffWatcher as browser_handoff_watcher } from \"managed-deepagents/runtime\";"
+    ));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"]["mda-browser-handoff"],
+        "./_mda_entry.ts:browser_handoff_watcher"
+    );
+    let package: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package["dependencies"]["@browserbasehq/stagehand"], "4.3.0");
+    assert_eq!(package["dependencies"]["stagehand-middleware"], "0.1.1");
+
+    // Eval trials never get a browser, so they never install Stagehand.
+    let eval_dir = root.path().join("eval");
+    compile_for_eval(&project, &eval_dir).unwrap();
+    let eval_entry = fs::read_to_string(eval_dir.join("_mda_eval_entry.ts")).unwrap();
+    assert!(!eval_entry.contains("browser"), "{eval_entry}");
+    let eval_manifest = fs::read_to_string(eval_dir.join("langgraph.json")).unwrap();
+    assert!(
+        !eval_manifest.contains("mda-browser-handoff"),
+        "{eval_manifest}"
+    );
+    let eval_package = fs::read_to_string(eval_dir.join("package.json")).unwrap();
+    assert!(!eval_package.contains("stagehand"), "{eval_package}");
 }
 
 #[test]
@@ -4280,7 +4685,7 @@ fn compile_omits_memory_when_the_project_declares_none() {
 
     assert!(!summary.memory.agent_enabled());
     assert!(!summary.memory.user_enabled());
-    assert_eq!(summary.memory.path(), None);
+    assert_eq!(summary.memory, MemoryDecision::None);
 
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(!entry_out.contains("memory"), "{entry_out}");
@@ -5221,4 +5626,32 @@ fn compile_for_deploy_rejects_a_marker_on_a_python_local_package() {
     .unwrap_err();
     let error = format!("{error:#}");
     assert!(error.contains("sys_platform == 'linux'"), "{error}");
+}
+
+#[test]
+fn a_compile_cancellation_stays_a_cancellation() {
+    let interrupted = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::Interrupted))
+        .context("failed to run npm install");
+
+    let err = super::compilation(interrupted);
+
+    assert!(crate::error::is_cancellation(&err), "{err:#}");
+}
+
+#[test]
+fn a_compile_failure_keeps_the_childs_stderr() {
+    let child = anyhow::Error::new(std::io::Error::other("ImportError: x"))
+        .context("failed to emit connector requirements");
+
+    let err = super::compilation(child);
+
+    assert_eq!(
+        crate::error::category_of(&err),
+        crate::error::ErrorCategory::Compilation
+    );
+    assert_eq!(
+        format!("{err:#}"),
+        "failed to emit connector requirements: ImportError: x"
+    );
+    assert_eq!(err.chain().count(), 2);
 }

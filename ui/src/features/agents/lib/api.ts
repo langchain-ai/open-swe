@@ -2,6 +2,7 @@ import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
+  AgentBackgroundOutput,
   AgentBackgroundWork,
   AgentQueuedMessage,
   AgentSchedule,
@@ -28,6 +29,26 @@ export class AgentsApiError extends DashboardRequestError {
   constructor(status: number, message: string, requestId?: string) {
     super(status, message, requestId)
     this.name = "AgentsApiError"
+  }
+
+  /** A failed response, named by its `detail` when the body has one. */
+  static async fromResponse(
+    response: Response,
+    requestId?: string
+  ): Promise<AgentsApiError> {
+    let message = response.statusText
+    try {
+      const body: unknown = await response.json()
+      const detail =
+        body !== null && typeof body === "object" && "detail" in body
+          ? (body as { detail: unknown }).detail
+          : undefined
+      if (typeof detail === "string" && detail) message = detail
+      else if (detail !== undefined) message = JSON.stringify(detail)
+    } catch {
+      // Not a JSON error body; the status text is all we have.
+    }
+    return new AgentsApiError(response.status, message, requestId)
   }
 }
 
@@ -112,6 +133,20 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+export interface ThreadBrowserTab {
+  id: string
+  title: string
+  url: string
+}
+
+/** The window of its LangSmith browser a thread's agent drives, as the dashboard embeds it. */
+export interface ThreadBrowser {
+  tabs: Array<ThreadBrowserTab>
+  /** LangSmith's page for the window, minted for the dashboard to frame. */
+  act_url: string
+  expires_at: string
+}
+
 export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -132,6 +167,8 @@ export interface ThreadsPageParams {
   repo?: string
   ownerless?: boolean
   owned?: boolean
+  /** Thread sources to leave out, such as `claude_code`. */
+  excludeSources?: Array<string>
   sortBy?: ThreadSortBy
 }
 
@@ -157,6 +194,47 @@ export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
+function errorDetailMessage(detail: unknown): string {
+  if (typeof detail === "string") return detail
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((issue: unknown) => {
+      if (
+        !issue ||
+        typeof issue !== "object" ||
+        !("msg" in issue) ||
+        typeof issue.msg !== "string"
+      )
+        return []
+      const field =
+        "loc" in issue && Array.isArray(issue.loc)
+          ? issue.loc
+              .slice(1)
+              .filter(
+                (part: unknown) =>
+                  typeof part === "string" || typeof part === "number"
+              )
+              .join(".")
+          : ""
+      if (
+        field === "name" &&
+        "type" in issue &&
+        issue.type === "string_too_long" &&
+        "ctx" in issue &&
+        issue.ctx &&
+        typeof issue.ctx === "object" &&
+        "max_length" in issue.ctx &&
+        typeof issue.ctx.max_length === "number"
+      )
+        return [
+          `Please use a shorter name (${issue.ctx.max_length} characters or fewer)`,
+        ]
+      return [field ? `${field}: ${issue.msg}` : issue.msg]
+    })
+    if (messages.length) return messages.join("; ")
+  }
+  return JSON.stringify(detail) ?? "Request failed"
+}
+
 export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
@@ -179,10 +257,7 @@ export async function agentsRequest<T>(
     try {
       const body = await res.json()
       if (body?.detail) {
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
+        message = errorDetailMessage(body.detail)
       }
     } catch {
       /* ignore */
@@ -216,10 +291,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     try {
       const body = await res.json()
       if (body?.detail) {
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
+        message = errorDetailMessage(body.detail)
       }
     } catch {
       /* ignore */
@@ -253,6 +325,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -262,6 +336,7 @@ function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
   owned?: boolean
+  excludeSources?: Array<string>
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -270,6 +345,8 @@ function buildReposQuery(params: {
     search.set("include_automations", String(params.includeAutomations))
   }
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -295,6 +372,7 @@ export const agentsApi = {
       includeResolved?: boolean
       includeAutomations?: boolean
       owned?: boolean
+      excludeSources?: Array<string>
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(
@@ -383,6 +461,10 @@ export const agentsApi = {
     agentsRequest<AgentBackgroundWork>(
       `/threads/${encodeURIComponent(threadId)}/background-work`
     ),
+  getThreadBackgroundOutput: (threadId: string, taskId: string) =>
+    agentsRequest<AgentBackgroundOutput>(
+      `/threads/${encodeURIComponent(threadId)}/background-work/${encodeURIComponent(taskId)}/output`
+    ),
   getThreadQueuedMessages: (threadId: string) =>
     agentsRequest<Array<AgentQueuedMessage>>(
       `/threads/${encodeURIComponent(threadId)}/queued-messages`
@@ -462,6 +544,15 @@ export const agentsApi = {
   connectCloudTerminal: (threadId: string) =>
     agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
+      { method: "POST" }
+    ),
+  getThreadBrowser: (threadId: string) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser`
+    ),
+  openThreadBrowser: (threadId: string) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser`,
       { method: "POST" }
     ),
 }

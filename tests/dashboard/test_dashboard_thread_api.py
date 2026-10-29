@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -31,9 +32,9 @@ from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
-from openswe.users import User, UserPreferences
+from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import patch_thread_module
+from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -44,6 +45,11 @@ _PAIR = ("openai:gpt-6.1-sol", "medium")
 @asynccontextmanager
 async def _unlocked(*args, **kwargs):
     yield
+
+
+@pytest.fixture(autouse=True)
+def _threads_kept_by_the_fake_client(monkeypatch) -> None:
+    patch_thread_module(monkeypatch, "THREADS", ThreadStoreOverClient())
 
 
 @pytest.fixture(autouse=True)
@@ -170,6 +176,54 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+
+
+async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    history_started, profile_started = asyncio.Event(), asyncio.Event()
+    history_finished, profile_finished = asyncio.Event(), asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def read_history(thread_id: str) -> dict[str, object]:
+        history_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            history_finished.set()
+
+    async def read_profile(login: str) -> dict[str, object]:
+        profile_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            profile_finished.set()
+
+    error = HTTPException(401)
+
+    async def reject_start(login: str) -> None:
+        await profile_started.wait()
+        await history_started.wait()
+        raise error
+
+    monkeypatch.setattr(thread_runs.THREADS, "state", read_history)
+    monkeypatch.setattr(thread_runs, "get_profile", read_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", reject_start)
+
+    try:
+        with pytest.raises(HTTPException) as raised:
+            await thread_runs._enrich_run_start_command(
+                "tid", "octocat", {"method": "run.start"}, metadata={}
+            )
+        assert raised.value is error
+        assert profile_finished.is_set()
+        assert history_finished.is_set()
+    finally:
+        blocked.set()
+        await profile_finished.wait()
+        await history_finished.wait()
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -349,7 +403,11 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     second = uuid7()
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
-        return SimpleNamespace(id=second) if (provider, login) == ("github", "second-gh") else None
+        return (
+            SimpleNamespace(id=second, github_login=login)
+            if (provider, login) == ("github", "second-gh")
+            else None
+        )
 
     async def canonical(person: dict[str, str]) -> dict[str, str]:
         return person
@@ -363,8 +421,10 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "follow up"}]},
-            "metadata": {"user_id": str(first)},
-            "config": {"metadata": {"user_id": str(first)}},
+            "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"},
+            "config": {
+                "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"}
+            },
         },
     }
     enriched = await thread_runs._enrich_run_start_command(
@@ -378,6 +438,8 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     )
     assert enriched["params"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
+    assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+    assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
 
 
 @pytest.mark.parametrize("relayed", [False, True])
@@ -406,6 +468,9 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     assert ("system:dashboard-handoff" in texts) is not relayed
     assert ('surface="web"' in texts) is not relayed
     assert thread_runs.RELAYED_FROM_KEY not in enriched["params"]
+    assert enriched["params"]["config"]["configurable"].get(thread_runs.RELAYED_FROM_KEY) == (
+        "coordinator-tid" if relayed else None
+    )
     source = "slack" if relayed else "dashboard"
     assert enriched["params"]["config"]["configurable"]["source"] == source
     assert cast(dict[str, object], created["metadata"])["source"] == source
@@ -637,16 +702,15 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     if not history_available:
         get_state.side_effect = RuntimeError("History unavailable")
     client = SimpleNamespace(threads=SimpleNamespace(get_state=get_state))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
 
-    _, injected, _ = await thread_runs._attributed_run_messages(
-        "tid",
+    _, injected = await thread_runs._attributed_run_messages(
         "octocat",
         metadata={"injected_dynamic_context_hashes": [linked_hash, unlinked_hash]},
+        history=await thread_runs._ThreadHistory.of("tid"),
         content="Continue",
-        creating=False,
         email=None,
-        client=client,
     )
 
     assert injected == ({unlinked_hash} if history_available else {linked_hash, unlinked_hash})
@@ -731,6 +795,59 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
     assert exc_info.value is error
 
 
+_REFUSED_START = json.dumps(
+    {"type": "error", "id": 0, "error": "unknown_error", "message": "failed to create run"}
+).encode()
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status_code"),
+    [
+        pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
+        pytest.param(
+            thread_proxy.CommandReply(200, _REFUSED_START, "application/json"),
+            200,
+            id="runtime-refused",
+        ),
+    ],
+)
+async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
+    monkeypatch, refusal: Exception | thread_proxy.CommandReply, status_code: int
+) -> None:
+    turn_id = uuid7()
+
+    class UndeliverableThreads(ThreadStoreOverClient):
+        async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
+            if isinstance(refusal, Exception):
+                raise refusal
+            return refusal
+
+    class IdleThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "status": "idle", "metadata": {"owner_login": "ada"}}
+
+    async def enrich(thread_id: str, login: str, command: dict[str, object], **kwargs) -> dict:
+        return {
+            "method": "run.start",
+            "params": {"config": {"configurable": {"transcript_turn_id": str(turn_id)}}},
+        }
+
+    failed = AsyncMock()
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
+    )
+    patch_thread_module(monkeypatch, "THREADS", UndeliverableThreads())
+    monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
+    monkeypatch.setattr(thread_proxy, "fail_unstarted_turn", failed)
+
+    status, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid", "ada", b'{"method": "run.start", "params": {}}'
+    )
+
+    assert status == status_code
+    failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
+
+
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
     class AdminThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -770,9 +887,6 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
                 },
             }
 
-    class AdminClient:
-        threads = AdminThreads()
-
     class FakeResponse:
         status_code = 200
         content = b"{}"
@@ -780,23 +894,17 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
 
     posted: list[bytes] = []
 
-    class FakeAsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> FakeAsyncClient:
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
+    class FakeHttpClient:
         async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> FakeResponse:
             posted.append(content)
             return FakeResponse()
 
+    class AdminClient:
+        threads = AdminThreads()
+        http = SimpleNamespace(client=FakeHttpClient())
+
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
-    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
 
     status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "another-admin", b'{"method": "input.respond"}'
@@ -968,6 +1076,56 @@ def _make_threads(count: int, *, resolved_before: int) -> list[dict[str, object]
     return threads
 
 
+@pytest.mark.parametrize("readable", [True, False])
+async def test_slack_link_search_checks_thread_access(monkeypatch, readable: bool) -> None:
+    thread = {"thread_id": "linked", "metadata": {"visibility": "private"}}
+    monkeypatch.setattr(
+        thread_listing, "lookup_slack_link_thread_id", AsyncMock(return_value="linked")
+    )
+    monkeypatch.setattr(
+        thread_listing,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread))),
+    )
+    monkeypatch.setattr(thread_listing, "thread_is_readable", lambda *args: readable)
+    monkeypatch.setattr(
+        thread_listing, "_summarize_thread", AsyncMock(return_value={"id": "linked"})
+    )
+
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat",
+        query="https://example.slack.com/archives/C123/p1788431248678809",
+        scope="interactive",
+    )
+
+    assert page["items"] == ([{"id": "linked"}] if readable else [])
+    assert page["hasMore"] is False
+
+
+async def test_pr_link_search_finds_exact_associations_outside_participation(monkeypatch) -> None:
+    threads = _make_threads(2, resolved_before=0)
+    for thread, number in zip(threads, [42, 420], strict=True):
+        metadata = cast(dict[str, object], thread["metadata"])
+        metadata["pr_url"] = f"https://github.com/acme/repo/pull/{number}"
+        metadata["latest_run_status"] = "success"
+    search = AsyncMock(return_value=threads)
+    client = SimpleNamespace(threads=SimpleNamespace(search=search))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        thread_listing,
+        "_summarize_threads",
+        AsyncMock(side_effect=lambda client, rows: [{"id": row["thread_id"]} for row in rows]),
+    )
+
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat", query="https://github.com/acme/repo/pull/42/files#diff-123"
+    )
+
+    assert page["items"] == [{"id": threads[0]["thread_id"]}]
+    assert search.call_args.kwargs["metadata"] == {}
+    assert search.call_args.kwargs["params"] == {"text": "https://github.com/acme/repo/pull/42"}
+
+
 async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monkeypatch) -> None:
     page_size = thread_listing._THREADS_SEARCH_PAGE
     threads = _make_threads(page_size + 50, resolved_before=page_size)
@@ -1049,16 +1207,6 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     )
     monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
-    preferences = AsyncMock(return_value=UserPreferences())
-    monkeypatch.setattr(User, "preferences_for_login", preferences)
-    disabled = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=2)
-    assert [item["id"] for item in disabled["items"]] == ["t0", "t1"]
-    assert all("taskWorkers" not in item for item in disabled["items"])
-    assert disabled["items"][0]["taskMembership"]["role"] == "worker"
-    flat_parent = {"id": "t3"}
-    await thread_listing.attach_task_workers(client, [flat_parent], "octocat", None)
-    assert "taskWorkers" not in flat_parent
-    preferences.return_value = UserPreferences(experimental_task_coordination=True)
     first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
     assert [item["id"] for item in first["items"]] == ["t3"]
     parent = first["items"][0]
@@ -1109,11 +1257,6 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
 async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
-    )
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):

@@ -6,6 +6,7 @@ from sqlalchemy import text
 from openswe.database.postgres import transaction
 from openswe.threads import index, status
 from openswe.threads.index import Runtime, ThreadStatus
+from openswe.ui_invalidations import Topic, outbox
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -68,3 +69,32 @@ async def test_threads_stuck_busy_are_settled_from_their_runtime(
         "just-started": "busy",
         "gone-from-runtime": "idle",
     }
+
+
+@pytest.mark.parametrize("finished", ["idle", "error", "interrupted"])
+async def test_reviewer_status_reconciliation_refreshes_its_open_review_page(
+    monkeypatch: pytest.MonkeyPatch, finished: ThreadStatus
+) -> None:
+    await _busy_since("reviewer", datetime.now(UTC) - timedelta(hours=1))
+    await index.update(
+        "reviewer",
+        {"kind": "reviewer", "pr": {"owner": "Acme", "name": "Widgets", "number": 42}},
+    )
+    runtime = _Runtimes({"reviewer": "busy"})
+    monkeypatch.setattr(status, "RUNTIMES", runtime)
+    topic = "pull-requests/acme/widgets/42"
+
+    await status.refresh_thread_status("reviewer")
+    assert await outbox.invalidated_since({topic: 60}) == set()
+
+    runtime.runtime.statuses["reviewer"] = finished
+    assert await status.reconcile_busy_threads() == 1
+    assert await outbox.invalidated_since({topic: 60, Topic.PULL_REQUESTS.name: 60}) == {
+        topic,
+        Topic.PULL_REQUESTS.name,
+    }
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM ui_invalidation"))
+
+    await status.refresh_thread_status("reviewer")
+    assert await outbox.invalidated_since({topic: 60}) == set()

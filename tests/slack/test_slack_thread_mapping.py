@@ -8,6 +8,7 @@ import pytest
 from openswe import event_claims
 from openswe.database import postgres
 from openswe.slack import client as slack_client
+from openswe.slack import records as slack_records
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
 from openswe.slack.records import (
@@ -21,6 +22,29 @@ from openswe.slack.records import (
     store_slack_message_run_mapping,
     store_slack_run_mapping,
 )
+from openswe.thread_ids import mda_successor_thread_id
+from openswe.threads import index
+
+
+@pytest.mark.parametrize("root_field", ["ts", "thread_ts"])
+async def test_reply_permalink_without_thread_timestamp(monkeypatch, root_field: str) -> None:
+    lookup = AsyncMock(
+        side_effect=lambda channel, ts: "thread-1" if ts == "1788425314.774339" else None
+    )
+    monkeypatch.setattr(slack_records, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(slack_records, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    client = AsyncMock()
+    client.conversations_replies.return_value = {"messages": [{root_field: "1788425314.774339"}]}
+    context = AsyncMock()
+    context.__aenter__.return_value = client
+    monkeypatch.setattr(slack_records.SlackClient, "bot", lambda: context)
+
+    assert (
+        await slack_records.lookup_slack_link_thread_id(
+            "https://example.slack.com/archives/C123/p1788431248678809"
+        )
+        == "thread-1"
+    )
 
 
 class _Threads:
@@ -125,6 +149,21 @@ async def test_resolver_backfills_existing_thread_from_metadata() -> None:
 
     assert resolved == "legacy-thread"
     assert await lookup_slack_thread_id("C1", "1.0") == "legacy-thread"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_a_location_on_a_local_thread_moves_to_its_mda_successor() -> None:
+    old = "00000000-0000-4000-8000-000000000001"
+    await index.create(old, runtime="local")
+    await bind_slack_thread_id("C1", "1.0", old)
+    client: Any = _Client()
+
+    first = await resolve_slack_thread_id(client, "C1", "1.0")
+    second = await resolve_slack_thread_id(client, "C1", "1.0")
+
+    assert first == second == mda_successor_thread_id(old)
+    assert await lookup_slack_thread_id("C1", "1.0") == first
 
 
 @pytest.mark.asyncio

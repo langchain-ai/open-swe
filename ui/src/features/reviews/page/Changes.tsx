@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { ReactNode } from "react"
 import { CodeView, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import type {
   CodeViewHandle,
@@ -32,8 +31,6 @@ import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
-import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
 import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
 import {
@@ -51,10 +48,7 @@ import {
 } from "./diffEntries"
 import { EntriesContext, MarkersContext, StepsContext } from "./entries"
 import { FILE_HEADER_HEIGHT, FileHeader } from "./FileHeader"
-import { FindingNote } from "./notes/FindingNote"
-import { NoteFrame } from "./notes/NoteFrame"
-import { Composer } from "./notes/Composer"
-import { ThreadNote } from "./notes/ThreadNote"
+import { renderNote } from "./notes/NoteView"
 import { Overview } from "./Overview"
 import { reviewQueries, useFileMarkers, type PullRequestRef } from "./queries"
 import { isCollapsed, useReviewPage, type DiffTarget } from "./store"
@@ -67,6 +61,8 @@ import {
   stepItemId,
   WalkthroughEnd,
 } from "./StepSection"
+import { FindBar } from "./FindBar"
+import { FIND_HIGHLIGHT_CSS, useFindHighlights } from "./findHighlights"
 import { useDiffKeys } from "./useDiffKeys"
 
 type Item = CodeViewItem<Note>
@@ -152,7 +148,6 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const setComposer = useReviewPage((state) => state.setComposer)
   const setActive = useReviewPage((state) => state.setActive)
   const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
-  const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const theme = useResolvedTheme()
   const [storedOverflow] = useDiffOverflow()
   const files = diff.data?.files ?? []
@@ -164,6 +159,8 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       ? "wrap"
       : storedOverflow
   const handle = useRef<CodeViewHandle<Note>>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const paintFind = useFindHighlights(containerRef)
   const askAboutLines = useAskAboutLines(pr)
   const markers = useFileMarkers(pr)
 
@@ -192,6 +189,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   )
   useEffect(() => setEntryOrder(entries), [entries, setEntryOrder])
   const draftComments = drafts?.comments
+  const agentNotes = drafts?.notes
   const sources = useMemo<NoteSources>(
     () => ({
       findings: detail?.findings ?? [],
@@ -200,6 +198,9 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       drafts: (draftComments ?? [])
         .filter((draft) => !draft.outcome)
         .map((draft) => draft.proposal),
+      agentNotes: (agentNotes ?? [])
+        .filter((draft) => !draft.outcome)
+        .map((draft) => draft.note),
       composer,
     }),
     [
@@ -207,6 +208,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       conversation?.threads,
       pending.comments,
       draftComments,
+      agentNotes,
       composer,
     ]
   )
@@ -265,7 +267,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
       // Step items are the only plain files: no gutter, no surface, their placeholder line unseen.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}pre[data-file],pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}pre[data-file] [data-annotation-content]{left:0;width:auto}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
+      unsafeCSS: `${base.unsafeCSS}${FIND_HIGHLIGHT_CSS}[data-diffs-header]{border-bottom:0 !important}pre[data-file],pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}pre[data-file] [data-annotation-content]{left:0;width:auto}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
@@ -285,6 +287,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       loadDiffFiles,
       // Hunks highlighted alone lose multi-line string state; hydrate once shown.
       onPostRender: (_node, instance, phase) => {
+        paintFind()
         if (phase === "unmount") return void hydrating.delete(instance)
         if (instance.options.collapsed || hydrating.has(instance)) return
         const loads = instance as unknown as Partial<LoadsFiles>
@@ -302,7 +305,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           commentOn(context.item.id, range)
       },
     }
-  }, [diffStyle, overflow, theme, loadDiffFiles, commentOn])
+  }, [diffStyle, overflow, theme, loadDiffFiles, commentOn, paintFind])
 
   const renderHeader = useCallback(
     () => (
@@ -339,7 +342,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       annotation.metadata.kind === "step" ? (
         <StepIntro id={item.id} />
       ) : (
-        <NoteView pr={pr} note={annotation.metadata} />
+        renderNote(pr, annotation.metadata)
       ),
     [pr]
   )
@@ -355,11 +358,6 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       }
       const entry = findEntry(entries, target)
       if (!entry) return
-      if (
-        isRenderable(entry.file) &&
-        isCollapsed(useReviewPage.getState(), entry)
-      )
-        toggleCollapsed(entry.readKey)
       // Arriving at a step's first file shows the step from its header.
       const opensStep =
         entry.step && stepsByIndex.get(entry.step.index)?.entries[0] === entry
@@ -399,12 +397,14 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         }, 2400)
       })
     },
-    [entries, stepsByIndex, toggleCollapsed]
+    [entries, stepsByIndex]
   )
 
   useEffect(
     () =>
       useReviewPage.subscribe((state, previous) => {
+        if (previous.composer && !state.composer)
+          handle.current?.clearSelectedLines()
         if (state.jump && state.jump !== previous.jump)
           scrollTo(state.jump.target)
       }),
@@ -446,13 +446,13 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           }
         }
         setActive(active, atEnd)
+        paintFind()
       })
     },
-    [entryMap, stepItems, setActive]
+    [entryMap, stepItems, setActive, paintFind]
   )
 
   const [selection, setSelection] = useState<TextSelection | null>(null)
-  const containerRef = useRef<HTMLDivElement | null>(null)
   // Notes size themselves to the visible pane, not to the widest code line.
   useEffect(() => {
     const node = containerRef.current
@@ -530,6 +530,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                 onScroll={onScroll}
               />
               <ReadNudge groups={stepGroups} />
+              <FindBar />
               {diff.isError && (
                 <p
                   role="alert"
@@ -558,76 +559,3 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     </EntriesContext.Provider>
   )
 })
-
-/** One note on a line; each kind reads only the data it shows. */
-function NoteView({
-  pr,
-  note,
-}: {
-  pr: PullRequestRef
-  note: Exclude<Note, { kind: "step" }>
-}): ReactNode {
-  switch (note.kind) {
-    case "finding":
-      return <FindingNoteView pr={pr} id={note.id} />
-    case "thread":
-      return <ThreadNoteView pr={pr} id={note.id} />
-    case "pending":
-      return <PendingNote pr={pr} id={note.id} />
-    case "draft":
-      return (
-        <NoteFrame>
-          <ProposedCommentCard
-            owner={pr.owner}
-            repo={pr.repo}
-            number={pr.number}
-            id={note.id}
-          />
-        </NoteFrame>
-      )
-    case "composer":
-      return <ComposerNote pr={pr} />
-  }
-}
-
-function FindingNoteView({ pr, id }: { pr: PullRequestRef; id: string }) {
-  const finding = useQuery(reviewQueries.detail(pr)).data?.findings.find(
-    (candidate) => candidate.id === id
-  )
-  const thread = useQuery(reviewQueries.conversation(pr)).data?.threads.find(
-    (candidate) => candidate.id === finding?.github_review_comment_id
-  )
-  return finding ? (
-    <FindingNote pr={pr} finding={finding} thread={thread ?? null} />
-  ) : null
-}
-
-function ThreadNoteView({ pr, id }: { pr: PullRequestRef; id: number }) {
-  const thread = useQuery(reviewQueries.conversation(pr)).data?.threads.find(
-    (candidate) => candidate.id === id
-  )
-  return thread ? <ThreadNote pr={pr} thread={thread} /> : null
-}
-
-function PendingNote({ pr, id }: { pr: PullRequestRef; id: number }) {
-  const comment = usePendingReview(pr.owner, pr.repo, pr.number).comments.find(
-    (candidate) => candidate.id === id
-  )
-  return comment ? (
-    <NoteFrame className="px-space-1 py-0">
-      <PendingReviewCommentCard
-        owner={pr.owner}
-        repo={pr.repo}
-        number={pr.number}
-        comment={comment}
-      />
-    </NoteFrame>
-  ) : null
-}
-
-function ComposerNote({ pr }: { pr: PullRequestRef }) {
-  const composer = useReviewPage((state) => state.composer)
-  return composer ? (
-    <Composer pr={pr} path={composer.path} range={composer.range} />
-  ) : null
-}

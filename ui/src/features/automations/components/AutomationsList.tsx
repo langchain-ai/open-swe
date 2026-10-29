@@ -202,13 +202,13 @@ function AutomationRow({
   const isToggling = usePendingVariables<{ scheduleId: string }>(
     agentMutationKeys.updateSchedule
   ).some((vars) => vars.scheduleId === schedule.id)
-  const isTesting =
+  const isStarting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
 
-  const onTest = (e: React.MouseEvent) => {
+  const onRun = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (isTesting || isToggling) return
+    if (isStarting || isToggling) return
     triggerSchedule.mutate(schedule.id, {
       onSuccess: (result) => {
         void navigate({
@@ -222,7 +222,7 @@ function AutomationRow({
   const onToggle = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (isTesting || isToggling) return
+    if (isStarting || isToggling) return
     updateSchedule.mutate({
       scheduleId: schedule.id,
       body: { enabled: !schedule.enabled },
@@ -302,12 +302,12 @@ function AutomationRow({
             color="secondary"
             variant="outlined"
             leftDecorator={LightningIcon}
-            onClick={onTest}
-            disabled={isTesting || isToggling}
-            aria-label="Test automation"
+            onClick={onRun}
+            disabled={isStarting || isToggling}
+            aria-label="Run automation now"
             className="shrink-0"
           >
-            {isTesting ? "Starting…" : "Test"}
+            {isStarting ? "Starting…" : "Run now"}
           </Button>
           <IconButton
             icon={schedule.enabled ? PauseIcon : PlayIcon}
@@ -316,7 +316,7 @@ function AutomationRow({
             variant="plain"
             size="md"
             onClick={onToggle}
-            disabled={isTesting || isToggling}
+            disabled={isStarting || isToggling}
             className="shrink-0"
           />
         </>

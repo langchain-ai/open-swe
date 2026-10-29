@@ -45,6 +45,8 @@ RETIRED_PROFILE_KEYS = frozenset(
         "subagent_reasoning_effort",
         "model_routing_enabled",
         "experimental_mcp_ptc",
+        "experimental_monitor",
+        "experimental_assistant_ui",
         "recent_thread_context_enabled",
     }
 )
@@ -88,16 +90,10 @@ class ProfileUpdate(BaseModel):
     concierge_mode: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
-    experimental_task_coordination: bool | None = None
+    experimental_fleet: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     experimental_background_callbacks: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    experimental_monitor: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_act_as_approval: bool | None = None
@@ -166,20 +162,10 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
-        "experimental_assistant_ui": (
-            update.experimental_assistant_ui
-            if update.experimental_assistant_ui is not None
-            else existing.get("experimental_assistant_ui")
-        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
             else existing.get("experimental_background_callbacks")
-        ),
-        "experimental_monitor": (
-            update.experimental_monitor
-            if update.experimental_monitor is not None
-            else existing.get("experimental_monitor")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -419,7 +405,7 @@ async def put_my_profile(
             concierge_mode=update.concierge_mode,
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
-            experimental_task_coordination=update.experimental_task_coordination,
+            experimental_fleet=update.experimental_fleet,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -431,7 +417,7 @@ async def put_my_profile(
         update.concierge_mode
         or update.pr_review_links
         or update.pr_failure_reactions
-        or update.experimental_task_coordination
+        or update.experimental_fleet
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")

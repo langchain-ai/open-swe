@@ -3,7 +3,6 @@
 //! Used by deploy bake (`capture` / `get` / wait) and `mda delete` (list +
 //! delete recipe snapshots named `{deployment}--setup-{digest}`).
 
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -194,14 +193,14 @@ impl Client {
                         timeout.as_secs()
                     );
                 }
-                _ => thread::sleep(READY_POLL_INTERVAL),
+                _ => crate::interrupt::pause(READY_POLL_INTERVAL)?,
             }
         }
     }
 
     /// Platform sandboxes API root (`…/v2/sandboxes`).
     pub(crate) fn sandboxes_base(&self) -> Result<String> {
-        let platform = self.platform_base()?;
+        let platform = self.platform_base();
         Ok(format!("{platform}/v2/sandboxes"))
     }
 }
@@ -226,7 +225,6 @@ fn snapshot_in_use(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::{Credential, REQUEST_TIMEOUT};
     use serde_json::json;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -269,19 +267,6 @@ mod tests {
         String::from_utf8_lossy(&data).to_string()
     }
 
-    fn client_for(platform: String) -> Client {
-        Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(platform),
-        }
-    }
-
     #[test]
     fn lists_snapshots_with_true_prefix() {
         let body = json!({
@@ -293,7 +278,7 @@ mod tests {
         })
         .to_string();
         let (url, rx) = serve(vec![(200, body)]);
-        let found = client_for(url)
+        let found = Client::for_test(&url)
             .list_snapshots_with_prefix("agent--setup-")
             .unwrap();
         assert_eq!(found.len(), 2);
@@ -315,7 +300,7 @@ mod tests {
         })
         .to_string();
         let (url, rx) = serve(vec![(200, capture), (200, ready)]);
-        let snapshot = client_for(url)
+        let snapshot = Client::for_test(&url)
             .capture_snapshot("builder", "agent--setup-abc", Duration::from_secs(10))
             .unwrap();
         assert_eq!(snapshot.status.as_deref(), Some("ready"));
@@ -332,7 +317,7 @@ mod tests {
         })
         .to_string();
         let (url, rx) = serve(vec![(409, body)]);
-        let outcome = client_for(url).delete_snapshot("stale-id").unwrap();
+        let outcome = Client::for_test(&url).delete_snapshot("stale-id").unwrap();
         assert_eq!(outcome, SnapshotDelete::InUse);
         assert!(rx
             .recv()
@@ -343,7 +328,7 @@ mod tests {
     #[test]
     fn delete_snapshot_treats_not_found_as_missing() {
         let (url, _rx) = serve(vec![(404, String::new())]);
-        let outcome = client_for(url).delete_snapshot("gone").unwrap();
+        let outcome = Client::for_test(&url).delete_snapshot("gone").unwrap();
         assert_eq!(outcome, SnapshotDelete::Missing);
     }
 }

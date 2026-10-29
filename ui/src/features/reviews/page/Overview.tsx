@@ -1,10 +1,12 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
@@ -18,7 +20,7 @@ import { RelativeTimestamp } from "./RelativeTimestamp"
 
 const CLAMP_PX = 320
 
-/** `#123` in prose links to that pull request's review page here; code is left alone. */
+/** `#123` and `owner/repo#123` in prose link to that pull request's review page here; code is left alone. */
 function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
   return body
     .split(/(```[\s\S]*?```|`[^`\n]*`)/)
@@ -26,9 +28,18 @@ function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
       index % 2 === 1
         ? part
         : part.replace(
-            /(^|[\s(])#(\d+)\b/g,
-            (_match, lead: string, number: string) =>
-              `${lead}[#${number}](/agents/reviews/${pr.owner}/${pr.repo}/${number})`
+            /(^|[\s(])(?:([A-Za-z0-9-]+)\/([\w.-]+))?#(\d+)\b/g,
+            (
+              _match,
+              lead: string,
+              owner: string | undefined,
+              repo: string | undefined,
+              number: string
+            ) => {
+              const target = owner && repo ? { owner, repo } : pr
+              const text = owner ? `${owner}/${repo}#${number}` : `#${number}`
+              return `${lead}[${text}](/agents/reviews/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/${number})`
+            }
           )
     )
     .join("")
@@ -138,14 +149,15 @@ function Description({
           />
         )}
         <ProfileLink author={author} className="font-medium text-primary" />
-        <a
+        <MacawLink
+          variant="xs"
           href={githubUrls.pullRequest(pr)}
           target="_blank"
           rel="noreferrer"
-          className="hover:text-primary hover:underline"
+          className={cn(INHERITED_LINK, "hover:text-primary hover:underline")}
         >
           opened this {createdAt && <RelativeTimestamp value={createdAt} />}
-        </a>
+        </MacawLink>
         <span className="ml-auto">{labels}</span>
       </header>
       <div
@@ -170,10 +182,14 @@ function Description({
         )}
       </div>
       {overflows && (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={expanded ? "Show less" : "Show the whole description"}
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-space-1 inline-flex items-center gap-space-1 text-xs font-medium text-secondary hover:text-primary"
+          className="mt-space-1 h-auto gap-space-1 border-0 px-0 font-medium text-secondary hover:text-primary"
         >
           <CaretDownIcon
             className={cn(
@@ -182,7 +198,7 @@ function Description({
             )}
           />
           {expanded ? "Show less" : "Show the whole description"}
-        </button>
+        </Button>
       )}
     </article>
   )

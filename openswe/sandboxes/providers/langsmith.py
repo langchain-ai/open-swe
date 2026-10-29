@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import secrets
 import shlex
 from abc import ABC, abstractmethod
 from typing import Any, Literal, NotRequired, TypedDict
@@ -13,6 +14,7 @@ from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import (
     DeleteResult,
     ExecuteResponse,
+    FileDownloadResponse,
     FileInfo,
     LsResult,
     ReadResult,
@@ -31,11 +33,14 @@ from langsmith.sandbox import (
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.config import ENV
-from openswe.sandboxes.paths import WORKSPACE_DIR
+from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
+from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
+from openswe.workspaces.cloud_identity import federated_cloud
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +64,6 @@ PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 # takes up to about three minutes; outlast that rather than fail the run.
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_CONFIG_ERROR_BODY_CHARS = 500
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
@@ -68,30 +72,7 @@ _LS_MAX_ENTRIES = 1000
 # Above this, a file API read would pull the whole file into the worker to return
 # one page; the base class's read script pages inside the sandbox instead.
 _FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
-
-
-def _get_langsmith_api_key() -> str | None:
-    """Get LangSmith API key from environment.
-
-    Same resolution as the rest of the app (``LANGSMITH_API_KEY``).
-    """
-    return ENV.LANGSMITH_API_KEY.optional()
-
-
-def _get_sandbox_endpoint() -> str:
-    """Use the deployment's LangSmith API root for sandbox operations."""
-    return ENV.LANGSMITH_ENDPOINT.get()
-
-
-def _get_sandbox_api_endpoint() -> str:
-    """Sandbox API base URL for the langsmith SDK clients.
-
-    The SDK's ``api_endpoint`` is the sandbox base (root + ``/v2/sandboxes``),
-    not the API root, and its methods append ``/boxes``, ``/snapshots``, etc.
-    """
-    root = _get_sandbox_endpoint().rstrip("/")
-    suffix = "/v2/sandboxes"
-    return root if root.endswith(suffix) else f"{root}{suffix}"
+_DOWNLOAD_CONCURRENCY = 16
 
 
 def service_identity_jwks_url() -> str:
@@ -100,10 +81,7 @@ def service_identity_jwks_url() -> str:
     The keys are served by the API host, not by the app origin the token names as
     its issuer.
     """
-    root = _get_sandbox_endpoint().rstrip("/")
-    suffix = "/v2/sandboxes"
-    api_root = root[: -len(suffix)] if root.endswith(suffix) else root
-    return f"{api_root}/.well-known/jwks.json"
+    return f"{SandboxAPI.from_env().api_root}/.well-known/jwks.json"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -312,6 +290,9 @@ def _is_retryable_proxy_config_error(exc: BaseException) -> bool:
 
 
 def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
+    # A stalled create may have succeeded server-side; an orphan its idle TTL stops beats failing.
+    if isinstance(exc, httpx2.TransportError):
+        return True
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
     if isinstance(status_code, int):
@@ -366,56 +347,55 @@ async def _create_sandbox_with_retry(
                 min(attempt, len(SANDBOX_CREATE_RETRY_DELAYS_SECONDS) - 1)
             ]
             logger.warning(
-                "Failed to create LangSmith sandbox (%s); retrying in %.1fs",
-                type(exc).__name__,
-                delay,
+                "Failed to create LangSmith sandbox; retrying",
+                extra={"error_type": type(exc).__name__, "attempt": attempt + 1, "delay_s": delay},
             )
             await asyncio.sleep(delay)
     raise RuntimeError("unreachable sandbox retry state")
-
-
-def _with_response_body(exc: BaseException) -> httpx2.HTTPStatusError | None:
-    """Re-raisable copy of ``exc`` carrying the response body, or ``None`` to re-raise as-is.
-
-    ``raise_for_status`` builds its message from the status line and an MDN link
-    only, so the API's own explanation of a rejection never reaches the logs.
-    """
-    if not isinstance(exc, httpx2.HTTPStatusError):
-        return None
-    body = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
-    if not body:
-        return None
-    return httpx2.HTTPStatusError(
-        f"{exc}\nResponse body: {body}",
-        request=exc.request,
-        response=exc.response,
-    )
 
 
 async def _patch_proxy_config(
     client: httpx2.AsyncClient,
     url: str,
     payload: dict[str, Any],
-    api_key: str,
+    api: SandboxAPI,
     sandbox_name: str,
 ) -> None:
     async def patch() -> None:
-        response = await client.patch(url, json=payload, headers={"X-API-Key": api_key})
-        response.raise_for_status()
+        response = await client.patch(url, json=payload, headers=api.headers())
+        api.raise_for_status(response)
 
-    try:
-        await retry_transient_sandbox_errors(
-            patch,
-            description=f"GitHub proxy config for sandbox {sandbox_name}",
-            max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
-            retryable=_is_retryable_proxy_config_error,
-            retry_after=_proxy_config_retry_after,
-        )
-    except httpx2.HTTPStatusError as exc:
-        enriched = _with_response_body(exc)
-        if enriched is not None:
-            raise enriched from exc
-        raise
+    await retry_transient_sandbox_errors(
+        patch,
+        description=f"GitHub proxy config for sandbox {sandbox_name}",
+        max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+        retryable=_is_retryable_proxy_config_error,
+        retry_after=_proxy_config_retry_after,
+    )
+
+
+async def _federated_proxy_rules(
+    client: httpx2.AsyncClient, url: str, api: SandboxAPI, sandbox_name: str
+) -> list[dict[str, JsonValue]]:
+    async def get() -> dict[str, JsonValue]:
+        response = await client.get(url, headers=api.headers())
+        api.raise_for_status(response)
+        return _json_object.validate_python(response.json())
+
+    sandbox = await retry_transient_sandbox_errors(
+        get,
+        description=f"proxy config of sandbox {sandbox_name}",
+        max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+        retryable=_is_retryable_proxy_config_error,
+        retry_after=_proxy_config_retry_after,
+    )
+    current = sandbox.get("proxy_config")
+    rules = current.get("rules") if isinstance(current, dict) else None
+    return [
+        rule
+        for rule in (rules if isinstance(rules, list) else [])
+        if isinstance(rule, dict) and federated_cloud(rule)
+    ]
 
 
 async def configure_sandbox_proxy(
@@ -426,12 +406,11 @@ async def configure_sandbox_proxy(
     thread_id: str | None = None,
 ) -> None:
     """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
-    api_key = _get_langsmith_api_key()
-    if not api_key:
+    api = SandboxAPI.from_env()
+    if not api.api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
-    langsmith_endpoint = _get_sandbox_endpoint()
-    url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
+    url = f"{api.endpoint}/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
     # Retire credentials saved by removed built-in integrations.
@@ -450,16 +429,25 @@ async def configure_sandbox_proxy(
         if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
     ]
     tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
-    proxy_config["rules"] = [
-        *_github_proxy_rules(github_token),
-        *([tools_rule] if tools_rule else []),
-        *preserved_rules,
-    ]
-    payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+        # Federation is fixed at creation, including its absence on older boxes, and
+        # LangSmith allows one rule per cloud.
+        federated_rules = await _federated_proxy_rules(client, url, api, sandbox_name)
+        federated_clouds = {rule.get("type") for rule in federated_rules}
+        proxy_config["rules"] = [
+            *_github_proxy_rules(github_token),
+            *([tools_rule] if tools_rule else []),
+            *(
+                rule
+                for rule in preserved_rules
+                if not federated_cloud(rule)
+                and not (isinstance(rule, dict) and rule.get("type") in federated_clouds)
+            ),
+            *federated_rules,
+        ]
+        await _patch_proxy_config(client, url, {"proxy_config": proxy_config}, api, sandbox_name)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
 
@@ -479,34 +467,19 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     exists for the same port, and while the tenant's
     ``sandbox_service_url_langsmith_login`` flag is off.
     """
-    api_key = _get_langsmith_api_key()
-    if not api_key:
-        msg = "LANGSMITH_API_KEY not set"
-        raise ValueError(msg)
-    url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=SERVICE_URL_TIMEOUT_SECONDS
-    ) as client:
-        response = await client.post(
-            url,
-            json={"port": port, "access": "workspace"},
-            headers={"X-API-Key": api_key},
-        )
-        try:
-            response.raise_for_status()
-        except httpx2.HTTPStatusError as exc:
-            enriched = _with_response_body(exc)
-            if enriched is not None:
-                raise enriched from exc
-            raise
+    response = await SandboxAPI.from_env().request(
+        "POST",
+        f"/boxes/{sandbox_id}/service-url",
+        json={"port": port, "access": "workspace"},
+        timeout=SERVICE_URL_TIMEOUT_SECONDS,
+    )
     return WorkspaceServiceURL.model_validate(response.json()).service_url
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:
     """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
-    return AsyncSandboxClient(
-        api_key=_get_langsmith_api_key(), api_endpoint=_get_sandbox_api_endpoint()
-    )
+    api = SandboxAPI.from_env()
+    return AsyncSandboxClient(api_key=api.api_key, api_endpoint=api.endpoint)
 
 
 async def capture_snapshot_with_tag(
@@ -541,6 +514,16 @@ async def capture_snapshot_with_tag(
         return await client.capture_snapshot(sandbox_id, name, timeout=timeout)
     finally:
         client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
+
+
+async def sandbox_exists(sandbox_id: str) -> bool:
+    """Whether LangSmith still has the sandbox; raises when it cannot tell."""
+    async with get_async_sandbox_client() as client:
+        try:
+            await client.get_sandbox(name=sandbox_id)
+        except ResourceNotFoundError:
+            return False
+    return True
 
 
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
@@ -592,7 +575,7 @@ async def create_langsmith_sandbox(
         fs_capacity_bytes=fs_capacity_bytes,
         create_params=create_params,
     )
-    provider = LangSmithProvider(api_key=_get_langsmith_api_key())
+    provider = LangSmithProvider(api_key=SandboxAPI.from_env().api_key)
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=options.snapshot_id or "",
@@ -640,9 +623,34 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    _git_identity_pending: str | None = None
+    _git_identity_lock: asyncio.Lock | None = None
+
     @property
     def sandbox(self) -> Any:
         return self._sandbox
+
+    def reset_git_identity(self) -> None:
+        """Apply the fallback identity before the next command, without another connection."""
+        self._git_identity_pending = f"__open_swe_git_identity_{secrets.token_hex(16)}__\n"
+        forget_work_dir(self)
+
+    async def ensure_git_identity(self) -> None:
+        """Attempt a pending reset without making a failed identity write fail preparation."""
+        if self._git_identity_pending is not None:
+            try:
+                result = await self.aexecute(":", timeout=30)
+                if result.exit_code != 0:
+                    logger.warning(
+                        "Failed to write the bot Git identity",
+                        extra={"sandbox_id": self.id, "log_tail": result.output[-2000:]},
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to write the bot Git identity",
+                    extra={"sandbox_id": self.id},
+                    exc_info=True,
+                )
 
     def get_work_dir(self) -> str:
         """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
@@ -733,6 +741,30 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return await super().als(path)
         return LsResult(entries=[FileInfo(path=m.path, is_dir=m.is_dir) for m in listing.matches])
 
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
+        """Read every file at once, where the base class reads them one request at a time.
+
+        A reviewer reads every trusted ``SKILL.md`` before its first model call,
+        dozens on a skill-heavy repo.
+        """
+        sandbox = self._aget_sandbox()
+        limit = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
+
+        async def download(path: str) -> FileDownloadResponse:
+            if not path.startswith("/"):
+                return FileDownloadResponse(path=path, content=None, error="invalid_path")
+            try:
+                async with limit:
+                    content = await sandbox.read(path)
+            except ResourceNotFoundError:
+                return FileDownloadResponse(path=path, content=None, error="file_not_found")
+            except SandboxClientError as exc:
+                error = "is_directory" if "is a directory" in str(exc).lower() else "file_not_found"
+                return FileDownloadResponse(path=path, content=None, error=error)
+            return FileDownloadResponse(path=path, content=content, error=None)
+
+        return list(await asyncio.gather(*(download(path) for path in paths)))
+
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         """Upload through the sandbox file API, which creates missing parent directories.
 
@@ -762,6 +794,52 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         *,
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded semantic timeout, not an asyncio contract
     ) -> ExecuteResponse:
+        if self._git_identity_pending is None:
+            return await self._aretried_execute(command, timeout)
+        if self._git_identity_lock is None:
+            self._git_identity_lock = asyncio.Lock()
+        async with self._git_identity_lock:
+            marker = self._git_identity_pending
+            if marker is None:
+                return await self._aretried_execute(command, timeout)
+            work_dir_ready = f"{marker}work-dir\n"
+            identity_ready = f"{marker}identity\n"
+            command_started = f"{marker}command\n"
+            prepared = (
+                f"{{ if mkdir -p {shlex.quote(WORKSPACE_DIR)} && test -w {shlex.quote(WORKSPACE_DIR)}; "
+                f"then printf %s {shlex.quote(work_dir_ready)}; fi; }} 2>&1; "
+                f"{{ if git config --global user.name {shlex.quote(OPEN_SWE_BOT_NAME)} && "
+                f"git config --global user.email {shlex.quote(OPEN_SWE_BOT_EMAIL)}; "
+                f"then printf %s {shlex.quote(identity_ready)}; fi; }} 2>&1; "
+                f"printf %s {shlex.quote(command_started)}; "
+                f"exec /bin/bash -c {shlex.quote(command)}"
+            )
+            try:
+                result = await self._aretried_execute(prepared, timeout)
+            finally:
+                if self._git_identity_pending == marker:
+                    self._git_identity_pending = None
+            setup, started, output = result.output.partition(command_started)
+            if not started:
+                return result
+            if work_dir_ready in setup:
+                remember_work_dir(self, WORKSPACE_DIR)
+            else:
+                logger.warning(
+                    "Could not ready the sandbox work directory", extra={"sandbox_id": self.id}
+                )
+            if identity_ready not in setup:
+                logger.warning(
+                    "Failed to write the bot Git identity",
+                    extra={"sandbox_id": self.id, "log_tail": setup[-2000:]},
+                )
+            return ExecuteResponse(
+                output=output,
+                exit_code=result.exit_code,
+                truncated=result.truncated,
+            )
+
+    async def _aretried_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
         return await retry_transient_sandbox_errors(
             lambda: self._aexecute_once(command, timeout=timeout),
             description="Sandbox command",
@@ -852,8 +930,9 @@ class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or _get_langsmith_api_key()
-        self._api_endpoint = _get_sandbox_api_endpoint()
+        api = SandboxAPI.from_env()
+        self._api_key = api_key or api.api_key
+        self._api_endpoint = api.endpoint
         if not self._api_key:
             msg = "LANGSMITH_API_KEY not set"
             raise ValueError(msg)

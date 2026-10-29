@@ -9,7 +9,7 @@ build = "build.rs"
 
 [[bin]]
 name = "mda"
-path = "src/main.rs"
+path = "src/bin/mda.rs"
 
 [dependencies]
 anyhow = "1"
@@ -23,6 +23,18 @@ dotenvy = "0.15.7"
 flate2 = "1"
 is_ci = "1.2"
 notify = "8"
+opentelemetry = { version = "0.33", default-features = false, features = [
+    "logs",
+] }
+opentelemetry-appender-tracing = { version = "0.33", default-features = false }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = [
+    "http-json",
+    "logs",
+    "reqwest-blocking-client",
+] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = [
+    "logs",
+] }
 oxc = "0.154.0"
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
@@ -36,6 +48,11 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = { version = "0.11", default-features = false }
 tar = "0.4"
 toml_edit = "0.25"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "registry",
+    "std",
+] }
 # PEP 440 specifier parsing for `requires-python`. Pinned exactly: this is
 # uv's internal crate on a 0.0.x line, so minor bumps may break the API.
 uv-pep440 = "=0.0.93"
@@ -46,6 +63,10 @@ uuid = { version = "1.24.0", default-features = false, features = [
 walkdir = "2"
 
 [dev-dependencies]
+opentelemetry_sdk = { version = "0.33", default-features = false, features = [
+    "logs",
+    "testing",
+] }
 tempfile = "3"
 
 [lints]

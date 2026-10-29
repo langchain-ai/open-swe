@@ -165,17 +165,22 @@ test.describe("review page", () => {
     await expect(page).toHaveURL(target);
   });
 
-  test("puts the state pill on the title line and links the title to GitHub", async ({
+  test("keeps the state pill beside the title menu and a separate GitHub link", async ({
     page,
   }) => {
     await openReview(page, pr);
     const title = page
       .locator("h1")
-      .filter({ has: page.locator('svg[aria-label="GitHub"]') });
-    const link = title.getByRole("link");
-    await expect(link).toContainText("Add constant modules");
-    await expect(link).toContainText(`#${pr.number}`);
-    await expect(link.locator('svg[aria-label="GitHub"]')).toBeVisible();
+      .filter({ hasText: "Add constant modules" });
+    const menu = title.getByRole("button");
+    await expect(menu).toContainText("Add constant modules");
+    await expect(menu).toContainText(`#${pr.number}`);
+    const link = title.getByRole("link", { name: "Open on GitHub" });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute(
+      "href",
+      `https://github.com/${OWNER}/${REPO}/pull/${pr.number}`,
+    );
 
     const pill = title.locator("xpath=preceding-sibling::span[1]");
     await expect(pill).toHaveText("Reviewable");
@@ -371,6 +376,26 @@ test.describe("review page", () => {
     ).toHaveCount(0);
   });
 
+  test("clears the line selection when cancelling an inline comment", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const diff = diffColumn(page);
+    await expect(async () => {
+      await diff.locator('[data-column-number="5"]').first().hover();
+      await diff
+        .locator("[data-gutter-utility-slot] button")
+        .click({ timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(diff.getByLabel("Comment body")).toBeVisible();
+    await expect(diff.locator("[data-selected-line]").first()).toBeVisible();
+
+    await diff.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("heading", { name: "Changes", exact: true }).click();
+    await expect(diff.getByLabel("Comment body")).toHaveCount(0);
+    await expect(diff.locator("[data-selected-line]")).toHaveCount(0);
+  });
+
   test("chat-drafted comments join one pending review that submits together", async ({
     page,
   }) => {
@@ -434,8 +459,13 @@ test.describe("review page", () => {
       .getByTestId("pending-review-comment")
       .filter({ hasText: edited });
     await expect(pendingCard).toContainText("Pending");
-    const reviewButton = page.getByRole("button", { name: /Review changes/ });
-    await expect(reviewButton).toContainText("1");
+    // Approving is one click; the rest of the review form is behind its caret.
+    await expect(
+      page.getByRole("button", { name: "Approve, 1 pending comment" }),
+    ).toContainText("1");
+    const reviewButton = page.getByRole("button", {
+      name: "Comment or request changes",
+    });
 
     await chatCard(toDiscard).getByRole("button", { name: "Discard" }).click();
     await expect(chatCard(toDiscard)).toContainText("Comment discarded");
@@ -513,12 +543,17 @@ test.describe("review page", () => {
     });
     await card.getByRole("button", { name: "Add to review" }).click();
     await expect(card).toContainText("Added to your review");
-    const reviewButton = page.getByRole("button", { name: /Review changes/ });
-    await expect(reviewButton).toContainText("1");
+    await expect(
+      page.getByRole("button", { name: "Approve, 1 pending comment" }),
+    ).toContainText("1");
 
-    await reviewButton.click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     await page.getByRole("button", { name: "Discard review" }).click();
-    await expect(reviewButton).not.toContainText("1");
+    await expect(
+      page.getByRole("button", { name: "Approve", exact: true }),
+    ).toBeVisible();
     await expect(
       diffColumn(page).getByTestId("pending-review-comment"),
     ).toHaveCount(0);
@@ -546,11 +581,23 @@ test.describe("review page", () => {
       .click();
     await expect(conversation.getByText(comment)).toBeVisible();
 
-    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
-    await page.getByRole("button", { name: "Submit review" }).click();
+    await page
+      .getByRole("button", { name: "Cancel", exact: true })
+      .press("Meta+Enter");
+    await expect(page.getByLabel("Review summary")).toBeVisible();
+    expect((await fakePull(page, pr)).reviews).toHaveLength(0);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
+    await page.getByRole("radio", { name: /Approve/ }).check();
+    await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(
       conversation.getByText("approved", { exact: true }),

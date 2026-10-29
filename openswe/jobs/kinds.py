@@ -12,6 +12,12 @@ from typing import Final
 from pydantic import JsonValue
 
 from openswe import event_claims
+from openswe.agent_api.report_receipts import PURGE_JOB as REPORT_RECEIPT_PURGE
+from openswe.agent_api.report_receipts import PURGE_SCHEDULE as REPORT_RECEIPT_SCHEDULE
+from openswe.agent_api.report_receipts import purge_report_receipts
+from openswe.agent_api.tool_sets import PURGE_JOB as TOOL_SETS_PURGE
+from openswe.agent_api.tool_sets import PURGE_SCHEDULE as TOOL_SETS_SCHEDULE
+from openswe.agent_api.tool_sets import purge_tool_sets
 from openswe.agent_cost import run_agent_cost_refresh
 from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announcement
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
@@ -23,6 +29,9 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.merge_queue.controller import start_queue
+from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
+from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
@@ -35,7 +44,10 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
+from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.threads.index_import import import_agent_server_threads
+from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
@@ -48,6 +60,8 @@ AGENT_COST: Final = "agent_cost"
 SESSION_COST: Final = "session_cost"
 RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
+
+WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -110,7 +124,9 @@ async def _baby_sit(job: Job) -> str | None:
 @_sandbox_work(WORKSPACE_REFRESH)
 async def _workspace_refresh(job: Job) -> object:
     kind = "update" if job.payload.get("refresh_kind") == "update" else "full"
-    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind)
+    # A cron's id outlives each of its runs, so only a one-shot job names one refresh.
+    run_id = None if job.cron else str(job.id)
+    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind, run_id=run_id)
 
 
 @WORKER.register(AGENT_SCHEDULE_JOB_KIND)
@@ -160,14 +176,38 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return await reconcile_busy_threads()
+    return {
+        "threads_settled": await reconcile_busy_threads(),
+        "stalled_runs_failed": await fail_stalled_runs(),
+    }
+
+
+@WORKER.register(SLACK_CHANNEL_DIRECTORY)
+async def _slack_channel_directory(_job: Job) -> None:
+    await sync_directory()
+
+
+@WORKER.register(REPORT_RECEIPT_PURGE)
+async def _report_receipt_purge(_job: Job) -> None:
+    logger.info("Report receipts purged", extra={"purged": await purge_report_receipts()})
+
+
+@WORKER.register(TOOL_SETS_PURGE)
+async def _tool_sets_purge(_job: Job) -> None:
+    logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
+    if job.lapsed_lease is not None:
+        logger.warning(
+            "Reclaimed thread wakeup skipped because its run may have started",
+            extra={"job_id": str(job.id), "lapsed_lease": job.lapsed_lease.isoformat()},
+        )
+        return
     # Never retried: a run the server started before the client saw an error would start twice.
     try:
-        run_id = await run_thread_wakeup(job.payload)
+        run_id = await run_thread_wakeup(job.payload, job_id=str(job.id), due_at=job.due_at)
     except Exception:
         logger.exception("Thread wakeup failed", extra={"job_id": str(job.id)})
         return
@@ -179,9 +219,15 @@ async def start_jobs() -> None:
     steps: list[Callable[[], Awaitable[object]]] = [
         import_agent_server_crons,
         import_agent_server_threads,
+        start_queue,
+        ensure_directory_sync,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),
+        lambda: queue.schedule(
+            REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
+        ),
+        lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
     ]
     for step in steps:
         try:

@@ -47,9 +47,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git restore -- .github/workflows/openwiki-update.yml
+          rm -f -- CLAUDE.md
 
           # Stage only the paths OpenWiki is allowed to change.
-          git add -- openwiki AGENTS.md CLAUDE.md
+          git add -- openwiki AGENTS.md
 
           if git diff --cached --quiet; then
             echo "No OpenWiki changes to commit."

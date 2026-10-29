@@ -3,16 +3,19 @@
 Starting a run marks its thread busy. What the run left behind (idle, an
 interrupt waiting on a person, an error) is the runtime's to say, so the
 run-complete webhook asks it, and a reconcile job asks again for any thread
-still marked busy long after a webhook should have come.
+still marked busy long after a webhook should have come. A run that froze while
+still reporting itself running is failed by ``openswe.threads.stalls``.
 """
 
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.threads import index
 from openswe.threads.index import ThreadStatus
 from openswe.threads.runtimes import RUNTIMES
+from openswe.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,12 @@ async def refresh_thread_status(thread_id: str) -> ThreadStatus | None:
     status = await RUNTIMES.runs_on(thread.runtime).status(thread_id)
     if status is not None:
         await index.set_status(thread_id, status)
+        if status != thread.status and thread.metadata.get("kind") == "reviewer":
+            pr = thread.metadata.get("pr")
+            if isinstance(pr, dict):
+                owner, repo, number = pr.get("owner"), pr.get("name"), pr.get("number")
+                if isinstance(owner, str) and isinstance(repo, str) and isinstance(number, int):
+                    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
     return status
 
 

@@ -8,14 +8,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypeAlias
+from typing import Literal, NotRequired, TypeAlias, Union
 
 from langchain_core.messages import ContentBlock
-from typing_extensions import ReadOnly, TypedDict
+from typing_extensions import ReadOnly, TypeAliasType, TypedDict
 
-JsonValue: TypeAlias = (
-    bool | int | float | str | Sequence["JsonValue"] | Mapping[str, "JsonValue"] | None
+JsonValue = TypeAliasType(
+    "JsonValue",
+    Union[bool, int, float, str, Sequence["JsonValue"], Mapping[str, "JsonValue"], None],  # noqa: UP007
 )
+"""A JSON value. A recursive alias pydantic builds, so a TypedDict that uses it,
+such as ``EndpointAnswer``, validates as it is typed."""
 
 ChannelErrorCode = Literal[
     "channel_invalid_signature",
@@ -100,6 +103,16 @@ class ScheduleEvent(TypedDict):
     new_thread: ReadOnly[bool]
 
 
+ChannelReply: TypeAlias = Literal["auto", "none"]
+"""Whether a channel posts the run's final answer to the conversation:
+``"auto"`` (the default) posts the agent's last reply once the run succeeds,
+and ``"none"`` leaves replying to the agent, through ``runtime.channel.post``
+or its own tools. Either way the channel keeps its other updates, such as
+Slack's status and reactions."""
+
+CHANNEL_REPLIES: frozenset[ChannelReply] = frozenset({"auto", "none"})
+"""Every ``ChannelReply``, for channels that check one."""
+
 ChannelEvent: TypeAlias = (
     MessageEvent | UserPromptResponseEvent | InterruptResumeEvent | ScheduleEvent
 )
@@ -109,7 +122,10 @@ ChannelEvent: TypeAlias = (
 class ChannelInfo:
     name: str
     provider: str
-    event: ChannelEvent
+    #: The event of the message that started this run, or the schedule event of a
+    #: scheduled run; ``None`` for a channel read from the thread record.
+    event: ChannelEvent | None
+    #: The provider's payload, in the run its message started only.
     raw_event: JsonValue = None
 
 
@@ -122,6 +138,13 @@ class PostedChannelMessage(PostedChannelMessageRequired, total=False):
     url: str
 
 
+class PostedChannelThread(PostedChannelMessage):
+    """A post that started a new provider thread."""
+
+    thread_id: str
+    """The LangGraph thread replies in the new provider thread run on."""
+
+
 class ChannelError(Exception):
     """Typed channel failure with a stable machine-readable code."""
 
@@ -132,11 +155,7 @@ class ChannelError(Exception):
 
 def normalize_channel_destination(
     destination: ChannelDestination | Mapping[str, object],
-) -> (
-    ChannelDestinationCurrentThread
-    | ChannelDestinationProviderThread
-    | ChannelDestinationProviderConversation
-):
+) -> ChannelDestination:
     """Narrow a destination to its discriminant + required address fields."""
     dest_type = destination.get("type")
     if dest_type == "current_thread":

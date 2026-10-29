@@ -5,9 +5,9 @@ rows it consumed, so no update can overwrite another.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection
 from datetime import datetime
-from typing import Self
+from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import BigInteger, Identity, delete, select
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.input_messages import RunMessage, message_sender_id
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject
 
@@ -85,15 +86,15 @@ class QueuedMessage(Base):
             )
 
     @classmethod
-    async def remove(cls, messages: Sequence[Self]) -> None:
-        if not messages:
+    async def remove(cls, thread_id: str, seqs: Collection[int]) -> None:
+        """Take the ``seqs`` queued for ``thread_id`` off its queue."""
+        if not seqs:
             return
         async with postgres.session() as session:
             await session.execute(
-                delete(cls).where(cls.seq.in_([message.seq for message in messages]))
+                delete(cls).where(cls.thread_id == thread_id, cls.seq.in_(list(seqs)))
             )
-            for thread_id in {message.thread_id for message in messages}:
-                await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
+            await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
     @classmethod
     async def clear(cls, thread_id: str) -> None:
@@ -101,11 +102,31 @@ class QueuedMessage(Base):
             await session.execute(delete(cls).where(cls.thread_id == thread_id))
             await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
+    @property
+    def run_message(self) -> RunMessage | None:
+        content = self.content
+        if (
+            isinstance(content, dict)
+            and content.get("role") in ("user", "system")
+            and isinstance(content.get("content"), str | list)
+        ):
+            return cast(RunMessage, content)
+        return None
+
+    @property
+    def hidden(self) -> bool:
+        message = self.run_message
+        return (
+            message is not None
+            and message_sender_id(message["content"], kind="system") == "system:slack-note"
+        )
+
     async def preview(self) -> QueuedPreview:
         """What a person sees of this message while it waits for the agent."""
         from openswe.incidents.report import context_message
 
-        content = self.content
+        message = self.run_message
+        content = message["content"] if message is not None else self.content
         if isinstance(content, str):
             payload = _QueuedPayload(text=content)
         elif isinstance(content, list):

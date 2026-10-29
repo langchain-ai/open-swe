@@ -30,6 +30,71 @@ def github(monkeypatch):
     return _install
 
 
+@pytest.mark.parametrize(
+    ("keep_review_id", "keep_commit", "scope_to_review_id", "dismissed"),
+    [
+        (None, "new", None, {1, 5, 6}),
+        (3, None, None, {1, 5, 6, 7}),
+        (None, None, None, {1, 3, 5, 6, 7}),
+        (None, None, 4, {1, 3, 7}),
+        (None, None, 999, set()),
+    ],
+    ids=[
+        "head-moved",
+        "approved-again",
+        "not-approved",
+        "scoped-to-own-login",
+        "own-review-missing",
+    ],
+)
+async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
+    keep_review_id: int | None,
+    keep_commit: str | None,
+    scope_to_review_id: int | None,
+    dismissed: set[int],
+) -> None:
+    def review(review_id: int, login: str, state: str, commit: str) -> dict[str, object]:
+        return {
+            "id": review_id,
+            "user": {"id": review_id, "login": login},
+            "state": state,
+            "commit_id": commit,
+        }
+
+    reviews = [
+        review(1, "open-swe[bot]", "APPROVED", "old"),
+        review(2, "alice", "APPROVED", "old"),
+        review(3, "open-swe[bot]", "APPROVED", "new"),
+        review(4, "open-swe[bot]", "COMMENTED", "old"),
+        review(5, "Open-SWE-Preview[bot]", "APPROVED", "old"),
+        review(6, "openswe-dev[bot]", "APPROVED", "old"),
+        review(7, "open-swe[bot]", "APPROVED", "new"),
+    ]
+    dismissals: list[int] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return httpx2.Response(200, json=reviews)
+        review_id = int(request.url.path.split("/")[-2])
+        dismissals.append(review_id)
+        # A review GitHub no longer has is as good as dismissed; a refusal must be reported.
+        return httpx2.Response({5: 404, 6: 403}.get(review_id, 200), json={})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(9)
+        refused = await pull.withdraw_open_swe_approvals(
+            reason="stale",
+            keep_review_id=keep_review_id,
+            keep_commit=keep_commit,
+            scope_to_review_id=scope_to_review_id,
+        )
+
+    assert set(dismissals) == dismissed
+    # Scoping to a login excludes review 6 (a different login) before it is ever
+    # attempted, and an unknown scope review attempts nothing at all.
+    assert refused == ([6] if scope_to_review_id is None else [])
+
+
 @pytest.mark.parametrize("status,merged", [(200, True), (200, False), (409, False), (403, False)])
 async def test_merge_requires_github_confirmation(github, status, merged):
     request = github(
@@ -176,6 +241,19 @@ async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutat
     ]
     assert request.await_args_list[0].kwargs == {"max_retries": 0}
     assert request.await_args_list[1].kwargs["json"]["variables"] == {"pullRequestId": "PR_node_7"}
+
+
+@pytest.mark.parametrize("draft", [True, False])
+async def test_a_closed_pull_request_cannot_be_marked_ready(github, draft):
+    request = github(
+        AsyncMock(
+            return_value=response({"node_id": "PR_node_7", "state": "closed", "draft": draft})
+        )
+    )
+    with pytest.raises(HTTPException, match="closed and cannot be marked ready") as error:
+        await actions.act_on_pull_request(_pull(7), actions.MarkReadyAction(action="mark-ready"))
+    assert error.value.status_code == 409
+    assert request.await_count == 1
 
 
 async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):

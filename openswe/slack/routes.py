@@ -29,6 +29,7 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
     SlackRequestError,
@@ -382,6 +383,8 @@ async def slack_webhook(
         return ignored("Invalid Slack event")
 
     new_pr_links = await SlackPullRequestLink.record(envelope)
+    if event.type in DIRECTORY_EVENTS and (listed_channel := event.resolve_channel_id()):
+        background_tasks.add_task(SlackChannel.observe, event.type, listed_channel)
 
     from openswe.incidents import channels as incidents
 
@@ -531,9 +534,6 @@ async def slack_webhook(
         )
 
     if event.type == "reaction_added":
-        if event.reaction == "x":
-            background_tasks.add_task(common.process_slack_stop_reaction, raw_event, event_id)
-            return accepted("Stop reaction queued")
         if event.reaction in common.FEEDBACK_REACTIONS:
             background_tasks.add_task(common.process_slack_reaction_added, raw_event, event_id)
             return accepted("Reaction feedback queued")
@@ -1143,10 +1143,10 @@ async def slack_interactivity(
             if button.action not in {"approve", "reject"}:
                 return ignored("Unknown workflow approval action")
             approved = button.action == "approve"
-            record = await common.decide_workflow_push_approval(
+            decision = await common.decide_workflow_push_approval(
                 thread_id, button.fingerprint, approved=approved, actor=user_id
             )
-            if record is None:
+            if decision is None:
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
                     thread_ts=reply_ts,
@@ -1154,6 +1154,15 @@ async def slack_interactivity(
                     agent_thread_id=thread_id,
                 )
                 return ignored("workflow approval not found")
+            record, changed = decision
+            if not changed:
+                background_tasks.add_task(
+                    _update_selected_option_message,
+                    interaction,
+                    action.model_copy(update={"text": None}),
+                    f"Workflow push {record['status']}",
+                )
+                return accepted(f"Workflow push already {record['status']}")
             background_tasks.add_task(
                 _update_selected_option_message,
                 interaction,
@@ -1164,7 +1173,7 @@ async def slack_interactivity(
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
                     thread_ts=reply_ts,
-                    text=f"Workflow push rejected for fingerprint `{button.fingerprint}`. No workflow files will be pushed.",
+                    text="Workflow push rejected. No workflow files will be pushed.",
                     agent_thread_id=thread_id,
                 )
                 return accepted("Workflow push rejected")
@@ -1172,7 +1181,7 @@ async def slack_interactivity(
             await common.post_slack_thread_reply(
                 channel_id=channel_id,
                 thread_ts=reply_ts,
-                text=f"Workflow push approved for fingerprint `{button.fingerprint}`. Open SWE will retry the blocked push.",
+                text="Workflow push approved. Open SWE will retry the blocked push.",
                 agent_thread_id=thread_id,
             )
             repo = await common.get_slack_repo_config(
@@ -1205,6 +1214,15 @@ async def slack_interactivity(
 
         if button.type != "open_swe_option":
             return ignored("Unknown action type")
+
+        if button.user_id is not None and button.user_id != user_id:
+            await common.post_slack_ephemeral_message(
+                channel_id,
+                user_id,
+                "This choice is for someone else. No action was taken.",
+                thread_ts=reply_ts or None,
+            )
+            return ignored("Only the choice recipient can select an option")
 
         response = button.response.strip()
         if not response:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
@@ -21,17 +20,26 @@ from managed_deepagents._identity_auth import (
     SOURCE_THREAD_HEADER,
     USER_HEADER,
 )
+from managed_deepagents._log import logger
 from managed_deepagents._loopback import (
     is_loopback_url,
     resolve_loopback_api_key,
     resolve_loopback_api_url,
+)
+from managed_deepagents._telemetry.otel import (
+    LogAttributes,
+    LogContext,
+    enter_log_context,
+    exit_log_context,
+    hold_log_context,
+    record_log,
+    trace_id_from_traceparent,
 )
 from managed_deepagents.run_context import ManagedChannelContext
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
 
-_LOG = logging.getLogger("mda")
 
 ScheduleFn = Callable[[Callable[[], Awaitable[None]]], None]
 
@@ -50,8 +58,8 @@ def schedule_ingress_work(
     async def _run() -> None:
         try:
             await work()
-        except Exception:  # noqa: BLE001 - logged; must not break the ack path
-            _LOG.exception("[mda] %s failed", label)
+        except Exception as error:  # noqa: BLE001 - logged; must not break the ack path
+            logger.error("%s failed (%s)", label, logger.safe_error_label(error), error=error)
 
     try:
         loop = __import__("asyncio").get_running_loop()
@@ -59,12 +67,50 @@ def schedule_ingress_work(
         __import__("asyncio").run(_run())
         return
     task = loop.create_task(_run())
+    hold_log_context(task)
     # Keep a strong ref until the task finishes.
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
 
 _background_tasks: set[Any] = set()
+
+
+async def with_ingress_log_context(
+    traceparent: str | None,
+    attributes: LogAttributes,
+    handle: Callable[[], Awaitable[Any]],
+) -> Any:
+    """Handle one inbound event inside its own log context.
+
+    The trace id comes from the request's ``traceparent``, or is minted. Once
+    the response and any work scheduled through :func:`schedule_ingress_work`
+    settle, an ``ingress completed`` record is queued.
+    """
+    asyncio = __import__("asyncio")
+    context = LogContext(trace_id=trace_id_from_traceparent(traceparent))
+    context.attributes.update(attributes)
+    token = enter_log_context(context)
+    status = 500
+    try:
+        response = await handle()
+        status_code = getattr(response, "status_code", None)
+        status = status_code if isinstance(status_code, int) else 200
+        return response
+    finally:
+        exit_log_context(token)
+
+        async def _complete() -> None:
+            await asyncio.gather(*context.pending, return_exceptions=True)
+            token = enter_log_context(context)
+            try:
+                record_log("INFO", "ingress completed", attributes={"http.status_code": status})
+            finally:
+                exit_log_context(token)
+
+        task = asyncio.get_running_loop().create_task(_complete())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
 
 def _create_ingress_loopback_client(

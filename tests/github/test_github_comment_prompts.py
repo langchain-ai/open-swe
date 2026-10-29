@@ -54,12 +54,12 @@ def test_a_hostile_name_stays_out_of_the_system_prompt() -> None:
         github_login="oconnor",
     )
 
-    system_prompt = construct_system_prompt(working_dir="/workspace")
+    system_prompt = construct_system_prompt()
     person = ThreadParticipant(
         identity=identity, person_id="user:0199e0ae-0000-7000-8000-000000000000"
     ).as_person()
 
-    assert hostile not in system_prompt
+    assert hostile not in system_prompt.shared + system_prompt.thread
     assert person["commit_name"] == hostile
     assert person["commit_email"] == "1234+oconnor@users.noreply.github.com"
 

@@ -18,7 +18,7 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from openswe.github.checks import REVIEW_CHECK_RUN_NAME
-from openswe.github.http import RepoClient, or_none
+from openswe.github.http import ReadResult, RepoClient, read_result
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +41,28 @@ class CommitChecks:
     @classmethod
     async def read(cls, repo: RepoClient, sha: str) -> Self | None:
         """``None`` when GitHub could not answer for either (Checks: Read missing?)."""
+        return (await cls.read_result(repo, sha)).value
+
+    @classmethod
+    async def read_result(cls, repo: RepoClient, sha: str) -> ReadResult[Self]:
+        """Read both CI sources without losing retryable failure information."""
         runs, statuses = await asyncio.gather(
-            or_none(repo.check_runs(sha)), or_none(repo.commit_statuses(sha))
+            read_result(repo.check_runs(sha)), read_result(repo.commit_statuses(sha))
         )
-        if runs is None or statuses is None:
+        if runs.value is None or statuses.value is None:
             logger.warning(
                 "Commit checks unavailable", extra={"repo_full_name": repo.full_name, "sha": sha}
             )
-            return None
-        return cls(
-            runs=[run for run in runs if run.get("name") not in _OPEN_SWE_CHECK_NAMES],
-            statuses=statuses,
+            failure = runs.status if runs.value is None else statuses.status
+            if "transient" in (runs.status, statuses.status):
+                failure = "transient"
+            return ReadResult(None, failure)
+        return ReadResult(
+            cls(
+                runs=[run for run in runs.value if run.get("name") not in _OPEN_SWE_CHECK_NAMES],
+                statuses=statuses.value,
+            ),
+            "ok",
         )
 
     def unreported(self, required: set[RequiredCheck]) -> list[str]:
@@ -66,8 +77,15 @@ class RequiredCheck:
     app_id: int | None = None
 
     @classmethod
-    async def for_branch(cls, repo: RepoClient, branch: str) -> set[Self] | None:
-        """Checks ``branch`` requires, from branch protection and rulesets; read access suffices."""
+    async def for_branch(
+        cls,
+        repo: RepoClient,
+        branch: str,
+        *,
+        include_review_checks: bool = False,
+        require_mappable_rules: bool = False,
+    ) -> set[Self] | None:
+        """Required status checks; optionally reject rules that cannot map to check names."""
         try:
             protection = _Branch.model_validate(await repo.branch(branch)).protection
             rules = _BRANCH_RULES.validate_python(await repo.branch_rules(branch))
@@ -76,6 +94,17 @@ class RequiredCheck:
                 "Failed to read required checks",
                 extra={"repo_full_name": repo.full_name, "branch": branch},
                 exc_info=True,
+            )
+            return None
+        unsupported = sorted({rule.type for rule in rules} & {"workflows", "code_scanning"})
+        if require_mappable_rules and unsupported:
+            logger.warning(
+                "Required checks include unsupported rules",
+                extra={
+                    "repo_full_name": repo.full_name,
+                    "branch": branch,
+                    "rule_types": unsupported,
+                },
             )
             return None
         required: set[Self] = set()
@@ -89,7 +118,11 @@ class RequiredCheck:
                     cls(check.context, _any_app(check.integration_id))
                     for check in rule.parameters.required_status_checks
                 )
-        return {check for check in required if check.name not in _OPEN_SWE_CHECK_NAMES}
+        return {
+            check
+            for check in required
+            if include_review_checks or check.name not in _OPEN_SWE_CHECK_NAMES
+        }
 
     def reported_by(self, check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> bool:
         for run in check_runs:

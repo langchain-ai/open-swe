@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+import { plannedCalls } from "./helpers/dashboard";
+
 // Full happy path, driven entirely through the mock Slack + GitHub UIs:
 //   user asks in Slack -> real agent implements in a local sandbox -> opens a PR
 //   on the fake GitHub -> replies with the PR link in the SAME Slack thread.
@@ -31,6 +33,13 @@ test.describe("Open SWE full flow", () => {
     await expect(reply).toBeVisible();
     const prLink = reply.locator('a[href*="/pull/"]');
     await expect(prLink).toBeVisible();
+    const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();
+    const threadId =
+      new URL((await webLink.getAttribute("href")) ?? "", "http://x").pathname
+        .split("/")
+        .pop() ?? "";
+
+    expect(await plannedCalls(page, threadId)).toEqual(["start"]);
 
     // Follow the link → the PR page shows what GitHub would show.
     await prLink.click();
