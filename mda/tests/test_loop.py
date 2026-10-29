@@ -27,7 +27,15 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
+from runtime_api.loop import (
+    Done,
+    GitBaseline,
+    GitHubProxyRefreshed,
+    PhaseResult,
+    Prepared,
+    Route,
+    TaskContext,
+)
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
@@ -288,6 +296,21 @@ async def test_a_run_context_summarized_away_is_sent_again(
     )
     assert again.messages == []
 
+    edited = '<dynamic-context kind="run" id="source">Edited</dynamic-context>'
+    history[4].content = [{"type": "text", "text": edited}]
+    history[7] = HumanMessage(
+        content='<dynamic-context kind="run" id="review-guide">Reopened</dynamic-context>'
+    )
+    history[5] = AIMessage(content=history[5].content)
+    changed = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
+    )
+    assert [message.content for message in messages_from_dict(changed.messages)] == [
+        edited,
+        history[7].content,
+        "# Run context\nhead_sha: new",
+    ]
+
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(
     monkeypatch: pytest.MonkeyPatch,
@@ -446,13 +469,17 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     backend, calls = _backend(
         monkeypatch,
         {
-            "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
+            "prepare": Prepared(
+                update={"rendered_system_prompt": "You review."},
+                github_proxy=GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
+            ),
+            "git_baseline": GitBaseline(),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
-        LoopRules(at_end=["settle_review_check"]),
+        LoopRules(at_end=["settle_review_check"], refresh_github_proxy=True),
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",
@@ -473,6 +500,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     # work the backend keeps failing is tried again, then let go of for the rest.
     assert [name for name, _ in calls] == [
         "prepare",
+        "git_baseline",
         "step_limit_reached",
         "step_limit_reached",
         "step_limit_reached",
