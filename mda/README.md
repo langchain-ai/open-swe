@@ -11,7 +11,7 @@ Every call is authenticated with the run token.
 
 - **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith box, one per thread.
   The catalog gives the options it is created with (the workspace snapshot, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
-  Before `prepare`, the run opens the box (`open_sandbox`) and reports its name; the backend binds the thread to it (`sandbox_owner: mda`) and connects as to any reused box: proxy credentials, git identity, tool channel.
+  Before `prepare`, the run opens the box (`open_sandbox`), alongside reading its tool specs and sending what its outbox holds, and reports its name; the backend binds the thread to it (`sandbox_owner: mda`) and connects as to any reused box: proxy credentials, git identity, tool channel.
   MDA leaves the proxy config to the backend (`_openswe_no_manage_proxy=True`).
   `recreate_sandbox` on such a box comes back from the backend as what to replace it with; MDA replaces it under the same name (`replace_sandbox`, the old box stopped and kept renamed), and the backend reconnects through `sandbox_replaced`.
   The backend never creates or replaces an MDA-owned box.
@@ -42,11 +42,12 @@ Every call is authenticated with the run token.
   The transcript hears of every call alongside it (`tool_started`, `tool_result`); each phase and reply waits for the reports made before it.
   Code mode's calls skip the checks.
 - **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
-  `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
+  `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
 - **Incident evidence:** in an incident run, each tool result is recorded as evidence the report can cite (`record_evidence`), and carries the id it was recorded under.
 - **Loop:** `BackendRunMiddleware` (`rt/middleware.py`) prepares the run, reads its inbox and runs its loop:
   - `prepare`: before the run, on the backend (preparation, transcript turn, reply bookkeeping).
     It writes the graph state the loop reads;
+  - `git_baseline`, started once `prepare` returns: the backend snapshots the thread's checkouts while the first model call runs, and the run waits for it once the model answers, before any tool runs (`rt/git_baseline.py`);
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
     Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read waits for it; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;

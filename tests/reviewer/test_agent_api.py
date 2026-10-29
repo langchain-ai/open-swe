@@ -136,7 +136,11 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
-    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    parts = agent.AgentParts()
+    monkeypatch.setattr(
+        parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
+    )
+    graph = RemoteGraph("agent", never_planned, parts)
     run = RUN.model_copy(update={"assistant_id": "agent"})
     asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
 
@@ -160,6 +164,56 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     assert context == {"instructions": None, "message": None}
     assert refreshed == {"expires_at": None}
     refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
+
+
+async def test_task_context_rechecks_membership_and_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware import task_coordination
+    from openswe.tasks import store
+
+    task = store.Task(title="Repair login", workspace_id=uuid4(), coordinator_thread_id="owner")
+    context = store.TaskContext(
+        task, store.TaskMembership(thread_id=RUN.thread_id, task_id=task.id, role="worker")
+    )
+    membership = AsyncMock(return_value=None)
+    delegation = store.TaskDelegation(
+        worker_thread_id=RUN.thread_id,
+        task_id=task.id,
+        coordinator_thread_id="owner",
+        instructions="Fix login",
+        model="openai:gpt-5.5",
+        effort="high",
+    )
+    thread = AsyncMock(return_value={"metadata": {}})
+    monkeypatch.setattr(task_coordination, "read_thread", thread)
+    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
+    monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
+    graph = RemoteGraph("agent", AsyncMock())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+
+    absent = await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert isinstance(absent, dict) and absent["message"] is None
+
+    membership.return_value = context
+    joined = await graph.api(run, "task_context", {"run_id": "run-1"})
+    assert isinstance(joined, dict)
+    assert str(task.id) in str(joined["message"])
+    assert task.title in str(joined["message"])
+    assert joined["instructions"] != absent["instructions"]
+
+    delegation.cancelled = True
+    with pytest.raises(PermissionError, match="This worker was cancelled"):
+        await graph.api(run, "task_context", {"run_id": "run-1"})
+
+    thread.side_effect = PermissionError("Thread access revoked")
+    with pytest.raises(PermissionError, match="Thread access revoked"):
+        await graph.api(run, "task_context", {"run_id": "run-1"})
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -436,7 +490,10 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         ToolSurface(
             middleware=[
                 reviewer.PrepareReviewerRunMiddleware(
-                    thread_id=RUN.thread_id, config=config, use_gateway=False
+                    thread_id=RUN.thread_id,
+                    config=config,
+                    use_gateway=False,
+                    model=reviewer.ReviewerModelChoice("openai:gpt-6.1-sol", {}, None),
                 )
             ]
         ),
@@ -452,6 +509,60 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         await session.rejoin_preparation(None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_reviewer_runs_record_transcript_model_and_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid7
+
+    from langchain_core.messages import AIMessage, HumanMessage, messages_to_dict
+
+    import openswe.reviewer as reviewer
+    from openswe.agent_api.reviewer import REVIEWER
+    from openswe.database import analytics
+    from openswe.sandboxes.managed import ManagedSandbox
+    from openswe.transcript.snapshot import load_snapshot
+
+    monkeypatch.setattr(analytics, "_WORKSPACE_ID", None)
+    await analytics.load_workspace()
+    thread_id, run_id = str(uuid7()), str(uuid7())
+    configurable = {"thread_id": thread_id, "invocation_id": run_id, "source": "github"}
+    run = RUN.model_copy(update={"thread_id": thread_id, "configurable": configurable})
+    metadata: dict[str, object] = {}
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": metadata})
+    client.threads.update = AsyncMock(side_effect=lambda *_, **kw: metadata.update(kw["metadata"]))
+    monkeypatch.setattr(
+        reviewer.THREADS,
+        "update",
+        AsyncMock(side_effect=lambda _id, update: metadata.update(update)),
+    )
+    monkeypatch.setattr("openswe.middleware.transcript.get_client", lambda: client)
+    monkeypatch.setattr(reviewer, "prepare_reviewer_run", AsyncMock(return_value={}))
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    schedule = AsyncMock(return_value=True)
+    monkeypatch.setattr("openswe.agent_cost.schedule_agent_cost_refresh", schedule)
+    asked = HumanMessage(content="Review this PR", id="human")
+    reply = AIMessage(
+        content="Reviewed",
+        id="reply",
+        usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+    )
+
+    await REVIEWER.api(run, "prepare", {"run_id": run_id, "messages": messages_to_dict([asked])})
+    await REVIEWER.api(
+        run, "model_result", {"run_id": run_id, "response": messages_to_dict([reply])}
+    )
+    await REVIEWER.api(run, "run_ended", {"run_id": run_id})
+
+    assert metadata["agent_kind"] == "reviewer" and metadata["model"]
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None and snapshot.turns[0].state == "completed"
+    assert snapshot.messages[-1].usage["invocation_id"] == run_id
+    assert schedule.await_args.args[0]["invocation_id"] == run_id
 
 
 @pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
@@ -1093,17 +1204,17 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
 ) -> None:
     from pydantic import BaseModel
     from runtime_api.endpoint import Handlers
-    from runtime_api.loop import PREPARE, PhaseResult, Prepare
+    from runtime_api.loop import PREPARE, Prepare, Prepared
 
     from openswe.agent_api import server
 
     class Strict(BaseModel):
         count: int
 
-    async def prepare(run: RemoteRun, request: Prepare) -> PhaseResult:
+    async def prepare(run: RemoteRun, request: Prepare) -> Prepared:
         # A bug in the phase's own code, not in what MDA sent.
         Strict.model_validate({"count": "many"})
-        return PhaseResult()
+        return Prepared()
 
     handlers = Handlers[RemoteRun]()
     handlers.serve(PREPARE, prepare)

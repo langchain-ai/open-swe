@@ -29,7 +29,7 @@ from openswe.expedited_review.readiness import (
     review_authors,
 )
 from openswe.expedited_review.reviews import dismiss_approval
-from openswe.github.http import GitHubAppUnavailable, or_none
+from openswe.github.http import GitHubAppUnavailable, GitHubError, or_none
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
@@ -98,6 +98,40 @@ class ReviewCard:
     """A request's card in Slack, its author DM, and the request's open-to-closed lifecycle."""
 
     request: HumanReviewRequest
+
+    async def link_on_github(self) -> None:
+        """Link the published Slack review request from its pull request."""
+        request = self.request
+        if request.awaiting_ready or not request.slack_message_ts:
+            return
+        anchor = request.slack_thread_ts or request.slack_message_ts
+        permalink = await get_slack_permalink(request.slack_channel_id, anchor)
+        if permalink is None and anchor != request.slack_message_ts:
+            permalink = await get_slack_permalink(
+                request.slack_channel_id, request.slack_message_ts
+            )
+        if permalink is None:
+            logger.warning(
+                "Could not link Slack review request without a permalink",
+                extra={"request_id": str(request.id)},
+            )
+            return
+        marker = f"<!-- open-swe-review-request:{request.id} -->"
+        pr = request.pull_request
+        try:
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+                if any(
+                    marker in str(comment.get("body", ""))
+                    for comment in await pull.issue_comments()
+                ):
+                    return
+                await pull.comment(f"Review requested in [Slack]({permalink}).\n\n{marker}")
+        except GitHubAppUnavailable, GitHubError, httpx2.HTTPError:
+            logger.warning(
+                "Could not link Slack review request on GitHub",
+                extra={"request_id": str(request.id)},
+                exc_info=True,
+            )
 
     async def _files(self) -> list[ChangedFile] | None:
         """The PR's changed files; ``None`` when the App cannot read them."""
@@ -497,6 +531,7 @@ class ReviewCard:
             else:
                 request.slack_message_ts = message_ts
                 await request.save()
+                await self.link_on_github()
                 await self.broadcast_configured()
             return
         if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
@@ -923,8 +958,9 @@ class ReviewPicks:
             message = participant.pick_message
             if message is None:
                 continue
-            status = "Review submitted on GitHub. This assignment is no longer active."
-            if not await message.show(status):
+            pr = self.request.pull_request
+            status = f"Review submitted for <{pr.url}|{pr.label}>."
+            if not await message.replace(status):
                 continue
             if participant.user.slack_user_id:
                 await note_for_concierge(
@@ -932,7 +968,7 @@ class ReviewPicks:
                     message.channel_id,
                     prompt(
                         "slack/concierge-dm-edited",
-                        text=message.text,
+                        text=status,
                         status=status,
                     ),
                 )

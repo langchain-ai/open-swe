@@ -140,7 +140,7 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
     admin_client: httpx.AsyncClient, payload: dict[str, bool], allowed: bool
 ) -> None:
     with patch.object(
-        workspace_routes.SlackChannel,
+        SlackChannel,
         "load",
         AsyncMock(return_value=SlackChannel(id="C0API", payload=_ELIGIBLE)),
     ):
@@ -156,7 +156,7 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
     assert created.status_code == 200
 
     load = AsyncMock(return_value=SlackChannel(id="C0NEW", payload=payload))
-    with patch.object(workspace_routes.SlackChannel, "load", load):
+    with patch.object(SlackChannel, "load", load):
         response = await admin_client.put(
             "/dashboard/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
         )
