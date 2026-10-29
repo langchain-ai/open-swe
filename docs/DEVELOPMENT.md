@@ -5,19 +5,13 @@ Deploying it for a team is the [installation guide](INSTALLATION.md).
 
 ## Production releases
 
-Production is released by merging a release PR, not on a schedule.
-The **Prepare production release PR** workflow opens one after main changes, or can be run manually from Actions.
-It updates `.github/production-release` with a full main commit SHA and leaves an existing release PR unchanged, so its candidate stays pinned while main moves on.
+[release-please](https://github.com/googleapis/release-please) keeps a `release: X.Y.Z` PR open with the changelog of everything merged to main since the last release.
+The version and changelog come from Conventional Commit PR titles: `feat`, `fix`, `perf` and `revert` are listed, other types are hidden.
+Merge that PR when you want to release: **Release Please** tags the commit `vX.Y.Z`, then runs **Promote main to prod**, which typechecks it, moves `prod` to it, deploys the production MDA runtime and publishes a desktop nightly.
+Nothing reaches production until a release PR is merged.
 
-Review the linked changes since production before merging.
-The PR is created with `GITHUB_TOKEN`, so GitHub does not automatically start pull-request workflows: close and reopen it as a human to start CI.
-To choose a newer candidate, close the old PR without merging and run **Prepare production release PR** again.
-GitHub Actions must be allowed to create pull requests in the repository's Actions settings.
-
-Merging the pin into main runs **Release to prod**: it typechecks the pinned commit, fast-forwards prod to it, deploys the production MDA runtime, and publishes the desktop nightly.
-Only commits already in main and containing the current prod commit can be released; an unchanged pin is a no-op.
-Later commits on main are not included, and a failed workflow can be rerun from Actions.
-The initial pin records the existing prod commit without requesting a new release.
+GitHub Actions must be allowed to create pull requests in the repository settings.
+The release PR is opened with `GITHUB_TOKEN`, so pull-request checks do not start on their own; close and reopen it to run them.
 
 ## Prerequisites
 

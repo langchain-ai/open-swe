@@ -1,0 +1,94 @@
+name: Release Please
+
+# Keeps a release PR open with the changelog of everything on main since the
+# last release. Merging it tags the release commit and promotes it to prod.
+# GitHub releases are skipped (skip-github-release) so the desktop updater's
+# latest release stays a desktop build.
+
+on:
+  push:
+    branches: [main]
+
+# No workflow-level concurrency: GitHub keeps one pending run per group, so a
+# later push could cancel the queued run of a merged release PR.
+permissions:
+  contents: read
+
+jobs:
+  tag-release:
+    name: Tag a merged release PR
+    if: github.repository == 'langchain-ai/open-swe'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Tag the release commit
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          subject="$(git log -1 --format=%s)"
+          pattern='^release: ([0-9]+\.[0-9]+\.[0-9]+)( |$)'
+          if [[ ! "$subject" =~ $pattern ]] || git diff --quiet HEAD~1 HEAD -- .release-please-manifest.json; then
+            echo "Not a release commit."
+            exit 0
+          fi
+          version="${BASH_REMATCH[1]}"
+          manifest_version="$(jq -r '."."' .release-please-manifest.json)"
+          if [[ "$manifest_version" != "$version" ]]; then
+            echo "::error::Release commit names $version but the manifest has $manifest_version."
+            exit 1
+          fi
+          tag="v$version"
+          tagged="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .object.sha")"
+          if [[ -z "$tagged" ]]; then
+            gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          elif [[ "$tagged" != "$GITHUB_SHA" ]]; then
+            echo "::error::$tag already points at $tagged."
+            exit 1
+          fi
+          gh label create "autorelease: tagged" --color ededed --force >/dev/null
+          for pr in $(gh api "repos/$GH_REPO/commits/$GITHUB_SHA/pulls" --jq '.[] | select(any(.labels[]; .name == "autorelease: pending")) | .number'); do
+            gh pr edit "$pr" --remove-label "autorelease: pending" --add-label "autorelease: tagged"
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Tagged [$tag]($GITHUB_SERVER_URL/$GH_REPO/tree/$tag) for production." >> "$GITHUB_STEP_SUMMARY"
+
+  release-please:
+    name: Update the release PR
+    needs: tag-release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  promote:
+    name: Promote the release to prod
+    needs: tag-release
+    if: needs.tag-release.outputs.version != ''
+    permissions:
+      contents: write
+      pull-requests: read
+    uses: ./.github/workflows/promote_main_to_prod.yml
+    with:
+      ref: ${{ github.sha }}
+    secrets: inherit
