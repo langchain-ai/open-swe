@@ -146,7 +146,7 @@ async def test_private_pr_rejects_another_requester(monkeypatch, thread_metadata
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["public", "private", "legacy", "system", "unowned"])
-async def test_background_completion_cannot_publish_with_saved_user_identity(
+async def test_background_completion_publishes_only_as_a_pinned_identity(
     monkeypatch, thread_metadata, credentials, scope
 ):
     opr = importlib.import_module("openswe.tools.open_pull_request")
@@ -165,6 +165,10 @@ async def test_background_completion_cannot_publish_with_saved_user_identity(
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
     )
+    if scope == "private":
+        assert await opr._resolve_pr_author_token() == ("personal-token", "user")
+        credentials.assert_awaited_once_with("alice")
+        return
     if scope in ("system", "unowned"):
         assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
     else:

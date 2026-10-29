@@ -271,6 +271,20 @@ async def test_release_branch_push_excludes_inherited_workflows(
     assert "-release workflow" in change.diff_preview
     assert "+new workflow" in change.diff_preview
 
+    if not upstream:
+        await backend.git("update-ref refs/remotes/origin/other-feature HEAD")
+        assert await middleware._change_for_request(request) is None
+
+
+async def test_new_branch_without_shared_remote_history_fails_closed(tmp_path: Path) -> None:
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b feature")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    await backend.git("commit --allow-empty -qm initial")
+    head = await backend.git("rev-parse HEAD")
+    assert await guard._new_branch_base(backend, str(tmp_path), head) == ""
+
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
     change = await guard._workflow_change_for_push(

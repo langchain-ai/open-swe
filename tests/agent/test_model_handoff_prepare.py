@@ -212,9 +212,7 @@ async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
     selection = handoff.middleware._model_selection
     assert selection is not None
     selection._routing_mode = "auto"
-    monkeypatch.setenv("TYPESAFE_API_KEY", "rejected-key")
-    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY", raising=False)
-    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "rejected-key")
     requests: list[httpx2.Request] = []
 
     def handle(request: httpx2.Request) -> httpx2.Response:

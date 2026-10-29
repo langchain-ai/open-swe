@@ -17,6 +17,7 @@ from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.merge_queue import controller
+from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.git import SHA
 from openswe.merge_queue.models import RequestState
 from openswe.merge_queue.store import MergeQueue, QueueCursor, QueueItemNotFound
@@ -73,6 +74,7 @@ class QueueStatus(BaseModel):
     items: list[EntryView]
     next_cursor: str | None
     active_batch_id: UUID | None
+    configuration_generation: str | None
 
 
 class AttemptView(BaseModel):
@@ -121,20 +123,31 @@ async def queue_access(
     user = await User.for_session(user_id, session["sub"])
     if user is None or user.id != user_id or not user.github_login:
         raise HTTPException(401, "Sign in again to use the queue")
+    try:
+        config = await QueueConfiguration.load(workspace_id)
+    except ValueError as exc:
+        raise HTTPException(409, "Queue configuration is invalid") from exc
+    if config is None:
+        raise HTTPException(404, "Queue is not enabled for this workspace")
+    if (
+        config.repository.lower() != running.config.repository.lower()
+        or config.repository_id != running.config.repository_id
+    ):
+        raise HTTPException(409, "Queue identity changed; explicit handoff required")
     queue = await MergeQueue.load(running.queue.id, workspace_id)
     if queue is None:
         raise HTTPException(404, "Queue not found")
-    await require_repo_access_for_user(user.github_login, running.config.repository)
-    if queue.mode == "native" and running.config.check_app_id is None:
+    await require_repo_access_for_user(user.github_login, config.repository)
+    if queue.mode != config.mode:
+        raise HTTPException(409, "Queue mode changed; explicit handoff required")
+    if queue.mode == "native" and config.check_app_id is None:
         raise HTTPException(409, "Native queue observation is read-only; use GitHub queue controls")
     async with GitHubClient.as_user(user.github_login) as github:
-        repo = github.repo(*running.config.repository.split("/", 1))
-        if (await repo.info()).get("id") != running.config.repository_id:
+        repo = github.repo(*config.repository.split("/", 1))
+        if (await repo.info()).get("id") != config.repository_id:
             raise HTTPException(409, "Repository identity changed")
         try:
-            yield QueueAccess(
-                queue, user, repo, user.email.lower() in running.config.operator_emails
-            )
+            yield QueueAccess(queue, user, repo, user.email.lower() in config.operator_emails)
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
         except QueueItemNotFound as exc:
@@ -172,6 +185,7 @@ async def queue_status(
             else None
         ),
         active_batch_id=batch_id,
+        configuration_generation=access.queue.configuration_generation,
     )
 
 

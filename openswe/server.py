@@ -12,7 +12,7 @@ import hashlib
 import logging
 import time
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from functools import cache, cached_property, partial
 from typing import Any, Final, Self, cast
 from uuid import UUID
@@ -168,6 +168,7 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.run_skills import RunSkillStores
+from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
 from openswe.thread_title import (
@@ -185,6 +186,7 @@ from openswe.tools import (
     background_task,
     code_channel_set_view,
     configure_repository,
+    configure_workspace,
     connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
@@ -193,6 +195,7 @@ from openswe.tools import (
     delete_user_skill,
     delete_workspace,
     dismiss_human_review_request,
+    execute_database_sql,
     expedite_pr_approval,
     expose_port,
     fetch_url,
@@ -318,9 +321,6 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = SHELL_SEARCH_EXCLUDED_TOOLS
-STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
-    {"delete", "edit_file", "execute", "task", "write_file"}
-)
 # Each posts to the reader and ends the walkthrough's turn as surely as a final reply.
 GUIDE_REPLY_TOOLS = frozenset(
     {
@@ -456,13 +456,18 @@ async def _thread_participant(
 ) -> ThreadParticipant:
     user = await _participant_user(identity.github_login, person_id)
     login = (user.github_login if user else "") or identity.github_login
+    slack_user_id = slack_user_id or (user.slack_user_id if user else "")
+    if timezone and slack_user_id:
+        remember_slack_user_timezone(slack_user_id, timezone)
+    elif slack_user_id:
+        timezone = await get_slack_user_timezone(slack_user_id)
     if not login:
         return ThreadParticipant(
             identity=identity,
             person_id=person_id or "",
             timezone=timezone,
             linked=user is not None,
-            slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
+            slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
     profile, workspace_admin, instructions = await asyncio.gather(
@@ -485,7 +490,7 @@ async def _thread_participant(
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
-        slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
+        slack_user_id=slack_user_id,
     )
 
 
@@ -517,7 +522,9 @@ async def _thread_participants(
         )
     )
     others = [
-        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
+        identity
+        for identity in identities
+        if identity.github_login.casefold() != resolved_sender.github_login.casefold()
     ]
     return list(
         await asyncio.gather(
@@ -585,6 +592,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "publish_workspace",
         "snapshotctl",
         "configure_repository",
+        "configure_workspace",
         "delete_workspace",
         "create_automation",
         "update_automation",
@@ -622,6 +630,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "manage_thread",
         "read_incident",
         "read_only_sql",
+        "execute_database_sql",
         "read_user_settings",
         "connect_managed_tools",
         "save_user_settings",
@@ -663,6 +672,7 @@ ADMIN_TOOLS = (
     publish_workspace,
     snapshotctl,
     configure_repository,
+    configure_workspace,
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
@@ -741,6 +751,7 @@ AGENT_TOOLS: Final = (
     cli_result,
     worktree_handoff,
     read_only_sql,
+    execute_database_sql,
     write_database_rows,
     manage_feature_flags,
     manage_review_approval_mode,
@@ -774,7 +785,7 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
         *(
             tool
             for tool in AGENT_TOOLS
-            if _writes_database_rows() or tool is not write_database_rows
+            if _writes_database_rows() or tool not in (execute_database_sql, write_database_rows)
         ),
         *walkthrough_tools("reviewer"),
         *walkthrough_tools("author"),
@@ -974,9 +985,29 @@ def _integration_middleware(
     return candidate if candidate.has_groups else None
 
 
-async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
+async def _timed[T](thread_id: str | None, name: str, work: Awaitable[T]) -> T:
     async with aphase(thread_id, name):
-        return await loader()
+        return await work
+
+
+async def _credential_scope(config: RunnableConfig) -> tuple[str | None, bool]:
+    """Whose personal integrations the run may use, and whether that could be told."""
+    try:
+        return await private_credential_login(config), True
+    except Exception:
+        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+        return None, False
+
+
+async def _thread_settings(thread_id: str) -> tuple[ThreadSettings, bool]:
+    return normalize_thread_settings(await load_thread_settings(client, thread_id))
+
+
+async def _scoped_mcp_tools(
+    thread_id: str, scope: Awaitable[tuple[str | None, bool]], workspace: str
+) -> tuple[str | None, MCPTools]:
+    login, known = await scope
+    return await _run_mcp_tools(thread_id, login, workspace) if known else (None, MCPTools())
 
 
 async def _cached_profile(profile_login: str | None):
@@ -987,12 +1018,12 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
+def _sandbox_file_downloads_enabled(*, bridged: bool) -> bool:
     """Return whether signed sandbox file downloads are available for this run.
 
     They are served by the LangSmith box itself, which a bridged thread does not have.
     """
-    return cfg.stop_summary is not True and not bridged
+    return not bridged
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
@@ -1478,7 +1509,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
-            sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
+            sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
@@ -1586,27 +1617,30 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
-    walkthrough = await ReviewGuideSession.get(thread_id)
-    guide = walkthrough if walkthrough is not None and not walkthrough.closed else None
-    profile_login = await resolve_github_login(as_json_object(config))
-    credential_login = None
-    credential_scope_known = False
-    try:
-        credential_login = await private_credential_login(config)
-        credential_scope_known = True
-    except Exception:
-        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
-
-    stop_summary_mode = cfg.stop_summary is True
-    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    credential_scope = asyncio.ensure_future(_credential_scope(config))
     # MCP loading needs only who the run acts for and where, and it is the slowest
-    # lookup here, so it overlaps the settings and access lookups below.
-    mcp_tools_task = (
-        asyncio.ensure_future(_run_mcp_tools(thread_id, credential_login, workspace))
-        if not stop_summary_mode and credential_scope_known
-        else None
+    # lookup here, so it overlaps every lookup below.
+    mcp_tools_task = asyncio.ensure_future(
+        _scoped_mcp_tools(
+            thread_id, credential_scope, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+        )
     )
-    task_coordination = await TaskCoordinationMiddleware.for_thread(thread_id)
+    (
+        walkthrough,
+        profile_login,
+        (credential_login, _),
+        task_coordination,
+        bridge_client,
+        (thread_settings, settings_changed),
+    ) = await asyncio.gather(
+        ReviewGuideSession.get(thread_id),
+        resolve_github_login(as_json_object(config)),
+        credential_scope,
+        TaskCoordinationMiddleware.for_thread(thread_id),
+        _timed(thread_id, "factory.bridged_thread", _bridge_client(thread_id)),
+        _timed(thread_id, "factory.thread_settings", _thread_settings(thread_id)),
+    )
+    guide = walkthrough if walkthrough is not None and not walkthrough.closed else None
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -1618,30 +1652,31 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     # Every settings read below is keyed by this slug. A factory runs outside the
     # graph's own context, so the settings module cannot recover it on its own.
     settings_workspace = workspace_slug(cfg)
-    async with aphase(thread_id, "factory.bridged_thread"):
-        bridge_client = await _bridge_client(thread_id)
-    async with aphase(thread_id, "factory.thread_settings"):
-        thread_settings, settings_changed = normalize_thread_settings(
-            await load_thread_settings(client, thread_id)
-        )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
-    async with aphase(thread_id, "factory.settings_defaults"):
-        settings, profile = await asyncio.gather(
-            cached_workspace_settings(settings_workspace),
-            _cached_profile(
-                profile_login
-                if reset_model_selection or not thread_settings.get("model_id")
-                else None
+    (settings, profile), admin_thread, tool_access = await asyncio.gather(
+        _timed(
+            thread_id,
+            "factory.settings_defaults",
+            asyncio.gather(
+                cached_workspace_settings(settings_workspace),
+                _cached_profile(
+                    profile_login
+                    if reset_model_selection or not thread_settings.get("model_id")
+                    else None
+                ),
             ),
-        )
-        model_defaults = settings.default_model_pair("agent")
-        routing_defaults = dict(settings.agent_routing_models)
-        title_defaults = settings.default_thread_title_model
-        use_gateway = settings.effective_gateway_enabled
-        fable_enabled = settings.fable_enabled
+        ),
+        _timed(thread_id, "factory.admin_thread", _admin_thread(config, profile_login)),
+        _timed(thread_id, "factory.tool_access", resolve_access(cfg, login=profile_login)),
+    )
+    model_defaults = settings.default_model_pair("agent")
+    routing_defaults = dict(settings.agent_routing_models)
+    title_defaults = settings.default_thread_title_model
+    use_gateway = settings.effective_gateway_enabled
+    fable_enabled = settings.fable_enabled
 
     slack_ask_mode = _slack_ask_mode(cfg)
 
@@ -1805,16 +1840,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     configurable["resolved_agent_model_id"] = model_id
     configurable["resolved_agent_effort"] = profile_effort
 
-    async with aphase(thread_id, "factory.admin_thread"):
-        admin_thread = await _admin_thread(config, profile_login)
-    async with aphase(thread_id, "factory.tool_access"):
-        tool_access = await resolve_access(cfg, login=profile_login)
-
-    cli_result_required = not stop_summary_mode and bridge_client == "cli"
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
-    managed_gateway, mcp_tools = (
-        await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
-    )
+    cli_result_required = bridge_client == "cli"
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
+    managed_gateway, mcp_tools = await mcp_tools_task
     if incident_session is not None:
         # incident.io refuses publishing from this MCP client (surface_cannot_publish).
         mcp_tools = [
@@ -1850,8 +1878,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             else (output_iframe, create_sandbox_file_download_url, expose_port)
         ),
         *(() if cli_result_required else (cli_result,)),
-        *(() if bridge_client == "desktop" and not stop_summary_mode else (worktree_handoff,)),
-        *(() if _writes_database_rows() else (write_database_rows,)),
+        *(() if bridge_client == "desktop" else (worktree_handoff,)),
+        *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
@@ -1896,13 +1924,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
-    if stop_summary_mode:
-        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
-        STOP_SUMMARY_EXCLUDED_TOOLS
-        if stop_summary_mode
-        else _slack_ask_excluded_tools(cfg)
+        _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         if incident_automatic
@@ -1934,7 +1958,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         if (adaptive_model_routing or source == "slack")
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
-        and not stop_summary_mode
         and incident_session is None
         and not cfg.background_task_completion
         and not cfg.continued_from_thread_id
@@ -2077,15 +2100,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
         )
     )
-    surface.inbox = (
-        None
-        if stop_summary_mode
-        else InboxSpec(
-            events=True,
-            surface=initial_surface,
-            model_id=model_id,
-            image_fallback=vision_model is not None,
-        )
+    surface.inbox = InboxSpec(
+        events=True,
+        surface=initial_surface,
+        model_id=model_id,
+        image_fallback=vision_model is not None,
     )
     surface.files = files.backend
     surface.artifacts_root = files.artifacts_root
@@ -2135,9 +2154,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.code_mode = True
     surface.excluded = (
-        STOP_SUMMARY_EXCLUDED_TOOLS
-        if stop_summary_mode
-        else _slack_ask_excluded_tools(cfg)
+        _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         if incident_automatic

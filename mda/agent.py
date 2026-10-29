@@ -259,7 +259,12 @@ def _parts(graph: Graph) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, opened_sandbox, booted_sandbox),
+            BackendRunMiddleware(
+                backend,
+                opened_sandbox,
+                booted_sandbox,
+                read_ahead=[skill_files.list_ahead],
+            ),
             replace_sandbox,
             *reports,
             skills,

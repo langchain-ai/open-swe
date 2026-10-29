@@ -32,6 +32,7 @@ from openswe.slack.http import (
 )
 from openswe.slack.review_links import pr_review_links
 from openswe.source_context import SourceContext
+from openswe.utils import ttl_cache
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
@@ -1501,6 +1502,9 @@ async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) ->
         return False
 
 
+_SLACK_USER_TIMEZONE_TTL_SECONDS = 3600.0
+
+
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     """Get Slack user details by user ID."""
     if not SLACK_BOT_TOKEN:
@@ -1513,6 +1517,40 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning("Slack user lookup failed", extra={"slack_error": slack_error(exc)})
         return None
+
+
+class SlackUserLookupFailed(Exception):
+    """Slack did not answer a user lookup, as opposed to answering without the field."""
+
+
+def _slack_user_timezone_key(user_id: str) -> str:
+    return f"slack-user-timezone:{user_id}"
+
+
+def remember_slack_user_timezone(user_id: str, timezone: str) -> None:
+    """Record a timezone Slack already reported, so later lookups agree with it."""
+    ttl_cache.set_cached(
+        _slack_user_timezone_key(user_id), timezone, _SLACK_USER_TIMEZONE_TTL_SECONDS
+    )
+
+
+async def get_slack_user_timezone(user_id: str) -> str:
+    """The person's Slack timezone name, or an empty string when Slack does not say."""
+
+    async def load() -> str:
+        info = await get_slack_user_info(user_id)
+        if info is None:
+            raise SlackUserLookupFailed(user_id)
+        timezone = info.get("tz")
+        return timezone.strip() if isinstance(timezone, str) else ""
+
+    try:
+        return await ttl_cache.cached(
+            _slack_user_timezone_key(user_id), _SLACK_USER_TIMEZONE_TTL_SECONDS, load
+        )
+    except SlackUserLookupFailed:
+        logger.info("Slack timezone unavailable; not caching", extra={"slack_user_id": user_id})
+        return ""
 
 
 async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
