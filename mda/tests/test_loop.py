@@ -177,7 +177,8 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     loop = RunLoop(backend)
     state = _state(
         HumanMessage(content="Fix the login", id="human-1"),
-        rendered_system_prompt="You are Open SWE.",
+        rendered_system_prompt="You are Open SWE.\n\nThis thread's artifacts are here.",
+        rendered_thread_prompt="This thread's artifacts are here.",
     )
 
     barrier = asyncio.Barrier(2)
@@ -200,7 +201,9 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     await backend.outbox.drain()
 
     assert planned.call is not None
+    # What only this thread's prompt says goes apart, after what every thread shares.
     assert planned.call.system_prompt == "This is a preview deployment.\n\nYou are Open SWE."
+    assert planned.call.thread_prompt == "This thread's artifacts are here."
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
     assert planned.update == {
         "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",

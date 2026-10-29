@@ -132,7 +132,7 @@ from openswe.model_request import (
     model_selection_trace,
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
-from openswe.prompt import TurnContext, construct_system_prompt
+from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
@@ -1466,11 +1466,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             recent_threads=recent_threads,
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
-        system_prompt = (
-            {"rendered_system_prompt": await rendered_prompt, "system_prompt_fixed": True}
-            if rendered_prompt is not None
-            else {}
-        )
+        system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -1531,7 +1527,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             **system_prompt,
         }
 
-    async def _render_system_prompt(self, cfg: RunConfig) -> str:
+    async def _render_system_prompt(self, cfg: RunConfig) -> SystemPrompt:
         """The thread's system prompt, from what holds for it as its first run starts."""
         async with aphase(self._thread_id, "prepare.default_repo"):
             default_repo = await _resolve_prompt_default_repo(cfg)
