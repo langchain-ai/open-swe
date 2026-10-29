@@ -47,6 +47,7 @@ import type {
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { FleetSidebar } from "@/features/agents/components/FleetSidebar"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
 import {
@@ -189,6 +190,17 @@ export function AgentsSidebar({
   const fleetSelected = useRouterState({
     select: (state) => state.location.pathname === "/agents/chat",
   })
+  const fleetLocation = useRouterState({
+    select: (state) => state.location.search,
+  })
+  const fleetWorkspace =
+    "workspace" in fleetLocation && typeof fleetLocation.workspace === "string"
+      ? fleetLocation.workspace
+      : undefined
+  const fleetThread =
+    "chat" in fleetLocation && typeof fleetLocation.chat === "string"
+      ? fleetLocation.chat
+      : undefined
   const linkOptions = useHrefLinkOptions()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const profile = useProfile()
@@ -703,235 +715,247 @@ export function AgentsSidebar({
           }}
         />
       </div>
-      <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
-        <Link
-          to="/agents"
-          onClick={layout.closeOnMobile}
-          className={cn(
-            NAV_ROW_CLASS,
-            "group bg-surface-level-3 hover:bg-surface-level-4"
-          )}
-        >
-          <PlusIcon size={20} className="-mx-0.5" />
-          New
-          <Kbd
-            aria-hidden
-            className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
-          >
-            {newThreadShortcut}
-          </Kbd>
-        </Link>
-        {profile.data?.concierge_mode && (
-          <a
-            href={
-              concierge.data?.thread_id
-                ? `/agents/${concierge.data.thread_id}`
-                : concierge.data?.channel_id
-                  ? `slack://channel?id=${concierge.data.channel_id}`
-                  : undefined
-            }
-            onClick={layout.closeOnMobile}
-            aria-current={
-              !!concierge.data?.thread_id &&
-              activeThreadId === concierge.data.thread_id
-                ? "page"
-                : undefined
-            }
-            className={cn(
-              NAV_ROW_CLASS,
-              !!concierge.data?.thread_id &&
-                activeThreadId === concierge.data.thread_id &&
-                "bg-selected hover:bg-selected-hover"
-            )}
-          >
-            <ChatCircleIcon size={16} weight="regular" />
-            Concierge
-          </a>
-        )}
-      </div>
-
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        {scrollEdges.top && (
-          <>
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-sticky-header h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
-          </>
-        )}
-        {scrollEdges.bottom && (
-          <>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-default" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-sticky-header h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
-          </>
-        )}
-        <div
-          ref={scrollViewport}
-          className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2"
-          onScroll={measureScrollEdges}
-        >
-          <SidebarNav
-            className={isDesktop ? "pb-space-3" : "pb-space-4"}
-            onNavigate={layout.closeOnMobile}
-          />
-          {cloudPending && allItems.length === 0 && (
-            <ThreadListSkeleton compact={prefs.compact} />
-          )}
-          {cloudError && (
-            <ThreadSourceError
-              label="Cloud threads unavailable"
-              onRetry={() => {
-                void pinnedQuery.refetch()
-                void recentsQuery.refetch()
-                if (repoMode) void sidebarReposQuery.refetch()
-              }}
-            />
-          )}
-          {cloudPending && allItems.length > 0 && (
-            <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-tertiary">
-              <Spinner size="xxs" />
-              Loading threads…
-            </div>
-          )}
-
-          {(filteredPinnedItems.length > 0 ||
-            pinnedGroups.length > 0 ||
-            (repoMode && noRepoPinned && noRepoAvailable)) && (
-            <section className="mb-space-3">
-              <SidebarSectionHeader
-                label="Pinned"
-                collapsed={sectionCollapsed("pinned")}
-                onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
-                menu={
-                  <SidebarSectionMenu label="Pinned options">
-                    <MenuChoiceGroup<PinnedSort>
-                      label="Sort pinned by"
-                      value={prefs.sortPinned}
-                      onChange={(sortPinned) => setView({ sortPinned })}
-                      options={[
-                        { value: "updated", label: "Last updated" },
-                        { value: "manual", label: "Manual order" },
-                      ]}
-                    />
-                  </SidebarSectionMenu>
-                }
-              />
-              {!sectionCollapsed("pinned") && (
-                <>
-                  {filteredPinnedItems.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
-                  {pinnedGroups.map(renderRepoGroup)}
-                  {repoMode &&
-                    noRepoPinned &&
-                    noRepoAvailable &&
-                    renderRepoGroup(noRepoGroup)}
-                </>
+      {fleetSelected ? (
+        <FleetSidebar
+          workspaceId={fleetWorkspace}
+          threadId={fleetThread}
+          onSelect={(workspace, chat) => {
+            void navigate({ to: "/agents/chat", search: { workspace, chat } })
+            layout.closeOnMobile()
+          }}
+        />
+      ) : (
+        <>
+          <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
+            <Link
+              to="/agents"
+              onClick={layout.closeOnMobile}
+              className={cn(
+                NAV_ROW_CLASS,
+                "group bg-surface-level-3 hover:bg-surface-level-4"
               )}
-            </section>
-          )}
-
-          {repoMode &&
-            (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
-              <section className="mb-space-3">
-                <SidebarSectionHeader
-                  label={workspaceMode ? "Workspaces" : "Repositories"}
-                  collapsed={!workspaceMode && sectionCollapsed("repos")}
-                  onToggleCollapsed={
-                    workspaceMode
-                      ? undefined
-                      : () => toggleSectionCollapsed("repos")
-                  }
-                  menu={
-                    <SidebarSectionMenu label="Repositories options">
-                      {viewMenuItems}
-                      {removeProjectItems}
-                    </SidebarSectionMenu>
-                  }
-                  action={
-                    isDesktop ? (
-                      <SidebarSectionAction
-                        label="Add repository"
-                        icon={PlusIcon}
-                        onClick={() => void addLocalRepo()}
-                      />
-                    ) : undefined
-                  }
-                />
-                {(workspaceMode || !sectionCollapsed("repos")) && (
-                  <>
-                    {workspaceMode
-                      ? workspaceGroups.map((workspace) => (
-                          <WorkspaceGroupSection
-                            key={workspace.slug}
-                            workspace={workspace}
-                            collapsed={sectionCollapsed(
-                              `workspace:${workspace.slug}`
-                            )}
-                            onToggleCollapsed={() =>
-                              toggleSectionCollapsed(
-                                `workspace:${workspace.slug}`
-                              )
-                            }
-                            renderRepoGroup={renderRepoGroup}
-                          />
-                        ))
-                      : unpinnedGroups.map(renderRepoGroup)}
-                    {!noRepoPinned &&
-                      noRepoAvailable &&
-                      renderRepoGroup(noRepoGroup)}
-                  </>
+            >
+              <PlusIcon size={20} className="-mx-0.5" />
+              New
+              <Kbd
+                aria-hidden
+                className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
+              >
+                {newThreadShortcut}
+              </Kbd>
+            </Link>
+            {profile.data?.concierge_mode && (
+              <a
+                href={
+                  concierge.data?.thread_id
+                    ? `/agents/${concierge.data.thread_id}`
+                    : concierge.data?.channel_id
+                      ? `slack://channel?id=${concierge.data.channel_id}`
+                      : undefined
+                }
+                onClick={layout.closeOnMobile}
+                aria-current={
+                  !!concierge.data?.thread_id &&
+                  activeThreadId === concierge.data.thread_id
+                    ? "page"
+                    : undefined
+                }
+                className={cn(
+                  NAV_ROW_CLASS,
+                  !!concierge.data?.thread_id &&
+                    activeThreadId === concierge.data.thread_id &&
+                    "bg-selected hover:bg-selected-hover"
                 )}
-              </section>
+              >
+                <ChatCircleIcon size={16} weight="regular" />
+                Concierge
+              </a>
             )}
+          </div>
 
-          {!repoMode && (
-            <section className="mb-space-3">
-              <SidebarSectionHeader
-                label="Recents"
-                collapsed={sectionCollapsed("recents")}
-                onToggleCollapsed={() => toggleSectionCollapsed("recents")}
-                menu={
-                  <SidebarSectionMenu label="Recents options">
-                    {viewMenuItems}
-                  </SidebarSectionMenu>
-                }
-                action={
-                  <SidebarSectionAction
-                    label="New thread"
-                    icon={PlusIcon}
-                    onClick={() => {
-                      layout.closeOnMobile()
-                      void navigate({ to: "/agents" })
-                    }}
-                  />
-                }
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            {scrollEdges.top && (
+              <>
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-sticky-header h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
+              </>
+            )}
+            {scrollEdges.bottom && (
+              <>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-floating-bar border-b border-default" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-sticky-header h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
+              </>
+            )}
+            <div
+              ref={scrollViewport}
+              className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-2"
+              onScroll={measureScrollEdges}
+            >
+              <SidebarNav
+                className={isDesktop ? "pb-space-3" : "pb-space-4"}
+                onNavigate={layout.closeOnMobile}
               />
-              {!sectionCollapsed("recents") && (
-                <>
-                  {recents.map((item) => (
-                    <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                  ))}
-                  {recentsQuery.hasMore && (
-                    <LoadMoreThreadsOnScroll
-                      label="Load more threads"
-                      root={scrollViewport}
-                      loading={recentsQuery.isFetchingNextPage}
-                      onLoadMore={recentsQuery.fetchNextPage}
-                    />
-                  )}
-                </>
+              {cloudPending && allItems.length === 0 && (
+                <ThreadListSkeleton compact={prefs.compact} />
               )}
-            </section>
-          )}
-          {isEmpty && !cloudError && (
-            <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
-              {hasActiveFilters(prefs.filters)
-                ? "No threads match these filters."
-                : "No threads yet."}
-            </p>
-          )}
-        </div>
-      </div>
+              {cloudError && (
+                <ThreadSourceError
+                  label="Cloud threads unavailable"
+                  onRetry={() => {
+                    void pinnedQuery.refetch()
+                    void recentsQuery.refetch()
+                    if (repoMode) void sidebarReposQuery.refetch()
+                  }}
+                />
+              )}
+              {cloudPending && allItems.length > 0 && (
+                <div className="flex items-center gap-space-2 px-space-2 py-space-2 text-xs text-tertiary">
+                  <Spinner size="xxs" />
+                  Loading threads…
+                </div>
+              )}
 
+              {(filteredPinnedItems.length > 0 ||
+                pinnedGroups.length > 0 ||
+                (repoMode && noRepoPinned && noRepoAvailable)) && (
+                <section className="mb-space-3">
+                  <SidebarSectionHeader
+                    label="Pinned"
+                    collapsed={sectionCollapsed("pinned")}
+                    onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
+                    menu={
+                      <SidebarSectionMenu label="Pinned options">
+                        <MenuChoiceGroup<PinnedSort>
+                          label="Sort pinned by"
+                          value={prefs.sortPinned}
+                          onChange={(sortPinned) => setView({ sortPinned })}
+                          options={[
+                            { value: "updated", label: "Last updated" },
+                            { value: "manual", label: "Manual order" },
+                          ]}
+                        />
+                      </SidebarSectionMenu>
+                    }
+                  />
+                  {!sectionCollapsed("pinned") && (
+                    <>
+                      {filteredPinnedItems.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
+                      {pinnedGroups.map(renderRepoGroup)}
+                      {repoMode &&
+                        noRepoPinned &&
+                        noRepoAvailable &&
+                        renderRepoGroup(noRepoGroup)}
+                    </>
+                  )}
+                </section>
+              )}
+
+              {repoMode &&
+                (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
+                  <section className="mb-space-3">
+                    <SidebarSectionHeader
+                      label={workspaceMode ? "Workspaces" : "Repositories"}
+                      collapsed={!workspaceMode && sectionCollapsed("repos")}
+                      onToggleCollapsed={
+                        workspaceMode
+                          ? undefined
+                          : () => toggleSectionCollapsed("repos")
+                      }
+                      menu={
+                        <SidebarSectionMenu label="Repositories options">
+                          {viewMenuItems}
+                          {removeProjectItems}
+                        </SidebarSectionMenu>
+                      }
+                      action={
+                        isDesktop ? (
+                          <SidebarSectionAction
+                            label="Add repository"
+                            icon={PlusIcon}
+                            onClick={() => void addLocalRepo()}
+                          />
+                        ) : undefined
+                      }
+                    />
+                    {(workspaceMode || !sectionCollapsed("repos")) && (
+                      <>
+                        {workspaceMode
+                          ? workspaceGroups.map((workspace) => (
+                              <WorkspaceGroupSection
+                                key={workspace.slug}
+                                workspace={workspace}
+                                collapsed={sectionCollapsed(
+                                  `workspace:${workspace.slug}`
+                                )}
+                                onToggleCollapsed={() =>
+                                  toggleSectionCollapsed(
+                                    `workspace:${workspace.slug}`
+                                  )
+                                }
+                                renderRepoGroup={renderRepoGroup}
+                              />
+                            ))
+                          : unpinnedGroups.map(renderRepoGroup)}
+                        {!noRepoPinned &&
+                          noRepoAvailable &&
+                          renderRepoGroup(noRepoGroup)}
+                      </>
+                    )}
+                  </section>
+                )}
+
+              {!repoMode && (
+                <section className="mb-space-3">
+                  <SidebarSectionHeader
+                    label="Recents"
+                    collapsed={sectionCollapsed("recents")}
+                    onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+                    menu={
+                      <SidebarSectionMenu label="Recents options">
+                        {viewMenuItems}
+                      </SidebarSectionMenu>
+                    }
+                    action={
+                      <SidebarSectionAction
+                        label="New thread"
+                        icon={PlusIcon}
+                        onClick={() => {
+                          layout.closeOnMobile()
+                          void navigate({ to: "/agents" })
+                        }}
+                      />
+                    }
+                  />
+                  {!sectionCollapsed("recents") && (
+                    <>
+                      {recents.map((item) => (
+                        <SidebarThreadRow key={item.key} {...rowProps(item)} />
+                      ))}
+                      {recentsQuery.hasMore && (
+                        <LoadMoreThreadsOnScroll
+                          label="Load more threads"
+                          root={scrollViewport}
+                          loading={recentsQuery.isFetchingNextPage}
+                          onLoadMore={recentsQuery.fetchNextPage}
+                        />
+                      )}
+                    </>
+                  )}
+                </section>
+              )}
+              {isEmpty && !cloudError && (
+                <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
+                  {hasActiveFilters(prefs.filters)
+                    ? "No threads match these filters."
+                    : "No threads yet."}
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
       <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (

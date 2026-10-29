@@ -3,46 +3,16 @@ import { Client } from "@langchain/langgraph-sdk"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
-import { Select } from "@langchain/macaw-components/Select"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { cn } from "@/lib/utils"
 
-interface Workspace {
-  id: string
-  name: string
-}
-interface ChatMessage {
-  type?: string
-  role?: string
-  content: string | Array<{ type: string; text?: string }>
-}
-interface Thread {
-  thread_id: string
-  status: string
-  metadata?: { thread_title?: string; first_message_preview?: string }
-  values?: { messages?: ChatMessage[] }
-}
-
-async function request<T>(path: string, body?: object): Promise<T> {
-  const response = await fetch(dashboardApiUrl(`/fleet-chat${path}`), {
-    credentials: "include",
-    ...(body
-      ? {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      : {}),
-  })
-  if (!response.ok) {
-    const error: { detail?: string } = await response.json()
-    throw new Error(error.detail ?? "Chat could not be loaded.")
-  }
-  return response.json()
-}
+import {
+  fleetRequest as request,
+  type Thread,
+} from "@/features/agents/lib/fleetChat"
 
 export function FleetChat({
   workspaceId,
@@ -58,17 +28,6 @@ export function FleetChat({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [run, setRun] = useState<{ thread: string; id: string } | null>(null)
-  const workspaces = useQuery({
-    queryKey: ["fleet-workspaces"],
-    queryFn: () => request<Workspace[]>("/workspaces"),
-    retry: false,
-  })
-  const threads = useQuery({
-    queryKey: ["fleet-threads", workspaceId],
-    queryFn: () => request<Thread[]>(`/${workspaceId}/threads`),
-    enabled: Boolean(workspaceId),
-    retry: false,
-  })
   const thread = useQuery({
     queryKey: ["fleet-thread", workspaceId, threadId],
     queryFn: () => request<Thread>(`/${workspaceId}/threads/${threadId}`),
@@ -77,11 +36,7 @@ export function FleetChat({
   })
   const active =
     thread.data?.status === "busy" || thread.data?.status === "pending"
-  const problem =
-    error ??
-    workspaces.error?.message ??
-    threads.error?.message ??
-    thread.error?.message
+  const problem = error ?? thread.error?.message
   const messages = thread.data?.values?.messages ?? []
 
   useEffect(() => {
@@ -226,22 +181,6 @@ export function FleetChat({
             Fleet’s general-purpose agent
           </p>
         </div>
-        <Select
-          aria-label="LangSmith workspace"
-          size="md"
-          placeholder="Select LangSmith workspace"
-          value={workspaceId}
-          options={(workspaces.data ?? []).map((workspace) => ({
-            value: workspace.id,
-            label: workspace.name,
-          }))}
-          loading={workspaces.isPending}
-          onChange={(workspace) => {
-            onSelect(workspace)
-            setRun(null)
-            setError(null)
-          }}
-        />
       </header>
       {problem && (
         <div
@@ -258,7 +197,6 @@ export function FleetChat({
             onClick={() => {
               setError(null)
               void cache.invalidateQueries({ queryKey: ["fleet-workspaces"] })
-              void threads.refetch()
               if (threadId) void thread.refetch()
             }}
           >
@@ -267,77 +205,7 @@ export function FleetChat({
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        <aside
-          className="hidden w-56 shrink-0 flex-col gap-space-2 overflow-y-auto border-r border-default bg-surface-level-2 p-space-3 md:flex"
-          aria-label="Chat history"
-        >
-          <Button
-            size="md"
-            color="secondary"
-            disabled={!workspaceId || sending}
-            onClick={() => {
-              onSelect(workspaceId)
-              setDraft("")
-              setError(null)
-            }}
-          >
-            New chat
-          </Button>
-          {threads.isLoading && (
-            <p role="status" className="p-space-2 text-sm text-secondary">
-              Loading chats…
-            </p>
-          )}
-          {workspaceId && threads.data?.length === 0 && (
-            <p className="p-space-2 text-sm text-secondary">
-              Your conversations will appear here.
-            </p>
-          )}
-          {(threads.data ?? []).map((item) => (
-            <Button
-              key={item.thread_id}
-              size="md"
-              color="secondary"
-              variant="plain"
-              aria-pressed={item.thread_id === threadId}
-              className={cn(
-                "w-full justify-start",
-                item.thread_id === threadId && "bg-selected"
-              )}
-              onClick={() => {
-                onSelect(workspaceId, item.thread_id)
-                setError(null)
-              }}
-            >
-              <span className="truncate">
-                {item.metadata?.thread_title ??
-                  item.metadata?.first_message_preview ??
-                  "New chat"}
-              </span>
-            </Button>
-          ))}
-        </aside>
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between border-b border-default p-space-3 md:hidden">
-            <Select
-              aria-label="Chat history"
-              size="md"
-              value={threadId}
-              placeholder="Chat history"
-              options={(threads.data ?? []).map((item) => ({
-                value: item.thread_id,
-                label: item.metadata?.thread_title ?? "New chat",
-              }))}
-              onChange={(id) => onSelect(workspaceId, id)}
-            />
-            <Button
-              color="secondary"
-              size="md"
-              onClick={() => onSelect(workspaceId)}
-            >
-              New chat
-            </Button>
-          </div>
           <div
             className="flex-1 overflow-y-auto px-space-6 py-space-6"
             aria-label="Conversation"
