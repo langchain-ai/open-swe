@@ -4,7 +4,8 @@ from typing import Any
 import pytest
 
 from openswe.utils import thread_reads
-from openswe.utils.thread_reads import read_thread, shared_thread_reads
+from openswe.utils.thread_reads import read_indexed_thread, read_thread, shared_thread_reads
+from tests.conftest import ThreadStoreOverClient
 
 
 class _Threads:
@@ -67,3 +68,37 @@ async def test_a_nested_scope_shares_the_outer_reads(threads: _Threads) -> None:
 
     assert planned == prepared
     assert threads.reads == 1
+
+
+async def test_indexed_and_legacy_reads_share_one_snapshot(
+    threads: _Threads, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    threads.outcomes = [
+        {"thread_id": "t", "metadata": {"workspace": "first"}},
+        {"thread_id": "t", "metadata": {"workspace": "next"}},
+    ]
+    monkeypatch.setattr("openswe.threads.proxy.langgraph_client", lambda: _Client(threads))
+    monkeypatch.setattr(thread_reads, "THREADS", ThreadStoreOverClient())
+
+    async with shared_thread_reads():
+        indexed = await read_indexed_thread("t")
+        assert await read_thread("t") == indexed
+        assert (await read_indexed_thread("t"))["metadata"] == {"workspace": "first"}
+
+    assert (await read_indexed_thread("t"))["metadata"] == {"workspace": "next"}
+    assert threads.reads == 2
+
+
+async def test_missing_indexed_thread_is_not_shared(
+    threads: _Threads, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    threads.outcomes = [None, {"thread_id": "t", "metadata": {}}]
+    monkeypatch.setattr("openswe.threads.proxy.langgraph_client", lambda: _Client(threads))
+    monkeypatch.setattr(thread_reads, "THREADS", ThreadStoreOverClient())
+
+    async with shared_thread_reads():
+        with pytest.raises(LookupError):
+            await read_indexed_thread("t")
+        assert (await read_indexed_thread("t"))["thread_id"] == "t"
+
+    assert threads.reads == 2

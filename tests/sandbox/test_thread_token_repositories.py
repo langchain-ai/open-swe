@@ -4,6 +4,8 @@ import pytest
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.sandboxes import state
+from openswe.utils import thread_reads
+from tests.conftest import ThreadStoreOverClient
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +16,8 @@ def _empty_cache() -> None:
 def _client(monkeypatch: pytest.MonkeyPatch, get: AsyncMock) -> None:
     client = MagicMock()
     client.threads.get = get
-    monkeypatch.setattr(state, "get_client", lambda: client)
+    monkeypatch.setattr("openswe.threads.proxy.langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_reads, "THREADS", ThreadStoreOverClient())
 
 
 async def test_the_scope_is_read_from_the_live_thread_once(
