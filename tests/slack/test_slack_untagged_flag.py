@@ -162,6 +162,7 @@ async def test_only_slack_mentions_trigger_normal_channels(
 ) -> None:
     payload = _message_payload(text, "Ev-mention")
     payload["event"]["type"] = event_type
+    payload["event"]["action_token"] = "event-capability"
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
@@ -170,6 +171,9 @@ async def test_only_slack_mentions_trigger_normal_channels(
 
     assert response["status"] == expected_status
     assert bool(background_tasks.tasks) == (expected_status == "accepted")
+    if expected_status == "accepted":
+        request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+        assert request.action_token == "event-capability"
 
 
 async def test_a_watched_channel_message_checks_automations(

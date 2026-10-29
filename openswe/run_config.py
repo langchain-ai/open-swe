@@ -115,6 +115,7 @@ class RunConfig(BaseModel):
 
     # Where the run came from
     slack_thread: SlackThreadRef | None = None
+    slack_action_token: str = Field(default="", repr=False)
     linear_issue: LinearIssueRef | None = None
     github_issue: GitHubIssueRef | None = None
     github_pr_or_issue: GitHubPROrIssueRef | None = None

@@ -76,6 +76,7 @@ _TOOL_MODULES = {
     "slack_read_channel_messages": "openswe.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
+    "slack_search_messages": "openswe.slack.tools.search_messages",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
     "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
@@ -160,6 +161,7 @@ __all__ = [
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_reply",
+    "slack_search_messages",
     "slack_breakout_thread",
     "slack_start_review_channel",
     "submit_thread_feedback",
@@ -186,6 +188,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
     from openswe.slack.tools.reply import slack_reply
     from openswe.slack.tools.request_pr_review import request_pr_review
+    from openswe.slack.tools.search_messages import slack_search_messages
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
     from openswe.slack.tools.start_review_channel import slack_start_review_channel
     from openswe.tools.add_finding import add_finding

@@ -100,6 +100,7 @@ class SlackEvent(SlackPayload):
     ts: str = ""
     event_ts: str = ""
     action_ts: str = ""
+    action_token: str = Field(default="", repr=False, exclude=True)
     thread_ts: str = ""
     user: str | SlackRef = ""
     user_id: str = ""

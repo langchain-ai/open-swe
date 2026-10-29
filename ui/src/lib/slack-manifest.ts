@@ -1,5 +1,6 @@
 const BASE_BOT_SCOPES = [
   "reactions:write",
+  "search:read.public",
   "commands",
   "app_mentions:read",
   "channels:history",

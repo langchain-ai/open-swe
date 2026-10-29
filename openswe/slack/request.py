@@ -14,6 +14,7 @@ class SlackRequest(BaseModel):
     event_ts: str = ""
     original_message_ts: str = ""
     event_id: str = ""
+    action_token: str = Field(default="", repr=False)
     user_id: str = ""
     user_name: str = ""
     text: str = ""

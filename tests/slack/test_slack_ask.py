@@ -68,6 +68,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
         channel_id="C1",
         user_id="U1",
         question="why?",
+        action_token="event-capability" if reply_thread_ts else "",
         selected_message=selected_message,
         thread_id="t-1",
         team_id="T1",
@@ -82,6 +83,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     assert upsert.await_args.kwargs["owner_login"] == "octocat"
     configurable = dispatch.await_args.args[2]
     assert configurable["slack_ask"] is True
+    assert configurable["slack_action_token"] == request.action_token
     assert configurable["slack_thread"]["triggering_user_id"] == "U1"
     assert "thread_ts" not in configurable["slack_thread"]
     status.assert_not_awaited()

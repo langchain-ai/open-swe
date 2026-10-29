@@ -240,6 +240,7 @@ from openswe.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_search_messages,
     slack_start_review_channel,
     snapshotctl,
     start_thread,
@@ -729,6 +730,7 @@ AGENT_TOOLS: Final = (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_search_messages,
     slack_breakout_thread,
     slack_start_review_channel,
     submit_thread_feedback,
@@ -1823,10 +1825,12 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_post_message,
         slack_read_thread_messages,
         slack_reply,
+        slack_search_messages,
         slack_breakout_thread,
         slack_start_review_channel,
     ]
     withheld = [
+        *(() if cfg.source == "slack" and cfg.slack_action_token else (slack_search_messages,)),
         *(() if monitors_enabled else (monitor,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
