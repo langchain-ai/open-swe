@@ -36,6 +36,7 @@ from openswe.frontend_review.schemas import (
 )
 from openswe.frontend_review.service import EvidenceAsset, FrontendReviewConflict
 from openswe.github.http import GitHubClient
+from openswe.github.pull_request_status import OpenPullRequest, OpenPullRequests
 from openswe.threads.summary import assert_thread_readable
 
 
@@ -439,6 +440,65 @@ async def test_all_frontend_evidence_endpoints_require_repository_access(
             else None,
         )
     assert response.status_code == 403
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_inbox_intersects_live_user_requests_with_latest_scoped_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(GitHubClient, "as_app", _github)
+    request = StartFrontendReview(
+        base_url="https://base.vercel.app", head_url="https://head.vercel.app"
+    )
+    older = await service.create_review("acme", "repo", 7, request)
+    latest = await service.create_review("acme", "repo", 7, request)
+    await service.create_review("private", "repo", 7, request)
+    search = AsyncMock(
+        return_value=OpenPullRequests(
+            pull_requests=[
+                OpenPullRequest(repo="ACME/Repo", number=7, title="Requested from design"),
+                OpenPullRequest(repo="acme/repo", number=8, title="No QA run yet"),
+            ],
+            next_page=2,
+            incomplete=False,
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+    )
+    monkeypatch.setattr(routes, "list_open_pull_requests", search)
+
+    class RequestedGitHub(_GitHub):
+        async def pull(self) -> dict[str, object]:
+            return {
+                "state": "open",
+                "head": {"sha": "c" * 40},
+                "requested_reviewers": [],
+                "requested_teams": [{"slug": "design"}],
+            }
+
+    @asynccontextmanager
+    async def as_user(login: str) -> AsyncIterator[RequestedGitHub]:
+        assert login == "octocat"
+        yield RequestedGitHub()
+
+    monkeypatch.setattr(GitHubClient, "as_user", as_user)
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.dependency_overrides[require_session] = lambda: {"sub": "octocat"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://test"
+    ) as client:
+        response = await client.get("/frontend-reviews/inbox")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["next_page"] == 2
+        [item] = payload["items"]
+        assert item["run"]["id"] == str(latest.id) != str(older.id)
+        assert item["pr"]["headSha"] == "c" * 40
+        assert item["requested_reviewers"] == []
+        assert item["requested_teams"] == ["ACME/design"]
+        assert search.await_args.kwargs["scope"] == "review-requested"
+        app.dependency_overrides[require_session] = lambda: {}
+        assert (await client.get("/frontend-reviews/inbox")).status_code == 401
 
 
 def test_publishing_rejects_external_media_and_mismatched_capture_dimensions() -> None:

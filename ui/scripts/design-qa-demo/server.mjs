@@ -5,6 +5,8 @@ import { resolve, dirname, extname, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
 import {
+  demoRepo,
+  demoPullRequests,
   checkpoints,
   snapshot,
   makeRun,
@@ -35,27 +37,47 @@ const runs = new Map()
 function reset() {
   for (const job of jobs) clearTimeout(job)
   jobs.clear()
-  runs.set(1, [makeRun(1, metrics)])
-  runs.set(2, [])
-  const blocked = makeRun(3, metrics, ids.blocked)
-  Object.assign(blocked, {
-    status: "blocked",
-    auth_mode: "dummy",
-    error: "Demo: preview requires a disposable QA identity.",
-  })
-  Object.assign(blocked.report, {
-    summary:
-      "Demo: authentication is blocked. No private preview was contacted.",
-    ai_review_status: "not_run",
-    scenarios: [],
-  })
-  runs.set(3, [blocked])
+  runs.clear()
+  for (const pr of demoPullRequests) {
+    if (pr.unreviewed) {
+      runs.set(pr.number, [])
+      continue
+    }
+    const run = makeRun(pr.number, metrics, pr.blocked ? ids.blocked : ids.run)
+    run.report.scenarios = run.report.scenarios.filter((state) =>
+      pr.states.includes(state.id)
+    )
+    if (pr.stale) run.head_sha = "c".repeat(40)
+    if (pr.number === 43397)
+      run.report.summary =
+        "Scripted recap: a subtle button color change and updated hover and pressed feedback. Inspect text contrast in the hover state."
+    if (pr.number === 43398)
+      run.report.summary =
+        "Scripted recap: the action is 2 px taller. Evidence is from an earlier commit; compare the edge, then rerun on the latest revision."
+    if (pr.number === 43401)
+      run.report.summary =
+        "Scripted recap: review button height and fill alignment with the search control."
+    if (pr.blocked) {
+      Object.assign(run, {
+        status: "blocked",
+        auth_mode: "dummy",
+        error: "Demo: preview requires a disposable QA identity.",
+      })
+      Object.assign(run.report, {
+        summary:
+          "Demo: authentication is blocked. No private preview was contacted.",
+        ai_review_status: "not_run",
+        scenarios: [],
+      })
+    }
+    runs.set(pr.number, [run])
+  }
 }
 reset()
 function invalidate(number) {
   for (const stream of streams)
     stream.write(
-      `event: invalidated\ndata: ${JSON.stringify({ topics: [`pull-requests/synthetic/frontend-review/${number}`] })}\n\n`
+      `event: invalidated\ndata: ${JSON.stringify({ topics: [`pull-requests/${demoRepo}/${number}`] })}\n\n`
     )
 }
 function schedule(callback, delay) {
@@ -109,16 +131,43 @@ function events(req, res, invalidations = false) {
     clearInterval(keepAlive)
   })
 }
-const titles = [
-  "Refine trace controls and project dialog",
-  "Polish project settings",
-  "Review a protected preview",
-]
+function pullRequest(pr) {
+  return {
+    repo: demoRepo,
+    number: pr.number,
+    title: pr.title,
+    state: "open",
+    draft: false,
+    additions: 24,
+    deletions: 8,
+    mergeable: true,
+    mergeState: "CLEAN",
+    headSha: revision.head,
+    headRef: "designer-demo",
+    reviewers: [],
+    reviewRequired: true,
+    statusAvailable: true,
+    createdAt: date,
+    updatedAt: date,
+    ci: "passing",
+    failingChecks: [],
+    pendingChecks: [],
+    missingChecks: [],
+    unresolvedThreads: 0,
+  }
+}
+function scopedPRs(scope) {
+  return demoPullRequests.filter((pr) =>
+    scope === "mine"
+      ? pr.author === "demo-designer"
+      : pr.reviewers.includes("demo-designer") || pr.teams.length > 0
+  )
+}
 const banner = `<style>
 #design-qa-demo {height:44px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--bg-brand-subtle);color:var(--text-primary);border-bottom:1px solid var(--border-default);font:12px system-ui}
 #design-qa-demo strong{white-space:nowrap}#design-qa-demo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#design-qa-demo a{margin-left:auto;color:var(--text-primary);white-space:nowrap}
 .h-svh{height:calc(100svh - 44px)}.min-h-svh{min-height:calc(100svh - 44px)}
-</style><aside id="design-qa-demo" aria-label="Demo mode"><strong>DEMO</strong><span>Scripted PRs, AI recap, and capture activity. Pixel comparisons are real. No login needed.</span><a href="/__demo/reset">Reset demo</a></aside>`
+</style><aside id="design-qa-demo" aria-label="Demo mode"><strong>DEMO</strong><span>Scripted PRs and team requests. Try PR 43399. Pixel comparisons are real. No login needed.</span><a href="/__demo/reset">Reset demo</a></aside>`
 
 const server = http.createServer((req, res) => {
   if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host))
@@ -174,47 +223,49 @@ const server = http.createServer((req, res) => {
       login: "demo-designer",
       slack_onboarding_dismissed: true,
     })
-  if (
-    /^\/dashboard\/api\/repos\/synthetic\/frontend-review\/pulls\/[123]$/.test(
-      path
-    )
-  )
-    return json(res, null)
+  if (path === `${api}/frontend-reviews/inbox`)
+    return json(res, {
+      items: scopedPRs(url.searchParams.get("scope"))
+        .filter((pr) => runs.get(pr.number)?.length)
+        .map((pr) => ({
+          pr: pullRequest(pr),
+          run: runs.get(pr.number)[0],
+          requested_reviewers: pr.reviewers,
+          requested_teams: pr.teams,
+        })),
+      next_page: null,
+      incomplete: false,
+    })
   if (path === `${api}/pull-requests` || path === `${api}/review-assignments`)
     return json(res, {
-      pullRequests: titles.map((title, i) => ({
-        repo: "synthetic/frontend-review",
-        number: i + 1,
-        title,
-        state: "open",
-        draft: false,
-        additions: 24,
-        deletions: 8,
-        mergeable: true,
-        mergeState: "CLEAN",
-        headSha: revision.head,
-        headRef: "designer-demo",
-        reviewers: [],
-        reviewRequired: true,
-        statusAvailable: true,
-        createdAt: date,
-        updatedAt: date,
-        ci: "passing",
-        failingChecks: [],
-        pendingChecks: [],
-        missingChecks: [],
-        unresolvedThreads: 0,
-      })),
+      pullRequests: scopedPRs(url.searchParams.get("scope")).map(pullRequest),
       nextPage: null,
       incomplete: false,
       updatedAt: date,
     })
+  const details = path.match(
+    /^\/dashboard\/api\/repos\/langchain-ai\/langchainplus\/pulls\/(\d+)$/
+  )
+  if (details) {
+    const pr = demoPullRequests.find((pr) => pr.number === Number(details[1]))
+    return json(res, pr ? pullRequest(pr) : null)
+  }
   const match = path.match(
-    /^\/dashboard\/api\/reviews\/synthetic\/frontend-review\/([123])(?:\/(.*))?$/
+    /^\/dashboard\/api\/reviews\/langchain-ai\/langchainplus\/(\d+)(?:\/(.*))?$/
   )
   if (match) {
     const number = Number(match[1]),
       suffix = match[2] ?? ""
+    const pr = demoPullRequests.find((pr) => pr.number === number)
+    if (!pr)
+      return json(
+        res,
+        {
+          detail:
+            "This local demo includes PRs 43396–43401 only. Try 43399 to start a scripted run.",
+        },
+        404
+      )
     if (suffix === "frontend-reviews") {
       if (req.method === "POST") {
         req.resume()
@@ -269,7 +320,7 @@ const server = http.createServer((req, res) => {
         watch: false,
         pr: {
           state: "open",
-          title: `Demo · ${titles[number - 1]}`,
+          title: `Demo · ${pr.title}`,
           body: "Synthetic designer demo. No real GitHub PR was reviewed.",
           additions: 24,
           deletions: 8,
@@ -278,11 +329,14 @@ const server = http.createServer((req, res) => {
           head_sha: revision.head,
           head_ref: "designer-demo",
           base_ref: "main",
-          author: { login: "demo-designer", avatar_url: null },
+          author: { login: pr.author, avatar_url: null },
           created_at: date,
           merged_at: null,
           assignees: [],
-          requested_reviewers: [],
+          requested_reviewers: pr.reviewers.map((login) => ({
+            login,
+            avatar_url: null,
+          })),
           labels: [],
         },
         checks: [],
@@ -318,7 +372,7 @@ const server = http.createServer((req, res) => {
       id: ids.thread,
       title: "Demo chat · Attachment preparation only",
       repo: "frontend-review",
-      repoFullName: "synthetic/frontend-review",
+      repoFullName: demoRepo,
       branch: "designer-demo",
       model: "",
       status: "idle",

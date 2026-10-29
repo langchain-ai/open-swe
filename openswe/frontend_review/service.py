@@ -9,7 +9,8 @@ from uuid import UUID
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import JsonValue, TypeAdapter
-from sqlalchemy import Select, func, select, text, update
+from sqlalchemy import Select, func, select, text, tuple_, update
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
@@ -204,6 +205,39 @@ async def list_reviews(owner: str, repo: str, pr_number: int) -> list[FrontendRe
                 _scoped_query(owner, repo, pr_number)
                 .order_by(FrontendReviewRun.created_at.desc())
                 .limit(20)
+            )
+        )
+
+
+async def latest_reviews(
+    identities: list[tuple[str, str, int]],
+) -> list[FrontendReviewRun]:
+    """Read only the latest evidence for PRs the caller has already authorized."""
+    if not identities:
+        return []
+    async with postgres.session() as session:
+        return list(
+            await session.scalars(
+                select(FrontendReviewRun)
+                .join(PullRequest)
+                .where(
+                    tuple_(
+                        func.lower(PullRequest.owner),
+                        func.lower(PullRequest.repo),
+                        PullRequest.number,
+                    ).in_(
+                        [
+                            (owner.lower(), repo.lower(), number)
+                            for owner, repo, number in identities
+                        ]
+                    )
+                )
+                .ext(distinct_on(FrontendReviewRun.pull_request_id))
+                .order_by(
+                    FrontendReviewRun.pull_request_id,
+                    FrontendReviewRun.created_at.desc(),
+                    FrontendReviewRun.id.desc(),
+                )
             )
         )
 

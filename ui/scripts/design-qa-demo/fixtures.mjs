@@ -7,6 +7,62 @@ export const ids = {
 export const revision = { base: "a".repeat(40), head: "b".repeat(40) }
 export const date = "2026-10-29T14:00:00Z"
 
+// Fictional requests and assignments; these numbers never contact GitHub.
+export const demoRepo = "langchain-ai/langchainplus"
+export const demoPullRequests = [
+  {
+    number: 43396,
+    title: "Refine trace controls and project dialog",
+    author: "demo-engineer",
+    reviewers: ["demo-designer"],
+    teams: ["langchain-ai/design"],
+    states: ["color", "size", "hover", "pressed", "dialog", "filled"],
+  },
+  {
+    number: 43397,
+    title: "Tune button color and hover feedback",
+    author: "demo-engineer",
+    reviewers: [],
+    teams: ["langchain-ai/design"],
+    states: ["color", "hover", "pressed"],
+  },
+  {
+    number: 43398,
+    title: "Adjust project settings spacing",
+    author: "demo-engineer",
+    reviewers: [],
+    teams: ["langchain-ai/frontend"],
+    states: ["size"],
+    stale: true,
+  },
+  {
+    number: 43400,
+    title: "Review a protected preview",
+    author: "demo-engineer",
+    reviewers: ["demo-designer"],
+    teams: [],
+    blocked: true,
+    states: [],
+  },
+  {
+    number: 43401,
+    title: "Align trace search and action heights",
+    author: "demo-designer",
+    reviewers: [],
+    teams: [],
+    states: ["size", "color"],
+  },
+  {
+    number: 43399,
+    title: "Polish project settings",
+    author: "demo-engineer",
+    reviewers: ["demo-designer"],
+    teams: [],
+    states: [],
+    unreviewed: true,
+  },
+]
+
 export const checkpoints = [
   {
     id: "color",
@@ -157,7 +213,7 @@ export function snapshot(id, side) {
 }
 
 export function makeRun(number, metrics = {}, id = ids.run) {
-  const root = `/dashboard/api/reviews/synthetic/frontend-review/${number}/frontend-reviews/${id}/media`
+  const root = `/dashboard/api/reviews/langchain-ai/langchainplus/${number}/frontend-reviews/${id}/media`
   return {
     id,
     status: "complete",

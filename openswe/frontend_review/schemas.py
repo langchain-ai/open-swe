@@ -7,6 +7,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 from runtime_api.frontend_review import FrontendReviewArguments
 
+from openswe.github.pull_request_status import OpenPullRequest
+
 RunStatus = Literal["pending", "running", "complete", "blocked", "failed"]
 AuthMode = Literal["dummy", "none"]
 MediaType = Literal["image/png", "video/webm", "video/mp4"]
@@ -146,3 +148,16 @@ class FrontendReviewView(BaseModel):
 
 class FrontendReviewList(BaseModel):
     runs: list[FrontendReviewView]
+
+
+class FrontendReviewInboxItem(BaseModel):
+    pr: OpenPullRequest
+    run: FrontendReviewView
+    requested_reviewers: list[str]
+    requested_teams: list[str]
+
+
+class FrontendReviewInbox(BaseModel):
+    items: list[FrontendReviewInboxItem]
+    next_page: int | None
+    incomplete: bool

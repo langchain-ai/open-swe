@@ -1,3 +1,4 @@
+import type { OpenPullRequest } from "@/lib/api"
 import {
   dashboardApiUrl,
   dashboardForwardedHeaders,
@@ -74,6 +75,19 @@ export interface FrontendReviewRun {
   report: FrontendReport | null
 }
 
+export interface FrontendReviewInboxItem {
+  pr: OpenPullRequest
+  run: FrontendReviewRun
+  requested_reviewers: string[]
+  requested_teams: string[]
+}
+
+export interface FrontendReviewInbox {
+  items: FrontendReviewInboxItem[]
+  next_page: number | null
+  incomplete: boolean
+}
+
 export interface FrontendReviewInput {
   base_url: string
   head_url: string
@@ -116,6 +130,10 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const frontendReviewApi = {
+  inbox: (scope: "mine" | "review-requested", page: number) =>
+    request<FrontendReviewInbox>(
+      `/frontend-reviews/inbox?scope=${scope}&page=${page}`
+    ),
   list: (pr: PullRequestRef) =>
     request<{ runs: FrontendReviewRun[] }>(path(pr)),
   get: (pr: PullRequestRef, id: string) =>
