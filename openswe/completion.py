@@ -175,11 +175,14 @@ async def _post_failure_reply(
         if location is not None:
             trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
-            # A sandbox notice already says why the run failed.
             notice = SlackNotice(
                 _RUN_FAILED_NOTICE,
                 _failure_text(status, reason_code=reason_code),
-                quiet_after=frozenset({SANDBOX_UNREACHABLE_NOTICE}),
+                quiet_after=(
+                    frozenset({SANDBOX_UNREACHABLE_NOTICE})
+                    if reason_code == "sandbox_unreachable"
+                    else frozenset()
+                ),
             )
             return await post_slack_thread_reply(
                 location[0],
