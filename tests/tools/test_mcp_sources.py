@@ -200,3 +200,38 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     tool = (await runtime.load_mcp_tools(workspace, user))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+async def test_langsmith_tools_never_fall_back_to_a_default_workspace(monkeypatch):
+    workspace_id = "ebbaf2eb-769b-4505-aca2-d11de10372a4"
+    scoped = {"type": "object", "properties": {"workspace_id": {"type": "string"}}}
+    calls: list[dict] = []
+
+    async def discover(record, namespace):
+        return [
+            Tool(name="list_workspaces", input_schema={"type": "object"}),
+            Tool(name="query_runs", input_schema=scoped),
+        ]
+
+    async def call(transport, name, arguments):
+        calls.append(arguments)
+        return CallToolResult(
+            content=[TextContent(type="text", text="platform returned 403: forbidden")],
+            is_error=True,
+        )
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    fake_mcp_server(monkeypatch, call=call)
+    langsmith = record("langsmith", allowed_tools=["list_workspaces", "query_runs"])
+    tools = await runtime.load_mcp_tools(source(("workspace_mcps",), {"langsmith": langsmith}))
+    query = next(tool for tool in tools if tool.name == "mcp_langsmith_query_runs")
+    assert query.args_schema["required"] == ["workspace_id"]
+
+    for arguments in ({}, {"workspace_id": "LangChain Inc"}):
+        assert "was not called" in await query.ainvoke(arguments)
+    assert calls == []
+
+    denied = await query.ainvoke({"workspace_id": workspace_id})
+    assert denied.startswith("platform returned 403")
+    assert f"workspace `{workspace_id}`" in denied
+    assert calls == [{"workspace_id": workspace_id}]

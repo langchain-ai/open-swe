@@ -1,0 +1,3 @@
+`{{ tool }}` was not called: `workspace_id` must be the UUID of the LangSmith workspace that holds the resource; Open SWE never lets LangSmith fall back to a default workspace.
+Take it from the `/o/<workspace_id>/` segment of the resource's LangSmith URL, which is the workspace (tenant) ID, not the organization ID.
+Without a URL, call the LangSmith MCP's `list_workspaces` and use the workspace that holds the resource.

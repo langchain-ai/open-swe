@@ -23,6 +23,7 @@ from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
+from openswe.mcp.langsmith import WorkspaceScopedTool
 from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
@@ -237,10 +238,13 @@ def _wrap_tool(
     namespace: tuple[str, ...],
     sources: tuple[MCPSource, ...],
     provenance: MCPToolProvenance,
+    scoped: WorkspaceScopedTool | None = None,
 ) -> BaseTool:
     async def invoke(**arguments: Any) -> Any:
         is_error = True
         try:
+            if scoped is not None:
+                scoped.check(arguments)
             for bound_source in sources:
                 if bound_source.namespace == namespace and bound_source.authorize is not None:
                     await bound_source.authorize()
@@ -259,8 +263,15 @@ def _wrap_tool(
             fresh = await as_langchain_tool(definition, _client(record, namespace))
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
-            # Call the coroutine directly so remote arguments LangChain reserves pass through.
-            result = await asyncio.wait_for(fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS)
+            try:
+                # Call the coroutine directly so remote arguments LangChain reserves pass through.
+                result = await asyncio.wait_for(
+                    fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                )
+            except ToolException as error:
+                if scoped is None:
+                    raise
+                raise scoped.explain(error, arguments) from None
             is_error = False
             return result
         except ToolException:
@@ -277,7 +288,7 @@ def _wrap_tool(
         coroutine=invoke,
         name=_tool_name(name, definition.name),
         description=definition.description or definition.name,
-        args_schema=definition.input_schema,
+        args_schema=definition.input_schema if scoped is None else scoped.input_schema,
         response_format="content_and_artifact",
         handle_tool_error=True,
         metadata={"mcp_tool_name": definition.name, "mcp_provenance": provenance},
@@ -346,6 +357,7 @@ async def _load_tools(
                     scope=source.scope,
                     overridden_scopes=overridden_scopes,
                 ),
+                WorkspaceScopedTool.of(definition, definitions),
             )
             for definition in definitions
             if record.allows_tool(definition.name)
