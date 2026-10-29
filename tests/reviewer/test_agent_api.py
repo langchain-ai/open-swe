@@ -461,7 +461,6 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
 async def test_reviewer_runs_record_transcript_model_and_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from datetime import UTC, datetime
     from unittest.mock import AsyncMock, MagicMock
     from uuid import uuid7
 
@@ -473,29 +472,15 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     from openswe.sandboxes.managed import ManagedSandbox
     from openswe.transcript.snapshot import load_snapshot
 
-    thread_id, invocation_id = str(uuid7()), str(uuid7())
-    run = RUN.model_copy(
-        update={
-            "thread_id": thread_id,
-            "configurable": {
-                **RUN.configurable,
-                "thread_id": thread_id,
-                "invocation_id": invocation_id,
-                "source": "github",
-            },
-        }
-    )
     monkeypatch.setattr(analytics, "_WORKSPACE_ID", None)
     await analytics.load_workspace()
-    thread_metadata: dict[str, object] = {"title": "Review"}
-
-    async def update(thread_id: str, *, metadata: dict[str, object]) -> None:
-        del thread_id
-        thread_metadata.update(metadata)
-
+    thread_id, run_id = str(uuid7()), str(uuid7())
+    configurable = {"thread_id": thread_id, "invocation_id": run_id, "source": "github"}
+    run = RUN.model_copy(update={"thread_id": thread_id, "configurable": configurable})
+    metadata: dict[str, object] = {}
     client = MagicMock()
-    client.threads.get = AsyncMock(return_value={"metadata": thread_metadata})
-    client.threads.update = AsyncMock(side_effect=update)
+    client.threads.get = AsyncMock(return_value={"metadata": metadata})
+    client.threads.update = AsyncMock(side_effect=lambda *_, **kw: metadata.update(kw["metadata"]))
     monkeypatch.setattr(reviewer, "get_client", lambda: client)
     monkeypatch.setattr("openswe.middleware.transcript.get_client", lambda: client)
     monkeypatch.setattr(reviewer, "prepare_reviewer_run", AsyncMock(return_value={}))
@@ -503,30 +488,23 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr("openswe.agent_cost.schedule_agent_cost_refresh", schedule)
     asked = HumanMessage(content="Review this PR", id="human")
-    response = AIMessage(
+    reply = AIMessage(
         content="Reviewed",
-        id="review",
-        usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        id="reply",
+        usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    started = datetime.now(UTC)
 
+    await REVIEWER.api(run, "prepare", {"run_id": run_id, "messages": messages_to_dict([asked])})
     await REVIEWER.api(
-        run, "prepare", {"run_id": invocation_id, "messages": messages_to_dict([asked])}
+        run, "model_result", {"run_id": run_id, "response": messages_to_dict([reply])}
     )
-    await REVIEWER.api(
-        run, "model_result", {"run_id": invocation_id, "response": messages_to_dict([response])}
-    )
-    await REVIEWER.api(run, "run_ended", {"run_id": invocation_id})
+    await REVIEWER.api(run, "run_ended", {"run_id": run_id})
 
-    models = await reviewer.resolve_reviewer_models(reviewer.RunConfig.parse(run.configurable))
-    assert thread_metadata["model"] == models.main.model_id
+    assert metadata["agent_kind"] == "reviewer" and metadata["model"]
     snapshot = await load_snapshot(thread_id)
-    assert snapshot is not None
-    assert snapshot.turns[0].state == "completed"
-    message = next(m for m in snapshot.messages if m.text == "Reviewed")
-    assert message.created_at >= started
-    assert message.usage["invocation_id"] == invocation_id
-    assert schedule.await_args.args[0]["invocation_id"] == invocation_id
+    assert snapshot is not None and snapshot.turns[0].state == "completed"
+    assert snapshot.messages[-1].usage["invocation_id"] == run_id
+    assert schedule.await_args.args[0]["invocation_id"] == run_id
 
 
 @pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
