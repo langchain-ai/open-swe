@@ -34,31 +34,12 @@ export function FleetDesktop({
   const connected = connection.data?.[0]
   if (connected)
     return (
-      <div className="flex h-full min-h-0 flex-col">
-        <div className="flex items-center justify-between gap-space-3 border-b border-default px-space-6 py-space-2 text-sm text-secondary">
-          <span>{connected.name}</span>
-          <Button
-            size="sm"
-            color="secondary"
-            onClick={async () => {
-              await desktop.fleetDisconnect()
-              cache.removeQueries({ queryKey: ["fleet-threads"] })
-              cache.setQueryData(["fleet-workspaces"], [])
-              onSelect()
-            }}
-          >
-            Disconnect
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1">
-          <FleetChat
-            key={connected.id}
-            workspaceId={connected.id}
-            threadId={workspaceId === connected.id ? threadId : undefined}
-            onSelect={onSelect}
-          />
-        </div>
-      </div>
+      <FleetChat
+        key={connected.id}
+        workspaceId={connected.id}
+        threadId={workspaceId === connected.id ? threadId : undefined}
+        onSelect={onSelect}
+      />
     )
   return (
     <form

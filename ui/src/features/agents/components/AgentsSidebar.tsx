@@ -764,12 +764,21 @@ export function AgentsSidebar({
               size="md"
               placeholder="Select LangSmith workspace"
               value={fleetWorkspace}
-              options={(fleetWorkspaceQuery.data ?? []).map((workspace) => ({
-                value: workspace.id,
-                label: workspace.name,
-              }))}
+              options={[
+                ...(fleetWorkspaceQuery.data ?? []).map((workspace) => ({
+                  value: workspace.id,
+                  label: workspace.name,
+                })),
+                { value: "disconnect", label: "Disconnect LangSmith" },
+              ]}
               loading={fleetWorkspaceQuery.isPending}
-              onChange={(workspace) => {
+              onChange={async (workspace) => {
+                if (workspace === "disconnect") {
+                  await window.openSweDesktop?.fleetDisconnect()
+                  queryClient.removeQueries({ queryKey: ["fleet-threads"] })
+                  queryClient.setQueryData(["fleet-workspaces"], [])
+                  workspace = undefined
+                }
                 void navigate({ to: "/agents/chat", search: { workspace } })
               }}
               triggerClassName="w-full"
