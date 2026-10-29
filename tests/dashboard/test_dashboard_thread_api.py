@@ -817,7 +817,9 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
     turn_id = uuid7()
 
     class UndeliverableThreads(ThreadStoreOverClient):
-        async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
+        async def command(
+            self, thread_id: str, body: bytes, *, user_id: str | None = None
+        ) -> thread_proxy.CommandReply:
             if isinstance(refusal, Exception):
                 raise refusal
             return refusal

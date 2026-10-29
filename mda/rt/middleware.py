@@ -57,6 +57,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
@@ -558,6 +559,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             self._traces.get(self._backend.run).record_model(model.model_id)
         try:
             return await handler(request)
+        except GraphBubbleUp:
+            raise
         except Exception as exc:
             if planned.fallback is None or _tool_pairing_error(exc):
                 raise
@@ -699,8 +702,9 @@ async def reported(
     try:
         with subagent_of(tool_call_id), reporting(tool_call_id):
             result = await handler(request)
-    except asyncio.CancelledError:
-        # A stopped call stays open, as it does in-process.
+    except asyncio.CancelledError, GraphBubbleUp:
+        # A stopped call stays open, as it does in-process, and so does one paused for
+        # a connection the person has not granted: it runs again once they do.
         raise
     except Exception as exc:
         failure = ToolMessage(

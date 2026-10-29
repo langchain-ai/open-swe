@@ -2,13 +2,16 @@
 
 import json
 import re
-from typing import Any, Literal
+from collections.abc import Mapping
+from typing import Any, Final, Literal, Self
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from runtime_api.connections import ConnectionRef
 
 from openswe.encryption import decrypt_token, encrypt_token
+from openswe.prompts import prompt
 from openswe.utils.time import now_iso
 
 _BLOCKED_HEADERS = {
@@ -28,6 +31,23 @@ _SECRET_QUERY_SUFFIXES = (
     "password",
     "secret",
 )
+
+
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}")
+
+type MCPScope = Literal["instance", "workspace", "user", "managed"]
+
+# Whose credential a tier's server reads from its MDA connection: the deployment's for
+# the servers every run gets, the person's own for theirs.
+CONNECTION_OWNERS: Final[Mapping[MCPScope, Literal["agent", "user"]]] = {
+    "instance": "agent",
+    "workspace": "agent",
+    "user": "user",
+}
+
+
+def _is_header_name(name: str) -> bool:
+    return bool(_HEADER_NAME.fullmatch(name)) and name.lower() not in _BLOCKED_HEADERS
 
 
 def _is_secret_query_key(key: str) -> bool:
@@ -87,6 +107,12 @@ class MCPConnectionUpdate(BaseModel):
     headers: dict[str, str] | None = Field(default=None, repr=False)
     allowed_tools: list[str] = Field(default_factory=list)
     oauth: MCPOAuthUpdate | None = Field(default=None, repr=False)
+    # An MDA connection holding the server's credential: the MDA run reads it and connects
+    # to the server itself, so the backend keeps no headers or OAuth for it.
+    connection: ConnectionRef | None = None
+    # The header the connection's credential goes in as it is; None sends it as
+    # ``Authorization: Bearer <credential>``.
+    connection_header: str | None = None
 
     _url = field_validator("url")(_https_url)
 
@@ -100,8 +126,7 @@ class MCPConnectionUpdate(BaseModel):
         names: set[str] = set()
         for name, content in value.items():
             if (
-                not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}", name)
-                or name.lower() in _BLOCKED_HEADERS
+                not _is_header_name(name)
                 or name.lower() in names
                 or len(content) > 8192
                 or any(ord(char) < 32 or ord(char) > 126 for char in content)
@@ -117,8 +142,19 @@ class MCPConnectionUpdate(BaseModel):
             raise ValueError("Tool names must be non-empty and at most 128 characters")
         return list(dict.fromkeys(name.strip() for name in value))
 
+    @field_validator("connection")
+    @classmethod
+    def _connection(cls, value: ConnectionRef | None) -> ConnectionRef | None:
+        if value is not None and not value.for_mcp_server:
+            raise ValueError("Name an MDA connection made for MCP servers: open-swe-mcp-<server>")
+        return value
 
-type MCPScope = Literal["instance", "workspace", "user", "managed"]
+    @field_validator("connection_header")
+    @classmethod
+    def _connection_header(cls, value: str | None) -> str | None:
+        if value is not None and not _is_header_name(value):
+            raise ValueError("Invalid connection header name")
+        return value
 
 
 class MCPToolProvenance(BaseModel):
@@ -129,6 +165,10 @@ class MCPToolProvenance(BaseModel):
     connection_name: str
     scope: MCPScope
     overridden_scopes: list[MCPScope]
+
+    def note(self) -> str:
+        """What the description of each tool from this connection ends with, for the model."""
+        return prompt("tools/mcp-provenance", provenance=self.model_dump_json())
 
 
 class MCPToolDescription(BaseModel):
@@ -148,6 +188,8 @@ class MCPConnectionPublic(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     header_names: list[str] = Field(default_factory=list)
     oauth: MCPOAuth | None = None
+    connection: ConnectionRef | None = None
+    connection_header: str | None = None
     revision: str
     updated_at: str
 
@@ -155,6 +197,20 @@ class MCPConnectionPublic(BaseModel):
 class MCPConnection(MCPConnectionPublic):
     encrypted_headers: str = Field(default="", repr=False)
     encrypted_client_secret: str = Field(default="", repr=False)
+
+    @model_validator(mode="after")
+    def _one_credential(self) -> Self:
+        if self.connection is None:
+            if self.connection_header is not None:
+                raise ValueError("A connection header needs an MDA connection")
+        elif (
+            self.header_names
+            or self.oauth
+            or self.encrypted_headers
+            or self.encrypted_client_secret
+        ):
+            raise ValueError("An MCP server whose credential is an MDA connection keeps none")
+        return self
 
     def public(self) -> dict[str, Any]:
         return self.model_dump(exclude={"encrypted_headers", "encrypted_client_secret"})
@@ -175,12 +231,55 @@ class MCPConnection(MCPConnectionPublic):
         return json.loads(decrypted)
 
 
+def _connection_backed(
+    update: MCPConnectionUpdate, connection: ConnectionRef, header: str | None, scope: MCPScope
+) -> MCPConnection:
+    """A draft whose credential is an MDA connection, keeping none the previous record saved."""
+    if update.headers or update.oauth:
+        raise ValueError("Remove the headers and OAuth: the MDA connection holds the credential")
+    owner = CONNECTION_OWNERS.get(scope)
+    if connection.owner != owner:
+        raise ValueError(
+            "A personal MCP server reads its owner's own MDA connection (owner user)"
+            if owner == "user"
+            else "A shared MCP server reads the deployment's MDA connection (owner agent)"
+        )
+    return MCPConnection(
+        **update.model_dump(exclude={"headers", "oauth", "connection", "connection_header"}),
+        connection=connection,
+        connection_header=header,
+        revision=uuid4().hex,
+        updated_at=now_iso(),
+    )
+
+
 async def prepare_connection(
-    update: MCPConnectionUpdate, previous: MCPConnection | None = None
+    update: MCPConnectionUpdate, previous: MCPConnection | None = None, *, scope: MCPScope
 ) -> MCPConnection:
     """Resolve a draft's credentials using only the previous record in the same scope."""
     if previous and previous.name != update.name:
         raise ValueError("Connection name cannot change while reusing saved credentials")
+    fields = update.model_fields_set
+    if (
+        previous
+        and previous.connection
+        and "connection" not in fields
+        and not update.headers
+        and update.oauth is None
+    ):
+        # An update that names no credential keeps the connection, as one omitting OAuth keeps it.
+        if previous.url != update.url:
+            raise ValueError("Name the MDA connection again when changing the server URL")
+        header = (
+            update.connection_header
+            if "connection_header" in fields
+            else previous.connection_header
+        )
+        return _connection_backed(update, previous.connection, header, scope)
+    if update.connection is not None:
+        return _connection_backed(update, update.connection, update.connection_header, scope)
+    if update.connection_header is not None:
+        raise ValueError("Name the MDA connection whose credential the header carries")
     if previous and previous.url != update.url and previous.header_names and update.headers is None:
         raise ValueError("Replace or clear authentication headers when changing the server URL")
     encrypted = previous.encrypted_headers if previous else ""

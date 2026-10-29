@@ -80,6 +80,7 @@ from managed_deepagents._channels.linear_types import (
     LinearSessionPromptedEvent,
     LinearTeam,
 )
+from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._log import logger
 
@@ -87,6 +88,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.endpoint import EventEndpoint
     from managed_deepagents._channels.http.types import (
         HttpChannelInboundMessage,
+        HttpChannelMessageResult,
         HttpChannelParseResult,
         HttpChannelPostInput,
         HttpChannelRequest,
@@ -95,6 +97,7 @@ if TYPE_CHECKING:
         HttpPostedMessage,
         JsonValue,
     )
+    from managed_deepagents._channels.resolve_user import ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.types import ChannelReply
 
@@ -108,6 +111,7 @@ def linear_channel(
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> HttpChannel:
     """Options for ``channels.linear(...)``: the app's scope, event handlers and sessions.
 
@@ -211,6 +215,7 @@ def linear_channel(
     channel.paused_notice = _notify_paused
     # Deploy provides the app's token at this name.
     channel.agent_connections = [LINEAR_TOKEN_SLUG]
+    channel.resolve_user = checked_resolve_user("channels.linear", resolve_user)
     if app is not None and "icon" in app:
         # Served at /channels/{name}/icon; deploy points the app's icon at it.
         channel.icon = validate_channel_icon_path(app["icon"], "Linear app.icon")
@@ -351,12 +356,15 @@ async def _parse(
         }
     # What the run starts with, or how the event answers an interrupt, is
     # decided once MDA knows whether the thread waits on one.
-    return {
+    result: HttpChannelMessageResult = {
         "type": "message",
         "message": message,
         "raw_event": snapshot,
         "response": response,
     }
+    if event.actor is not None:
+        result["actor"] = event.actor
+    return result
 
 
 def _by_bot(
@@ -604,13 +612,17 @@ async def _handler_input(
         return outcome.input
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
-    # raised failed; one that returned nothing declined.
+    # raised failed; one that returned nothing declined, and an endpoint may
+    # say why.
     if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
             if outcome.type == "failed"
-            else {"type": "response", "body": "I'm not set up to work on this request."},
+            else {
+                "type": "response",
+                "body": outcome.decline or "I'm not set up to work on this request.",
+            },
         )
     return None
 

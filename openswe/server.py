@@ -32,6 +32,7 @@ from runtime_api.catalog import (
     InboxSpec,
     LoopRules,
     ModelSpec,
+    McpServerSpec,
     ReplyRules,
     RoutingRules,
 )
@@ -61,6 +62,7 @@ from langsmith.sandbox import SandboxRetryableConnectionError
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.agent_api.preparation import AgentPreparation
+from openswe.agent_api.connections import acting_user
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
@@ -913,6 +915,39 @@ async def _mcp_tools_for(
         if managed_gateway:
             sources.append(managed_mcp_source(credential_login, managed_gateway))
     return await load_mcp_tools(*sources)
+
+
+def _owned_mcp_servers(
+    config: RunnableConfig, credential_login: str | None, servers: Sequence[McpServerSpec]
+) -> list[McpServerSpec]:
+    """``servers`` without the personal ones, unless the MDA run acts as their owner.
+
+    MDA reads a personal server's connection as the person the run acts as there
+    (``acting_user``), whom the run is also attributed to. A run that acts as no one, such
+    as a wakeup or a background task's completion, has no person's principal, whoever it
+    is attributed to: MDA starts it as a service principal, MDA's channel one
+    (``mda:channel``) on a channel's thread and the backend key's own on any other, and
+    MDA refuses user connections to a service principal, so a grant there can be neither
+    made nor read.
+    """
+    metadata = config.get("metadata") or {}
+    attributed = metadata.get("ls_attribution_identifier")
+    for_owner = (
+        acting_user(metadata) is not None
+        and isinstance(attributed, str)
+        and credential_login is not None
+        and attributed.lower() == credential_login.lower()
+    )
+    owned: list[McpServerSpec] = []
+    for server in servers:
+        if server.connection.owner == "user" and not for_owner:
+            logger.warning(
+                "Leaving out a personal MCP server of a run that does not act for its owner",
+                extra={"mcp_name": server.name},
+            )
+            continue
+        owned.append(server)
+    return owned
 
 
 async def _run_mcp_tools(
@@ -2281,6 +2316,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     ]
     surface.dynamic = dynamic_tool_middleware
+    surface.mcp_servers = _owned_mcp_servers(
+        config,
+        credential_login,
+        mcp_tools.runtime_servers if isinstance(mcp_tools, MCPTools) else [],
+    )
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
     surface.backend_paths = tuple(

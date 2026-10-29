@@ -188,6 +188,64 @@ async def test_interrupted_reviewer_leaves_one_status_comment(
 
 
 @pytest.mark.asyncio
+async def test_a_github_channel_run_still_reports_its_failure_on_the_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "github",
+        "repo": {"owner": "acme", "name": "api"},
+        "source_context": {"github_issue": {"id": "101", "number": 7, "title": "Bug"}},
+    }
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    comment = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_github_comment", comment)
+
+    # MDA's GitHub channel posts no failure notice, so Open SWE's reply stays.
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error", "metadata": {"channel": "github"}}
+    )
+
+    assert result["status"] == "ok"
+    repo, number, _text = comment.await_args.args
+    assert (repo, number) == ({"owner": "acme", "name": "api"}, 7)
+
+
+@pytest.mark.asyncio
+async def test_a_channel_run_leaves_its_failure_to_the_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "linear",
+        "source_context": {"linear_issue": {"id": "issue-1", "title": "Bug"}},
+    }
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_linear_notification", notify)
+    task_messages, wakes = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(completion.TaskMessage, "deliver_to", task_messages)
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", wakes)
+
+    # MDA's Linear channel started this run; it reports the failure in the session.
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error", "metadata": {"channel": "linear"}}
+    )
+    assert result == {"status": "ignored", "reason": "the channel reports the failure"}
+    notify.assert_not_awaited()
+    # What arrived for the thread during the run doesn't wait for some later run.
+    task_messages.assert_awaited_once_with("t1")
+    wakes.assert_awaited_once_with("t1", "enqueue")
+
+    # A run the backend started on the same thread still gets its notice.
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-2", "status": "error"}
+    )
+    notify.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status", "metadata", "worker", "cancelled", "picks_up"),
     [
@@ -196,6 +254,8 @@ async def test_interrupted_reviewer_leaves_one_status_comment(
         ("success", {"kind": "follow_up_pickup"}, False, False, False),
         ("success", {}, True, False, True),
         ("success", {}, True, True, False),
+        # An MDA channel starts every run on its threads; the backend can't start one there.
+        ("success", {"channel": "linear"}, False, False, False),
     ],
 )
 async def test_leftover_follow_ups_get_one_pickup_run(

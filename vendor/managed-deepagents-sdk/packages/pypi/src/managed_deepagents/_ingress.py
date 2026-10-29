@@ -11,6 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Config, Context
 
 from managed_deepagents._identity_auth import (
+    AGENT_AUTH_PRINCIPAL_HEADER,
     HANDOFF_SECRET_ENV,
     HANDOFF_SECRET_HEADER,
     INGRESS_SECRET_ENV,
@@ -118,6 +119,7 @@ def _create_ingress_loopback_client(
     user_id: str,
     source_thread_key: str,
     source_provider: str = "slack",
+    principal_id: str | None = None,
 ) -> LangGraphClient:
     api_url = resolve_loopback_api_url()
     api_key = resolve_loopback_api_key()
@@ -130,6 +132,8 @@ def _create_ingress_loopback_client(
         SOURCE_PROVIDER_HEADER: source_provider,
         SOURCE_THREAD_HEADER: source_thread_key,
     }
+    if principal_id:
+        headers[AGENT_AUTH_PRINCIPAL_HEADER] = principal_id
     if handoff_secret:
         headers[HANDOFF_SECRET_HEADER] = handoff_secret
     elif not server_api_key and ingress_secret:
