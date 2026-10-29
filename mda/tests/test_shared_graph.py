@@ -49,7 +49,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
 from rt.backend import Run, current_run
-from rt.managed_sandbox import definition
+from rt.managed_sandbox import definition, opened_sandbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
@@ -445,6 +445,48 @@ def test_persisted_sandbox_binding_overrides_another_replicas_canonical_cache(
         assert mda_runtime._resolve_managed_sandbox(sandbox, _thread("thread-1")) is resolved
     assert all(call.args == (bound_name,) for call in client.get_sandbox.call_args_list)
     client.create_sandbox.assert_not_called()
+    client.update_sandbox.assert_not_called()
+    client.stop_sandbox.assert_not_called()
+    client.delete_sandbox.assert_not_called()
+
+
+@pytest.mark.parametrize("reappeared", [False, True])
+async def test_deleted_bound_workspace_recovers_under_its_name_and_reports_loss(
+    monkeypatch: pytest.MonkeyPatch, reappeared: bool
+) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    name = "original-legacy-suffix"
+    sandbox = definition(spec.create, None, name)
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
+    client = MagicMock()
+    client.get_sandbox.side_effect = (
+        [ResourceNotFoundError("deleted"), MagicMock(status="running")]
+        if reappeared
+        else ResourceNotFoundError("deleted")
+    )
+    fresh = MagicMock(status="running")
+    fresh.name = name
+    fresh.id = "fresh-id"
+    client.create_sandbox.return_value = fresh
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    resolved.id = name
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
+
+    opened = await opened_sandbox(MagicMock(backend=backend))
+
+    if reappeared:
+        assert opened.error is not None and "refusing automatic replacement" in opened.error
+        assert opened.workspace_lost is False
+        client.create_sandbox.assert_not_called()
+    else:
+        assert opened.sandbox_id == name
+        assert opened.workspace_lost is True
+        assert opened.error is None
+        assert client.create_sandbox.call_args.kwargs["name"] == name
     client.update_sandbox.assert_not_called()
     client.stop_sandbox.assert_not_called()
     client.delete_sandbox.assert_not_called()

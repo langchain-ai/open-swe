@@ -38,7 +38,12 @@ from langsmith.sandbox import (
     SandboxNotReadyError,
 )
 from managed_deepagents import define_sandbox
-from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
+from managed_deepagents.sandbox import (
+    BoundSandboxMissingError,
+    SandboxDefinition,
+    open_sandbox,
+    replace_sandbox,
+)
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import SandboxCreate
 from runtime_api.endpoint import call
@@ -117,6 +122,7 @@ class OpenedSandbox:
 
     sandbox_id: str | None = None
     error: str | None = None
+    workspace_lost: bool = False
 
 
 def _transient(exc: BaseException) -> bool:
@@ -163,6 +169,12 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
             return OpenedSandbox(sandbox_id=await open_sandbox(backend))
+        except BoundSandboxMissingError:
+            try:
+                await replace_sandbox(backend, missing_only=True)
+                return OpenedSandbox(sandbox_id=await open_sandbox(backend), workspace_lost=True)
+            except Exception as exc:
+                return _not_opened(exc)
         except Exception as exc:
             delay = backoff * random.uniform(0.8, 1.2)
             if not _transient(exc) or time.monotonic() + delay > deadline:

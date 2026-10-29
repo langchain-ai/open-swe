@@ -2165,7 +2165,9 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         """Adopt or create this run's box now, as its first use would, and return its name."""
         return (await self._abackend()).id
 
-    async def areplace(self, sandbox: SandboxDefinition | None = None) -> SandboxReplacement:
+    async def areplace(
+        self, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
+    ) -> SandboxReplacement:
         """Replace this run's box with a fresh one under its name, from ``sandbox``'s options."""
         source = self._source
         current = self._sandbox()
@@ -2177,6 +2179,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             source.connectors,
             source.identity,
             source.selection_fingerprint,
+            missing_only=missing_only,
         )
         source.proxy_config_sync.invalidate(replacement.new_name)
         self._keep(backend)
@@ -2522,6 +2525,8 @@ def _replace_managed_sandbox(
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
     selection_fingerprint: str | None = None,
+    *,
+    missing_only: bool = False,
 ) -> tuple[SandboxBackendProtocol, SandboxReplacement]:
     """Create a fresh box under the thread's box name; keep the old one, stopped and renamed.
 
@@ -2545,16 +2550,18 @@ def _replace_managed_sandbox(
             raise RuntimeError("This run's sandbox has no name to replace it under")
         client = _sandbox_client_for(replacement)
         existing = _fetch_sandbox(client, name, preserve_existing=True)
-        if existing is None:
-            raise RuntimeError(f"This run's sandbox {name!r} no longer exists")
-        suffix = f"-old-{secrets.token_hex(2)}"
-        retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
-        _await_if_needed(client.update_sandbox(name, new_name=retired))
+        if missing_only and existing is not None:
+            raise RuntimeError(f"Sandbox {name!r} exists; refusing automatic replacement")
+        retired = name
         stop_error: str | None = None
-        try:
-            _await_if_needed(client.stop_sandbox(retired))
-        except Exception as error:  # noqa: BLE001 - the fresh box stands either way; report it
-            stop_error = str(error) or type(error).__name__
+        if existing is not None:
+            suffix = f"-old-{secrets.token_hex(2)}"
+            retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
+            _await_if_needed(client.update_sandbox(name, new_name=retired))
+            try:
+                _await_if_needed(client.stop_sandbox(retired))
+            except Exception as error:  # noqa: BLE001 - the fresh box stands either way; report it
+                stop_error = str(error) or type(error).__name__
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             replacement,
             config=config,
@@ -3121,6 +3128,7 @@ def _create_langsmith_sandbox(
 ) -> tuple[SandboxBackendProtocol, str | None, str | None]:
     """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it."""
     from managed_deepagents.sandbox import (  # noqa: PLC0415
+        BoundSandboxMissingError,
         declared_create_fields,
         is_per_thread,
         owning_thread,
@@ -3152,7 +3160,9 @@ def _create_langsmith_sandbox(
     elif bound_name := _string_option(sandbox.options.get("_openswe_sandbox_id")):
         bound = _adopt_sandbox(client, bound_name, preserve_existing=True)
         if bound is None:
-            raise RuntimeError(f"The thread's bound sandbox {bound_name!r} no longer exists")
+            raise BoundSandboxMissingError(
+                f"The thread's bound sandbox {bound_name!r} no longer exists"
+            )
         if _sandbox_name_blocked(bound_name):
             raise RuntimeError(f"The thread's bound sandbox {bound_name!r} was invalidated")
         langsmith_sandbox, adopted = bound, True
