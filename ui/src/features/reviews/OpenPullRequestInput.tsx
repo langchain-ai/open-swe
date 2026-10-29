@@ -48,7 +48,7 @@ export function OpenPullRequestInput({
     >
       <div className="flex items-start gap-space-2">
         <Input
-          size="sm"
+          size={frontend ? "md" : "sm"}
           className="min-w-0 flex-1"
           debounceMs={0}
           aria-label={
@@ -77,7 +77,7 @@ export function OpenPullRequestInput({
           }}
         />
         {frontend && (
-          <Button size="sm" type="submit">
+          <Button size="md" type="submit">
             Open PR
           </Button>
         )}

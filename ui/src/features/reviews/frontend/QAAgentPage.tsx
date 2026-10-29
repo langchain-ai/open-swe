@@ -40,15 +40,10 @@ export function QAAgentPage() {
               states for PRs requested from you or your teams.
             </p>
           </div>
-          <div className="min-w-0 pt-space-1">
+          <div className="min-w-0">
             <OpenPullRequestInput frontend />
           </div>
         </header>
-
-        <Card className="p-space-3 text-xs text-secondary">
-          Explore saved visual reviews. Capturing new previews is not available
-          yet.
-        </Card>
 
         <GroupedTabs<Scope>
           size="sm"

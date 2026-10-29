@@ -163,11 +163,6 @@ function scopedPRs(scope) {
       : pr.reviewers.includes("demo-designer") || pr.teams.length > 0
   )
 }
-const banner = `<style>
-#design-qa-demo {height:44px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--bg-brand-subtle);color:var(--text-primary);border-bottom:1px solid var(--border-default);font:12px system-ui}
-#design-qa-demo strong{white-space:nowrap}#design-qa-demo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#design-qa-demo a{margin-left:auto;color:var(--text-primary);white-space:nowrap}
-.h-svh{height:calc(100svh - 44px)}.min-h-svh{min-height:calc(100svh - 44px)}
-</style><aside id="design-qa-demo" aria-label="Demo mode"><strong>DEMO</strong><span>Scripted PRs and team requests. Try PR 43399. Pixel comparisons are real. No login needed.</span><a href="/__demo/reset">Reset demo</a></aside>`
 
 const server = http.createServer((req, res) => {
   if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host))
@@ -434,10 +429,7 @@ const server = http.createServer((req, res) => {
     statSync(candidate).isFile()
   )
     return file(res, candidate)
-  const shell = readFileSync(resolve(root, "_shell.html"), "utf8").replace(
-    /<body([^>]*)>/,
-    `<body$1>${banner}`
-  )
+  const shell = readFileSync(resolve(root, "_shell.html"), "utf8")
   res.writeHead(200, {
     "Content-Type": "text/html",
     "Cache-Control": "no-store",

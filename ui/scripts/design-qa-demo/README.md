@@ -20,13 +20,13 @@ Open <http://127.0.0.1:4189/agents/qa>. For another port, run `pnpm --dir ui dem
 5. Expand **Interaction states**. Inspect **Hover**, **Pressed**, **Open dialog**, and **Filled input**. The hover example loses text contrast; the candidate dialog extends below the viewport. These are authored state examples, not an agent navigating a preview.
 6. Choose **Ask about this change**. The real chat composer opens with the selected PNGs and replay steps. Edit/remove attachments. Sending deliberately returns a demo-only error: no model is connected and nothing is transmitted elsewhere.
 7. Enter **43399** (or **#43399**) in the lookup and choose **Open PR** to open **Polish project settings**. Numbers default to `langchain-ai/langchainplus`; a full `owner/repo#number` reference or GitHub PR URL can target another repository in the real app. This demo serves only fictional PRs 43396–43401, never GitHub. Start a **New Design QA review**, enter syntactically valid preview URLs, and submit. The server simulates queued → capturing → AI reviewing → ready in about four seconds. The URLs and auth selection do not cause a login or browser request.
-8. Return to the inbox: the new scripted review now appears because it is requested from you. **Reset demo** restores the initial cards, including the protected-preview blocker. State is memory-only and also resets on restart.
+8. Return to the inbox: the new scripted review now appears because it is requested from you. Visiting `/__demo/reset` restores the initial cards, including the protected-preview blocker. State is memory-only and also resets on restart.
 
 ## Real versus scripted
 
 **Real:** the React interface, Macaw components/tokens, pixel calculation, sensitivity/opacity controls, crops, synchronized zoom/pan, local masks, keyboard shortcuts, evidence selection, and chat attachment preparation.
 
-**Scripted:** PR numbers (including LangChainPlus references), authors, review requests, team membership, PRs, review states/timings, recap prose, annotations, replay-step descriptions, clipping warnings, and image content. There is no live AI assessment, deployment/SHA verification, autonomous interaction, video recording, or real GitHub activity. The persistent banner and recap label this explicitly. Blocked captures do not count as reviewed coverage.
+**Scripted:** PR numbers (including LangChainPlus references), authors, review requests, team membership, PRs, review states/timings, recap prose, annotations, replay-step descriptions, clipping warnings, and image content. There is no live AI assessment, deployment/SHA verification, autonomous interaction, video recording, or real GitHub activity. The recap labels its authored findings; this README records the scripted behavior. Blocked captures do not count as reviewed coverage.
 
 `fixtures.mjs` contains synthetic SVG sources and report metadata. `assets/` contains 12 rasterized PNGs plus metrics computed with the application's `comparePixels` at threshold 0. Images depict a fictional workspace and contain no captured product/customer data. The development-only source gallery is `/__demo/fixtures`. To regenerate PNGs, rasterize `snapshot(id, side)` using Sharp or another SVG renderer, then recompute `metrics.json` with `comparePixels`. A rasterizer is not needed to run the demo. Missing assets fail startup so the evidence cannot silently change.
 
@@ -34,6 +34,6 @@ Exact mode exposes any different pixel, including antialiasing and unstable data
 
 ## Remove the demo
 
-Delete `ui/scripts/design-qa-demo/`, remove `demo:design-qa` from `ui/package.json`, and remove the local-demo paragraph in `docs/reference/frontend-reviewer.md`. No production UI/backend code imports this folder. The banner, mock session, fake activity, and reset link exist only in this server. There is no feature flag, schema field, migration, or authentication bypass to remove.
+Delete `ui/scripts/design-qa-demo/`, remove `demo:design-qa` from `ui/package.json`, and remove the local-demo paragraph in `docs/reference/frontend-reviewer.md`. No production UI/backend code imports this folder. The mock session, fake activity, and reset endpoint exist only in this server. There is no feature flag, schema field, migration, or authentication bypass to remove.
 
 Keep **AI Recap**, its evidence links, full-width comparisons, and collapsed advanced controls: they work with normal saved reports and contain no scripted responses.
