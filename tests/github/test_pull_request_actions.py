@@ -243,6 +243,19 @@ async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutat
     assert request.await_args_list[1].kwargs["json"]["variables"] == {"pullRequestId": "PR_node_7"}
 
 
+@pytest.mark.parametrize("draft", [True, False])
+async def test_a_closed_pull_request_cannot_be_marked_ready(github, draft):
+    request = github(
+        AsyncMock(
+            return_value=response({"node_id": "PR_node_7", "state": "closed", "draft": draft})
+        )
+    )
+    with pytest.raises(HTTPException, match="closed and cannot be marked ready") as error:
+        await actions.act_on_pull_request(_pull(7), actions.MarkReadyAction(action="mark-ready"))
+    assert error.value.status_code == 409
+    assert request.await_count == 1
+
+
 async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):
     request = github(AsyncMock(return_value=response({"message": "Not Found"}, 404)))
     with pytest.raises(HTTPException, match="Not Found") as error:
