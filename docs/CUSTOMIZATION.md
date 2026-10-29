@@ -126,8 +126,7 @@ surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_ga
 ### Auto model routing with Jev
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
-When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe.
-Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
+A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); this requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
 Routing is independent of the provider-proxy gateway toggle below.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
@@ -148,7 +147,7 @@ It remains selected on follow-ups; explicit UI/API model choices take precedence
 A clearly unavailable model or failure to persist the selection stops the run.
 No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
 
-Run the live intent cases from the repository root with an activated Python environment and configured TypeSafe or gateway credentials:
+Run the live intent cases from the repository root with an activated Python environment and configured gateway credentials:
 
 ```bash
 LANGSMITH_TRACING=false python -m evals.model_request

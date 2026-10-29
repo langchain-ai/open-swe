@@ -1259,9 +1259,9 @@ class RemoteGraph:
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        tools = await session.tool_set().keep()
+        tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
         settings = session.settings().model_copy(update={"tools": tools})
-        return RunStart(catalog=await session.plan(), settings=settings)
+        return RunStart(catalog=catalog, settings=settings)
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
