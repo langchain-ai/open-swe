@@ -91,18 +91,18 @@ class NativeQueueRuntime:
         revision = config.workflow_policy_revision if config.sync_workflow_policy else None
         workflow_digest = config.workflow_digest if config.sync_workflow_policy else None
         trust = config.native_trust
-        previous = await queue.native_validation_work(lease)
-        if (
-            previous is not None
-            and previous.attempt.state == "succeeded"
-            and snapshot.main_sha != previous.batch.base_sha
-        ):
+        history = await queue.native_validation_history(lease)
+        previous = history[0] if history else None
+        for work in history:
             if (
-                await repo.merge_base(previous.request.candidate_sha, snapshot.main_sha)
-                == previous.request.candidate_sha
+                work.attempt.state == "succeeded"
+                and snapshot.main_sha != work.request.workflow_sha
+                and await repo.merge_base(work.request.candidate_sha, snapshot.main_sha)
+                == work.request.candidate_sha
             ):
-                await queue.record_native_landing(previous, lease)
+                await queue.record_native_landing(work, lease)
                 previous = None
+                break
         policy = (
             QueuePolicy.model_validate(previous.batch.policy["policy"])
             if previous is not None and previous.batch.policy.get("trust") == trust

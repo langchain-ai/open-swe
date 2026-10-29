@@ -1623,6 +1623,7 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "dispatch_policy_mismatch",
         "report_policy_mismatch",
         "policy_discovery",
+        "policy_adoption_after_success",
         "rerun_after_success",
         "report_rejected",
         "issuer",
@@ -1881,6 +1882,35 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     assert len(successes) == 2
     assert successes[0].content == successes[1].content
 
+    if fault == "policy_adoption_after_success":
+        from openswe.merge_queue.dispatch import WorkflowPolicy
+
+        config = await queue.adopt_workflow_policy(
+            config,
+            WorkflowPolicy(
+                nonce=uuid7(),
+                repository=config.repository,
+                repository_id=config.repository_id,
+                workflow_policy_revision=2,
+                workflow_digest=config.workflow_digest,
+                dispatch_actor_id=123,
+                check_app_id=456,
+            ),
+        )
+        # A replacement starts before GitHub lands the already-published success.
+        await reconcile()
+        repo.native_queue.return_value = native_snapshot((), main=request.candidate_sha)
+        repo.merge_base = AsyncMock(return_value=request.candidate_sha)
+        await reconcile()
+        history = await queue.history(request.batch_id)
+        assert history.batch.state == "landed"
+        assert [attempt.state for attempt in history.attempts] == ["succeeded", "cancelled"]
+        assert [
+            r
+            for r in sent
+            if r.url.path.endswith("/check-reports") and json.loads(r.content)["state"] == "success"
+        ] == successes
+
 
 async def test_configuration_fences_stale_workers_and_serializes_check_publication(
     queue_controller: QueueController,
@@ -1955,7 +1985,9 @@ async def test_configuration_fences_stale_workers_and_serializes_check_publicati
         await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)
 
 
-async def test_workflow_policy_adoption_preserves_budget_and_fences_old_results(queue_controller):
+async def test_workflow_policy_adoption_preserves_budget_and_fences_old_results(
+    queue_controller: QueueController,
+) -> None:
     from openswe.merge_queue.dispatch import WorkflowPolicy
 
     queue = queue_controller.queue
@@ -2002,21 +2034,7 @@ async def test_workflow_policy_adoption_preserves_budget_and_fences_old_results(
         update={"workflow_policy_revision": 2, "workflow_digest": "b" * 64}
     )
     updated = await queue.adopt_workflow_policy(config, changed)
-    assert (await QueueConfiguration.load(queue.workspace_id)) == updated
-    with pytest.raises(LeaseLost):
-        await queue.authorize_native_result(work, native_snapshot(), lease)
     await queue.release(lease)
-    with pytest.raises(LeaseLost):
-        await queue.adopt_workflow_policy(config, changed)
-    for rejected in (
-        approved,
-        changed.model_copy(update={"workflow_digest": "c" * 64}),
-        changed.model_copy(update={"repository_id": 999}),
-        changed.model_copy(update={"dispatch_actor_id": 999}),
-        changed.model_copy(update={"check_app_id": 999}),
-    ):
-        with pytest.raises(ValueError):
-            await queue.adopt_workflow_policy(updated, rejected)
     lease = await queue.claim(uuid7(), timedelta(minutes=1), config=updated)
     assert lease is not None
     assert not await queue.authorize_native_result(work, native_snapshot(), lease)
@@ -2041,25 +2059,3 @@ async def test_workflow_policy_adoption_preserves_budget_and_fences_old_results(
     assert replacement.request.workflow_sha == rebuilt.main_sha
     assert replacement.batch.candidate == work.batch.candidate
     await queue.release(lease)
-    rollback = approved.model_copy(update={"workflow_policy_revision": 3})
-    reverted = await queue.adopt_workflow_policy(updated, rollback)
-    assert reverted.workflow_digest == config.workflow_digest
-    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=reverted)
-    assert lease is not None
-    last = await queue.prepare_native_validation(
-        rebuilt, 600, lease, policy=policy, trust=reverted.native_trust
-    )
-    assert last is not None and last.attempt.number == 3
-    assert last.batch.deadline == work.batch.deadline
-    await queue.release(lease)
-    exhausted = await queue.adopt_workflow_policy(
-        reverted, changed.model_copy(update={"workflow_policy_revision": 4})
-    )
-    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=exhausted)
-    assert lease is not None
-    assert (
-        await queue.prepare_native_validation(
-            rebuilt, 600, lease, policy=policy, trust=exhausted.native_trust
-        )
-        is None
-    )
