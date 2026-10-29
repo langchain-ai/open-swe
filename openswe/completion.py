@@ -13,6 +13,7 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 import hmac
 import logging
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -169,11 +170,36 @@ async def _post_failure_reply(
         location = ctx.slack_location
         if location is not None:
             trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
+            from openswe.slack.retry import SlackRetry
+
             slack_text = _failure_text(status, trace_url, reason_code)
+            blocks = None
+            slack_thread = ctx.slack_thread
+            if (
+                slack_thread is not None
+                and not slack_thread.triggering_bot_id
+                and reason_code not in {"context_too_long", "model_unavailable"}
+            ):
+                retry_text = warning(
+                    f"Open SWE wasn't able to finish that — {_failure_reason(status, reason_code)}. "
+                    "Click Retry to pick this back up."
+                )
+                if trace_url:
+                    retry_text += f" View the error in <{trace_url}|LangSmith>."
+                blocks = SlackRetry(
+                    channel_id=location[0],
+                    thread_ts=slack_thread.thread_ts,
+                    user_id=slack_thread.triggering_user_id,
+                    reply_thread_ts=slack_thread.reply_thread_ts,
+                    nonce=invocation_id or str(uuid.uuid7()),
+                ).blocks(retry_text)
+                if blocks is not None:
+                    slack_text = retry_text
             return await post_slack_thread_reply(
                 location[0],
                 location[1],
                 slack_text,
+                blocks=blocks,
                 agent_thread_id=thread_id,
             )
         return False

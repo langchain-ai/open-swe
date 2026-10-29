@@ -50,4 +50,8 @@ class SlackRequest(BaseModel):
             thread_ts=self.thread_ts,
             event_id=self.event_id,
             agent_thread_id=self.thread_id,
+            user_id=self.user_id,
+            message_ts=self.original_message_ts
+            or ("" if self.event_id.startswith("slack-retry:") else self.event_ts),
+            reply_thread_ts=self.reply_thread_ts,
         )
