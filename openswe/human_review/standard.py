@@ -58,6 +58,7 @@ from openswe.human_review.picking import (
     Wait,
     choose_reviewer,
 )
+from openswe.human_review.readiness import offer_readiness
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -425,10 +426,30 @@ async def _request_review(
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers:
+        readiness_note = ""
+        if (
+            "it is a draft" in blockers
+            and "it is closed" not in blockers
+            and "it is already merged" not in blockers
+        ):
+            try:
+                readiness_note = await offer_readiness(pr_ref, pull, origin)
+            except Exception:
+                logger.warning(
+                    "Could not offer draft readiness in Slack",
+                    extra={"pr_url": pr_ref.url},
+                    exc_info=True,
+                )
+                readiness_note = (
+                    "Could not confirm delivery of the author-only Mark ready button. "
+                    "Ask the author to use Ready for review on GitHub."
+                )
         return _failure(
             f"{pr_ref.url} cannot be put up for review: "
             + "; ".join(blockers)
             + ". "
+            + readiness_note
+            + " "
             + prompt("tools/human-review-blocked")
         )
 
