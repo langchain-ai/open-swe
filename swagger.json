@@ -5644,6 +5644,11 @@
             "default": false,
             "title": "Summary Updated",
             "type": "boolean"
+          },
+          "supplementary_refusal": {
+            "default": "",
+            "title": "Supplementary Refusal",
+            "type": "string"
           }
         },
         "required": [
