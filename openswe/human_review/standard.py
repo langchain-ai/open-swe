@@ -47,7 +47,6 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
 from openswe.human_review.deadlines import schedule as _schedule
-from openswe.human_review.design import DesignReview
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
@@ -61,6 +60,13 @@ from openswe.human_review.picking import (
     choose_reviewer,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.supplementary import (
+    STEP_PREFIX as SUPPLEMENTARY_STEP,
+)
+from openswe.human_review.supplementary import (
+    SupplementaryReviewRefused,
+    SupplementaryReviews,
+)
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -155,6 +161,7 @@ class RequestResult(BaseModel):
     summary_updated: bool = False
     claimed: bool = False
     auto_merge: bool = True
+    supplementary_refusal: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +340,24 @@ async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
     return result
 
 
+async def _request_supplementary(
+    active: HumanReviewRequest,
+    pull: PullRequestClient,
+    result: RequestResult,
+    policy_id: str,
+    reason: str,
+) -> RequestResult:
+    """Add a supplementary review to an open request without touching its engineering card."""
+    blockers = await review_blockers(pull)
+    if blockers is None or blockers:
+        return _failure("The pull request must be open and not a draft for a supplementary review.")
+    try:
+        await SupplementaryReviews(active).ask(pull, policy_id.strip(), reason)
+    except SupplementaryReviewRefused as refused:
+        return _failure(str(refused))
+    return result
+
+
 async def record_pull_request(
     pull: PullRequestClient,
 ) -> tuple[PullRequest, PullRequestPayload] | None:
@@ -361,7 +386,8 @@ async def request_review(
     channel: str = "",
     inline_summary: str | None = None,
     auto_merge: bool | None = None,
-    design_review_reason: str = "",
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
@@ -376,7 +402,8 @@ async def request_review(
                 channel=channel,
                 inline_summary=inline_summary,
                 auto_merge=auto_merge,
-                design_review_reason=design_review_reason,
+                supplementary_review=supplementary_review,
+                supplementary_review_reason=supplementary_review_reason,
             )
     except GitHubAppUnavailable:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -390,34 +417,33 @@ async def _request_review(
     channel: str,
     inline_summary: str | None,
     auto_merge: bool | None = None,
-    design_review_reason: str = "",
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> RequestResult:
+    if bool(supplementary_review.strip()) != bool(supplementary_review_reason.strip()):
+        return _failure("Pass supplementary_review and supplementary_review_reason together.")
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
         result = await _existing(active, auto_merge)
         if not result.success:
             return result
+        if supplementary_review:
+            return await _request_supplementary(
+                active, pull, result, supplementary_review, supplementary_review_reason
+            )
         if active.kind == "standard" and channel.strip():
             target = await _target_channel(pr_ref, pull, channel)
             if isinstance(target, RequestResult):
                 return target
             if target.id != active.slack_channel_id:
                 return await _existing(active, auto_merge, target.id)
-        if design_review_reason:
-            blockers = await review_blockers(pull)
-            if blockers is None or blockers:
-                return _failure(
-                    "The pull request must be open and not a draft for a Design review."
-                )
-            await DesignReview(active).start(pull, design_review_reason)
-            return result
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return result
 
-    if design_review_reason and not inline_summary:
-        return _failure("Design assessment requires an existing review request.")
+    if supplementary_review and not inline_summary:
+        return _failure("A supplementary review needs an open review request or an inline_summary.")
     blockers = await review_blockers(pull)
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
@@ -491,9 +517,18 @@ async def _request_review(
     await ReviewCard(request).link_on_github()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
-    await DesignReview(request).start(pull, design_review_reason)
+    refusal = ""
+    if supplementary_review:
+        try:
+            await SupplementaryReviews(request).ask(
+                pull, supplementary_review.strip(), supplementary_review_reason
+            )
+        except SupplementaryReviewRefused as refused:
+            refusal = str(refused)
+    await SupplementaryReviews(request).start(pull)
     return RequestResult(
         success=True,
+        supplementary_refusal=refusal,
         auto_merge=request.auto_merge,
         request_id=str(request.id),
         channel=target.id,
@@ -670,7 +705,7 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
             extra={"request_id": str(request.id)},
         )
         return []
-    states = await DesignReview(request).engineering_states(states)
+    states = await SupplementaryReviews(request).engineering_states(states)
     return [login for login, state in states.items() if state == "APPROVED"]
 
 
@@ -1051,7 +1086,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
-    states = await DesignReview(request).engineering_states(states)
+    states = await SupplementaryReviews(request).engineering_states(states)
     await ReviewPicks(request).complete(
         {
             login.lower()
@@ -1547,8 +1582,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
-    if step == "design_review":
-        return {"status": await DesignReview(request).run()}
+    if step.startswith(SUPPLEMENTARY_STEP):
+        return {"status": await SupplementaryReviews(request).run(step)}
     if step.startswith("snooze:"):
         user_id = UUID(step.removeprefix("snooze:"))
         participant = request.participant(user_id)

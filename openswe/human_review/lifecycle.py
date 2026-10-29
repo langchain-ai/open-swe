@@ -337,10 +337,10 @@ class ReviewCard:
             return await standard_card.closed_card(
                 request, title=pr.title, author=author, outcome=outcome, review_states=states
             )
-        from openswe.human_review.design import DesignReview
         from openswe.human_review.standard import merge_wait
+        from openswe.human_review.supplementary import SupplementaryReviews
 
-        states = await DesignReview(request).engineering_states(states)
+        states = await SupplementaryReviews(request).engineering_states(states)
         if (
             "CHANGES_REQUESTED" not in states.values()
             and merge_wait(

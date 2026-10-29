@@ -909,9 +909,9 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
         patch.object(ReviewCard, "link_on_github", AsyncMock()),
         patch.object(
-            standard.DesignReview,
-            "settings",
-            AsyncMock(side_effect=RuntimeError("design settings unavailable")),
+            standard.SupplementaryReviews,
+            "policies",
+            AsyncMock(side_effect=RuntimeError("repository settings unavailable")),
         ),
     ):
         result = await standard._request_review(
@@ -995,7 +995,7 @@ async def test_only_auto_merge_requests_merge_when_approved(
     request.thread_id = "review-request"
     request.created_at = datetime.now(UTC) - timedelta(hours=3)
     if design_only:
-        request.run_config = {"design_review": {"github_login": "grace"}}
+        request.run_config = {"supplementary_reviews": {"design": {"github_login": "grace"}}}
     if pending:
         user = User(
             identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
@@ -1059,12 +1059,9 @@ async def test_only_auto_merge_requests_merge_when_approved(
         )
 
 
-@pytest.mark.parametrize(
-    ("channel", "design_reason"),
-    [("", ""), ("#current", ""), ("#requested", ""), ("#requested", "New navigation flow")],
-)
+@pytest.mark.parametrize("channel", ["", "#current", "#requested"])
 async def test_existing_request_checks_explicit_channel_before_updating_summary(
-    channel: str, design_reason: str, monkeypatch: pytest.MonkeyPatch
+    channel: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from openswe.github.pull_request_status import PullRequestClient
     from openswe.human_review import standard
@@ -1102,7 +1099,6 @@ async def test_existing_request_checks_explicit_channel_before_updating_summary(
         standard.Origin(thread_id="owner"),
         channel=channel,
         inline_summary="Updated summary",
-        design_review_reason=design_reason,
     )
     mismatch = channel == "#requested"
     assert result.success and result.reused

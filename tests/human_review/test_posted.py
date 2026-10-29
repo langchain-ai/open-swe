@@ -9,7 +9,7 @@ from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
-from openswe.human_review import design, lifecycle, posted, standard
+from openswe.human_review import lifecycle, posted, standard, supplementary
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.posted import linked_pull_requests
 from openswe.human_review.requests import HumanReviewRequest
@@ -266,9 +266,9 @@ async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
 ) -> None:
     monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
     monkeypatch.setattr(
-        design.DesignReview,
-        "settings",
-        AsyncMock(side_effect=RuntimeError("design settings unavailable")),
+        supplementary.SupplementaryReviews,
+        "policies",
+        AsyncMock(side_effect=RuntimeError("repository settings unavailable")),
     )
     user = User()
     async with postgres.session() as session:

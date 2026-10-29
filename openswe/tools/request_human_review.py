@@ -15,6 +15,7 @@ from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
     Origin,
+    RequestResult,
     ReviewStatus,
     assign,
     request_review,
@@ -38,6 +39,17 @@ from openswe.users import User
 
 def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
+
+
+def _supplementary_note(result: RequestResult, supplementary_review: str) -> str:
+    if not supplementary_review.strip():
+        return ""
+    if result.supplementary_refusal:
+        return f" The supplementary review was not requested: {result.supplementary_refusal}"
+    return (
+        f" The `{supplementary_review.strip()}` supplementary review is requested; "
+        "Open SWE rotates and notifies its reviewer."
+    )
 
 
 async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None:
@@ -72,13 +84,14 @@ async def request_human_review(
     inline_summary: str = "",
     channel: str = "",
     auto_merge: bool | None = None,
-    design_review_reason: str = "",
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> dict[str, Any]:
     """Implement the `request_human_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
-    if not inline_summary.strip() and not design_review_reason.strip():
+    if not inline_summary.strip() and not supplementary_review.strip():
         return _failure(
             "inline_summary is required: one or two sentences on what the change does and why."
         )
@@ -87,7 +100,13 @@ async def request_human_review(
         return _failure(refusal)
     if caller := cfg.mcp_caller:
         return await _request_for_mcp_caller(
-            pr_ref, caller, inline_summary, channel, auto_merge, design_review_reason
+            pr_ref,
+            caller,
+            inline_summary,
+            channel,
+            auto_merge,
+            supplementary_review,
+            supplementary_review_reason,
         )
     login = cfg.github_login or ""
     thread_id = cfg.thread_id or ""
@@ -105,7 +124,8 @@ async def request_human_review(
         channel=channel,
         inline_summary=inline_summary or None,
         auto_merge=auto_merge,
-        design_review_reason=design_review_reason,
+        supplementary_review=supplementary_review,
+        supplementary_review_reason=supplementary_review_reason,
     )
     if not result.success:
         return _failure(result.error)
@@ -137,7 +157,8 @@ async def request_human_review(
         "request_id": result.request_id,
         "slack_channel_id": result.channel,
         "next": f"{posted} People sign up from the card. {merge_note} "
-        "You are woken if nobody signs up. Do not announce or link the card; do not poll.",
+        "You are woken if nobody signs up. Do not announce or link the card; do not poll."
+        + _supplementary_note(result, supplementary_review),
     }
 
 
@@ -147,7 +168,8 @@ async def _request_for_mcp_caller(
     inline_summary: str,
     channel: str,
     auto_merge: bool | None = None,
-    design_review_reason: str = "",
+    supplementary_review: str = "",
+    supplementary_review_reason: str = "",
 ) -> dict[str, Any]:
     """Request review as a person calling over MCP, who has no thread to point at the card."""
     requester = await User.for_login("github", login)
@@ -159,7 +181,8 @@ async def _request_for_mcp_caller(
         channel=channel,
         inline_summary=inline_summary or None,
         auto_merge=auto_merge,
-        design_review_reason=design_review_reason,
+        supplementary_review=supplementary_review,
+        supplementary_review_reason=supplementary_review_reason,
     )
     if not result.success:
         return _failure(result.error)
@@ -196,7 +219,8 @@ async def _request_for_mcp_caller(
         "request_id": result.request_id,
         "permalink": result.permalink,
         "next": f"{posted} People sign up from the card. {merge_note} "
-        "If nobody signs up, Open SWE picks a reviewer. Do not poll.",
+        "If nobody signs up, Open SWE picks a reviewer. Do not poll."
+        + _supplementary_note(result, supplementary_review),
     }
 
 

@@ -1,10 +1,15 @@
-"""Supplementary Product Design review, independent of engineering reviewer signup."""
+"""Supplementary reviews: specialist reviewers a repository configures alongside engineering review.
+
+Each policy in ``supplementaryReviews`` (``.open-swe/settings.json``) names a GitHub team, the
+paths it cares about, and the criteria an isolated assessment judges the pull request by. When a
+pull request qualifies, a member of that team is rotated in and notified. Their approval never
+stands in for engineering review.
+"""
 
 import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
 
 from pydantic import BaseModel
 
@@ -14,10 +19,14 @@ from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.org_membership import team_members
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
-from openswe.github.repo_files import DesignReviewSettings, RepoSettings
+from openswe.github.repo_files import RepoSettings, SupplementaryReviewPolicy
 from openswe.human_review.deadlines import schedule
 from openswe.human_review.picking import Coverage, ReviewerAvailability
-from openswe.human_review.requests import HumanReviewRequest, slack_mention
+from openswe.human_review.requests import (
+    SUPPLEMENTARY_REVIEWS_KEY,
+    HumanReviewRequest,
+    slack_mention,
+)
 from openswe.prompts import prompt
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.dm import send_dm
@@ -26,11 +35,15 @@ from openswe.users import User
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
-_KEY = "design_review"
+STEP_PREFIX = "supplementary_review:"
 _RETRY = timedelta(hours=1)
 
 
-class DesignState(BaseModel):
+class SupplementaryReviewRefused(Exception):
+    """A requested supplementary review this pull request cannot have."""
+
+
+class SupplementaryState(BaseModel):
     assessment_requested: bool = False
     assessment_started_at: datetime | None = None
     reason: str = ""
@@ -42,72 +55,62 @@ class DesignState(BaseModel):
     dm_notified: bool = False
 
 
-def potential_ui(path: str, settings: DesignReviewSettings) -> bool:
-    """Production frontend paths warrant judgment, not automatic design assignment."""
-    file = PurePosixPath(path.lower())
-    return (
-        settings.matches(path)
-        and file.suffix in {".tsx", ".jsx", ".ts", ".js", ".css", ".scss", ".sass", ".less"}
-        and not {"tests", "test", "__tests__", "e2e", "playwright", "cypress", "__mocks__"}
-        & set(file.parts)
-        and not any(part in file.name for part in (".test.", ".spec.", ".stories.", ".d.ts"))
-    )
+def _stored(request: HumanReviewRequest) -> dict[str, SupplementaryState]:
+    raw = request.run_config.get(SUPPLEMENTARY_REVIEWS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    return {key: SupplementaryState.model_validate(value) for key, value in raw.items()}
 
 
 @dataclass
-class DesignReview:
-    request: HumanReviewRequest
+class SupplementaryReview:
+    """One configured policy applied to one review request."""
 
-    async def settings(self) -> DesignReviewSettings | None:
-        if self.request.kind not in ("standard", "posted"):
-            return None
-        pr = self.request.pull_request
-        return (await RepoSettings.cached(pr.owner, pr.repo)).design_review
+    request: HumanReviewRequest
+    policy: SupplementaryReviewPolicy
 
     @property
-    def state(self) -> DesignState:
-        return DesignState.model_validate(self.request.run_config.get(_KEY) or {})
+    def step(self) -> str:
+        return f"{STEP_PREFIX}{self.policy.id}"
+
+    @property
+    def state(self) -> SupplementaryState:
+        return self.state_of(self.request)
+
+    def state_of(self, row: HumanReviewRequest) -> SupplementaryState:
+        return _stored(row).get(self.policy.id) or SupplementaryState()
+
+    def save(self, row: HumanReviewRequest, state: SupplementaryState) -> None:
+        stored = row.run_config.get(SUPPLEMENTARY_REVIEWS_KEY)
+        reviews = dict(stored) if isinstance(stored, dict) else {}
+        reviews[self.policy.id] = state.model_dump(mode="json")
+        row.run_config = {**row.run_config, SUPPLEMENTARY_REVIEWS_KEY: reviews}
+
+    def applies_to(self, files: list[ChangedFile]) -> bool:
+        return any(self.policy.matches(file.filename) for file in files)
 
     async def _schedule(self, after: timedelta = timedelta(0)) -> None:
-        if not await schedule(self.request, "design_review", after):
-            raise RuntimeError("Could not schedule design review")
+        if not await schedule(self.request, self.step, after):
+            raise RuntimeError("Could not schedule a supplementary review")
 
-    async def start(self, pull: PullRequestClient | None = None, reason: str = "") -> None:
-        try:
-            if pull is not None:
-                await self._start(pull, reason)
-            elif await self.settings() is not None:
-                pr = self.request.pull_request
-                async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as client:
-                    await self._start(client, reason)
-        except Exception:
-            logger.exception(
-                "Could not start supplementary design review",
-                extra={"request_id": str(self.request.id)},
-            )
-
-    async def _start(self, pull: PullRequestClient, reason: str) -> None:
-        """Queue immediate semantic assessment, or an agent's reasoned design-review request."""
-        settings = await self.settings()
-        if settings is None or self.request.state != "open":
+    async def start(self, reason: str = "") -> None:
+        """Queue the assessment, or record an agent's reason that the review is needed."""
+        if self.request.state != "open":
             return
         if not reason and self.state.assessment_requested:
-            return
-        files = await ChangedFile.of_pull(pull)
-        if files is None or not any(potential_ui(file.filename, settings) for file in files):
             return
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is None or row.state != "open":
                 return
-            state = DesignReview(row).state
+            state = self.state_of(row)
             if reason and not state.reason:
                 state.reason = reason.strip()
-                row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+                self.save(row, state)
         await self._schedule()
 
     async def run(self) -> str:
-        """Assess once, then rotate a designer as soon as someone eligible is working."""
-        if await self.settings() is None or skip_on_preview("design_review"):
+        """Assess once, then rotate a reviewer in as soon as someone eligible is working."""
+        if skip_on_preview("supplementary_review"):
             return "disabled"
         pr = self.request.pull_request
         async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
@@ -123,8 +126,8 @@ class DesignReview:
                 return await self._assign(pull)
             except Exception:
                 logger.exception(
-                    "Could not deliver a design review request",
-                    extra={"request_id": str(self.request.id)},
+                    "Could not deliver a supplementary review request",
+                    extra={"request_id": str(self.request.id), "policy": self.policy.id},
                 )
                 await self._schedule(_RETRY)
                 return "retrying"
@@ -134,7 +137,7 @@ class DesignReview:
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is None or row.state != "open":
                 return "closed"
-            state = DesignReview(row).state
+            state = self.state_of(row)
             if state.assessment_requested:
                 return "assessed"
             now = datetime.now(UTC)
@@ -142,7 +145,7 @@ class DesignReview:
                 wait = state.assessment_started_at + _RETRY - now
             if wait <= timedelta(0):
                 state.assessment_started_at = now
-                row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+                self.save(row, state)
         if wait > timedelta(0):
             await self._schedule(wait)
             return "assessing"
@@ -155,8 +158,14 @@ class DesignReview:
                     await start_dashboard_thread(
                         login,
                         None,
-                        prompt=prompt("runs/design-review", pr_url=pr.url),
-                        title=f"Assess design review for {pr.repo}#{pr.number}",
+                        prompt=prompt(
+                            "runs/supplementary-review",
+                            pr_url=pr.url,
+                            policy_id=self.policy.id,
+                            label=self.policy.label,
+                            criteria=self.policy.criteria,
+                        ),
+                        title=f"Assess {self.policy.label} for {pr.repo}#{pr.number}",
                         repos=[f"{pr.owner}/{pr.repo}"],
                         visibility="private",
                         unlisted=True,
@@ -164,27 +173,24 @@ class DesignReview:
                 )
         except Exception:
             logger.exception(
-                "Could not request design review assessment",
-                extra={"request_id": str(self.request.id)},
+                "Could not request a supplementary review assessment",
+                extra={"request_id": str(self.request.id), "policy": self.policy.id},
             )
         finally:
             async with HumanReviewRequest.locked(self.request.id) as (_, row):
                 if row is not None:
-                    state = DesignReview(row).state
+                    state = self.state_of(row)
                     if state.assessment_started_at == now:
                         state.assessment_requested = dispatched
                         state.assessment_started_at = None
-                        row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+                        self.save(row, state)
         if dispatched:
             return "assessment_requested"
         await self._schedule(_RETRY)
         return "retrying"
 
     async def _candidates(self, pull: PullRequestClient) -> list[tuple[User, ReviewerAvailability]]:
-        settings = await self.settings()
-        if settings is None:
-            return []
-        org, team = settings.team.split("/", 1)
+        org, team = self.policy.team.split("/", 1)
         members = await team_members(org, team)
         users = await asyncio.gather(*(User.for_login("github", login) for login in members or []))
         reviews = await latest_review_states(pull, self.request.pull_request.author)
@@ -215,10 +221,10 @@ class DesignReview:
                 await self._schedule(_RETRY)
                 return "waiting"
             delay = timedelta(0)
-            async with self.request.design_rotation() as (row, history):
+            async with self.request.supplementary_rotation(self.policy.id) as (row, history):
                 if row is None or row.state != "open":
                     return "closed"
-                state = DesignReview(row).state
+                state = self.state_of(row)
                 if not state.github_login:
                     now = datetime.now(UTC)
                     user, hours = min(
@@ -235,19 +241,21 @@ class DesignReview:
                     if delay <= timedelta(0):
                         state.github_login = user.github_login
                         state.assigned_at = now
-                        row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+                        self.save(row, state)
             if delay > timedelta(0):
                 await self._schedule(delay)
                 return "waiting"
+        label = self.policy.label
         async with HumanReviewRequest.locked(self.request.id) as (_, row):
             if row is None or row.state != "open":
                 return "closed"
-            state = DesignReview(row).state
+            state = self.state_of(row)
             user = await User.for_login("github", state.github_login)
             pr = row.pull_request
             note = (
-                f"Design review — {slack_mention(user, state.github_login)}: {state.reason}\n"
-                f"<{pr.url}|{pr.repo}#{pr.number}> · Supplementary UX review; engineering review remains separate."
+                f"{label} — {slack_mention(user, state.github_login)}: {state.reason}\n"
+                f"<{pr.url}|{pr.repo}#{pr.number}> · Supplementary review; "
+                "engineering review remains separate."
             )
             failed = False
             try:
@@ -256,8 +264,8 @@ class DesignReview:
                     state.github_requested = True
                 if not state.github_notified:
                     await pull.comment(
-                        f"### Design review\n\n@{state.github_login} — {state.reason}\n\n"
-                        "Supplementary Product Design review; this does not replace engineering or CODEOWNERS review."
+                        f"### {label}\n\n@{state.github_login} — {state.reason}\n\n"
+                        "Supplementary review; this does not replace engineering or CODEOWNERS review."
                     )
                     state.github_notified = True
                 if not state.slack_notified:
@@ -276,32 +284,109 @@ class DesignReview:
                     )
             except Exception:
                 logger.exception(
-                    "Could not deliver design review notifications",
-                    extra={"request_id": str(row.id)},
+                    "Could not deliver supplementary review notifications",
+                    extra={"request_id": str(row.id), "policy": self.policy.id},
                 )
                 failed = True
-            row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+            self.save(row, state)
         if failed or not state.dm_notified or not state.slack_notified:
             await self._schedule(_RETRY)
             return "retrying"
         return "requested"
 
+
+@dataclass
+class SupplementaryReviews:
+    """Every supplementary review a review request's repository configures."""
+
+    request: HumanReviewRequest
+
+    async def policies(self) -> list[SupplementaryReviewPolicy]:
+        if self.request.kind not in ("standard", "posted"):
+            return []
+        pr = self.request.pull_request
+        return (await RepoSettings.cached(pr.owner, pr.repo)).supplementary_reviews
+
+    async def start(self, pull: PullRequestClient | None = None) -> None:
+        """Queue an assessment for each policy whose paths the pull request touches."""
+        try:
+            if not await self.policies():
+                return
+            if pull is not None:
+                await self._start(pull)
+                return
+            pr = self.request.pull_request
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as client:
+                await self._start(client)
+        except Exception:
+            logger.exception(
+                "Could not start supplementary reviews",
+                extra={"request_id": str(self.request.id)},
+            )
+
+    async def _start(self, pull: PullRequestClient) -> None:
+        files = await ChangedFile.of_pull(pull)
+        if not files:
+            return
+        for policy in await self.policies():
+            review = SupplementaryReview(self.request, policy)
+            if review.applies_to(files):
+                await review.start()
+
+    async def ask(self, pull: PullRequestClient, policy_id: str, reason: str) -> None:
+        """Ask for one policy's review with an agent's reason; raises when it cannot apply."""
+        policies = await self.policies()
+        policy = next((policy for policy in policies if policy.id == policy_id), None)
+        if policy is None:
+            configured = ", ".join(f"`{policy.id}`" for policy in policies) or "none"
+            raise SupplementaryReviewRefused(
+                f"This repository configures no `{policy_id}` supplementary review "
+                f"(configured: {configured})."
+            )
+        review = SupplementaryReview(self.request, policy)
+        files = await ChangedFile.of_pull(pull)
+        if files is None:
+            raise SupplementaryReviewRefused("GitHub was unavailable while reading changed files.")
+        if not review.applies_to(files):
+            raise SupplementaryReviewRefused(
+                f"None of the pull request's changed files match the {policy.label} paths."
+            )
+        try:
+            await review.start(reason)
+        except RuntimeError:
+            logger.exception(
+                "Could not schedule a requested supplementary review",
+                extra={"request_id": str(self.request.id), "policy": policy_id},
+            )
+
+    async def run(self, step: str) -> str:
+        policy_id = step.removeprefix(STEP_PREFIX)
+        policy = next((p for p in await self.policies() if p.id == policy_id), None)
+        if policy is None:
+            return "disabled"
+        return await SupplementaryReview(self.request, policy).run()
+
     async def engineering_states(self, states: dict[str, str]) -> dict[str, str]:
-        """A supplementary approval is not an engineering approval unless they also own or signed up."""
-        designer = self.state.github_login.lower()
-        if not designer or not any(
-            login.lower() == designer and state == "APPROVED" for login, state in states.items()
-        ):
+        """Drop approvals from supplementary reviewers who are not also owners or engineering reviewers."""
+        supplementary = {
+            state.github_login.lower()
+            for state in _stored(self.request).values()
+            if state.github_login
+        }
+        approving = {
+            login.lower()
+            for login, state in states.items()
+            if state == "APPROVED" and login.lower() in supplementary
+        }
+        if not approving:
             return states
-        if any(
-            p.github_login.lower() == designer for p in self.request.reviewers + self.request.picks
-        ):
-            return states
+        engineering = {p.github_login.lower() for p in self.request.reviewers + self.request.picks}
         coverage = await Coverage.load(self.request)
-        if coverage is not None and coverage.of(designer):
-            return states
+        ignored = {
+            login for login in approving - engineering if coverage is None or not coverage.of(login)
+        }
         return {
             login: state
             for login, state in states.items()
-            if login.lower() != designer or state != "APPROVED"
+            if login.lower() not in ignored or state != "APPROVED"
         }

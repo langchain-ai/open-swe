@@ -45,6 +45,7 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # Open SWE asked who has not accepted yet, so the request is still open to anyone;
 # ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
 ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
+SUPPLEMENTARY_REVIEWS_KEY = "supplementary_reviews"
 
 
 class ChannelChoice(TypedDict):
@@ -347,20 +348,21 @@ class HumanReviewRequest(Base):
             return list(rows)
 
     @asynccontextmanager
-    async def design_rotation(self) -> AsyncIterator[tuple[Self | None, dict[str, datetime]]]:
-        """Read rotation history and reserve a designer atomically across this repository's PRs."""
+    async def supplementary_rotation(
+        self, policy_id: str
+    ) -> AsyncIterator[tuple[Self | None, dict[str, datetime]]]:
+        """Read one supplementary review's rotation history and reserve a reviewer atomically."""
         cls = type(self)
         pr = self.pull_request
         repository = f"{pr.owner}/{pr.repo}".lower()
-        login = cls.run_config["design_review"]["github_login"].astext
-        assigned_at = cast(
-            cls.run_config["design_review"]["assigned_at"].astext, DateTime(timezone=True)
-        )
+        review = cls.run_config[SUPPLEMENTARY_REVIEWS_KEY][policy_id]
+        login = review["github_login"].astext
+        assigned_at = cast(review["assigned_at"].astext, DateTime(timezone=True))
         async with postgres.session() as session:
             await session.execute(
                 select(
                     func.pg_advisory_xact_lock(
-                        func.hashtextextended(f"design-review:{repository}", 0)
+                        func.hashtextextended(f"supplementary-review:{repository}:{policy_id}", 0)
                     )
                 )
             )

@@ -6,7 +6,7 @@ from collections import Counter
 from datetime import timedelta
 from fnmatch import fnmatchcase
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 
 from openswe.github.http import (
     GitHubAppUnavailable,
@@ -51,12 +51,22 @@ class ReviewChannelRule(BaseModel):
     channel: str = Field(min_length=1)
 
 
-class DesignReviewSettings(BaseModel):
+class SupplementaryReviewPolicy(BaseModel):
+    """A specialist review a repository asks for alongside engineering review, such as design."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
+    label: str = Field(min_length=1, max_length=60)
     team: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
     paths: list[str] = Field(min_length=1)
+    exclude: list[str] = Field(default_factory=list)
+    criteria: str = Field(min_length=1, max_length=2000)
 
     def matches(self, path: str) -> bool:
-        return any(fnmatchcase(path, pattern) for pattern in self.paths)
+        return any(fnmatchcase(path, pattern) for pattern in self.paths) and not any(
+            fnmatchcase(path, pattern) for pattern in self.exclude
+        )
 
 
 class ReviewFile(BaseModel):
@@ -68,11 +78,28 @@ class RepoSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    design_review: DesignReviewSettings | None = Field(None, alias="designReview")
+    supplementary_reviews: list[SupplementaryReviewPolicy] = Field(
+        default_factory=list, alias="supplementaryReviews"
+    )
     review_channel: str = Field("", alias="reviewChannel")
     review_channel_rules: list[ReviewChannelRule] = Field(
         default_factory=list, alias="reviewChannelRules"
     )
+
+    @field_validator("supplementary_reviews")
+    @classmethod
+    def _unique_ids(
+        cls, policies: list[SupplementaryReviewPolicy]
+    ) -> list[SupplementaryReviewPolicy]:
+        ids = [policy.id for policy in policies]
+        if len(ids) != len(set(ids)):
+            raise ValueError("supplementaryReviews ids must be unique")
+        return policies
+
+    def supplementary_review(self, policy_id: str) -> SupplementaryReviewPolicy | None:
+        return next(
+            (policy for policy in self.supplementary_reviews if policy.id == policy_id), None
+        )
 
     @property
     def review_channels(self) -> set[str]:
