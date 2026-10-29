@@ -391,6 +391,47 @@ describe("transcript events", () => {
     expect(requested.status).toBe("running")
   })
 
+  it("marks a persisted message failed when its turn never started", () => {
+    const row = {
+      ...turn("turn-1", "2026-01-01T00:00:00Z", "requested"),
+      error: "the message could not be started",
+    }
+    const data = snapshot({
+      turns: [row],
+      messages: [
+        messageRow({
+          message_id: "human-1",
+          turn_id: "turn-1",
+          role: "human",
+          text: "Please apply the patch",
+          created_at: row.requested_at,
+        }),
+      ],
+    })
+    const requested = fromSnapshot(data)
+    expect(toMessages(requested)[0]?.deliveryStatus).toBeUndefined()
+    const failed = applyEvent(requested, {
+      ...appended(11, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-1", error: row.error },
+    })
+    expect(toMessages(failed)[0]).toMatchObject({
+      id: "human-1",
+      deliveryStatus: "failed",
+      deliveryError: row.error,
+    })
+    const reloaded = fromSnapshot({
+      ...data,
+      turns: [{ ...row, state: "failed" }],
+    })
+    expect(toMessages(reloaded)).toEqual(toMessages(failed))
+    const started = fromSnapshot({
+      ...data,
+      turns: [{ ...row, state: "failed", started_at: row.requested_at }],
+    })
+    expect(toMessages(started)[0]?.deliveryStatus).toBeUndefined()
+  })
+
   it("keeps a queued follow-up out of the record until its run starts", () => {
     const requested = applyEvent(fromSnapshot(twoTurnSnapshot()), {
       ...appended(11, {}),

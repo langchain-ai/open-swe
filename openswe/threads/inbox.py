@@ -20,6 +20,7 @@ from uuid import UUID
 
 import httpx2
 from langgraph_sdk import get_client
+from pydantic import JsonValue
 from runtime_api.catalog import InboxSpec
 
 from openswe.dashboard.options import model_supports_images
@@ -40,6 +41,7 @@ from openswe.tasks.messages import TaskMessage
 from openswe.users import User
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
+    RELAY_RUN_ID_KEY,
     RELAYED_FROM_KEY,
     REPLIES_KEY,
     dashboard_input_context,
@@ -161,6 +163,23 @@ class Taken:
     queued: list[int] = field(default_factory=list)
     # The event matches and task messages among ``messages``.
     events: list[UUID] = field(default_factory=list)
+    # The agent thread that relayed the latest follow-up, if one did.
+    relayed_from: str | None = None
+    relay_updated: bool = False
+
+    def state_update(self, run_id: str | None) -> dict[str, JsonValue]:
+        """The run state these follow-ups set.
+
+        The relay source is stamped with the run that read it: state is
+        checkpointed, so a later run must not inherit an earlier run's relay.
+        """
+        update: dict[str, JsonValue] = {}
+        if self.reply_surface is not None:
+            update["reply_surface"] = self.reply_surface
+        if self.relay_updated:
+            update[RELAYED_FROM_KEY] = self.relayed_from
+            update[RELAY_RUN_ID_KEY] = run_id
+        return update
 
 
 class ThreadInbox:
@@ -253,6 +272,9 @@ class ThreadInbox:
                 _flush_blocks(queued_updates, content_blocks, injected)
                 queued_updates.append(cast(dict[str, Any], message))
                 continue
+            relayed_from = content.get(RELAYED_FROM_KEY) if isinstance(content, dict) else None
+            taken.relayed_from = relayed_from if isinstance(relayed_from, str) else None
+            taken.relay_updated = True
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on

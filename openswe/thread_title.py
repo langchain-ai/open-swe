@@ -49,7 +49,7 @@ def _thread_metadata(thread: Any) -> dict[str, Any]:
 
 def _title_input(messages: Sequence[BaseMessage]) -> str | None:
     texts: list[str] = []
-    for message in messages:
+    for message in reversed(messages):
         if dynamic_context_hash(message.content) is not None:
             continue
         text = (input_message_text(message.content) or message.text).strip()

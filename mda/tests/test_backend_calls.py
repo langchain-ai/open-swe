@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import anthropic
 import httpx
@@ -55,6 +55,7 @@ from managed_deepagents import (
     define_deep_agent,
     shared_factory,
 )
+from managed_deepagents._run_input import ManagedTurnTracer
 from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
@@ -76,9 +77,10 @@ from runtime_api.catalog import (
     FilesSpec,
     InboxSpec,
     ModelSpec,
-    OperationSpec,
+    RunModels,
     SandboxCreate,
     SandboxSpec,
+    ToolSpec,
 )
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
@@ -101,6 +103,116 @@ from runtime_api.loop import (
 from runtime_api.operations import OperationResult, ShellVerdict
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 from runtime_api.workers import LAUNCH_WORKER
+
+
+class UserInterrupt(Exception):
+    pass
+
+
+class UserTimeout(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (None, "completed"),
+        (
+            asyncio.CancelledError(
+                UserInterrupt(
+                    "superseded by run 00000000-0000-4000-8000-000000000001 "
+                    "(multitask_strategy=interrupt)"
+                )
+            ),
+            "superseded",
+        ),
+        (TimeoutError("run deadline exceeded"), "failed"),
+        (asyncio.CancelledError(TimeoutError("run deadline exceeded")), "failed"),
+        (asyncio.CancelledError(UserTimeout("run deadline exceeded")), "failed"),
+        (asyncio.CancelledError(UserTimeout(TimeoutError("run deadline exceeded"))), "failed"),
+        (asyncio.CancelledError(UserInterrupt("User interrupted the run")), "cancelled"),
+        (asyncio.CancelledError(), "failed"),
+        (GeneratorExit(), "cancelled"),
+        (RuntimeError("provider failed"), "failed"),
+    ],
+)
+async def test_managed_root_records_its_end_reason(
+    failure: BaseException | None, reason: str
+) -> None:
+    client = MagicMock(spec=Client)
+    tracer = ManagedTurnTracer(client=client, project_name="test")
+    root_id = uuid4()
+    with tracing_context(enabled=True):
+        tracer.on_chain_start({}, {}, run_id=root_id)
+        if failure is None:
+            tracer.on_chain_end({"answer": "done"}, run_id=root_id)
+        else:
+            tracer.on_chain_error(failure, run_id=root_id)
+    patches = [
+        call.kwargs for call in client.update_run.call_args_list if call.kwargs["run_id"] == root_id
+    ]
+    assert patches
+    assert _run_metadata(patches[-1])["end_reason"] == reason
+    assert bool(patches[-1].get("error")) == (reason == "failed")
+    if reason == "failed":
+        assert failure is not None
+        assert str(failure) in str(patches[-1]["error"])
+
+
+async def test_managed_run_deadline_preserves_the_root_error() -> None:
+    client = MagicMock(spec=Client)
+    agent = await compile_managed_agent_async(
+        define_deep_agent(
+            name="timed-agent",
+            model=_StalledAnthropic(model_name="claude-opus-5-5", api_key="test"),
+        ),
+        {},
+        report_telemetry=False,
+    )
+    with tracing_context(enabled=True, client=client):
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                agent.ainvoke({"messages": [("user", "hello")]}, {"run_name": "timed-agent"}),
+                timeout=0.1,
+            )
+    root_id = next(
+        call.kwargs["id"]
+        for call in client.create_run.call_args_list
+        if call.kwargs["name"] == "timed-agent"
+    )
+    patches = [
+        call.kwargs for call in client.update_run.call_args_list if call.kwargs["run_id"] == root_id
+    ]
+    assert patches
+    assert _run_metadata(patches[-1])["end_reason"] == "failed"
+    assert "CancelledError" in str(patches[-1]["error"])
+
+
+async def test_root_termination_closes_children_and_suppresses_late_spans() -> None:
+    client = MagicMock(spec=Client)
+    tracer = ManagedTurnTracer(client=client, project_name="test")
+    root_id, tool_id, model_id = uuid4(), uuid4(), uuid4()
+    with tracing_context(enabled=True):
+        root = tracer.on_chain_start({}, {}, run_id=root_id, name="turn")
+        tracer.on_tool_start({}, "input", run_id=tool_id, parent_run_id=root_id)
+        tracer.on_chat_model_start(
+            {}, [[HumanMessage(content="hello")]], run_id=model_id, parent_run_id=root_id
+        )
+        tracer.on_chain_error(asyncio.CancelledError(), run_id=root_id)
+        tracer.on_tool_end("late result", run_id=tool_id)
+        tracer.on_llm_error(RuntimeError("late error"), run_id=model_id)
+        posted = client.create_run.call_count
+        late_id = uuid4()
+        tracer.on_chain_start({}, {}, run_id=late_id, parent_run_id=tool_id)
+        tracer.on_tool_start({}, "late", run_id=uuid4(), parent_run_id=late_id)
+        tracer.on_chat_model_start(
+            {}, [[HumanMessage(content="late")]], run_id=uuid4(), parent_run_id=root_id
+        )
+    assert client.create_run.call_count == posted
+    ended = {
+        call.kwargs["run_id"]: call.kwargs["end_time"] for call in client.update_run.call_args_list
+    }
+    assert ended[root_id] == ended[tool_id] == ended[model_id] == root.end_time
 
 
 def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:
@@ -234,6 +346,19 @@ async def test_managed_traces_keep_the_requested_project_without_mirroring(
             assert get_tracing_context()["replicas"] == replicas
     wait_for_all_tracers()
     assert len([run for run in callbacks.traced_runs if run.name == "test-agent"]) == 2
+    root_ids = {
+        call.kwargs["id"]
+        for call in client.create_run.call_args_list
+        if call.kwargs["name"] == "test-agent"
+    }
+    assert root_ids
+    root_patches = {
+        call.kwargs["run_id"]: _run_metadata(call.kwargs)
+        for call in client.update_run.call_args_list
+        if call.kwargs["run_id"] in root_ids
+    }
+    assert root_ids <= root_patches.keys()
+    assert all(metadata["end_reason"] == "completed" for metadata in root_patches.values())
     spans = [call.kwargs for call in client.create_run.call_args_list]
     assert {span["session_name"] for span in spans} == projects
     for project in projects:
@@ -275,9 +400,7 @@ async def test_a_tool_call_the_backend_never_answered(
     client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     served = operation_tool(
-        OperationSpec(
-            name="background_execute", description="Execute", parameters={"type": "object"}
-        ),
+        ToolSpec(name="background_execute", description="Execute", parameters={"type": "object"}),
         _run_backend(),
     )
     runtime = ToolRuntime(
@@ -320,7 +443,7 @@ async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
     client.post = post
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     served = operation_tool(
-        OperationSpec(
+        ToolSpec(
             name="get_thread",
             description="Operation",
             parameters={"type": "object"},
@@ -550,7 +673,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
     _answering(monkeypatch, backend, phase)
     tools = [
         operation_tool(
-            OperationSpec(name=name, description=name, parameters={"type": "object"}), backend
+            ToolSpec(name=name, description=name, parameters={"type": "object"}), backend
         )
         for name in (
             "walkthrough_describe_other",
@@ -879,6 +1002,85 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
     assert fallback.sent
 
 
+@pytest.mark.parametrize("selection", ["primary", "route", "vision", "fallback"])
+async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
+    monkeypatch: pytest.MonkeyPatch, selection: str
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    primary = ModelSpec(model_id="anthropic:primary", kwargs={})
+    routed = ModelSpec(model_id="anthropic:routed", kwargs={})
+    vision = ModelSpec(model_id="anthropic:vision", kwargs={})
+    fallback = ModelSpec(model_id="anthropic:fallback", kwargs={})
+    built: dict[str, ChatAnthropic] = {
+        spec.model_id: _RecordingAnthropic(model_name=spec.model_id, api_key="test", sent=[])
+        for spec in (primary, routed, vision, fallback)
+    }
+    if selection == "fallback":
+        built[routed.model_id] = _StalledAnthropic(model_name=routed.model_id, api_key="test")
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
+    backend = _run_backend(
+        invocation_id="turn",
+        catalog=Catalog(models=RunModels(model=primary, subagent_model=primary, use_gateway=False)),
+    )
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "before_model":
+            return BeforeModel(
+                call=ModelCall(
+                    system_prompt="test",
+                    model=None if selection == "primary" else routed,
+                    vision=vision if selection == "vision" else None,
+                    fallback=fallback if selection == "fallback" else None,
+                )
+            )
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    client = MagicMock(spec=Client)
+    patches: dict[object, dict[str, object]] = {}
+
+    def update(run_id: object, **kwargs: object) -> None:
+        patches[run_id] = deepcopy(kwargs)
+
+    client.update_run.side_effect = update
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=cast(
+            list[AgentMiddleware],
+            [BackendRunMiddleware(backend), *model_call_guards(timeout_seconds=0.05)],
+        ),
+    )
+    message = (
+        HumanMessage(content=[{"type": "image_url", "image_url": {"url": "https://image.invalid"}}])
+        if selection == "vision"
+        else HumanMessage("hi")
+    )
+    with tracing_context(enabled=True):
+        result = await graph.ainvoke(
+            {"messages": [message]},
+            {
+                "callbacks": [LangChainTracer(client=client, project_name="test")],
+                "metadata": {"invocation_id": "turn"},
+            },
+        )
+    assert result["messages"][-1].content == "done"
+    created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
+    root_id = next(run_id for run_id, run in created.items() if not run.get("parent_run_id"))
+    expected = {"primary": primary, "route": routed, "vision": vision, "fallback": fallback}
+    assert _run_metadata(patches[root_id])["model"] == expected[selection].model_id
+    llms = [run_id for run_id, run in created.items() if run["run_type"] == "llm"]
+    assert len(llms) == (2 if selection == "fallback" else 1)
+    expected_calls = (
+        [routed.model_id, fallback.model_id]
+        if selection == "fallback"
+        else [expected[selection].model_id]
+    )
+    assert [
+        _run_metadata(patches.get(run_id, created[run_id]))["model"] for run_id in llms
+    ] == expected_calls
+
+
 async def test_a_stalled_subagent_call_answers_with_the_timeout() -> None:
     # Its `task` call hands this answer back; a raise would end the delegating run.
     subagent = create_agent(
@@ -982,7 +1184,13 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
+    monkeypatch.setenv("LANGSMITH_REVISION_ID", "runtime-sha")
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    actor = {
+        "ls_repo_provider": "github",
+        "ls_attribution_identifier": "trigger",
+        "LANGSMITH_AGENT_VERSION": "backend-sha",
+    }
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = _run_backend(invocation_id="turn", catalog=Catalog(trace_metadata=actor))
 
@@ -1041,7 +1249,13 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     config: RunnableConfig = {
         "configurable": {"thread_id": "trace-test"},
         "callbacks": [tracer],
-        "metadata": {"invocation_id": "turn", "existing_key": "preserved"},
+        "metadata": {
+            "invocation_id": "turn",
+            "existing_key": "preserved",
+            "revision_id": "queued-sha",
+            "LANGSMITH_AGENT_VERSION": "queued-agent-sha",
+            "environment": "queued-environment",
+        },
     }
     with tracing_context(enabled=True, parent=parent):
         await graph.ainvoke(
@@ -1079,6 +1293,10 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
             {"repo": "org/later", "branch": "later/head"},
         ]
         assert metadata["existing_key"] == "preserved"
+    [root_id] = [run_id for run_id, run in created.items() if run.get("parent_run_id") == parent.id]
+    assert reconciled[root_id]["revision_id"] == "runtime-sha"
+    assert reconciled[root_id]["LANGSMITH_AGENT_VERSION"] == "backend-sha"
+    assert reconciled[root_id]["environment"] == "production"
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
     final["ls_git_branch"] = "Next/turn"
@@ -1254,7 +1472,7 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     monkeypatch.setattr(backend.outbox, "started", started)
     monkeypatch.setattr(backend.outbox, "finished", finished)
     search = operation_tool(
-        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
+        ToolSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
         backend,
         cites_evidence=True,
     )

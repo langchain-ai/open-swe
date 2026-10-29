@@ -10,7 +10,9 @@ Give them the PR's canonical URL and ask its author to review the changes carefu
 Never undraft it yourself or request a review until the author has clicked the button.
 For a tiny change that someone can approve straight from the diff, use `expedite_pr_approval` instead.
 
-If a blocker other than draft status prevents the review request, investigate and resolve it within the requested scope when safe, verify and push any fixes, then retry this tool.
+An open expedited card already satisfies the review request and is not a blocker to resolve: tell the requester review is in progress rather than retrying.
+Do not call `expedite_pr_approval` with `action="cancel"` to make room for a standard review unless the requester explicitly asks.
+For other blockers except draft status, investigate and resolve them within the requested scope when safe, verify and push any fixes, then retry this tool.
 Do not merely report that the PR is blocked, whether by merge conflicts, failing checks, or another fixable prerequisite; draft status is never yours to change, and only the author's readiness button click may undraft the PR.
 If you need access, authorization, or a behavioral decision, explain the specific blocker and offer to fix it or ask for the concrete action needed to proceed.
 Never bypass safeguards or force-push without explicit authorization.
@@ -21,11 +23,12 @@ No pull request numbers, URLs, SHAs, file paths or names, and no request to revi
 
 Pass `channel` (a Slack channel name like `#eng-reviews` or a channel id) to post somewhere other than the repository's review channel; it is required when the repository has none. {% if mcp %}The card is posted in that channel and the person you are working for is sent a Slack DM pointing to it.{% else %}When this conversation is already a thread in that channel, the card is posted in the thread and also sent to the channel; otherwise it is posted in that channel and this thread gets a one-line pointer to it.{% endif +%}
 
-After this tool succeeds, send a brief completion message in the conversation where the person asked, confirming that human review was requested and linking to the pull request's canonical URL.
+If the result reports a channel mismatch, follow the returned guidance.
+Otherwise, after this tool succeeds, send a brief completion message in the conversation where the person asked, confirming that human review was requested and linking to the pull request's canonical URL.
 Tool activity and review cards do not replace this confirmation, including in the dashboard.
 Do not repeat the review summary or link to the Slack card: Slack unfurls that link into a second copy of it.
 
-{% if mcp %}If nobody signs up within 2 hours (or the workspace’s configured timeout) Open SWE picks a reviewer itself; use `assign_human_reviewer` to name one sooner. Calling this again for a pull request with an open request returns the existing card; when the request came from the person you are working for, the card's summary is replaced with the new `inline_summary`, which is how you correct it.{% else %}If nobody signs up within 2 hours (or the workspace’s configured timeout) you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary`, which is how you correct it.{% endif %} To take the request down instead, use `dismiss_human_review_request`.
+{% if mcp %}If nobody signs up within 2 hours (or the workspace’s configured timeout) Open SWE picks a reviewer itself; use `assign_human_reviewer` to name one sooner. Calling this again for a pull request with an open standard request returns the existing card; when the request came from the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% else %}If nobody signs up within 2 hours (or the workspace’s configured timeout) you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open standard request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary` unless the requested channel differs.{% endif %} To take the request down instead, use `dismiss_human_review_request`.
 
 Pass `auto_merge=false` for review only: reviewer signup, assignment and reminders continue, but a person must merge the PR.
 Omit `auto_merge` to inherit the workspace’s `human_review_auto_merge_enabled` default (enabled unless configured otherwise), or pass `true` to enable it for this request.

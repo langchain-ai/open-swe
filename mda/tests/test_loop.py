@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -124,6 +125,37 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
 
+async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = BackendCallError("context unavailable")
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def refresh(_held: Mapping[str, object]) -> dict[str, JsonValue]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+        return {}
+
+    async def context() -> TaskContext:
+        await started.wait()
+        raise failure
+
+    monkeypatch.setattr(loop, "_github_proxy", refresh)
+    monkeypatch.setattr(loop, "_task_context", context)
+
+    with pytest.raises(BackendCallError) as caught:
+        await loop.before_model(_state())
+
+    assert caught.value is failure
+    assert stopped.is_set()
+
+
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,7 +180,23 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         rendered_system_prompt="You are Open SWE.",
     )
 
-    planned = await loop.before_model(state)
+    barrier = asyncio.Barrier(2)
+    post = backend.post
+
+    async def overlapping_post(
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        await asyncio.wait_for(barrier.wait(), timeout=1)
+        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
+
+    with monkeypatch.context() as preparation:
+        preparation.setattr(backend, "post", overlapping_post)
+        planned = await loop.before_model(state)
     await backend.outbox.drain()
 
     assert planned.call is not None
@@ -274,6 +322,37 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
             {"run_id": "run-1", "model_id": requested.model_id, "effort": "high"},
         )
     ]
+
+
+async def test_a_route_the_classifier_fell_back_to_is_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: dict[str, BaseModel | BackendCallError] = {
+        "route_model": Route(route="default", persist=False)
+    }
+    backend, calls = _backend(
+        monkeypatch,
+        answers,
+        LoopRules(routing=RoutingRules(mode="auto")),
+    )
+    loop = RunLoop(backend)
+    human = HumanMessage(content="Fix the login", id="human-1")
+
+    first = await loop.before_model(_state(human))
+    second = await loop.before_model(_state(human, **first.update))
+
+    assert first.call is not None and first.call.model == _MAIN
+    assert "model_route" not in first.update
+    assert [name for name, _ in calls] == ["route_model"]
+    assert second.call is not None and second.call.model == _MAIN
+
+    monkeypatch.setattr("rt.loop.run_id", lambda: "run-2")
+    answers["route_model"] = Route(route="fast")
+    recovered = await loop.before_model(_state(human, **first.update))
+
+    assert recovered.call is not None and recovered.call.model == _FAST
+    assert recovered.update["model_route"] == "fast"
+    assert [name for name, _ in calls] == ["route_model", "route_model"]
 
 
 @pytest.mark.parametrize(

@@ -1134,19 +1134,23 @@ async def trigger_or_queue_run(
             extra={"agent_thread_id": thread_id},
         )
         return False
+    configurable: dict[str, object] = {
+        "source": "github",
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_number,
+        "workspace": workspace,
+        "environment": workspace,
+    }
+    slack_thread = SourceContext.from_metadata(record.metadata).slack_thread
+    if slack_thread is not None:
+        configurable["slack_thread"] = slack_thread.dump()
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
         None if input is not None else prompt,
-        {
-            "source": "github",
-            "github_login": github_login,
-            "github_user_id": github_user_id,
-            "repo": repo_config,
-            "pr_number": pr_number,
-            "workspace": workspace,
-            "environment": workspace,
-        },
+        configurable,
         source="github",
         thread_title=None,
         input=input,

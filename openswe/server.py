@@ -192,6 +192,7 @@ from openswe.tools import (
     delete_user_skill,
     delete_workspace,
     dismiss_human_review_request,
+    execute_database_sql,
     expedite_pr_approval,
     expose_port,
     fetch_url,
@@ -348,8 +349,7 @@ def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
     return SLACK_ASK_EXCLUDED_TOOLS
 
 
-# Reading a Slack channel takes an explicit channel id and nothing from the run's
-# source context, so it survives every gate the thread-bound Slack tools do not.
+# Channel history also serves source-free requests; its own policy gates access.
 SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
 
 
@@ -619,6 +619,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "manage_thread",
         "read_incident",
         "read_only_sql",
+        "execute_database_sql",
         "read_user_settings",
         "connect_managed_tools",
         "save_user_settings",
@@ -738,6 +739,7 @@ AGENT_TOOLS: Final = (
     cli_result,
     worktree_handoff,
     read_only_sql,
+    execute_database_sql,
     write_database_rows,
     manage_feature_flags,
     manage_review_approval_mode,
@@ -771,7 +773,7 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
         *(
             tool
             for tool in AGENT_TOOLS
-            if _writes_database_rows() or tool is not write_database_rows
+            if _writes_database_rows() or tool not in (execute_database_sql, write_database_rows)
         ),
         *walkthrough_tools("reviewer"),
         *walkthrough_tools("author"),
@@ -999,7 +1001,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     metadata, never from the client, and keeping the tools registered across a
     surface switch is what keeps the prompt prefix cacheable.
     """
-    if cfg.source not in {"slack", "schedule", "incidents_agent", DASHBOARD_SOURCE}:
+    if cfg.source not in {"slack", "schedule", "incidents_agent", "github", DASHBOARD_SOURCE}:
         return False
     if cfg.slack_thread is None:
         return False
@@ -1010,7 +1012,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
     """Where this run owes its answer, before anything moves mid-run."""
-    if cfg.source == DASHBOARD_SOURCE or not _slack_tools_enabled(cfg):
+    if cfg.source in {DASHBOARD_SOURCE, "github"} or not _slack_tools_enabled(cfg):
         return WEB_REPLY_SURFACE
     return SLACK_REPLY_SURFACE
 
@@ -1375,6 +1377,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
+            persist_route = False
             if self._model_selection is not None:
                 routing_state = cast(ModelSelectionState, state).copy()
                 if (
@@ -1384,11 +1387,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 ):
                     routing_state.pop("model_route", None)
                     routing_state.pop("requested_model", None)
-                attribution_route = (
-                    "default"
-                    if requested_model
-                    else await self._model_selection.select_route(routing_state)
-                )
+                if requested_model:
+                    attribution_route = "default"
+                    persist_route = True
+                else:
+                    selection = await self._model_selection.select_route(routing_state)
+                    attribution_route = selection.route
+                    persist_route = selection.persist
                 if attribution_route != "default":
                     attribution_model_id, attribution_effort = self._routing_defaults[
                         attribution_route
@@ -1514,7 +1519,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": added} if added else {}),
-            **({"model_route": attribution_route} if attribution_route is not None else {}),
+            **({"model_route": attribution_route} if persist_route else {}),
             **system_prompt,
         }
 
@@ -1793,6 +1798,13 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     managed_gateway, mcp_tools = (
         await mcp_tools_task if mcp_tools_task is not None else (None, MCPTools())
     )
+    if incident_session is not None:
+        # incident.io refuses publishing from this MCP client (surface_cannot_publish).
+        mcp_tools = [
+            tool
+            for tool in mcp_tools
+            if (tool.metadata or {}).get("mcp_tool_name") != "status_page_update"
+        ]
 
     slack_tools = [
         manage_code_channel,
@@ -1822,7 +1834,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" else (worktree_handoff,)),
-        *(() if _writes_database_rows() else (write_database_rows,)),
+        *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)

@@ -14,3 +14,11 @@ The SDK's `main` is vendored, and `UPSTREAM` records the exact commit the tree c
 - `uv run scripts/vendor.py --diff` prints our changes, carried pull requests included: the tree against `UPSTREAM`'s commit. Once upstream has one of them, the next update drops it from that list.
 
 Every change we make there ourselves has a dated note in [`mda-changes/`](mda-changes/README.md): what changed, why Open SWE needs it, and what MDA needs before we can drop it. A carried pull request needs none: `mda-upstream-prs` names it, and the pull request says the rest.
+
+## `langchain-quickjs/`
+
+[langchain-quickjs](https://github.com/langchain-ai/deepagents/tree/main/libs/partners/quickjs), the code mode `mda/` runs (`CodeInterpreterMiddleware`), from `libs/partners/quickjs` of the deepagents repository at the commit in `UPSTREAM`. `mda/` installs it from here as an editable uv path source, and `mda build` bundles it as a local package. It is vendored so Open SWE can change it before upstream does.
+
+`scripts/vendor.py --project langchain-quickjs` manages it exactly as it manages the SDK above: `[sha]`, `--branch`, `--pr <n>` (recorded in `langchain-quickjs-upstream-prs`) and `--diff` all work the same, against upstream's `main`. `DEEPAGENTS_REPO` overrides the upstream, as `MDA_SDK_REPO` does the SDK's.
+
+Every change we make there ourselves has a dated note in [`langchain-quickjs-changes/`](langchain-quickjs-changes/README.md), in the shape `mda-changes/` describes.

@@ -1,5 +1,12 @@
 This run was triggered from Slack.
 - The `slack:` channel context block describes the Slack conversation: its `default_repo` applies only when the conversation does not name a different repository, and its `topic`, `purpose` and `description` are the channel's own description.
+- For bot alerts (`system:slack-bot-*` senders), before substantive investigation read recent same-channel alerts with `slack_read_channel_messages`, then candidate diagnoses and prior notifications with `slack_read_thread_messages`.
+  Compare failure signatures using available test names, environment, failed job/step, resource, and error class; for URL-only alerts, first do only the run/log lookup needed to identify the failure.
+  A different run URL or triggering commit alone does not make a failure new.
+  For a matching, unchanged diagnosis, verify its current status with minimal checks and reply briefly linking the earlier findings, without repeating the investigation or re-tagging authors already notified.
+  Investigate fully when no prior diagnosis matches or the failure materially changed.
+  If lookup fails or status cannot be verified, report the limitation rather than claiming the alert is new or its status is known.
+  `list_threads(query=...)` searches metadata, not conversation content; use Slack history for alerts, and keep following the PR-thread lookup rule for PR implementation/fix delegation.
 - A compact Web footer is added automatically to Slack replies; do not duplicate it manually.
   Share the channel block's `web_url` or `trace_url` only if asked.
 {% if breakout %}
@@ -33,6 +40,7 @@ This run was triggered from Slack.
   Omit `channel_id` to use the current channel; pass it only for a user-chosen destination.
   Subsequent replies belong in the destination.
 - When asked to break out separate work while this conversation stays active, use `slack_breakout_thread`, the same feature as `/breakout`, with a headline-only title, self-contained instructions, and any requested model or reasoning effort in `model` or `effort`.
+  Its sandbox is separate: parent `/workspace` paths are available only when their files are transferred; source-thread non-image Slack attachments are transferred best-effort.
   Same-channel breakouts also work in private channels.
   Changing channels requires a public source channel and destination.
   Skip the first progress reply and call `slack_breakout_thread` before posting.
