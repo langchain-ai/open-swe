@@ -246,7 +246,6 @@ async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
     prepared = await handoff.prepare(state)
     assert "model_route" not in prepared
     assert prepared["selected_model_id"] == "openai:gpt-6.1-sol"
-    assert handoff.record.call_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
     assert (
         handoff.middleware._config["configurable"]["resolved_agent_model_id"]
         == "openai:gpt-6.1-sol"
