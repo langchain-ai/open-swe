@@ -299,7 +299,7 @@ export function SidebarConversationRow({
       >
         <SidebarRowTitle title={title} marquee={marquee} />
       </Link>
-      <span className="right-space-1 absolute inset-y-0 flex items-center rounded-lg bg-surface-level-2 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+      <span className="absolute inset-y-0 right-0 mr-space-1 flex items-center rounded-lg bg-surface-level-2 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? "Unpin chat" : "Pin chat"}
