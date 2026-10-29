@@ -2042,7 +2042,7 @@
       },
       "EndpointAnswer": {
         "additionalProperties": false,
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.",
+        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.\n\nExperimental: this may change in a minor release.",
         "properties": {
           "context": {
             "additionalProperties": {
@@ -2084,7 +2084,7 @@
         "type": "object"
       },
       "EndpointEvent_str_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
+        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.\n\nExperimental: this may change in a minor release.",
         "properties": {
           "deliveryId": {
             "title": "Deliveryid",
@@ -2111,7 +2111,7 @@
         "type": "object"
       },
       "EndpointThread": {
-        "description": "The conversation's thread an endpoint request is about.",
+        "description": "The conversation's thread an endpoint request is about.\n\nExperimental: this may change in a minor release.",
         "properties": {
           "channel": {
             "$ref": "#/components/schemas/_EndpointThreadChannel"
