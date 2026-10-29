@@ -11,7 +11,7 @@ Every call is authenticated with the run token.
 
 - **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith box, one per thread.
   The catalog gives the options it is created with (the workspace snapshot, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
-  Before `prepare`, the run opens the box (`open_sandbox`) and reports its name; the backend binds the thread to it (`sandbox_owner: mda`) and connects as to any reused box: proxy credentials, git identity, tool channel.
+  Before `prepare`, the run opens the box (`open_sandbox`), alongside reading its tool specs and sending what its outbox holds, and reports its name; the backend binds the thread to it (`sandbox_owner: mda`) and connects as to any reused box: proxy credentials, git identity, tool channel.
   MDA leaves the proxy config to the backend (`_openswe_no_manage_proxy=True`).
   `recreate_sandbox` on such a box comes back from the backend as what to replace it with; MDA replaces it under the same name (`replace_sandbox`, the old box stopped and kept renamed), and the backend reconnects through `sandbox_replaced`.
   The backend never creates or replaces an MDA-owned box.
@@ -21,11 +21,16 @@ Every call is authenticated with the run token.
   The deployment's workspace needs the LangSmith browser beta.
   It has no `browser_handoff`: MDA's watcher run would start the run that wakes the agent when the user hands the browser back, and Open SWE runs only what its backend signs (`rt/browser.py`).
 - **`catalog`:** the run's operations, subagents, models, box and loop rules (`runtime_api.catalog.Catalog`), in every run's context: dispatch does not start a run it cannot plan.
+  The context names the tools and carries none of their specs, since the Agent Server copies the context into every checkpoint; the run reads their specs and grants from the backend as it starts (`tool_specs`).
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
   A tool call is this runtime's: it sends the operation its arguments and the run state its spec says it reads (`reads`, `reads_all`), and turns what it answers into the tool's result, the run state it changed, its stream events and git evidence.
   The backend runs no tools node and no tool-call middleware.
   An operation whose box stopped answering ends the run; the backend has told the person.
   Tools the graph hides from the model are dropped from each request.
+- **`search_tools`, `resolve_tool`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
+  The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs.
+  `search_tools` searches them there, and the run calls one by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, asks `resolve_tool` which tool that is, with the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
+  A name that is none throws `TypeError` in code mode.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   Where MDA owns the box they run in it.
   On the paths the backend serves (`files.backend_paths`: offloaded images), and on a thread whose box is not MDA's, such as a desktop thread, deepagents' own tools run against the backend's files through the typed files API (`rt/remote_files.py`).
@@ -37,11 +42,12 @@ Every call is authenticated with the run token.
   The transcript hears of every call alongside it (`tool_started`, `tool_result`); each phase and reply waits for the reports made before it.
   Code mode's calls skip the checks.
 - **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
-  `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
+  `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
 - **Incident evidence:** in an incident run, each tool result is recorded as evidence the report can cite (`record_evidence`), and carries the id it was recorded under.
 - **Loop:** `BackendRunMiddleware` (`rt/middleware.py`) prepares the run, reads its inbox and runs its loop:
   - `prepare`: before the run, on the backend (preparation, transcript turn, reply bookkeeping).
     It writes the graph state the loop reads;
+  - `git_baseline`, started once `prepare` returns: the backend snapshots the thread's checkouts while the first model call runs, and the run waits for it once the model answers, before any tool runs (`rt/git_baseline.py`);
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.
     Once the model call goes ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read waits for it; a run that ends first leaves them owed.
     A run started to carry events receives them at `prepare`;
@@ -72,7 +78,7 @@ Every call is authenticated with the run token.
   Every graph has the same middleware, so a thread reads alike through any of them.
   Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the model a call is routed to, the skills, the loop rules, and the box, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
 
-The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model).
+The run's context carries the signed run token and the run's catalog; the token carries the settings the run started with (`RunSettings`: source, draft preference, model, and the digest of its tools).
 The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them.
 The backend reads the thread and run configuration from the token, never from the request body.
 This deployment holds no GitHub, Slack or database credentials.

@@ -17,7 +17,7 @@ import pytest
 from deepagents import create_deep_agent
 from deepagents.backends.local_shell import LocalShellBackend
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
@@ -77,10 +77,10 @@ from runtime_api.catalog import (
     FilesSpec,
     InboxSpec,
     ModelSpec,
-    OperationSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
+    ToolSpec,
 )
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
@@ -90,6 +90,7 @@ from runtime_api.loop import (
     PREPARE,
     AfterAgent,
     BeforeModel,
+    GitBaseline,
     Inbox,
     InboxItems,
     InboxReceipt,
@@ -400,9 +401,7 @@ async def test_a_tool_call_the_backend_never_answered(
     client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     served = operation_tool(
-        OperationSpec(
-            name="background_execute", description="Execute", parameters={"type": "object"}
-        ),
+        ToolSpec(name="background_execute", description="Execute", parameters={"type": "object"}),
         _run_backend(),
     )
     runtime = ToolRuntime(
@@ -445,7 +444,7 @@ async def test_a_quick_operation_deadline_yields_to_a_requested_timeout(
     client.post = post
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     served = operation_tool(
-        OperationSpec(
+        ToolSpec(
             name="get_thread",
             description="Operation",
             parameters={"type": "object"},
@@ -675,7 +674,7 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
     _answering(monkeypatch, backend, phase)
     tools = [
         operation_tool(
-            OperationSpec(name=name, description=name, parameters={"type": "object"}), backend
+            ToolSpec(name=name, description=name, parameters={"type": "object"}), backend
         )
         for name in (
             "walkthrough_describe_other",
@@ -706,6 +705,67 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
     assert operations == ["walkthrough_describe_other"]
     assert isinstance(result["messages"][-1], ToolMessage)
     assert result["messages"][-1].tool_call_id == "call-1"
+
+
+async def test_the_git_baseline_runs_alongside_the_first_model_call_and_before_its_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    backend = _run_backend(invocation_id="turn")
+    baseline = {"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
+    model_called = asyncio.Event()
+    order: list[str] = []
+    reported_git: list[dict[str, JsonValue]] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "git_baseline":
+            # Only the model call lets the snapshot finish: preparation must not wait on it.
+            await asyncio.wait_for(model_called.wait(), 5)
+            order.append("baseline")
+            return GitBaseline(update=baseline)
+        if name == "operation":
+            order.append("tool")
+            return OperationResult(content="ran")
+        if name == "tool_started":
+            reported_git.append(ToolCallReport.model_validate(body).git)
+        return PhaseResult()
+
+    class Model(AgentMiddleware):
+        async def awrap_model_call(
+            self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+        ) -> ModelResponse:
+            order.append("model")
+            model_called.set()
+            return await handler(request)
+
+    _answering(monkeypatch, backend, phase)
+    run = ToolSpec(name="run", description="run", parameters={"type": "object"})
+    middleware = cast(
+        list[AgentMiddleware],
+        [BackendRunMiddleware(backend), RuntimeToolsMiddleware(backend, ()), Model()],
+    )
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(content="", tool_calls=[ToolCall(name="run", args={}, id="call-1")]),
+                    AIMessage(content="done"),
+                ]
+            )
+        ),
+        tools=[operation_tool(run, backend)],
+        middleware=middleware,
+    )
+
+    await graph.ainvoke({"messages": [("user", "Change something")]})
+    await backend.outbox.drain()
+
+    assert order[:3] == ["model", "baseline", "tool"]
+    # What the backend measures the call's changes against.
+    assert reported_git == [baseline]
 
 
 async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpoint(
@@ -1210,7 +1270,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == "prepare":
-            return PhaseResult(
+            return PhaseResult(update={"git_trace_baseline": None})
+        if name == "git_baseline":
+            return GitBaseline(
                 update={"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
             )
         if name == "before_model":
@@ -1474,7 +1536,7 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     monkeypatch.setattr(backend.outbox, "started", started)
     monkeypatch.setattr(backend.outbox, "finished", finished)
     search = operation_tool(
-        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
+        ToolSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
         backend,
         cites_evidence=True,
     )

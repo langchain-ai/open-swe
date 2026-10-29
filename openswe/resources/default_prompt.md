@@ -16,7 +16,7 @@ A thread can override its own model, for example by asking the agent to switch t
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
 - **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, managed tools, and personal MCP servers.
-- **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features, recent-work context, and Slack behavior such as concierge mode, review-page links, and failing-check reactions.
+- **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including Fleet chats in the dashboard sidebar), recent-work context, and Slack behavior such as concierge mode, review-page links, and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

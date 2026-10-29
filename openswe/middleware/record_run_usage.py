@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain.agents.middleware import AgentState, ModelRequest, ModelResponse
@@ -66,6 +67,7 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
         for message in response.result:
             if isinstance(message, AIMessage):
                 message.response_metadata = {
+                    "created_at": datetime.now(UTC).isoformat(),
                     **message.response_metadata,
                     **({"open_swe_model_route": model_route} if model_route else {}),
                     **(

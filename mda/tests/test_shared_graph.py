@@ -12,15 +12,16 @@ import agent
 import httpx2
 import pytest
 from deepagents.backends import StateBackend
-from deepagents.backends.protocol import ExecuteResponse
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from deepagents.middleware.summarization import DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, tool
 from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
 from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
@@ -30,6 +31,9 @@ from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
 from langsmith.sandbox import (
     ResourceCreationError,
+    ResourceNameConflictError,
+    ResourceNotFoundError,
+    SandboxAPIError,
     SandboxAuthenticationError,
     SandboxClientError,
 )
@@ -45,18 +49,20 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
 from rt.backend import Run, current_run
+from rt.managed_sandbox import definition, opened_sandbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
     LoopRules,
     ModelSpec,
-    OperationSpec,
     RunModels,
     SandboxCreate,
     SandboxSpec,
     SubagentSpec,
+    ToolSpec,
 )
 from runtime_api.reports import Reports
+from runtime_api.tool_search import ResolvedTool, ToolSpecs
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 
@@ -69,20 +75,25 @@ def _thread(thread_id: str) -> ManagedRunConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
+# Each run's catalog by its token, whose tool specs the fake backend reads to it.
+_CATALOGS: dict[str, Catalog] = {}
+
+
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
-    """A run as dispatch starts it."""
+    """A run as dispatch starts it: its catalog's tools by name alone."""
+    _CATALOGS[token] = catalog
     return {
         "graph": graph,
         "__run_token": token,
         "invocation_id": f"invocation-{token}",
-        "__catalog": catalog.model_dump(mode="json"),
+        "__catalog": catalog.names_only().model_dump(mode="json"),
     }
 
 
 def _catalog(operation: str, grant: str, *, snapshot: str | None = None) -> Catalog:
     return Catalog(
         operations=[
-            OperationSpec(name=operation, description="An operation.", parameters={}, grant=grant)
+            ToolSpec(name=operation, description="An operation.", parameters={}, grant=grant)
         ],
         subagents=[SubagentSpec(name="reviewer", description="Reviews.", system_prompt="")],
         skill_sources=["/skills/org/"],
@@ -148,6 +159,26 @@ def backend_calls(
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
             return httpx2.Response(200, request=request, json={"content": "found"})
+        if hook == "tool_specs":
+            catalog = _CATALOGS[headers["Authorization"].removeprefix("Bearer ")]
+            names = json["names"]
+            assert isinstance(names, list)
+            listed = ToolSpecs(tools=[tool for tool in catalog.operations if tool.name in names])
+            return httpx2.Response(200, request=request, json=listed.model_dump(mode="json"))
+        if hook == "resolve_tool":
+            calls[-1] = (hook, headers["Authorization"], str(json["name"]))
+            resolved = ResolvedTool(
+                tool=ToolSpec(
+                    name="withheld_lookup",
+                    description="A tool the catalog leaves out.",
+                    parameters={},
+                    code_name="withheldLookup",
+                    grant="found-grant",
+                )
+                if json["name"] == "withheldLookup"
+                else None
+            )
+            return httpx2.Response(200, request=request, json=resolved.model_dump(mode="json"))
         if hook == "reports":
             taken = {"replies": [{} for _ in Reports.model_validate(json).items]}
             return httpx2.Response(200, request=request, json=taken)
@@ -315,6 +346,191 @@ async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_report
     ]
 
 
+@pytest.mark.parametrize("failure", ["lookup", "restart", "unusable", "conflict"])
+def test_thread_sandbox_failures_never_create_a_second_workspace(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    monkeypatch.delenv("LANGSMITH_DEPLOYMENT_NAME", raising=False)
+    client = MagicMock()
+    existing = MagicMock(status="stopped" if failure == "restart" else "failed")
+    client.get_sandbox.return_value = existing
+    client.start_sandbox.side_effect = SandboxAPIError("HTTP 503")
+    if failure == "lookup":
+        client.get_sandbox.side_effect = SandboxAPIError("HTTP 503")
+    elif failure == "conflict":
+        client.get_sandbox.side_effect = ResourceNotFoundError("not found")
+        client.create_sandbox.side_effect = ResourceNameConflictError("name already exists")
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    error = (
+        ResourceNameConflictError
+        if failure == "conflict"
+        else RuntimeError
+        if failure == "unusable"
+        else SandboxAPIError
+    )
+
+    with pytest.raises(error):
+        mda_runtime._create_langsmith_sandbox(
+            definition(spec.create, None), scope_key="thread:thread-1"
+        )
+
+    assert len(client.create_sandbox.call_args_list) == (1 if failure == "conflict" else 0)
+
+
+@pytest.mark.parametrize("replaced", [False, True])
+def test_losing_a_thread_sandbox_only_reconnects_to_an_existing_replacement(
+    monkeypatch: pytest.MonkeyPatch, replaced: bool
+) -> None:
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    sandbox = definition(spec.create, None)
+    original = MagicMock(spec=SandboxBackendProtocol)
+    original.execute.side_effect = ResourceNotFoundError("sandbox is gone")
+    entry = mda_runtime._ManagedSandboxEntry(original, host_name="original", sandbox_id="old-id")
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {"thread:thread-1": entry})
+    client = MagicMock()
+    replacement = MagicMock(name="original", status="running")
+    replacement.name = "original"
+    replacement.id = "new-id"
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+    if replaced:
+        client.get_sandbox.return_value = replacement
+    else:
+        client.get_sandbox.side_effect = ResourceNotFoundError("sandbox is gone")
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
+
+    with pytest.raises(ResourceNotFoundError, match="sandbox is gone"):
+        backend.execute("pwd")
+
+    assert backend._backend() is (resolved if replaced else original)
+    assert entry.backend is original
+    client.create_sandbox.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_persisted_sandbox_binding_overrides_another_replicas_canonical_cache(
+    monkeypatch: pytest.MonkeyPatch, missing: bool
+) -> None:
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    bound_name = "original-legacy-suffix"
+    sandbox = definition(spec.create, None, bound_name)
+    stale = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(
+        mda_runtime,
+        "_managed_sandboxes",
+        {"thread:thread-1": mda_runtime._ManagedSandboxEntry(stale, host_name="original")},
+    )
+    client = MagicMock()
+    handle = MagicMock(status="running")
+    handle.name = bound_name
+    handle.id = "bound-id"
+    if missing:
+        client.get_sandbox.side_effect = ResourceNotFoundError("not found")
+    else:
+        client.get_sandbox.return_value = handle
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+
+    if missing:
+        with pytest.raises(RuntimeError, match="bound sandbox.*no longer exists"):
+            mda_runtime._resolve_managed_sandbox(sandbox, _thread("thread-1"))
+    else:
+        assert mda_runtime._resolve_managed_sandbox(sandbox, _thread("thread-1")) is resolved
+    assert all(call.args == (bound_name,) for call in client.get_sandbox.call_args_list)
+    client.create_sandbox.assert_not_called()
+    client.update_sandbox.assert_not_called()
+    client.stop_sandbox.assert_not_called()
+    client.delete_sandbox.assert_not_called()
+
+
+@pytest.mark.parametrize("reappeared", [False, True])
+async def test_deleted_bound_workspace_recovers_under_its_name_and_reports_loss(
+    monkeypatch: pytest.MonkeyPatch, reappeared: bool
+) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    name = "original-legacy-suffix"
+    sandbox = definition(spec.create, None, name)
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
+    client = MagicMock()
+    client.get_sandbox.side_effect = (
+        [ResourceNotFoundError("deleted"), MagicMock(status="running")]
+        if reappeared
+        else ResourceNotFoundError("deleted")
+    )
+    fresh = MagicMock(status="running")
+    fresh.name = name
+    fresh.id = "fresh-id"
+    client.create_sandbox.return_value = fresh
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    resolved.id = name
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
+
+    opened = await opened_sandbox(MagicMock(backend=backend))
+
+    if reappeared:
+        assert opened.error is not None and "refusing automatic replacement" in opened.error
+        assert opened.workspace_lost is False
+        client.create_sandbox.assert_not_called()
+    else:
+        assert opened.sandbox_id == name
+        assert opened.workspace_lost is True
+        assert opened.error is None
+        assert client.create_sandbox.call_args.kwargs["name"] == name
+    client.update_sandbox.assert_not_called()
+    client.stop_sandbox.assert_not_called()
+    client.delete_sandbox.assert_not_called()
+
+
+@pytest.mark.parametrize("bound", [False, True])
+async def test_explicit_recreation_can_replace_a_failed_uncached_sandbox(
+    monkeypatch: pytest.MonkeyPatch, bound: bool
+) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    monkeypatch.delenv("LANGSMITH_DEPLOYMENT_NAME", raising=False)
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    bound_name = (
+        "original-legacy-suffix"
+        if bound
+        else mda_runtime._managed_sandbox_name("open-swe-mda-prod", "thread:thread-1")
+    )
+    sandbox = definition(spec.create, None, bound_name if bound else None)
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
+    client = MagicMock()
+    client.get_sandbox.return_value = MagicMock(status="failed")
+    fresh = MagicMock(status="running")
+    fresh.name = bound_name
+    fresh.id = "fresh-id"
+    client.create_sandbox.return_value = fresh
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
+
+    with pytest.raises(RuntimeError, match="not usable"):
+        await backend.aopen()
+    client.create_sandbox.assert_not_called()
+    replacement = await backend.areplace()
+
+    assert replacement.new_name == bound_name
+    assert replacement.old_name.startswith(f"{bound_name}-old-")
+    assert client.update_sandbox.call_args.args == (bound_name,)
+    assert client.create_sandbox.call_args.kwargs["name"] == bound_name
+    assert await backend.aopen() == resolved.id
+    client.delete_sandbox.assert_not_called()
+
+
 @pytest.mark.parametrize("code_mode", [False, True])
 async def test_finished_runs_release_their_tools_and_interpreters(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, code_mode: bool
@@ -357,6 +573,56 @@ async def test_finished_runs_release_their_tools_and_interpreters(
     )
     assert not interpreter._registry._slots
     assert not interpreter._ptc_tools_by_slot
+
+
+async def test_code_mode_calls_tools_its_catalog_leaves_out(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """The backend names what ``tools.<name>`` is, with the run's grant; a name it has none for throws."""
+    code = "await tools.withheldLookup({}); await tools.withheldLookup({}); await tools.notOne({})"
+    seen: list[BaseMessage] = []
+    generate = GenericFakeChatModel._agenerate
+
+    async def answering(
+        model: GenericFakeChatModel,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        seen[:] = messages
+        return await generate(model, messages, stop, run_manager)
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", answering)
+    replies = [
+        AIMessage(content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]),
+        # Called directly too, by the name a search gave, and by one that is no tool.
+        AIMessage(content="", tool_calls=[ToolCall(name="withheldLookup", args={}, id="direct")]),
+        AIMessage(content="", tool_calls=[ToolCall(name="noTool", args={}, id="no-tool")]),
+        AIMessage(content="done"),
+    ]
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=iter(replies)))
+    catalog = _catalog("lookup", "grant").model_copy(update={"search_tools": True})
+
+    await _run(InMemoryStore(), "withheld", _context("agent", "token", catalog))
+
+    [evaluated] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "eval"]
+    # The run goes on past a call of no tool, as the tool node answers it.
+    [missing] = [m for m in seen if isinstance(m, ToolMessage) and m.tool_call_id == "no-tool"]
+    assert missing.status == "error" and "noTool" in missing.text
+    assert '<error type="TypeError">notOne is not one of this run' in evaluated.text
+    called = [(hook, detail) for hook, _, detail in backend_calls if detail]
+    # Its context names its own tools, whose specs it reads once.
+    assert [hook for hook, _, _ in backend_calls].count("tool_specs") == 1
+    # The rest resolved once, each called with the grant the backend gave.
+    assert called == [
+        ("resolve_tool", "withheldLookup"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("resolve_tool", "notOne"),
+        ("operation", "withheld_lookup:found-grant"),
+        ("resolve_tool", "noTool"),
+    ]
 
 
 async def test_concurrent_runs_offer_and_call_only_their_own_operations(
@@ -460,7 +726,7 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
         catalog = _catalog("lookup", "grant").model_copy(
             update={
                 "operations": [
-                    OperationSpec(
+                    ToolSpec(
                         name="lookup",
                         description=f"Uses {parameter}",
                         parameters={
@@ -961,3 +1227,26 @@ async def test_cancelling_an_eval_its_worker_has_not_started_returns_promptly() 
         release.set()
     assert (await repl.eval_async("typeof globalThis.ran")).result == "undefined"
     await registry.aevict("busy")
+
+
+async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_run() -> None:
+    nested: list[object] = []
+    for _ in range(200):
+        nested = [nested]
+
+    @tool
+    def nest() -> list[object]:
+        """Return a result nested deeper than the interpreter marshals."""
+        return nested
+
+    registry = _Registry(
+        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
+    )
+    repl = registry.get("nest")
+    repl.install_tools([nest])
+    try:
+        failed = await repl.eval_async("globalThis.kept = 1; await tools.nest({})")
+        assert failed.error_type == "MarshalError"
+        assert (await repl.eval_async("kept")).result == "1"
+    finally:
+        await registry.aevict("nest")

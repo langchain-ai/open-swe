@@ -137,6 +137,11 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
         return
     assert sandbox is not None
     assert sandbox.thread_id == (None if owner == "own" else owner)
+    assert sandbox.sandbox_id == (
+        metadata.get("sandbox_id")
+        if owner == _HOST or metadata.get("sandbox_owner") == "mda"
+        else None
+    )
     assert sandbox.create.snapshot_id == "snap-1"
     assert sandbox.create.extra_fields == {
         **workspace.create_params,
@@ -168,13 +173,13 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
             {"sandbox_owner": "mda", "sandbox_id": "mda-box", "sandbox_replacement": None},
         ),
         (
-            {"sandbox_id": "old-box", "sandbox_owner": "mda"},
-            "mda-box",
             {
-                "sandbox_owner": "mda",
                 "sandbox_id": "mda-box",
-                "sandbox_base_proxy_config": {"rules": []},
+                "sandbox_owner": "mda",
+                "sandbox_replacement": {"workspace": "default", "source": "base"},
             },
+            "mda-box",
+            None,
         ),
     ],
 )
@@ -216,6 +221,45 @@ async def test_the_backend_binds_the_box_mda_reports(
         await bind_mda_sandbox("thread-1", reported)
 
     assert updates == ([] if update is None else [update])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement_pending", [False, True])
+async def test_replicas_cannot_rebind_a_thread_to_a_different_box(
+    monkeypatch, replacement_pending: bool
+) -> None:
+    from unittest.mock import MagicMock
+
+    from openswe.sandboxes.lifecycle import bind_mda_sandbox
+    from openswe.sandboxes.state import SANDBOX_CONNECTIONS, SandboxUnreachableError
+
+    metadata: dict[str, object] = {"sandbox_id": "original", "sandbox_owner": "mda"}
+    if replacement_pending:
+        metadata["sandbox_replacement"] = {"workspace": "default", "source": "base"}
+    updates: list[dict[str, object]] = []
+    connection = MagicMock()
+    monkeypatch.setitem(SANDBOX_CONNECTIONS, "original", connection)
+
+    async def read_metadata(thread_id: str) -> dict[str, object]:
+        return metadata
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        updates.append(metadata)
+
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
+
+    for reported in ("original", "original-c9eec961", "original", "original-c9eec961"):
+        if reported == "original":
+            await bind_mda_sandbox("thread-1", reported)
+        else:
+            with pytest.raises(
+                SandboxUnreachableError, match="Expected original; opened original-"
+            ):
+                await bind_mda_sandbox("thread-1", reported)
+        assert metadata["sandbox_id"] == "original"
+        assert SANDBOX_CONNECTIONS["original"] is connection
+    assert updates == []
 
 
 @pytest.mark.asyncio
