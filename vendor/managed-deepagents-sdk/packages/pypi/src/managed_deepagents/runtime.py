@@ -2502,9 +2502,10 @@ def _resolve_managed_sandbox(
         return entry.backend
 
 
-def _bound[Found: (_ManagedSandboxEntry, _SandboxClaim)](
-    found: Found | None, bound_name: str | None
-) -> Found | None:
+_Found = TypeVar("_Found", _ManagedSandboxEntry, _SandboxClaim)
+
+
+def _bound(found: _Found | None, bound_name: str | None) -> _Found | None:
     """``found``, unless the thread is bound to another box than the one it names."""
     if found is None or bound_name is None or found.host_name == bound_name:
         return found
