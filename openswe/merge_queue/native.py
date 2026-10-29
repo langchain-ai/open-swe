@@ -1,6 +1,7 @@
 """Validate selected GitHub candidates; GitHub alone constructs and lands them."""
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -11,13 +12,14 @@ from pydantic import BaseModel, Field
 
 from openswe.github.http import RepoClient
 from openswe.github.queue import NativeQueueSnapshot
-from openswe.merge_queue.admission import digest
+from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.models import Lease
 from openswe.merge_queue.runtime import QueueJob
 from openswe.merge_queue.store import LeaseLost, MergeQueue
 from openswe.merge_queue.validation import InvalidValidation, ValidationEvidence
+from openswe.merge_queue.validation_contract import WORKFLOW
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ class NativeQueueRuntime:
         self.queue_id, self.repository_id, self.open_repo = queue_id, repository_id, open_repo
         self.config, self.dispatcher = config, dispatcher
 
-    async def _timeout(self, repo: RepoClient) -> int:
+    async def _timeout(self, repo: RepoClient, policy: QueuePolicy | None = None) -> int:
         config = self.config
         assert config is not None and config.check_app_id is not None
         rules = await repo.branch_rules("main")
@@ -67,16 +69,16 @@ class NativeQueueRuntime:
         ):
             raise ValueError("Native queue must require the trusted merge-queue check")
         rule = queues[0]
-        validation = config.policy.validation
+        policy = policy or config.policy
+        validation = policy.validation
         assert validation is not None
         timeout = rule.check_response_timeout_minutes * 60
         if (
             rule.merge_method != "MERGE"
             or rule.grouping_strategy != "HEADGREEN"
             or rule.min_entries_to_merge != 1
-            or config.policy.max_batch_size
-            > min(rule.max_entries_to_build, rule.max_entries_to_merge)
-            or config.policy.collection_seconds + validation.deadline_seconds + 30 >= timeout
+            or policy.max_batch_size > min(rule.max_entries_to_build, rule.max_entries_to_merge)
+            or policy.collection_seconds + validation.deadline_seconds + 30 >= timeout
         ):
             raise ValueError("Native queue limits cannot support this batch size and time budget")
         return timeout
@@ -86,10 +88,7 @@ class NativeQueueRuntime:
     ) -> None:
         config, dispatcher = self.config, self.dispatcher
         assert config is not None and dispatcher is not None
-        timeout = await self._timeout(repo)
-        trust = digest(
-            {"workflow_digest": config.workflow_digest, "check_app_id": config.check_app_id}
-        )
+        trust = config.native_trust
         previous = await queue.native_validation_work(lease)
         if (
             previous is not None
@@ -101,6 +100,16 @@ class NativeQueueRuntime:
                 == previous.request.candidate_sha
             ):
                 await queue.record_native_landing(previous, lease)
+                previous = None
+        policy = (
+            QueuePolicy.model_validate(previous.batch.policy["policy"])
+            if previous is not None and previous.batch.policy.get("trust") == trust
+            else config.policy
+        )
+        timeout = await self._timeout(repo, policy)
+        workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", snapshot.main_sha)
+        if workflow is None or hashlib.sha256(workflow).hexdigest() != config.workflow_digest:
+            raise ValueError("Queue workflow changed")
         work = await queue.prepare_native_validation(
             snapshot, timeout, lease, policy=config.policy, trust=trust
         )
@@ -109,13 +118,16 @@ class NativeQueueRuntime:
         if work.dispatch:
             await queue.renew(lease, timedelta(seconds=60))
             try:
+                # The saved intent authorizes tests, not merging. Do not hold database
+                # locks during dispatch; publication below rechecks current authority.
                 await dispatcher.dispatch(work.request, work.attempt.deadline)
             except DispatchRejected as exc:
                 await queue.finish_native_validation(
                     work, {"error": str(exc)}, lease, succeeded=False
                 )
                 return
-            await dispatcher.report(work.request, work.attempt.deadline, "in_progress")
+            async with queue.native_publication(lease):
+                await dispatcher.report(work.request, work.attempt.deadline, "in_progress")
             return
         run_id = work.run_id
         if work.attempt.state == "running":
@@ -139,11 +151,14 @@ class NativeQueueRuntime:
         snapshot = await repo.native_queue(queue.target_branch)
         if snapshot.repository_id != self.repository_id:
             raise ValueError("Native queue repository identity changed")
-        if await self._timeout(repo) != timeout:
+        if await self._timeout(repo, policy) != timeout:
             raise ValueError("Native queue deadline changed during validation")
         await queue.renew(lease, timedelta(seconds=60))
         if await queue.authorize_native_result(work, snapshot, lease):
-            await dispatcher.report(work.request, work.attempt.deadline, "success", run_id=run_id)
+            async with queue.native_publication(lease):
+                await dispatcher.report(
+                    work.request, work.attempt.deadline, "success", run_id=run_id
+                )
 
     async def reconcile(self, payload: QueueJob) -> None:
         if payload.queue_id != self.queue_id:
@@ -151,7 +166,7 @@ class NativeQueueRuntime:
         queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
         if queue is None or queue.mode != "native":
             return
-        lease = await queue.claim(uuid7(), timedelta(seconds=60))
+        lease = await queue.claim(uuid7(), timedelta(seconds=60), config=self.config)
         if lease is None:
             return
         try:
@@ -163,20 +178,21 @@ class NativeQueueRuntime:
                 if self.dispatcher is not None:
                     await self._validate(queue, repo, snapshot, lease)
         finally:
-            if self.config is not None:
-                try:
-                    async with asyncio.timeout(10):
-                        await queue.prune_history(
-                            datetime.now(UTC) - timedelta(days=self.config.retention_days), lease
-                        )
-                except LeaseLost:
-                    logger.info(
-                        "Native queue cleanup lost its lease", extra={"queue_id": str(queue.id)}
+            try:
+                async with asyncio.timeout(10):
+                    await queue.prune_history(
+                        datetime.now(UTC)
+                        - timedelta(days=self.config.retention_days if self.config else 90),
+                        lease,
                     )
-                except Exception:
-                    logger.exception(
-                        "Native queue history cleanup failed", extra={"queue_id": str(queue.id)}
-                    )
+            except LeaseLost:
+                logger.info(
+                    "Native queue cleanup lost its lease", extra={"queue_id": str(queue.id)}
+                )
+            except Exception:
+                logger.exception(
+                    "Native queue history cleanup failed", extra={"queue_id": str(queue.id)}
+                )
             try:
                 async with asyncio.timeout(10):
                     await queue.release(lease)

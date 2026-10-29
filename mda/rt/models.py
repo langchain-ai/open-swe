@@ -59,6 +59,8 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
                 extra={"provider": provider},
             )
         kwargs["max_retries"] = disabled
+    if provider == "anthropic":
+        kwargs.setdefault("streaming", True)
     if provider == "openai":
         kwargs["use_responses_api"] = True
         kwargs.setdefault("store", False)

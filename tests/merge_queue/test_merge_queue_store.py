@@ -1,6 +1,7 @@
 """Storage regressions use the same migrated PostgreSQL database as the application."""
 
 import asyncio
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -63,6 +64,15 @@ async def claim(queue: MergeQueue) -> Lease:
     lease = await queue.claim(uuid7(), timedelta(minutes=5))
     assert lease is not None
     return lease
+
+
+async def save_configuration(config: QueueConfiguration) -> None:
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == config.workspace_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+        )
 
 
 async def batch(queue: MergeQueue, lease: Lease, key: str = "batch") -> Batch:
@@ -1041,7 +1051,7 @@ async def test_native_observation_survives_restart_and_old_events(
     response = native_response()
 
     def respond(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path == "/repos/acme/widgets" and request.method == "GET":
+        if request.url.path.lower() == "/repos/acme/widgets" and request.method == "GET":
             return httpx2.Response(200, json={"id": 42})
         if request.url.path == "/graphql":
             return httpx2.Response(200, json={"data": {"repository": response}})
@@ -1053,7 +1063,7 @@ async def test_native_observation_survives_restart_and_old_events(
     async def as_app(
         owner: str, repo: str, *, permissions: dict[str, str]
     ) -> AsyncIterator[GitHubClient]:
-        assert (owner, repo) == ("acme", "widgets")
+        assert (owner.lower(), repo.lower()) == ("acme", "widgets")
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
             yield GitHubClient(http)
 
@@ -1107,6 +1117,38 @@ async def test_native_observation_survives_restart_and_old_events(
         and not NativeQueueSnapshot.model_validate(empty.native_snapshot).candidates
     )
     assert await current.requests() == []
+    changed = config.model_copy(
+        update={
+            "repository": "ACME/WIDGETS",
+            "policy": config.policy.model_copy(update={"max_batch_size": 2}),
+        }
+    )
+    await save_configuration(changed)
+    await runtime.RUNTIME.reconcile(payload)
+    applied = await MergeQueue.load(original.id, original.workspace_id)
+    assert applied is not None and applied.configuration_generation == changed.generation
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == original.workspace_id)
+            .values(merge_queue_config=None)
+        )
+    response = native_response((7,))
+    await runtime.RUNTIME.reconcile(payload)
+    disabled = await MergeQueue.load(original.id, original.workspace_id)
+    assert disabled is not None
+    assert list(NativeQueueSnapshot.model_validate(disabled.native_snapshot).candidates)
+    assert disabled.lease_owner is None
+    await controller.start_queue()
+    assert runtime.RUNTIME is None
+    await runtime.reconcile_queue(job)
+    assert runtime.RUNTIME is None
+    await save_configuration(changed)
+    response = native_response(())
+    await runtime.reconcile_queue(job)
+    restored = await MergeQueue.load(original.id, original.workspace_id)
+    assert restored is not None
+    assert not NativeQueueSnapshot.model_validate(restored.native_snapshot).candidates
     with pytest.raises(LeaseLost, match="mode changed"):
         await original.claim(uuid7(), timedelta(seconds=60))
     with pytest.raises(ValueError, match="custom controller"):
@@ -1223,7 +1265,7 @@ async def test_queue_dashboard_authorization(
                     }
                 },
             )
-        assert request.url.path == "/repos/acme/widgets"
+        assert request.url.path.lower() == "/repos/acme/widgets"
         return httpx2.Response(200, json={"id": 42})
 
     @asynccontextmanager
@@ -1298,6 +1340,15 @@ async def test_queue_dashboard_authorization(
             ),
         )
         assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 204
+        revoked = queue_controller.config.model_copy(
+            update={
+                "repository": "ACME/WIDGETS",
+                "operator_emails": frozenset({"another@example.com"}),
+            }
+        )
+        await save_configuration(revoked)
+        assert (await client.patch(f"{path}/pause", json={"paused": True})).status_code == 403
+        await save_configuration(queue_controller.config)
         snapshot = (await client.get(path)).json()
         assert snapshot["paused"] is False and len(snapshot["items"]) == 1
         assert snapshot["next_cursor"] is None
@@ -1341,9 +1392,10 @@ async def test_queue_dashboard_authorization(
         assert (await client.get(path)).json()["items"] == []
         await queue.set_paused(True, actor=operator.id)
         await queue.enable_native_observation()
-        queue_controller.config = queue_controller.config.model_copy(
+        native_config = queue_controller.config.model_copy(
             update={"mode": "native", "check_app_id": 456}
         )
+        await save_configuration(native_config)
         assert (await client.patch(f"{path}/pause", json={"paused": True})).status_code == 204
         assert (await client.get(path)).json()["paused"] is True
         assert (await client.post(f"{path}/requests", json=body)).status_code == 409
@@ -1370,7 +1422,6 @@ async def test_queue_dashboard_authorization(
                 .where(WorkspaceRow.id == queue.workspace_id)
                 .values(merge_queue_config=None)
             )
-        await controller.start_queue()
         assert (await client.get(path)).status_code == 404
 
 
@@ -1413,8 +1464,17 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     assert restarted is not None
 
     queue = restarted
+    tuned = policy.model_copy(
+        update={
+            "max_batch_size": 2,
+            "collection_seconds": 0,
+            "deadline_seconds": 60,
+            "max_attempts": 1,
+            "validation": policy.validation.model_copy(update={"deadline_seconds": 60}),
+        }
+    )
     duplicate = await queue.prepare_native_validation(
-        native_snapshot((1, 2, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
+        native_snapshot((1, 2, 3, 4, 5, 6)), 600, lease, policy=tuned, trust="trusted-policy"
     )
     assert duplicate is not None and not duplicate.dispatch and duplicate.request == initial
     assert duplicate.batch.deadline == work.batch.deadline
@@ -1429,11 +1489,13 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
         is None
     )
     recovered = await queue.prepare_native_validation(
-        native_snapshot((1, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
+        native_snapshot((1, 3, 4, 5, 6)), 600, lease, policy=tuned, trust="trusted-policy"
     )
     assert recovered is not None and recovered.dispatch
     assert recovered.batch.id == initial.batch_id
     assert recovered.batch.deadline == work.batch.deadline
+    assert recovered.batch.max_attempts == policy.max_attempts
+    assert recovered.attempt.deadline > recovered.attempt.created_at + timedelta(seconds=100)
     assert recovered.request.candidate_sha == list(native_snapshot((1, 3)).candidates)[-1]
     assert recovered.request.attempt_id != initial.attempt_id
     await queue.bind_validation_run(recovered.attempt.id, 42, lease)
@@ -1454,15 +1516,16 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
         native_snapshot((4, 5, 6), main=recovered.request.candidate_sha, age=700),
         600,
         lease,
-        policy=policy,
+        policy=tuned,
         trust="trusted-policy",
     )
     assert next_work is not None and next_work.dispatch
     assert next_work.batch.id != initial.batch_id
     assert (
         next_work.request.candidate_sha
-        == list(native_snapshot((4, 5, 6), main=recovered.request.candidate_sha).candidates)[-1]
+        == list(native_snapshot((4, 5), main=recovered.request.candidate_sha).candidates)[-1]
     )
+    assert next_work.batch.max_attempts == 1
     history = await queue.history(initial.batch_id)
     assert history.batch.state == "landed"
     assert [attempt.state for attempt in history.attempts] == ["failed", "succeeded"]
@@ -1554,6 +1617,9 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
     "fault",
     [
         "replay",
+        "slow_dispatch",
+        "dispatch_tuning",
+        "dispatch_response_lost",
         "rerun_after_success",
         "report_rejected",
         "issuer",
@@ -1583,12 +1649,14 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         repository_id=42,
         mode="native",
         dispatch_url="https://dispatcher.example/api/v1/merge-queue/dispatch",
-        workflow_digest="a" * 64,
+        workflow_digest=hashlib.sha256(b"reviewed workflow").hexdigest(),
         check_app_id=456,
         operator_emails=frozenset({"operator@example.com"}),
         policy=policy,
     )
+    await save_configuration(config)
     repo = Mock(spec=RepoClient)
+    repo.raw_file = AsyncMock(return_value=b"reviewed workflow")
     repo.native_queue = AsyncMock(return_value=native_snapshot((1, 2, 3, 4, 5, 6)))
     repo.branch_rules = AsyncMock(
         return_value=[
@@ -1613,8 +1681,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     )
     sent: list[httpx2.Request] = []
     report_status = 502
+    tuned = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
 
-    def deliver(request: httpx2.Request) -> httpx2.Response:
+    async def deliver(request: httpx2.Request) -> httpx2.Response:
         sent.append(request)
         report = request.url.path.endswith("/check-reports")
         prefix = b"check-report:" if report else b""
@@ -1629,6 +1698,12 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             )
             if body["state"] == "success":
                 return httpx2.Response(report_status)
+        elif fault == "slow_dispatch":
+            await asyncio.sleep(6)
+        elif fault == "dispatch_tuning":
+            await save_configuration(tuned)
+        elif fault == "dispatch_response_lost":
+            raise httpx2.ReadTimeout("Dispatch response lost", request=request)
         return httpx2.Response(204)
 
     monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(deliver))
@@ -1661,7 +1736,16 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             await reconcile()
         assert sent == []
         return
-    await reconcile()
+    if fault == "dispatch_tuning":
+        with pytest.raises(LeaseLost, match="configuration changed"):
+            await reconcile()
+        config = tuned
+        assert len(sent) == 1
+    elif fault == "dispatch_response_lost":
+        with pytest.raises(httpx2.ReadTimeout):
+            await reconcile()
+    else:
+        await reconcile()
     request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
     run = ValidationRun(
         id=42,
@@ -1732,3 +1816,76 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     ]
     assert len(successes) == 2
     assert successes[0].content == successes[1].content
+
+
+async def test_configuration_fences_stale_workers_and_serializes_check_publication(
+    queue_controller: QueueController,
+) -> None:
+    queue = queue_controller.queue
+    async with postgres.session() as session:
+        await session.execute(
+            update(Repository)
+            .where(Repository.id == queue.repository_id)
+            .values(full_name="Acme/Widgets")
+        )
+    policy, unused_lease, _ = await enable_native_validation(queue)
+    await queue.release(unused_lease)
+    config = queue_controller.config.model_copy(
+        update={
+            "mode": "native",
+            "check_app_id": 456,
+            "policy": policy,
+        }
+    )
+    await save_configuration(config)
+    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+    assert lease is not None
+    work = await queue.prepare_native_validation(
+        native_snapshot(), 600, lease, policy=policy, trust=config.native_trust
+    )
+    assert work is not None
+    updated = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
+    async with asyncio.timeout(10):
+        with pytest.raises(TimeoutError):
+            async with queue.native_publication(lease):
+                change = asyncio.create_task(save_configuration(updated))
+                done, _ = await asyncio.wait({change}, timeout=0.05)
+                assert not done
+                await asyncio.Event().wait()
+        await change
+    with pytest.raises(LeaseLost, match="configuration changed"):
+        async with queue.native_publication(lease):
+            pytest.fail("A stale controller could publish a check")
+    with pytest.raises(LeaseLost, match="configuration changed"):
+        await queue.finish_native_validation(work, {"error": "old worker"}, lease, succeeded=False)
+    await queue.release(lease)
+    with pytest.raises(LeaseLost, match="configuration changed"):
+        await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+    current_lease = await queue.claim(uuid7(), timedelta(minutes=1), config=updated)
+    assert current_lease is not None
+    resumed = await queue.prepare_native_validation(
+        native_snapshot(), 600, current_lease, policy=updated.policy, trust=updated.native_trust
+    )
+    assert resumed is not None and not resumed.dispatch
+    assert resumed.request == work.request and resumed.batch.deadline == work.batch.deadline
+    await queue.release(current_lease)
+    changed_trust = updated.model_copy(update={"workflow_digest": "b" * 64})
+    await save_configuration(changed_trust)
+    new_lease = await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)
+    assert new_lease is not None
+    history = await queue.history(work.batch.id)
+    assert history.batch.state == "invalidated" and history.attempts[0].state == "cancelled"
+    assert not await queue.authorize_native_result(work, native_snapshot(), new_lease)
+
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == queue.workspace_id)
+            .values(merge_queue_config={"repository": "invalid"})
+        )
+    with pytest.raises(LeaseLost, match="disabled or invalid"):
+        async with queue.native_publication(new_lease):
+            pytest.fail("Invalid configuration allowed check publication")
+    await queue.release(new_lease)
+    with pytest.raises(LeaseLost, match="disabled or invalid"):
+        await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)
