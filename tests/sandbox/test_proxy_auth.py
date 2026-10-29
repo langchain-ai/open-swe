@@ -306,3 +306,63 @@ class TestRefreshThreadGithubProxy:
         )
         assert expires_at is not None
         assert expires_at.isoformat() == "2026-10-27T20:00:00+00:00"
+
+
+@pytest.mark.parametrize(
+    "changed", ["nothing", "box", "repositories", "tools rule", "expiring", "cached"]
+)
+async def test_a_reused_box_keeps_its_token_only_while_it_holds_this_scope_long_enough(
+    changed: str,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from openswe.sandboxes.lifecycle import ProxyGrant, _connect_existing_sandbox
+    from openswe.sandboxes.providers.langsmith import SandboxProxy, TimeoutLangSmithSandbox
+
+    sandbox = MagicMock(id="box-1")
+    sandbox.name = "sandbox-abc"
+    backend = TimeoutLangSmithSandbox(sandbox)
+    lifetime = timedelta(minutes=20 if changed == "expiring" else 50)
+    minted = SandboxGitHubAccess("ghs_fresh", (datetime.now(UTC) + lifetime).isoformat())
+    tools_rule: dict[str, object] = {"name": "open-swe-thread-tools", "headers": ["capability"]}
+    records: list[dict[str, object]] = []
+
+    async def record(_thread_id: str, metadata: dict[str, object]) -> None:
+        records.append(metadata)
+
+    async def connect(repositories: list[str], *, cached: bool = False) -> None:
+        await _connect_existing_sandbox(
+            "thread-123",
+            cached=backend if cached else None,
+            sandbox_id="sandbox-abc",
+            github_proxy_repositories=repositories,
+            grant=ProxyGrant.recorded(records[-1]) if records else None,
+        )
+
+    with (
+        patch(
+            "openswe.sandboxes.lifecycle.connect_existing_sandbox",
+            AsyncMock(return_value=backend),
+        ),
+        patch(
+            "openswe.sandboxes.lifecycle.workspace_token",
+            new_callable=AsyncMock,
+            return_value=minted,
+        ) as mint,
+        patch.object(SandboxProxy, "configure", new_callable=AsyncMock) as configure,
+        patch("openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=tools_rule)),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.THREADS.update", side_effect=record),
+    ):
+        await connect(["org/repo"])
+        if changed == "box":
+            sandbox.id = "box-2"
+        if changed == "tools rule":
+            tools_rule["headers"] = ["another capability"]
+        await connect(
+            ["org/other"] if changed == "repositories" else ["org/repo"],
+            cached=changed == "cached",
+        )
+
+    refreshed = 1 if changed == "nothing" else 2
+    assert mint.await_count == configure.await_count == refreshed

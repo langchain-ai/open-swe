@@ -57,6 +57,7 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
         _workspace_slug=None,
         *,
         github_proxy_permissions=None,
+        **_kwargs,
     ):
         return sandbox_backend
 
@@ -107,6 +108,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
         _workspace_slug=None,
         *,
         github_proxy_permissions=None,
+        **_kwargs,
     ):
         return sandbox_backend
 
@@ -160,6 +162,7 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
         _workspace_slug=None,
         *,
         github_proxy_permissions=None,
+        **_kwargs,
     ):
         return sandbox_backend
 

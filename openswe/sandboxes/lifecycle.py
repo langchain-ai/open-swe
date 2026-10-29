@@ -8,20 +8,23 @@ MDA, whose next run starts it in a box of its own. The registry lives in ``state
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
-from openswe.github.app import PermissionMap
+from openswe.github.app import PermissionMap, normalize_permissions
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import (
     READ_ONLY_REVIEW_PERMISSIONS,
@@ -33,6 +36,8 @@ from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
+    SandboxProxy,
+    TimeoutLangSmithSandbox,
     configure_sandbox_proxy,
     get_sandbox_proxy_config,
 )
@@ -50,14 +55,19 @@ from openswe.sandboxes.state import (
     thread_token_repositories,
     unwrap_sandbox_backend,
 )
-from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
+from openswe.sandboxes.tool_access import (
+    SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
+)
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
+from openswe.threads.store import THREADS
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
 from openswe.utils.time import parse_iso
 from openswe.workspaces.refresh import is_snapshot_stale, maybe_start_update
 from openswe.workspaces.store import (
+    DEFAULT_WORKSPACE_SLUG,
     SandboxResources,
     Workspace,
     load_workspace,
@@ -170,13 +180,92 @@ async def _configure_proxy(
     base_proxy_config: dict[str, Any] | None,
     *,
     thread_id: str | None = None,
-) -> None:
+) -> SandboxProxy:
     kwargs: dict[str, Any] = {}
     if base_proxy_config is not None:
         kwargs["base_proxy_config"] = base_proxy_config
     if thread_id is not None:
         kwargs["thread_id"] = thread_id
-    await configure_sandbox_proxy(sandbox_id, access.token, **kwargs)
+    return await configure_sandbox_proxy(sandbox_id, access.token, **kwargs)
+
+
+_PROXY_GRANT_METADATA_KEY = "sandbox_proxy_grant"
+# How long a token kept at connection must still last: preparing may wait ten minutes
+# before the first model call, and MDA replaces the token ten minutes before it expires.
+PROXY_GRANT_MIN_REMAINING = timedelta(minutes=30)
+
+
+def _box_uid(sandbox_backend: SandboxBackendProtocol) -> str | None:
+    current = unwrap_sandbox_backend(sandbox_backend)
+    return current.box_uid if isinstance(current, TimeoutLangSmithSandbox) else None
+
+
+class ProxyGrant(BaseModel):
+    """The GitHub token last put on a thread's box, kept on the thread so no replica repeats it.
+
+    ``box`` is the provider's id for the box, which a box recreated under the same name
+    does not share. ``scope`` digests everything else the proxy was configured from: the
+    thread, its workspace, the token's repositories and permissions, and the box's other
+    rules. A grant spares a connection only to the same box for the same scope.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    box: str
+    scope: str
+    expires_at: datetime
+
+    @staticmethod
+    def scope_of(
+        thread_id: str,
+        workspace_slug: str | None,
+        repositories: Sequence[str] | None,
+        permissions: PermissionMap | None,
+        proxy: SandboxProxy,
+    ) -> str:
+        scope = {
+            "thread": thread_id,
+            "workspace": workspace_slug or DEFAULT_WORKSPACE_SLUG,
+            "repositories": None
+            if repositories is None
+            else sorted({repo.lower() for repo in repositories}),
+            "permissions": normalize_permissions(permissions),
+            "proxy": proxy.fingerprint(),
+        }
+        return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
+
+    @classmethod
+    def recorded(cls, metadata: Mapping[str, object]) -> ProxyGrant | None:
+        raw = metadata.get(_PROXY_GRANT_METADATA_KEY)
+        if raw is None:
+            return None
+        try:
+            return cls.model_validate(raw)
+        except ValidationError:
+            logger.warning("Ignoring an unreadable sandbox proxy grant", exc_info=True)
+            return None
+
+    def covers(self, box: str | None, now: datetime) -> bool:
+        return box == self.box and self.expires_at - now >= PROXY_GRANT_MIN_REMAINING
+
+    async def record(self, thread_id: str) -> None:
+        await _keep_grant(thread_id, self.model_dump(mode="json"))
+
+    @staticmethod
+    async def forget(thread_id: str) -> None:
+        await _keep_grant(thread_id, None)
+
+
+async def _keep_grant(thread_id: str, grant: JsonValue) -> None:
+    try:
+        await THREADS.update(thread_id, {_PROXY_GRANT_METADATA_KEY: grant})
+    except Exception:
+        # Without it the next connection only gives the box a token again.
+        logger.warning(
+            "Could not record the sandbox proxy grant",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
 
 
 async def _refresh_github_proxy(
@@ -187,20 +276,49 @@ async def _refresh_github_proxy(
     github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
+    box: str | None = None,
+    grant: ProxyGrant | None = None,
 ) -> None:
-    """Refresh managed proxy credentials for reused LangSmith sandboxes."""
+    """Give a reused LangSmith box's proxy a fresh token, unless its own still covers the run.
+
+    ``box`` is the box's provider id when this connection fetched the box, and ``grant``
+    the thread's record of the token last put on its box.
+    """
+    sandbox_id = unwrap_sandbox_backend(sandbox_backend).id
+    proxy: SandboxProxy | None = None
+    if thread_id is not None and grant is not None and grant.covers(box, datetime.now(UTC)):
+        async with aphase(thread_id, "sandbox.proxy_check"):
+            proxy = await SandboxProxy.build(
+                sandbox_id, base_proxy_config=base_proxy_config, thread_id=thread_id
+            )
+        scope = ProxyGrant.scope_of(
+            thread_id, workspace_slug, github_proxy_repositories, github_proxy_permissions, proxy
+        )
+        if scope == grant.scope:
+            record_proxy_token_expiry(
+                thread_id,
+                grant.expires_at,
+                repositories=github_proxy_repositories,
+                permissions=github_proxy_permissions,
+                workspace_slug=workspace_slug,
+                base_proxy_config=base_proxy_config,
+            )
+            logger.info(
+                "Kept the sandbox's GitHub token",
+                extra={"thread_id": thread_id, "sandbox_id": sandbox_id},
+            )
+            return
+
     access = await _proxy_token(
         thread_id, workspace_slug, github_proxy_repositories, github_proxy_permissions
     )
-
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(
-            current_backend.id,
-            access,
-            base_proxy_config,
-            thread_id=thread_id,
-        )
+        if proxy is None:
+            proxy = await _configure_proxy(
+                sandbox_id, access, base_proxy_config, thread_id=thread_id
+            )
+        else:
+            await proxy.configure(access.token)
     record_proxy_token_expiry(
         thread_id,
         access.expires_at,
@@ -209,6 +327,12 @@ async def _refresh_github_proxy(
         workspace_slug=workspace_slug,
         base_proxy_config=base_proxy_config,
     )
+    expires_at = parse_iso(access.expires_at)
+    if thread_id is not None and box is not None and expires_at is not None:
+        scope = ProxyGrant.scope_of(
+            thread_id, workspace_slug, github_proxy_repositories, github_proxy_permissions, proxy
+        )
+        await ProxyGrant(box=box, scope=scope, expires_at=expires_at).record(thread_id)
 
 
 async def _refresh_github_proxy_or_fail(
@@ -219,6 +343,8 @@ async def _refresh_github_proxy_or_fail(
     workspace_slug: str | None = None,
     *,
     github_proxy_permissions: PermissionMap | None = None,
+    box: str | None = None,
+    grant: ProxyGrant | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
@@ -229,6 +355,8 @@ async def _refresh_github_proxy_or_fail(
             github_proxy_permissions=github_proxy_permissions,
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
+            box=box,
+            grant=grant,
         )
     except Exception as exc:
         logger.warning(
@@ -258,13 +386,24 @@ async def refresh_thread_github_proxy(
     access = await _proxy_token(thread_id, workspace_slug, repositories, permissions)
     base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(
+        proxy = await _configure_proxy(
             sandbox_id,
             access,
             base_proxy_config if isinstance(base_proxy_config, dict) else None,
             thread_id=thread_id,
         )
-    return parse_iso(access.expires_at)
+    expires_at = parse_iso(access.expires_at)
+    host = metadata.get(SANDBOX_HOST_THREAD_KEY)
+    if isinstance(host, str) and host != thread_id:
+        # The box is its host's, whose grant no longer says what token the box holds.
+        await ProxyGrant.forget(host)
+        return expires_at
+    previous = ProxyGrant.recorded(metadata)
+    if previous is not None and expires_at is not None:
+        # Kept for ``previous.box`` only: another box under the name is refreshed on connection.
+        scope = ProxyGrant.scope_of(thread_id, workspace_slug, repositories, permissions, proxy)
+        await ProxyGrant(box=previous.box, scope=scope, expires_at=expires_at).record(thread_id)
+    return expires_at
 
 
 _WORK_DIR_READY = "__open_swe_work_dir_ready__"
@@ -328,13 +467,17 @@ async def _connect_existing_sandbox(
     github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
+    grant: ProxyGrant | None = None,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
     A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
     pings the box first: refreshing the proxy below has to reach it anyway, and
-    raises the same unreachable error when it cannot.
+    raises the same unreachable error when it cannot. ``grant`` is the thread's
+    record of the token last put on its box, which only a box fetched now can
+    match: a cached connection may be to a box since recreated under its name.
     """
+    box: str | None = None
     if cached is not None:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
         sandbox_backend = cached
@@ -343,6 +486,7 @@ async def _connect_existing_sandbox(
         try:
             async with aphase(thread_id, "sandbox.reconnect", sandbox_id=sandbox_id):
                 sandbox_backend = await connect_existing_sandbox(str(sandbox_id))
+            box = _box_uid(sandbox_backend)
         except SandboxGoneError:
             raise
         except Exception as exc:
@@ -356,6 +500,8 @@ async def _connect_existing_sandbox(
             base_proxy_config,
             workspace_slug,
             github_proxy_permissions=github_proxy_permissions,
+            box=box,
+            grant=grant,
         )
     return refreshed
 
@@ -499,8 +645,9 @@ async def ensure_sandbox_for_thread(
     ``require_existing`` is for a task worker attaching to its coordinator's box,
     which it must never hand over.
 
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth, and
-    re-applies git identity every run because reused/reconnected sandboxes can
+    For LangSmith sandboxes, also refreshes the GitHub App proxy auth unless the
+    thread's ``ProxyGrant`` shows the box already holds a token for this scope
+    that outlasts the run's start, and re-applies git identity every run because reused/reconnected sandboxes can
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.
     """
@@ -553,6 +700,7 @@ async def ensure_sandbox_for_thread(
             github_proxy_permissions=github_proxy_permissions,
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
+            grant=ProxyGrant.recorded(sandbox_metadata),
         )
     except (SandboxGoneError, SandboxUnreachableError) as exc:
         if require_existing:
