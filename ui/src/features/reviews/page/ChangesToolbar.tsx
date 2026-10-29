@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils"
+import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Text } from "@langchain/macaw-components/Text"
@@ -61,14 +63,18 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
             {linesLeft === 0 ? (
               "all lines reviewed"
             ) : (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={`${linesLeft.toLocaleString()} lines left`}
                 type="button"
                 title="Go to the next file you haven't viewed"
                 onClick={jumpToUnviewed}
-                className={subtleLink}
+                className={cn("h-auto border-0 px-0", subtleLink)}
               >
                 {linesLeft.toLocaleString()} lines left
-              </button>
+              </Button>
             )}
             {viewedCount > 0 && ` · ${viewedCount} viewed`}
           </span>

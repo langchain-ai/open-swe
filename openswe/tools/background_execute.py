@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from openswe.dashboard.profiles import get_profile
 from openswe.run_config import RunConfig
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
-from openswe.sandboxes.state import SANDBOX_BACKENDS
+from openswe.sandboxes.state import SandboxBackendProxy, get_or_create_sandbox_backend_proxy
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 from openswe.utils.background_task_state import update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
@@ -66,14 +66,11 @@ async def _launch(
     )
 
 
-def current_backend() -> tuple[str, Any]:
+def current_backend() -> tuple[str, SandboxBackendProxy]:
     thread_id = RunConfig.from_runtime().thread_id
     if not isinstance(thread_id, str) or not thread_id:
         raise RuntimeError("No thread_id in current run config")
-    backend = SANDBOX_BACKENDS.get(thread_id)
-    if backend is None:
-        raise RuntimeError("No sandbox is bound to this thread")
-    return thread_id, backend
+    return thread_id, get_or_create_sandbox_backend_proxy(thread_id)
 
 
 async def background_execute(

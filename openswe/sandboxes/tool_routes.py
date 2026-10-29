@@ -18,6 +18,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix=TOOLS_PATH, tags=["sandbox-tools"])
 
 
+@router.get("", include_in_schema=False)
+@router.get("/list", include_in_schema=False)
+@router.get("/search", include_in_schema=False)
+@router.post("/invoke/{tool_name}", include_in_schema=False)
+async def removed_tool_endpoint() -> None:
+    raise HTTPException(
+        410,
+        "The sandbox tool endpoint was removed. Call the tool directly, "
+        "or find it with search_tools and call it from eval.",
+    )
+
+
 async def require_tool_access(request: Request, response: Response) -> ToolAccess:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"

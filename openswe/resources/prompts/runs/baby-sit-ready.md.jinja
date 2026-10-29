@@ -1,11 +1,13 @@
-Every check on {{ pr_url }} finished without a failure, so the CI watch on it has stopped.{% if expedited %} This PR has an open expedited review card.{% endif %}
+Every check on {{ pr_url }} finished without a failure; the CI watch remains active for future commits.{% if expedited %} This PR has an open expedited review card.{% endif %}
 
 
 Head SHA: {{ head_sha }}
 
 {% if expedited %}
 Call `merge_expedited_pr` now; it re-checks reviews and approvals and tells you what is still missing.
-Do not post in the Slack thread unless the merge needs a person to act.
+If it is only waiting for the author to mark the draft ready or for someone to approve the card, stay silent: the existing card already asks for that action.
+Do not repeat a draft-readiness or approval reminder.
+Post in the Slack thread only for a completed merge or a new blocker that needs a person to act.
 {% else %}
 Tell the originating thread in one short line that checks are green.
 {% endif %}

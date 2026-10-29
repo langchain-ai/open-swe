@@ -122,6 +122,7 @@ it.each([
         error: "",
         request_id: "request",
         channel: "C0123456789",
+        channel_name: "reviews",
       })
     )
     const requested = await screen.findByRole("button", {
@@ -253,6 +254,7 @@ it.each(["loading", "error", "blocked", "approved"])(
 )
 
 it("recovers channel selection after availability fails", async () => {
+  const successToast = vi.spyOn(toast, "success")
   const availability = vi
     .spyOn(api, "humanReviewAvailability")
     .mockRejectedValueOnce(new Error("Unavailable"))
@@ -269,6 +271,7 @@ it("recovers channel selection after availability fails", async () => {
     error: "",
     request_id: "request",
     channel: "C0123456789",
+    channel_name: "reviews",
   })
   render(
     <QueryClientProvider
@@ -297,6 +300,10 @@ it("recovers channel selection after availability fails", async () => {
   )
   await screen.findByRole("button", { name: "Review requested" })
   expect(request).toHaveBeenCalledWith(pr, "C0123456789")
+  expect(successToast).toHaveBeenCalledWith(
+    "Asked #reviews to review acme/app#7",
+    undefined
+  )
 })
 
 it("can request a selected channel without recovering availability", async () => {

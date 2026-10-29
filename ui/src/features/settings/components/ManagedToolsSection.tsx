@@ -233,6 +233,9 @@ function GatewayStatus({
           </Badge>
         )}
       </div>
+      <p className="px-space-3 pb-space-2 text-xs text-secondary">
+        These tools are only available in private threads.
+      </p>
       {status.ready ? null : (
         <p className="px-space-3 pb-space-2 text-xs text-secondary">
           {status.all_required
@@ -277,7 +280,7 @@ export function ManagedToolsSection() {
   return (
     <SettingsSection
       title="Managed Tools"
-      description="Tools from the LangSmith Managed Tools tool kit an admin picked for Open SWE. They load in your private threads and run with your own connections; provider tokens stay in LangSmith."
+      description="Tools from the LangSmith Managed Tools tool kit an admin picked for Open SWE. They load only in your private threads and run with your own connections; provider tokens stay in LangSmith."
     >
       {view.isLoading ? (
         <p className="p-space-4 text-xs text-secondary">Loading…</p>

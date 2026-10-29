@@ -20,15 +20,10 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
     Handing the model an error message instead would leave every later sandbox
     call hitting the same dead backend and notifying the user again.
     """
-    with (
-        patch(
-            "openswe.agent_api.failures.post_sandbox_unreachable_notification",
-            new_callable=AsyncMock,
-        ) as notify,
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-        ) as create,
-    ):
+    with patch(
+        "openswe.agent_api.failures.post_sandbox_unreachable_notification",
+        new_callable=AsyncMock,
+    ) as notify:
         failure = await OperationFailure.of(
             SandboxConnectionError("WebSocket upgrade to sb-dead failed (no valid HTTP response)"),
             operation="background_execute",
@@ -36,7 +31,6 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
         )
 
     assert failure.sandbox_unreachable
-    create.assert_not_awaited()
     notify.assert_awaited_once()
 
 

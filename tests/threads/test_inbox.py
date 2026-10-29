@@ -8,6 +8,7 @@ from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import ReplySurface
 from openswe.threads.inbox import Taken, ThreadInbox
+from openswe.utils.thread_ops import queue_system_note_for_thread
 
 
 def _envelope(message: RunMessage) -> str:
@@ -45,8 +46,35 @@ async def test_inbox_announces_the_move_to_web_only_once(registry_db: None) -> N
 
 
 @pytest.mark.asyncio
-async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
+async def test_system_notes_reach_the_agent_without_waiting_in_the_dashboard(
     registry_db: None,
+) -> None:
+    from openswe.threads.handlers import get_dashboard_thread_queued_messages
+
+    await queue_system_note_for_thread("thread-1", "Review accepted")
+
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        assert await get_dashboard_thread_queued_messages("thread-1", "octocat") == []
+    await QueuedMessage.put("thread-1", {"text": "My follow-up"})
+    with patch("openswe.threads.handlers._authorized_thread", AsyncMock()):
+        previews = await get_dashboard_thread_queued_messages("thread-1", "octocat")
+    assert [preview.text for preview in previews] == ["My follow-up"]
+    taken = await _read()
+    envelope = _envelope(taken.messages[0])
+    assert envelope.startswith(
+        '<input-message sender="system:slack-note" surface="automation" kind="system">'
+    )
+    assert envelope.count("<input-message") == 1
+    assert "Review accepted" in envelope
+    assert "My follow-up" in _envelope(taken.messages[-1])
+    await ThreadInbox("thread-1").receive(taken.queued)
+    assert await QueuedMessage.for_thread("thread-1") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("system_note", [False, True])
+async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
+    registry_db: None, system_note: bool
 ) -> None:
     await QueuedMessage.put(
         "thread-1",
@@ -58,6 +86,9 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
         },
     )
 
+    if system_note:
+        await queue_system_note_for_thread("thread-1", "Review accepted")
+
     taken = await _read("slack")
 
     assert taken.reply_surface is None
@@ -65,6 +96,24 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+    assert taken.state_update("run-1") == {
+        "relayed_from_thread_id": "worker-thread",
+        "relay_run_id": "run-1",
+    }
+
+    await ThreadInbox("thread-1").receive(taken.queued)
+    await queue_system_note_for_thread("thread-1", "Another review accepted")
+    notes = await _read("slack")
+    assert notes.queued
+    assert notes.state_update("run-1") == {}
+
+    await QueuedMessage.put("thread-1", {"text": "My follow-up", "source": "dashboard"})
+    direct = await _read("slack")
+    assert direct.state_update("run-1") == {
+        "reply_surface": "web",
+        "relayed_from_thread_id": None,
+        "relay_run_id": "run-1",
+    }
 
 
 @pytest.mark.asyncio

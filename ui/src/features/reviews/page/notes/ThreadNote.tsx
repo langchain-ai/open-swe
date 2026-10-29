@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
@@ -8,7 +9,7 @@ import type {
 } from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import {
   isPlaced,
   threadLine,
@@ -154,10 +155,15 @@ export function ThreadSummary({
     </>
   )
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-label={`${location ? `${location}: ` : ""}${displayName(first.author)}: ${plainFirstLine(first.body)}${thread.comments.length > 1 ? `, ${thread.comments.length} comments` : ""}${thread.resolved ? ", Resolved" : thread.outdated ? ", Outdated" : ""}`}
+      aria-expanded={false}
       type="button"
       onClick={onOpen}
-      className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-xs hover:bg-surface-level-1-hover"
+      className="h-auto w-full min-w-0 flex-col justify-start gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left whitespace-normal text-inherit hover:bg-surface-level-1-hover"
     >
       <span className="flex w-full min-w-0 items-center gap-space-2">
         <CaretRightIcon className="size-3 shrink-0 text-secondary" />
@@ -190,7 +196,7 @@ export function ThreadSummary({
           {plainFirstLine(last.body)}
         </span>
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -278,25 +284,33 @@ export function ThreadCard({
             {withLine(thread.path, threadLine(thread))}
           </span>
           {thread.comments[0].html_url && (
-            <a
+            <MacawLink
+              variant="xs"
               href={thread.comments[0].html_url}
               target="_blank"
               rel="noreferrer"
               aria-label="View this conversation on GitHub"
-              className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary hover:text-primary hover:underline"
+              className={cn(
+                INHERITED_LINK,
+                "flex shrink-0 items-center gap-space-1 text-xxs text-secondary hover:text-primary hover:underline"
+              )}
             >
               GitHub
               <ArrowSquareOutIcon className="size-3" weight="regular" />
-            </a>
+            </MacawLink>
           )}
           {isPlaced(thread) ? (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="xs"
+              aria-label="Show in diff"
               type="button"
-              className="shrink-0 text-xxs text-secondary hover:text-primary hover:underline"
+              className="h-auto shrink-0 border-0 px-0 text-secondary hover:text-primary hover:underline"
               onClick={() => jumpTo(threadTarget(thread))}
             >
               Show in diff
-            </button>
+            </Button>
           ) : (
             thread.outdated && <Tag>Outdated</Tag>
           )}

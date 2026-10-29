@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
@@ -7,7 +8,7 @@ import { copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"
-import { cn } from "@/lib/utils"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
   askAboutFinding,
@@ -50,20 +51,31 @@ export function FindingNote({
   const open = expandedFinding === finding.id
   const settled = finding.status !== "open"
   const color = findingGroupColor[finding.group]
+  const label = [
+    findingGroupLabel[finding.group],
+    finding.title,
+    settled && finding.status,
+    thread &&
+      thread.comments.length > 1 &&
+      plural(thread.comments.length - 1, "reply", "replies"),
+  ]
+    .filter(Boolean)
+    .join(", ")
   return (
     <NoteFrame>
       <div
-        className={cn(
-          "rounded-r-lg border-y border-r border-default bg-brand-muted text-xs",
-          settled && "opacity-60"
-        )}
+        className="rounded-r-lg border-y border-r border-default bg-brand-muted text-xs"
         style={{ borderLeft: `3px solid ${color}` }}
       >
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={label}
           type="button"
           aria-expanded={open}
           onClick={() => setExpandedFinding(open ? null : finding.id)}
-          className="flex w-full items-start gap-space-2 px-space-3 py-space-2 text-left"
+          className="h-auto w-full items-start justify-start gap-space-2 px-space-3 py-space-2 text-left whitespace-normal"
         >
           <AgentMark className="mt-0.5" />
           <span
@@ -96,7 +108,7 @@ export function FindingNote({
               open && "rotate-90"
             )}
           />
-        </button>
+        </Button>
         {open && (
           <div className="border-t border-subtle px-space-3 pt-space-2 pb-space-2">
             <div className="text-xs leading-[1.6]">
@@ -142,8 +154,12 @@ export function FindingNote({
                 Copy
               </Button>
               {finding.github_review_comment_id !== null && (
-                <a
-                  className="ml-auto text-secondary hover:text-primary hover:underline"
+                <MacawLink
+                  variant="xs"
+                  className={cn(
+                    INHERITED_LINK,
+                    "ml-auto text-secondary hover:text-primary hover:underline"
+                  )}
                   href={githubUrls.pullRequest(
                     pr,
                     `#discussion_r${finding.github_review_comment_id}`
@@ -152,7 +168,7 @@ export function FindingNote({
                   rel="noreferrer"
                 >
                   On GitHub
-                </a>
+                </MacawLink>
               )}
             </div>
           </div>

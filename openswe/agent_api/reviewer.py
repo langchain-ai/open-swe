@@ -11,6 +11,8 @@ from langchain_core.tools import BaseTool
 from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
 from openswe.github.thread_token import get_github_token
+from openswe.middleware.record_run_usage import record_run_usage
+from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.review.diff import compute_diff_line_set
 from openswe.reviewer import (
     ensure_reviewer_github_token,
@@ -32,6 +34,8 @@ def _tools_by_name() -> dict[str, BaseTool]:
 
 class ReviewerParts(RunParts):
     """The reviewer's pieces, as its plan builds them, for a call answered without it."""
+
+    reporters = (TranscriptMiddleware(), record_run_usage)
 
     def restore(self, state: dict[str, object]) -> None:
         # Sets do not cross to MDA and back; the diff they index does.

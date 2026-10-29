@@ -25,7 +25,7 @@ from openswe.github.ci import (
     is_completed_ci_payload,
 )
 from openswe.github.comments import post_github_comment
-from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, read_result
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repositories import Repository
@@ -81,6 +81,8 @@ class BabySitState(BaseModel):
     active: bool = True
     head_sha: str = ""
     head_ref: str = ""
+    ready_head_sha: str = ""
+    ready_dispatch_errors: int = 0
     installation_id: int | None = None
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: SourceContext = Field(default_factory=SourceContext)
@@ -313,6 +315,8 @@ async def start_watch(
         installation_id=installation_id,
         run_config=run_config,
         source_context=source_context,
+        ready_head_sha=carried.ready_head_sha if carried else "",
+        ready_dispatch_errors=carried.ready_dispatch_errors if carried else 0,
         retry_count=carried.retry_count if carried else 0,
         dispatch_keys=list(carried.dispatch_keys) if carried else [],
         delivery_ids=list(carried.delivery_ids) if carried else [],
@@ -358,7 +362,7 @@ async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
     An expedited review's thread only ever carries its card; returning ``False``
     hands terminal outcomes to the agent instead.
     """
-    if await _has_expedited_card(watch):
+    if await _review_card(watch) is not None:
         logger.info(
             "Suppressed baby-sit notice for an expedited review", extra={"watch_key": watch.key}
         )
@@ -418,20 +422,25 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
     return "stopped"
 
 
-async def _has_expedited_card(watch: BabySitWatch) -> bool:
+async def _review_card(watch: BabySitWatch) -> HumanReviewRequest | None:
     if not postgres.configured():
-        return False
+        return None
     try:
         approval = await HumanReviewRequest.active_for(watch.owner, watch.repo, watch.pr_number)
     except Exception:
         logger.warning("Expedited review lookup failed for %s", watch.key, exc_info=True)
-        return False
-    return approval is not None and approval.thread_id in {"", watch.thread_id}
+        return None
+    return (
+        approval if approval is not None and approval.thread_id in {"", watch.thread_id} else None
+    )
 
 
 async def _finish_ready(watch: BabySitWatch) -> str:
-    """Hand a green PR back to its agent thread, which decides whether to merge or report."""
-    expedited = await _has_expedited_card(watch)
+    """Report each green head once while continuing to watch future commits."""
+    approval = await _review_card(watch)
+    if (approval is not None and approval.awaiting_ready) or watch.ready_head_sha == watch.head_sha:
+        await WATCHES.save(watch)
+        return "watching"
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
@@ -440,7 +449,7 @@ async def _finish_ready(watch: BabySitWatch) -> str:
                 "runs/baby-sit-ready",
                 pr_url=watch.pr_url,
                 head_sha=watch.head_sha,
-                expedited=expedited,
+                expedited=approval is not None,
             ),
             configurable,
             source=str(configurable.get("source") or "github"),
@@ -450,12 +459,20 @@ async def _finish_ready(watch: BabySitWatch) -> str:
         )
     except Exception:
         logger.warning("Failed to dispatch baby-sit ready wakeup for %s", watch.key, exc_info=True)
-        return await _finish_watch(
-            watch,
-            f"*`/baby-sit` complete:* {watch.pr_url} has no pending or failing checks.",
-        )
-    await stop_watch(watch.key)
-    return "stopped"
+        watch.ready_dispatch_errors += 1
+        await WATCHES.save(watch)
+        if watch.ready_dispatch_errors >= MAX_EVALUATION_ERRORS:
+            return await _finish_watch(
+                watch,
+                f"*`/baby-sit` stopped:* {watch.pr_url} finished CI without a failure, but "
+                f"Open SWE could not resume its agent after {MAX_EVALUATION_ERRORS} attempts. "
+                "Check the agent service and restart the CI watch; nothing was merged.",
+            )
+        return "error"
+    watch.ready_dispatch_errors = 0
+    watch.ready_head_sha = watch.head_sha
+    await WATCHES.save(watch)
+    return "watching"
 
 
 def _failure_signals(
@@ -512,7 +529,12 @@ def _prompt_scalar(value: Any, limit: int) -> str:
     return " ".join(str(value).split())[:limit]
 
 
-async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
+async def _record_evaluation_error(
+    watch: BabySitWatch, detail: str, *, retryable: bool = False
+) -> str:
+    if retryable:
+        await WATCHES.save(watch)
+        return "error"
     errors = watch.evaluation_errors + 1
     watch.evaluation_errors = errors
     await WATCHES.save(watch)
@@ -521,7 +543,7 @@ async def _record_evaluation_error(watch: BabySitWatch, detail: str) -> str:
     return await _finish_watch(
         watch,
         f"*`/baby-sit` stopped:* {watch.pr_url} could not be evaluated after "
-        f"{MAX_EVALUATION_ERRORS} attempts ({detail}). Check GitHub App access and permissions.",
+        f"{MAX_EVALUATION_ERRORS} attempts ({detail}).",
     )
 
 
@@ -546,15 +568,20 @@ async def _evaluate_watch(key: str) -> str:
             return await _evaluate_pull(
                 watch, github.repo(watch.owner, watch.repo).pull_request(watch.pr_number)
             )
-    except GitHubAppUnavailable:
-        return await _record_evaluation_error(watch, "GitHub token unavailable")
+    except GitHubAppUnavailable as exc:
+        return await _record_evaluation_error(watch, str(exc), retryable=exc.retryable)
 
 
 async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
     key = watch.key
-    pr = await or_none(pull.pull())
+    result = await read_result(pull.pull())
+    pr = result.value
     if not pr:
-        return await _record_evaluation_error(watch, "pull request unavailable")
+        detail = {
+            "missing": "pull request not found or hidden from the GitHub App (404)",
+            "forbidden": "GitHub denied access to the pull request (401/403)",
+        }.get(result.status, "pull request unavailable")
+        return await _record_evaluation_error(watch, detail, retryable=result.status == "transient")
     # A merged or closed PR already says so where people look; the watch just ends.
     if pr.get("state") != "open":
         await stop_watch(key)
@@ -569,13 +596,20 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         watch.head_ref = head_ref
     if head_sha != watch.head_sha:
         watch.head_sha = head_sha
+        watch.ready_head_sha = ""
+        watch.ready_dispatch_errors = 0
         watch.retry_count = 0
         watch.dispatch_keys = []
         watch.alert_keys = []
 
-    checks = await CommitChecks.read(pull.repo, head_sha)
+    check_result = await CommitChecks.read_result(pull.repo, head_sha)
+    checks = check_result.value
     if checks is None:
-        return await _record_evaluation_error(watch, "CI status unavailable")
+        return await _record_evaluation_error(
+            watch,
+            f"CI status unavailable ({check_result.status})",
+            retryable=check_result.status == "transient",
+        )
 
     watch.evaluation_errors = 0
     state, failures = aggregate_check_state(checks.runs, checks.statuses)
@@ -617,7 +651,7 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures, expedited=await _has_expedited_card(watch)),
+            watch.failure_prompt(failures, expedited=await _review_card(watch) is not None),
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,

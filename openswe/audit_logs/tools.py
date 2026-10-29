@@ -4,7 +4,7 @@ import asyncio
 import functools
 import inspect
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from typing import ParamSpec, TypeVar
 
 from openswe.audit_logs.context import current_audit_log, enrich_workspace
@@ -21,15 +21,16 @@ P = ParamSpec("P")
 R = TypeVar("R", bound=Mapping[str, object])
 
 
-async def _enrich(entry: AuditLog, *, feature_flags: bool) -> None:
+async def _enrich(entry: AuditLog, *, thread_workspace: bool) -> None:
     cfg = configurable()
     entry.enrichments.thread_id = cfg.thread_id
-    if not feature_flags:
+    if thread_workspace:
         entry.enrichments.workspace = cfg.workspace
     backend = SANDBOX_BACKENDS.get(cfg.thread_id) if cfg.thread_id else None
     if backend is not None and backend.has_backend:
         entry.enrichments.delegated_from_sandbox_id = backend.id
-    if not direct_user_run(cfg):
+    # A remote MCP caller is the person, calling the tool directly.
+    if not direct_user_run(cfg) and not cfg.mcp_caller:
         return
     entry.enrichments.actor_login = cfg.github_login
     if cfg.github_user_id:
@@ -46,9 +47,14 @@ async def _enrich(entry: AuditLog, *, feature_flags: bool) -> None:
 
 
 def audit_tool(
-    *, skip_read: bool = False
+    *, reads: Collection[str] = (), target_workspace: str | None = None
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-    """Record a tool's outcome, including refusals returned by its access policy."""
+    """Record a tool's outcome, including refusals returned by its access policy.
+
+    Calls whose ``action`` is one of ``reads`` change nothing and are not
+    recorded. ``target_workspace`` names the argument holding the workspace the
+    call acts on, which the entry is filed under instead of the thread's.
+    """
 
     def decorate(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         signature = inspect.signature(fn)
@@ -59,7 +65,7 @@ def audit_tool(
         async def audited(*args: P.args, **kwargs: P.kwargs) -> R:
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()
-            if skip_read and bound.arguments.get("action") == "read":
+            if bound.arguments.get("action") in reads:
                 return await fn(*args, **kwargs)
             entry = AuditLog(
                 operation_name=operation_name,
@@ -68,15 +74,15 @@ def audit_tool(
             )
             try:
                 async with asyncio.timeout(2):
-                    await _enrich(entry, feature_flags=operation_name == "manage_feature_flags")
+                    await _enrich(entry, thread_workspace=target_workspace is None)
             except Exception:
                 logger.warning(
                     "Could not resolve tool audit context",
                     extra={"operation_name": operation_name},
                     exc_info=True,
                 )
-            workspace = bound.arguments.get("workspace")
-            if operation_name == "manage_feature_flags" and isinstance(workspace, str):
+            workspace = bound.arguments.get(target_workspace) if target_workspace else None
+            if isinstance(workspace, str):
                 await enrich_workspace(entry, workspace)
             token = current_audit_log.set(entry)
             try:

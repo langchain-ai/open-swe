@@ -7,62 +7,120 @@ import os
 import re
 import subprocess
 import sys
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
+
+# The scan is about 120 git calls waiting on the disk; 8, 16 and 128 workers measured the same.
+WORKERS = 16
+# A cold box's first scan has taken 25s, and the caller gives the script 30.
+DEADLINE_SECONDS = 20
 
 
-def git(path: Path, *args: str, optional: bool = False) -> bytes:
-    result = subprocess.run(
-        ["git", "--no-optional-locks", "-C", str(path), *args],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        timeout=5,
-        check=False,
-    )
+class Skipped(Exception):
+    """A checkout could not be fingerprinted; the rest of the scan still can."""
+
+
+class Git:
+    def __init__(self, pool: ThreadPoolExecutor) -> None:
+        self.pool = pool
+        self.deadline = time.monotonic() + DEADLINE_SECONDS
+
+    def start(self, path: Path, *args: str) -> "Future[subprocess.CompletedProcess[bytes]]":
+        return self.pool.submit(self.run, path, args)
+
+    def run(self, path: Path, args: Tuple[str, ...]) -> "subprocess.CompletedProcess[bytes]":
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise Skipped(f"git {args[0]} did not start before the scan deadline")
+        try:
+            return subprocess.run(
+                ["git", "--no-optional-locks", "-C", str(path), *args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=remaining,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise Skipped(f"git {args[0]} timed out") from None
+
+
+def output(call: "Future[subprocess.CompletedProcess[bytes]]", optional: bool = False) -> bytes:
+    result = call.result()
     if result.returncode:
         if optional:
             return b""
-        raise ValueError("git inspection failed")
+        raise Skipped("git failed")
     return result.stdout
 
 
-def snapshot(directory: str) -> Dict[str, Dict[str, Dict[str, str]]]:
-    root = Path(directory)
-    paths = [root] if (root / ".git").exists() else sorted(root.iterdir())
-    repos = {}
-    for path in paths:
-        if path.is_symlink() or not (path / ".git").exists():
-            continue
-        remote = git(path, "remote", "get-url", "origin", optional=True).decode().strip()
+class Checkout:
+    """One checkout, with every git call it needs already running."""
+
+    def __init__(self, git: Git, path: Path) -> None:
+        self.path = path
+        self.remote = git.start(path, "remote", "get-url", "origin")
+        self.head = git.start(path, "rev-parse", "--verify", "HEAD")
+        self.branch = git.start(path, "branch", "--show-current")
+        self.diff = git.start(path, "diff", "--no-ext-diff", "--no-textconv", "HEAD")
+        self.untracked = git.start(path, "ls-files", "--others", "--exclude-standard", "-z")
+
+    def fingerprint(self) -> Optional[Dict[str, str]]:
+        """None for a checkout that is not a GitHub repository with a commit."""
+        remote = output(self.remote, optional=True).decode().strip()
         match = re.fullmatch(
             r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?/?",
             remote,
         )
         if not match:
-            continue
-        head = git(path, "rev-parse", "--verify", "HEAD", optional=True).decode().strip()
+            return None
+        head = output(self.head, optional=True).decode().strip()
         if not head:
-            continue
-        branch = git(path, "branch", "--show-current").decode().strip()
-        digest = hashlib.sha256(git(path, "diff", "--no-ext-diff", "--no-textconv", "HEAD"))
-        untracked = git(path, "ls-files", "--others", "--exclude-standard", "-z")
-        for name in untracked.split(b"\0"):
+            return None
+        digest = hashlib.sha256(output(self.diff))
+        for name in output(self.untracked).split(b"\0"):
             if name:
-                stat = (path / os.fsdecode(name)).lstat()
+                try:
+                    stat = (self.path / os.fsdecode(name)).lstat()
+                except OSError:
+                    raise Skipped("an untracked file changed during the scan") from None
                 digest.update(name)
                 digest.update(str((stat.st_size, stat.st_mtime_ns)).encode())
-        repos[str(path)] = {
+        return {
             "repo": match.group(1),
-            "branch": branch,
+            "branch": output(self.branch).decode().strip(),
             "head": head,
             "dirty": digest.hexdigest(),
         }
-    return {"repos": repos}
+
+
+def snapshot(directory: str) -> Dict[str, object]:
+    root = Path(directory)
+    paths = [root] if (root / ".git").exists() else sorted(root.iterdir())
+    repos: Dict[str, Dict[str, str]] = {}
+    skipped: Dict[str, str] = {}
+    with ThreadPoolExecutor(WORKERS) as pool:
+        git = Git(pool)
+        checkouts: List[Checkout] = [
+            Checkout(git, path)
+            for path in paths
+            if not path.is_symlink() and (path / ".git").exists()
+        ]
+        for checkout in checkouts:
+            try:
+                fingerprint = checkout.fingerprint()
+            except Skipped as reason:
+                skipped[str(checkout.path)] = str(reason)
+                continue
+            if fingerprint:
+                repos[str(checkout.path)] = fingerprint
+    return {"repos": repos, **({"skipped": skipped} if skipped else {})}
 
 
 if __name__ == "__main__":
     try:
         request = json.loads(base64.b64decode(sys.argv[1]))
         print(json.dumps(snapshot(request["root"])))
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+    except (OSError, ValueError):
         print(json.dumps({"error": "Could not inspect workspace git state"}))

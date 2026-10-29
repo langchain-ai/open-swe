@@ -301,12 +301,17 @@ async def proxy_dashboard_thread_commands(
         and response_payload.get("type") == "success"
         and run_id is not None
     )
+    # The store answers a start the runtime refused with a 200 carrying an error envelope.
+    run_start_refused = method == "run.start" and (
+        reply.status >= 400
+        or (isinstance(response_payload, dict) and response_payload.get("type") == "error")
+    )
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
             return 200, json.dumps(requeued).encode(), "application/json"
-        if reply.status >= 400:
-            await _fail_requested_turn(thread_id, enriched)
+    if run_start_refused:
+        await _fail_requested_turn(thread_id, enriched)
     if run_start_succeeded and not creating and not relayed_from:
         try:
             await _notify_slack_web_handoff(thread_id, metadata)

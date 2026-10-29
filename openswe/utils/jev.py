@@ -7,6 +7,7 @@ from typing import Literal
 
 import httpx2
 from langchain_typesafe import Choice, TypeSafeClassifier
+from langchain_typesafe.client import TypeSafePermissionDeniedError
 
 from openswe.config import ENV
 from openswe.utils.gateway import gateway_base_url
@@ -52,9 +53,8 @@ async def select_jev_choices(
     for decision in tracked.values():
         decision.outcome = "classifier_failure"
         decision.reason = "missing_credentials"
-    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
     gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not typesafe_key and not gateway_key:
+    if not gateway_key:
         logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
         return results
     for decision in tracked.values():
@@ -65,17 +65,32 @@ async def select_jev_choices(
             httpx2.AsyncClient(transport=pooled_transport(), timeout=JEV_TIMEOUT_SECONDS) as client,
         ):
             classifier = TypeSafeClassifier(
-                model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
-                api_key=typesafe_key or gateway_key,
-                **({} if typesafe_key else {"base_url": gateway_base_url()}),
+                model="typesafe/jev-1.13.0",
+                api_key=gateway_key,
+                base_url=gateway_base_url(),
                 async_client=client,
             )
             response = await classifier.ainvoke(
                 {"state": task, "questions": dict(questions)},
                 config={"tags": ["nostream"]},
             )
-    except Exception:
-        logger.exception("Jev classification failed", extra={"questions": list(questions)})
+    except Exception as exc:
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+        if isinstance(exc, TypeSafePermissionDeniedError) or status in (401, 403):
+            for decision in tracked.values():
+                decision.reason = "classifier_auth_failure"
+            logger.error(
+                "Jev classifier credential rejected",
+                extra={
+                    "questions": list(questions),
+                    "status_code": status,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        else:
+            logger.exception("Jev classification failed", extra={"questions": list(questions)})
         return results
     for question, spec in questions.items():
         decision = tracked[question]

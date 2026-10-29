@@ -20,7 +20,7 @@ from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.records import SlackMessage, lookup_slack_thread_id
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
-from openswe.utils.thread_ops import queue_message_for_thread
+from openswe.utils.thread_ops import queue_system_note_for_thread
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ async def note_for_concierge(slack_user_id: str, dm_channel_id: str, note: str) 
     thread_id = await lookup_slack_thread_id(dm_channel_id, CONCIERGE_TS)
     if thread_id is None:
         return
-    if not await queue_message_for_thread(thread_id, [{"type": "text", "text": note}]):
+    if not await queue_system_note_for_thread(thread_id, note):
         logger.warning(
             "Could not queue a note for the concierge thread",
             extra={"slack_user_id": slack_user_id, "agent_thread_id": thread_id},
@@ -129,7 +129,7 @@ async def _record_in_concierge_thread(
         return
     permalink = await get_slack_permalink(*origin.location) if origin is not None else None
     note = prompt("slack/concierge-dm-posted", text=text, origin=origin, permalink=permalink or "")
-    if not await queue_message_for_thread(thread_id, [{"type": "text", "text": note}]):
+    if not await queue_system_note_for_thread(thread_id, note):
         logger.warning(
             "Could not queue a DM for the concierge thread",
             extra={"thread_id": thread_id},

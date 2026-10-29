@@ -2,7 +2,9 @@ import re
 import sys
 from collections.abc import Iterable
 
-REFERENCE = re.compile(r"\b(?:get_)?langgraph_client\b")
+REFERENCE = re.compile(
+    r"\b(?:(?:get_)?langgraph_client|get_(?:sync_)?client|(?:Sync)?LangGraphClient|langgraph_sdk\.client)\b"
+)
 REASON = "No new backend langgraph_client uses: everything must be on MDA now."
 
 

@@ -184,19 +184,24 @@ export function ReviewStylesPanel() {
             <ul className="flex flex-wrap gap-space-2">
               {(styles.data ?? []).map((s) => (
                 <li key={s.full_name}>
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={s.full_name}
                     type="button"
                     aria-pressed={selected === s.full_name}
                     className={cn(
-                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
+                      "justify-start",
+                      "max-w-full gap-space-2 border px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-1-hover",
                       selected === s.full_name
-                        ? "border-brand bg-selected font-medium"
+                        ? "border-brand bg-selected font-medium hover:bg-selected dark:hover:bg-selected"
                         : "border-default"
                     )}
                     onClick={() => setSelected(s.full_name)}
                   >
                     <span className="truncate">{s.full_name}</span>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

@@ -39,7 +39,7 @@ from openswe.github.http import github_reauth_message
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
-from openswe.input_messages import InputMessageContext, build_run_input
+from openswe.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -48,8 +48,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
 from openswe.threads.access import agent_version_metadata, resolve_run_email
 from openswe.threads.creation import create_thread
+from openswe.threads.store import THREADS
 from openswe.users import User
-from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
@@ -443,6 +443,11 @@ async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
             text(f"UPDATE automation SET {assignments} WHERE id = :id"),
             {**values, "id": uuid.UUID(record["id"])},
         )
+
+
+async def record_run_error(record: dict[str, Any], error: str) -> None:
+    """Show ``error`` on the automation, as a failed launch does."""
+    await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
 
 
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
@@ -890,7 +895,10 @@ async def _schedule_thread_metadata(cfg: RunConfig) -> dict[str, Any] | None:
     """Metadata of the public system thread an automation run executes on, if it is one."""
     if cfg.source != "schedule" or not cfg.thread_id or cfg.github_login or cfg.user_email:
         return None
-    metadata = thread_metadata(await langgraph_client().threads.get(cfg.thread_id))
+    thread = await THREADS.get(cfg.thread_id)
+    if thread is None:
+        return None
+    metadata = dict(thread.metadata)
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
         return None
     return metadata
@@ -999,6 +1007,22 @@ async def _agent_run_config(
     return {"configurable": configurable, "metadata": agent_version_metadata()}
 
 
+async def _automation_identity(record: dict[str, Any]) -> SystemIdentity:
+    """Who the run works for: the automation, and the creator it may DM its result to."""
+    identity: SystemIdentity = {
+        "id": f"system:schedule:{record['id']}",
+        "display_name": record.get("name") or "Scheduled automation",
+        "platform": "open-swe",
+    }
+    creator = record.get("created_by")
+    user = await User.for_login("github", creator) if isinstance(creator, str) and creator else None
+    if user is not None and user.slack_user_id:
+        identity["content"] = prompt(
+            "runs/automation-creator", login=creator, slack_user_id=user.slack_user_id
+        )
+    return identity
+
+
 async def _launch_agent_schedule_record(
     record: dict[str, Any],
     *,
@@ -1069,13 +1093,7 @@ async def _launch_agent_schedule_record(
         input=build_run_input(
             str(record["prompt"]) if prompt is None else prompt,
             input_context,
-            systems=[
-                {
-                    "id": f"system:schedule:{schedule_id}",
-                    "display_name": record.get("name") or "Scheduled automation",
-                    "platform": "open-swe",
-                }
-            ],
+            systems=[await _automation_identity(record)],
         ),
         source="schedule",
         thread_title=None,

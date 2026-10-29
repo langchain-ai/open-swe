@@ -241,7 +241,7 @@ class HumanReviewRequest(Base):
             .selectinload(HumanReviewParticipant.user)
             .selectinload(User.identities),
             selectinload(cls.requested_by).selectinload(User.identities),
-            selectinload(cls.pull_request),
+            selectinload(cls.pull_request).selectinload(PullRequest.threads),
         )
 
     @classmethod

@@ -3,6 +3,8 @@
 import asyncio
 import hmac
 from datetime import datetime
+from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -28,6 +30,34 @@ class DispatchGateway:
         if len(secret.get_secret_value()) < 32:
             raise ValueError("Queue dispatch requires a signing secret of at least 32 characters")
         self.url, self.secret = url, secret
+
+    async def report(
+        self,
+        contract: ValidationRequest,
+        expires_at: datetime,
+        state: Literal["in_progress", "success"],
+        *,
+        run_id: int | None = None,
+    ) -> None:
+        envelope = DispatchEnvelope(contract=contract, expires_at=expires_at)
+        report = CheckReport(dispatch_body=envelope.model_dump_json(), state=state, run_id=run_id)
+        body = report.model_dump_json(exclude_none=True).encode()
+        signature = hmac.digest(
+            self.secret.get_secret_value().encode(), b"check-report:" + body, "sha256"
+        ).hex()
+        parts = urlsplit(self.url)
+        url = urlunsplit(parts._replace(path=parts.path.rsplit("/", 1)[0] + "/check-reports"))
+        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
+            response = await client.post(
+                url,
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Merge-Queue-Signature": signature,
+                },
+                follow_redirects=False,
+            )
+            response.raise_for_status()
 
     async def dispatch(self, contract: ValidationRequest, expires_at: datetime) -> None:
         body = DispatchEnvelope(contract=contract, expires_at=expires_at).model_dump_json().encode()
@@ -60,3 +90,10 @@ class DispatchGateway:
                     # A proxy error may arrive after dispatch; discover the run instead of resending.
                     raise RuntimeError(f"Queue dispatch outcome unknown ({response.status_code})")
                 return
+
+
+class CheckReport(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    dispatch_body: str
+    state: Literal["in_progress", "success"]
+    run_id: int | None = None

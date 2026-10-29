@@ -644,8 +644,10 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
-    # A provider MDA declares no box for, so preparing reads no thread metadata.
-    monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # A thread with no box of MDA's, so preparing reads no thread metadata.
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain_core.messages import messages_to_dict
 
     from openswe.agent_api.graph import RemoteGraph

@@ -5,7 +5,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
+import httpx
 from githubkit.auth import AppAuthStrategy
+from githubkit.exception import RequestError, RequestFailed
 from githubkit_schemas.v2022_11_28.types import (
     AppInstallationsInstallationIdAccessTokensPostBodyType,
     AppPermissionsType,
@@ -13,6 +15,7 @@ from githubkit_schemas.v2022_11_28.types import (
 from pydantic import TypeAdapter
 
 from openswe.config import ENV
+from openswe.github.http import GitHubAppUnavailable
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 
 logger = logging.getLogger(__name__)
@@ -135,6 +138,7 @@ async def get_github_app_installation_token(
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
     log_errors: bool = True,
+    raise_errors: bool = False,
 ) -> str | None:
     """Exchange the GitHub App JWT for an installation access token."""
     token, _ = await get_github_app_installation_token_with_expiry(
@@ -143,6 +147,7 @@ async def get_github_app_installation_token(
         repositories=repositories,
         permissions=permissions,
         log_errors=log_errors,
+        raise_errors=raise_errors,
     )
     return token
 
@@ -161,6 +166,7 @@ async def get_github_app_installation_token_with_expiry(
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
     log_errors: bool = True,
+    raise_errors: bool = False,
 ) -> tuple[str | None, str | None]:
     """Exchange the GitHub App JWT for an installation access token and its expiry."""
     resolved_installation_id = str(
@@ -177,6 +183,8 @@ async def get_github_app_installation_token_with_expiry(
             if local_token:
                 return local_token, None
         logger.debug("GitHub App env vars not fully configured, skipping app token")
+        if raise_errors:
+            raise GitHubAppUnavailable("GitHub App is not configured")
         return None, None
 
     key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
@@ -206,9 +214,28 @@ async def get_github_app_installation_token_with_expiry(
             if isinstance(token, str) and token and parsed is not None:
                 _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
             return token, expires_at
-    except Exception:
+    except Exception as exc:
         if log_errors:
             logger.exception("Failed to get GitHub App installation token")
         else:
             logger.debug("Failed to get GitHub App installation token", exc_info=True)
+        if raise_errors:
+            retryable = False
+            if isinstance(exc, RequestFailed):
+                response = exc.response.raw_response
+                retryable = (
+                    response.status_code == 429
+                    or 500 <= response.status_code < 600
+                    or (
+                        response.status_code == 403
+                        and (
+                            response.headers.get("X-RateLimit-Remaining") == "0"
+                            or "Retry-After" in response.headers
+                            or "rate limit" in response.text.lower()
+                        )
+                    )
+                )
+            elif isinstance(exc, RequestError):
+                retryable = isinstance(exc.exc, httpx.TransportError)
+            raise GitHubAppUnavailable("GitHub App token unavailable", retryable=retryable) from exc
         return None, None

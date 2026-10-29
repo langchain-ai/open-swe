@@ -116,7 +116,7 @@ jobs:
         if: steps.rollout.outputs.superseded != 'true'
         working-directory: preview-tree
         run: |
-          if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk .github/workflows/build_preview_branch.yml; then
+          if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/build_preview_branch.yml; then
             echo "deploy=true" >>"$GITHUB_OUTPUT"
           fi
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -159,8 +159,8 @@ jobs:
             exit 1
           fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # its gateway key, and the secret they share.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          # its gateway key, the secret they share, and the commit its traces name as their revision.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
           uv run --project mda --locked mda deploy mda \
             --name open-swe-mda-preview \
             --deployment-type prod \

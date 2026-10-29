@@ -26,6 +26,9 @@ PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
 FIX_PROMPT_PATH = Path(".github/prompts/fix_preview_typecheck.md")
 FIXUP_MESSAGE = "preview: fix typecheck errors (oswe)"
 FORCE_MESSAGE = "preview: force deployment"
+WORKFLOWS_MESSAGE = "preview: keep the published workflows"
+# GitHub refuses a push by the workflow's token that changes anything here.
+WORKFLOWS = ".github/workflows"
 TYPECHECK_IMAGE = "node:24-bookworm-slim"
 TYPECHECK_SCRIPT = (
     "corepack pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
@@ -674,7 +677,10 @@ The preview resets to plain `main` every Sunday, in the
             await git("log", "--first-parent", "--format=%H%x00%s", "-n", "20", PUBLISHED_REF)
         ).stdout
         commits = (line.split("\0", 1) for line in history.splitlines())
-        tip = next((commit for commit in commits if commit[1] != FORCE_MESSAGE), None)
+        tip = next(
+            (commit for commit in commits if commit[1] not in {FORCE_MESSAGE, WORKFLOWS_MESSAGE}),
+            None,
+        )
         if tip is None or tip[1] != FIXUP_MESSAGE:
             return
         fixup = tip[0]
@@ -718,6 +724,27 @@ The preview resets to plain `main` every Sunday, in the
                 warn(f"could not record the failed preview tree: {marked.first_line}")
         return errors
 
+    async def keep_published_workflows(self) -> None:
+        """Put back the published preview's workflow files where the tree changed any.
+
+        The workflow's token cannot push a change to a workflow file, so a tree that
+        changes one, such as main editing CI, could never be published. The preview
+        branch's copies never run: every workflow runs from main's.
+        """
+        unchanged = await git(
+            "diff", "--quiet", PUBLISHED_REF, "HEAD", "--", WORKFLOWS, check=False
+        )
+        if unchanged.code == 0:
+            return
+        await git("rm", "-r", "-q", "--ignore-unmatch", "--", WORKFLOWS)
+        if (await git("ls-tree", "-d", PUBLISHED_REF, WORKFLOWS)).stdout.strip():
+            await git("checkout", PUBLISHED_REF, "--", WORKFLOWS)
+        await git("commit", "-q", "-m", WORKFLOWS_MESSAGE)
+        summary(
+            "",
+            "Kept the published preview's workflow files: the build cannot push changes to them.",
+        )
+
     async def publish(self, published: str | None) -> None:
         branch = self.settings.branch
         assembled = await rev_parse("HEAD^{tree}")
@@ -749,6 +776,8 @@ The preview resets to plain `main` every Sunday, in the
         published = await self.fetch_published()
         await self.assemble(prompt)
         if published is not None:
+            # Before the unchanged-tree check: the published tree keeps its own workflows.
+            await self.keep_published_workflows()
             await self.reuse_fixup()
         errors = None
         if self.settings.force or await rev_parse("HEAD^{tree}") != published:
@@ -758,6 +787,9 @@ The preview resets to plain `main` every Sunday, in the
         if errors:
             summary("", "### Typecheck failed — nothing published", "", "```", errors, "```")
             raise PreviewError("the preview tree fails typecheck; nothing was published")
+        if published is not None:
+            # Again, should verify have reassembled the tree from main.
+            await self.keep_published_workflows()
         await self.publish(published)
 
     async def reset(self) -> None:

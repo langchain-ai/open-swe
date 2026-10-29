@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
@@ -74,12 +75,20 @@ export function RepoSelector({
     >
       <div className={cn("min-w-0 shrink", className)}>
         <PopoverTrigger asChild>
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={
+              selectedRepo === undefined
+                ? placeholder
+                : (selectedLabel ?? selectedRepo ?? emptySelectionLabel)
+            }
             type="button"
             disabled={disabled}
             title={selectedRepo ?? undefined}
             className={cn(
-              "flex max-w-[260px] cursor-pointer items-center gap-space-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+              "max-w-[260px] cursor-pointer gap-space-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:bg-transparent disabled:opacity-60",
               triggerClassName
             )}
           >
@@ -94,7 +103,7 @@ export function RepoSelector({
               weight="regular"
               className="shrink-0 opacity-70"
             />
-          </button>
+          </Button>
         </PopoverTrigger>
         <PopoverContent
           align="start"
@@ -138,7 +147,12 @@ export function RepoSelector({
             />
           )}
           <div className="overflow-y-auto">
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={emptySelectionLabel}
+              aria-pressed={selectedRepo === null}
               type="button"
               onClick={() => {
                 onRepoChange(null)
@@ -146,7 +160,8 @@ export function RepoSelector({
                 setQuery("")
               }}
               className={cn(
-                "flex w-full items-center px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover",
+                "h-auto justify-start whitespace-normal",
+                "w-full px-space-2 py-space-1 text-left hover:bg-elevated-hover",
                 selectedRepo === null ? "text-primary" : "text-secondary"
               )}
             >
@@ -159,7 +174,7 @@ export function RepoSelector({
                   className="ml-auto shrink-0 text-icon-secondary"
                 />
               )}
-            </button>
+            </Button>
             {filteredRepos.length === 0 ? (
               <div className="px-space-2 py-space-1 text-secondary">
                 {noMatchesLabel}
@@ -168,7 +183,12 @@ export function RepoSelector({
               filteredRepos.map((repo) => {
                 const selected = repo.full_name === selectedRepo
                 return (
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={`${repo.full_name}${repo.private === undefined ? "" : ` ${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`}`}
+                    aria-pressed={selected}
                     key={repo.full_name}
                     type="button"
                     title={repo.full_name}
@@ -178,7 +198,8 @@ export function RepoSelector({
                       setQuery("")
                     }}
                     className={cn(
-                      "flex w-full items-center gap-space-2 px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover",
+                      "h-auto justify-start whitespace-normal",
+                      "w-full gap-space-2 px-space-2 py-space-1 text-left hover:bg-elevated-hover",
                       selected ? "text-primary" : "text-secondary"
                     )}
                   >
@@ -203,7 +224,7 @@ export function RepoSelector({
                         className="shrink-0 text-icon-secondary"
                       />
                     )}
-                  </button>
+                  </Button>
                 )
               })
             )}

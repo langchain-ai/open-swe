@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import {
   InfoRegularIcon,
   WarningRegularIcon,
@@ -115,9 +116,9 @@ function GithubAttachment({ href }: { href: string }) {
   const [failed, setFailed] = useState(false)
   if (failed)
     return (
-      <a href={href} target="_blank" rel="noreferrer">
+      <MacawLink variant="xs" href={href} target="_blank" rel="noreferrer">
         {href}
-      </a>
+      </MacawLink>
     )
   return (
     <video

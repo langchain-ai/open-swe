@@ -1,9 +1,11 @@
 """LangGraph graph entrypoint for the E2E Managed Deep Agents server.
 
 Serves the graph ``mda build`` compiled from the real ``mda/`` project, with the
-model it builds swapped for the scripted fake. It runs in the ``mda/`` project's
-environment, which has no ``openswe``: the backend's hooks, tools and sandbox
-are the E2E harness's own, reached over HTTP like a deployed runtime does.
+model it builds swapped for the scripted fake and LangSmith's sandbox service for
+the E2E's stand-in (``sandbox_service.py``), in which MDA creates each thread's box
+as it does in LangSmith. It runs in the ``mda/`` project's environment, which has
+no ``openswe``: the backend's hooks and tools are the E2E harness's own, reached
+over HTTP like a deployed runtime does.
 """
 
 import os
@@ -11,6 +13,20 @@ import sys
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import e2e_env  # noqa: E402, F401  - the E2E's environment, before anything reads it
+import sandbox_service  # noqa: E402
+
+if not sandbox_service.REAL:
+    from managed_deepagents import runtime as mda_runtime
+
+    def _stand_in_box(
+        _sandbox: object, *, scope_key: str, **_kwargs: object
+    ) -> tuple[sandbox_service.StandInSandbox, str, str]:
+        name = sandbox_service.mda_box_name(scope_key)
+        return sandbox_service.open_box(name), name, name
+
+    mda_runtime._create_langsmith_sandbox = _stand_in_box
 
 if not os.environ.get("E2E_REAL_LLM"):
     # From the build directory langgraph dev serves. Every model the runtime builds,

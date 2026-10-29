@@ -7,6 +7,7 @@ file and shell tools run here, as they do in the box MDA owns.
 """
 
 import base64
+import posixpath
 from collections.abc import Callable
 from typing import Final
 
@@ -98,8 +99,12 @@ class RemoteFiles(SandboxBackendProtocol):
             timeout=timeout,
         )
 
+    def _at(self, path: str) -> str:
+        """Where on the backend ``path`` is."""
+        return path
+
     async def als(self, path: str) -> LsResult:
-        reply = await self._call(file_api.LS, file_api.PathRequest(path=path))
+        reply = await self._call(file_api.LS, file_api.PathRequest(path=self._at(path)))
         return LsResult(
             error=reply.error,
             entries=None
@@ -109,7 +114,8 @@ class RemoteFiles(SandboxBackendProtocol):
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         reply = await self._call(
-            file_api.READ, file_api.ReadRequest(file_path=file_path, offset=offset, limit=limit)
+            file_api.READ,
+            file_api.ReadRequest(file_path=self._at(file_path), offset=offset, limit=limit),
         )
         return ReadResult(
             error=reply.error,
@@ -123,7 +129,7 @@ class RemoteFiles(SandboxBackendProtocol):
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         reply = await self._call(
-            file_api.WRITE, file_api.WriteRequest(file_path=file_path, content=content)
+            file_api.WRITE, file_api.WriteRequest(file_path=self._at(file_path), content=content)
         )
         return WriteResult(error=reply.error, path=reply.path)
 
@@ -137,7 +143,7 @@ class RemoteFiles(SandboxBackendProtocol):
         reply = await self._call(
             file_api.EDIT,
             file_api.EditRequest(
-                file_path=file_path,
+                file_path=self._at(file_path),
                 old_string=old_string,
                 new_string=new_string,
                 replace_all=replace_all,
@@ -146,11 +152,16 @@ class RemoteFiles(SandboxBackendProtocol):
         return EditResult(error=reply.error, path=reply.path, occurrences=reply.occurrences)
 
     async def adelete(self, file_path: str) -> DeleteResult:
-        reply = await self._call(file_api.DELETE, file_api.DeleteRequest(file_path=file_path))
+        reply = await self._call(
+            file_api.DELETE, file_api.DeleteRequest(file_path=self._at(file_path))
+        )
         return DeleteResult(error=reply.error, path=reply.path)
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        reply = await self._call(file_api.GLOB, file_api.GlobRequest(pattern=pattern, path=path))
+        reply = await self._call(
+            file_api.GLOB,
+            file_api.GlobRequest(pattern=pattern, path=None if path is None else self._at(path)),
+        )
         return GlobResult(
             error=reply.error,
             matches=None
@@ -169,7 +180,12 @@ class RemoteFiles(SandboxBackendProtocol):
     ) -> GrepResult:
         reply = await self._call(
             file_api.GREP,
-            file_api.GrepRequest(pattern=pattern, path=path, glob=glob, max_count=max_count),
+            file_api.GrepRequest(
+                pattern=pattern,
+                path=None if path is None else self._at(path),
+                glob=glob,
+                max_count=max_count,
+            ),
         )
         return GrepResult(
             error=reply.error,
@@ -201,7 +217,9 @@ class RemoteFiles(SandboxBackendProtocol):
             file_api.UPLOAD,
             file_api.UploadRequest(
                 files=[
-                    file_api.UploadedFile(path=path, content_base64=base64.b64encode(data).decode())
+                    file_api.UploadedFile(
+                        path=self._at(path), content_base64=base64.b64encode(data).decode()
+                    )
                     for path, data in files
                 ]
             ),
@@ -209,7 +227,9 @@ class RemoteFiles(SandboxBackendProtocol):
         return [FileUploadResponse(path=item.path, error=item.error) for item in reply.files]
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        reply = await self._call(file_api.DOWNLOAD, file_api.DownloadRequest(paths=paths))
+        reply = await self._call(
+            file_api.DOWNLOAD, file_api.DownloadRequest(paths=[self._at(path) for path in paths])
+        )
         return [
             FileDownloadResponse(
                 path=item.path,
@@ -220,6 +240,23 @@ class RemoteFiles(SandboxBackendProtocol):
             )
             for item in reply.files
         ]
+
+
+class RunArtifacts(RemoteFiles):
+    """The backend's files under the run's artifacts root, for what the graph itself keeps.
+
+    A run whose box is not MDA's keeps its large tool results here, where its file
+    tools read them, rather than at the root of a person's machine.
+    """
+
+    def __init__(
+        self, transport: Transport, run_id: Callable[[], str | None], root: Callable[[], str]
+    ) -> None:
+        super().__init__(transport, run_id)
+        self._root = root
+
+    def _at(self, path: str) -> str:
+        return posixpath.join(self._root(), path.lstrip("/"))
 
 
 def remote_file_tools(remote: RemoteFiles, artifacts_root: str) -> dict[str, BaseTool]:

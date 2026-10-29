@@ -1,10 +1,12 @@
 # /// script
 # requires-python = ">=3.14"
 # ///
-"""Vendor the Managed Deep Agents SDK from its main branch into vendor/managed-deepagents-sdk.
+"""Vendor an upstream project from its main branch into vendor/.
 
-The `mda` CLI's Rust source and the `managed-deepagents` Python runtime, which mda/
-installs and `make mda-cli` builds the CLI from.
+Each vendored project is one entry of PROJECTS: the Managed Deep Agents SDK (the
+`mda` CLI's Rust source and the `managed-deepagents` Python runtime, which mda/
+installs and `make mda-cli` builds the CLI from), the default, and langchain-quickjs,
+the code mode mda/ runs, from the deepagents repository.
 
     uv run scripts/vendor.py           # update to the head of upstream main
     uv run scripts/vendor.py <sha>     # update to a commit on upstream main
@@ -13,11 +15,14 @@ installs and `make mda-cli` builds the CLI from.
                                        # release branch Open SWE needs before it lands
     uv run scripts/vendor.py --pr <n>  # carry upstream pull request <n>, or move it to its head
     uv run scripts/vendor.py --diff    # our changes: the tree against UPSTREAM's commit
+    uv run scripts/vendor.py --project langchain-quickjs ...
+                                       # any of the above, for another vendored project
 
 UPSTREAM records the exact commit the tree comes from: its full SHA, then its date,
 then its branch when that is not main.
-vendor/mda-upstream-prs records the upstream pull requests the tree carries on top of it,
-not yet on main: one per line, its number, the head commit carried, then its title.
+Each project's upstream-prs record (vendor/mda-upstream-prs for the SDK) lists the
+upstream pull requests the tree carries on top of it, not yet on main: one per line,
+its number, the head commit carried, then its title.
 Our changes, carried pull requests included, are edits made in the tree itself, as in a
 vendor branch. Updating takes upstream's new version of every file we left alone, and
 three-way merges upstream's changes into every file we changed (base: the recorded
@@ -27,8 +32,8 @@ sides changed the same lines; carried pull requests the new commit contains drop
 that record. Carrying a pull request three-way merges its changes into the tree the same
 way (base: where it branched off its base branch, or the head carried before). Both
 relock mda/.
-MDA_SDK_REPO overrides the upstream, e.g. a local checkout; pull requests are looked up
-on GitHub with `gh`.
+Each project's repository variable (MDA_SDK_REPO, DEEPAGENTS_REPO) overrides its
+upstream, e.g. a local checkout; pull requests are looked up on GitHub with `gh`.
 """
 
 import argparse
@@ -45,25 +50,8 @@ from pathlib import Path
 from typing import Final
 
 ROOT: Final = Path(__file__).resolve().parent.parent
-DEST: Final = ROOT / "vendor" / "managed-deepagents-sdk"
-DEFAULT_REPO: Final = "git@github.com:langchain-ai/managed-deepagents-sdk.git"
-GITHUB_REPO: Final = "langchain-ai/managed-deepagents-sdk"
-PATHS: Final = (
-    "Cargo.toml",
-    "Cargo.lock",
-    "rustfmt.toml",
-    "LICENSE",
-    "README.md",
-    "crates",
-    "packages/pypi",
-)
-# The Python runtime's own tests never run here.
-SKIPPED: Final = "packages/pypi/tests"
+VENDOR: Final = ROOT / "vendor"
 RECORD: Final = "UPSTREAM"
-# Outside the tree, so nothing mistakes it for a file upstream ships.
-PRS_RECORD: Final = ROOT / "vendor" / "mda-upstream-prs"
-# What `make mda-cli` and local tooling write into the tree: kept across updates, never compared.
-BUILD_OUTPUTS: Final = ("target", "packages/pypi/src/managed_deepagents/_binaries")
 IGNORED_NAMES: Final = frozenset({"target", "_binaries", "__pycache__"})
 
 
@@ -74,10 +62,6 @@ class VendorError(Exception):
 def _git(*args: str, cwd: Path, output: bool = False) -> str:
     result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=output, text=output)
     return result.stdout.strip() if output else ""
-
-
-def _skipped(name: str) -> bool:
-    return name == SKIPPED or name.startswith(f"{SKIPPED}/")
 
 
 def _ignored(relative: Path) -> bool:
@@ -97,8 +81,89 @@ def files(tree: Path) -> dict[str, Path]:
     return found
 
 
-def recorded_sha() -> str:
-    return (DEST / RECORD).read_text().split()[0]
+@dataclass(frozen=True)
+class Project:
+    """One upstream project vendored under vendor/: where it comes from and what of it we keep."""
+
+    name: str
+    # Overrides ``repo``, e.g. with a local checkout.
+    repo_variable: str
+    repo: str
+    github_repo: str
+    # Where in the upstream repository the project lives; its paths are relative to it.
+    subdirectory: str
+    paths: tuple[str, ...]
+    # Upstream paths never vendored, such as the project's own tests.
+    skipped: tuple[str, ...] = ()
+    # What `make mda-cli` and local tooling write into the tree: kept across updates, never compared.
+    build_outputs: tuple[str, ...] = ()
+    # Outside the tree, so nothing mistakes it for a file upstream ships.
+    prs_record_name: str = ""
+    # Where our own changes to the tree are noted, one dated file each.
+    changes_name: str = ""
+
+    @property
+    def dest(self) -> Path:
+        return VENDOR / self.name
+
+    @property
+    def prs_record(self) -> Path:
+        return VENDOR / (self.prs_record_name or f"{self.name}-upstream-prs")
+
+    @property
+    def changes(self) -> str:
+        return f"vendor/{self.changes_name or f'{self.name}-changes'}"
+
+    @property
+    def upstream_repo(self) -> str:
+        return os.environ.get(self.repo_variable, self.repo)
+
+    def skips(self, name: str) -> bool:
+        return any(name == skipped or name.startswith(f"{skipped}/") for skipped in self.skipped)
+
+    def recorded_sha(self) -> str:
+        return (self.dest / RECORD).read_text().split()[0]
+
+    def tree_ish(self, sha: str) -> str:
+        """What ``git archive`` reads the project from at ``sha``."""
+        return f"{sha}:{self.subdirectory}" if self.subdirectory else sha
+
+
+PROJECTS: Final = {
+    project.name: project
+    for project in (
+        Project(
+            name="managed-deepagents-sdk",
+            repo_variable="MDA_SDK_REPO",
+            repo="git@github.com:langchain-ai/managed-deepagents-sdk.git",
+            github_repo="langchain-ai/managed-deepagents-sdk",
+            subdirectory="",
+            paths=(
+                "Cargo.toml",
+                "Cargo.lock",
+                "rustfmt.toml",
+                "LICENSE",
+                "README.md",
+                "crates",
+                "packages/pypi",
+            ),
+            # The Python runtime's own tests never run here.
+            skipped=("packages/pypi/tests",),
+            build_outputs=("target", "packages/pypi/src/managed_deepagents/_binaries"),
+            prs_record_name="mda-upstream-prs",
+            changes_name="mda-changes",
+        ),
+        Project(
+            name="langchain-quickjs",
+            repo_variable="DEEPAGENTS_REPO",
+            repo="git@github.com:langchain-ai/deepagents.git",
+            github_repo="langchain-ai/deepagents",
+            subdirectory="libs/partners/quickjs",
+            paths=("LICENSE", "README.md", "pyproject.toml", "langchain_quickjs"),
+        ),
+    )
+}
+DEFAULT_PROJECT: Final = "managed-deepagents-sdk"
 
 
 @dataclass(frozen=True)
@@ -119,21 +184,26 @@ class CarriedPR:
 
 
 class CarriedPRs:
-    """vendor/mda-upstream-prs: the upstream pull requests the tree carries, by number."""
+    """A project's upstream-prs record: the upstream pull requests the tree carries, by number."""
 
-    def __init__(self, prs: dict[int, CarriedPR]) -> None:
+    def __init__(self, record: Path, prs: dict[int, CarriedPR]) -> None:
+        self.record = record
         self.prs = prs
 
     @classmethod
-    def read(cls) -> CarriedPRs:
-        lines = PRS_RECORD.read_text().splitlines() if PRS_RECORD.exists() else []
-        return cls({pr.number: pr for pr in map(CarriedPR.parse, filter(None, lines))})
+    def read(cls, project: Project) -> CarriedPRs:
+        record = project.prs_record
+        lines = record.read_text().splitlines() if record.exists() else []
+        return cls(record, {pr.number: pr for pr in map(CarriedPR.parse, filter(None, lines))})
+
+    def without(self, numbers: list[int]) -> CarriedPRs:
+        return CarriedPRs(self.record, {n: pr for n, pr in self.prs.items() if n not in numbers})
 
     def write(self) -> None:
         if self.prs:
-            PRS_RECORD.write_text("".join(f"{self.prs[n].line()}\n" for n in sorted(self.prs)))
+            self.record.write_text("".join(f"{self.prs[n].line()}\n" for n in sorted(self.prs)))
         else:
-            PRS_RECORD.unlink(missing_ok=True)
+            self.record.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -147,18 +217,18 @@ class PullRequest:
     merge_commit: str | None
 
     @classmethod
-    def lookup(cls, number: int) -> PullRequest:
+    def lookup(cls, project: Project, number: int) -> PullRequest:
         fields = "number,title,headRefOid,baseRefName,mergeCommit"
         try:
             found = subprocess.run(
-                ["gh", "pr", "view", str(number), "-R", GITHUB_REPO, "--json", fields],
+                ["gh", "pr", "view", str(number), "-R", project.github_repo, "--json", fields],
                 check=True,
                 capture_output=True,
                 text=True,
             ).stdout
         except subprocess.CalledProcessError as exc:
             raise VendorError(
-                f"Cannot look up {GITHUB_REPO}#{number}: {exc.stderr.strip()}"
+                f"Cannot look up {project.github_repo}#{number}: {exc.stderr.strip()}"
             ) from exc
         data = json.loads(found)
         merge = data["mergeCommit"]
@@ -172,10 +242,11 @@ class PullRequest:
 
 
 class Upstream:
-    """One of the SDK repository's branches, main by default, fetched into a scratch directory."""
+    """One of a project's repository branches, main by default, fetched into a scratch directory."""
 
-    def __init__(self, repo: str, scratch: Path, branch: str = "main") -> None:
-        self.repo = repo
+    def __init__(self, project: Project, scratch: Path, branch: str = "main") -> None:
+        self.project = project
+        self.repo = project.upstream_repo
         self.branch = branch
         self._scratch = scratch
         # History without file contents, to check a commit is on the branch; then commits' files.
@@ -184,7 +255,7 @@ class Upstream:
         for path in (self._history, self._content):
             path.mkdir()
             _git("init", "--quiet", cwd=path)
-        _git("fetch", "--quiet", "--filter=blob:none", repo, branch, cwd=self._history)
+        _git("fetch", "--quiet", "--filter=blob:none", self.repo, branch, cwd=self._history)
         self.main = _git("rev-parse", "FETCH_HEAD", cwd=self._history, output=True)
 
     def _contains(self, sha: str, commit: str) -> bool:
@@ -257,11 +328,14 @@ class Upstream:
             return out
         _git("fetch", "--quiet", "--depth", "1", self.repo, sha, cwd=self._content)
         archive = subprocess.run(
-            ["git", "archive", sha, *PATHS], cwd=self._content, check=True, capture_output=True
+            ["git", "archive", self.project.tree_ish(sha), *self.project.paths],
+            cwd=self._content,
+            check=True,
+            capture_output=True,
         ).stdout
         out.mkdir()
         with tarfile.open(fileobj=BytesIO(archive)) as tar:
-            members = [m for m in tar.getmembers() if not _skipped(m.name)]
+            members = [m for m in tar.getmembers() if not self.project.skips(m.name)]
             tar.extractall(out, members=members, filter="data")
         # The commit itself was fetched here, whichever branch it is on.
         commit = _git("show", "-s", "--format=%H %cs", sha, cwd=self._content, output=True)
@@ -322,22 +396,25 @@ def merge_trees(
     return conflicts
 
 
-def _install(tree: Path, record: str, prs: CarriedPRs, conflicts: list[str], done: str) -> str:
+def _install(
+    project: Project, tree: Path, record: str, prs: CarriedPRs, conflicts: list[str], done: str
+) -> str:
     """Replace the vendored tree with ``tree``, recorded as ``record`` carrying ``prs``."""
+    dest = project.dest
     (tree / RECORD).write_text(f"{record}\n")
     prs.write()
     # Keep build outputs, so `make mda-cli` need not start over.
-    for output in BUILD_OUTPUTS:
-        if (DEST / output).exists():
+    for output in project.build_outputs:
+        if (dest / output).exists():
             (tree / output).parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(DEST / output, tree / output)
-    shutil.rmtree(DEST, ignore_errors=True)
-    DEST.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(tree, DEST)
+            shutil.move(dest / output, tree / output)
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(tree, dest)
     if conflicts:
         raise VendorError(
             f"{done}, but it collides with our changes; settle each of these in "
-            "vendor/managed-deepagents-sdk:\n"
+            f"vendor/{project.name}:\n"
             + "\n".join(f"  {conflict}" for conflict in conflicts)
             + "\nthen run `cd mda && uv lock`."
         )
@@ -347,43 +424,45 @@ def _install(tree: Path, record: str, prs: CarriedPRs, conflicts: list[str], don
 
 def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
     """Move the tree to ``ref``, keeping our changes; what was done."""
+    project = upstream.project
     sha = upstream.resolve(ref)
     new = upstream.tree(sha)
     record = (new / RECORD).read_text().strip()
-    recorded = recorded_sha() if DEST.exists() else None
+    recorded = project.recorded_sha() if project.dest.exists() else None
     base = upstream.merge_base(recorded, sha) if recorded else None
     tree = scratch / "updated"
     tree.mkdir()
     conflicts = merge_trees(
-        files(DEST),
+        files(project.dest),
         files(upstream.tree(base)) if base else {},
         files(new),
         tree,
         ("ours", f"upstream {base[:12]}" if base else "upstream (before)", f"upstream {sha[:12]}"),
     )
-    carried = CarriedPRs.read()
-    merged = [n for n in carried.prs if upstream.contains(PullRequest.lookup(n), sha)]
-    still = CarriedPRs({n: pr for n, pr in carried.prs.items() if n not in merged})
-    done = f"Updated to {record}"
+    carried = CarriedPRs.read(project)
+    merged = [n for n in carried.prs if upstream.contains(PullRequest.lookup(project, n), sha)]
+    still = carried.without(merged)
+    done = f"Updated vendor/{project.name} to {record}"
     if recorded and base != recorded:
         done += (
             f"; it doesn't build on {recorded[:12]}, so what {recorded[:12]} has and it lacks "
-            f"(since {base[:12]}) stays as our change: note it in vendor/mda-changes"
+            f"(since {base[:12]}) stays as our change: note it in {project.changes}"
         )
     if merged:
         done += f"; it has #{', #'.join(map(str, sorted(merged)))}, no longer carried"
     if still.prs:
         done += f"; still carrying #{', #'.join(map(str, sorted(still.prs)))}"
-    return _install(tree, record, still, conflicts, done)
+    return _install(project, tree, record, still, conflicts, done)
 
 
 def carry(upstream: Upstream, number: int, scratch: Path) -> str:
     """Merge upstream pull request ``number``'s changes into the tree; what was done."""
-    pr = PullRequest.lookup(number)
-    current = recorded_sha()
+    project = upstream.project
+    pr = PullRequest.lookup(project, number)
+    current = project.recorded_sha()
     if upstream.contains(pr, current):
         raise VendorError(f"#{number} is already in {current}; nothing to carry.")
-    carried = CarriedPRs.read()
+    carried = CarriedPRs.read(project)
     previous = carried.prs.get(number)
     if previous is not None and previous.head == pr.head:
         raise VendorError(f"#{number} is already carried at its head, {pr.head}.")
@@ -391,7 +470,7 @@ def carry(upstream: Upstream, number: int, scratch: Path) -> str:
     tree = scratch / "carried"
     tree.mkdir()
     conflicts = merge_trees(
-        files(DEST),
+        files(project.dest),
         files(upstream.tree(base)),
         files(upstream.tree(pr.head)),
         tree,
@@ -400,14 +479,16 @@ def carry(upstream: Upstream, number: int, scratch: Path) -> str:
     carried.prs[number] = CarriedPR(number, pr.head, pr.title)
     verb = "Moved" if previous is not None else "Carried"
     done = f"{verb} #{number} to {pr.head}: {pr.title}"
-    return _install(tree, (DEST / RECORD).read_text().strip(), carried, conflicts, done)
+    record = (project.dest / RECORD).read_text().strip()
+    return _install(project, tree, record, carried, conflicts, done)
 
 
 def diff(upstream: Upstream) -> int:
     """Print our changes, the tree against UPSTREAM's commit; how many files differ."""
+    project = upstream.project
     # The recorded commit, whichever branch it came from.
-    base = upstream.tree(recorded_sha())
-    theirs, ours = files(base), files(DEST)
+    base = upstream.tree(project.recorded_sha())
+    theirs, ours = files(base), files(project.dest)
     changed = 0
     for path in sorted(theirs.keys() | ours.keys()):
         before, after = theirs.get(path), ours.get(path)
@@ -422,7 +503,7 @@ def diff(upstream: Upstream) -> int:
                 "--label",
                 f"upstream/{path}",
                 "--label",
-                f"vendor/managed-deepagents-sdk/{path}",
+                f"vendor/{project.name}/{path}",
                 str(before or os.devnull),
                 str(after or os.devnull),
             ],
@@ -439,6 +520,12 @@ def main() -> int:
         "sha", nargs="?", help="a commit on the upstream branch; the branch's head by default"
     )
     parser.add_argument(
+        "--project",
+        choices=sorted(PROJECTS),
+        default=DEFAULT_PROJECT,
+        help=f"the vendored project ({DEFAULT_PROJECT} by default)",
+    )
+    parser.add_argument(
         "--branch",
         default="main",
         help="the upstream branch to vendor from (main by default), such as a release branch",
@@ -452,16 +539,19 @@ def main() -> int:
     args = parser.parse_args()
     if sum((args.sha is not None, args.diff, args.pr is not None)) > 1:
         parser.error("give one of a SHA, --pr or --diff")
-    repo = os.environ.get("MDA_SDK_REPO", DEFAULT_REPO)
+    project = PROJECTS[args.project]
     with tempfile.TemporaryDirectory() as scratch_dir:
         scratch = Path(scratch_dir)
         try:
-            upstream = Upstream(repo, scratch, args.branch)
+            upstream = Upstream(project, scratch, args.branch)
             if args.diff:
                 changed = diff(upstream)
-                carried = CarriedPRs.read().prs
+                carried = CarriedPRs.read(project).prs
                 note = f", carrying #{', #'.join(map(str, sorted(carried)))}" if carried else ""
-                print(f"{changed} file(s) differ from {recorded_sha()}{note}.", file=sys.stderr)
+                print(
+                    f"{changed} file(s) differ from {project.recorded_sha()}{note}.",
+                    file=sys.stderr,
+                )
             elif args.pr is not None:
                 print(f"{carry(upstream, args.pr, scratch)}; relocked mda/.")
             else:

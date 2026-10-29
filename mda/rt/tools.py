@@ -9,17 +9,18 @@ own (``rt.file_tools``).
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 from uuid import uuid4
 
 from langchain.tools import ToolRuntime
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langchain_core.tools import StructuredTool
+from langchain_quickjs import UnresolvedToolError
 from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
-from runtime_api.catalog import OperationSpec
+from runtime_api.catalog import ToolSpec
 from runtime_api.endpoint import LONG_CALL_SECONDS, call
 from runtime_api.loop import ToolCallReport
 from runtime_api.operations import (
@@ -92,7 +93,7 @@ def tool_report(
     )
 
 
-def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
+def _reading(spec: ToolSpec, state: Mapping[str, object]) -> RunOperation:
     """A call of ``spec``'s operation, carrying the run state it says it reads."""
     run_state = held_state(state)
     keys = list(run_state) if spec.reads_all else [k for k in spec.reads if k != "messages"]
@@ -110,13 +111,13 @@ def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
     )
 
 
-def _seconds(arguments: Mapping[str, JsonValue]) -> float:
+def _seconds(spec: ToolSpec, arguments: Mapping[str, JsonValue]) -> float:
     # A call with its own timeout, such as a long command, must be able to run it out
     # and answer that it did, rather than outlive this one.
     requested = arguments.get("timeout")
     if isinstance(requested, int | float) and not isinstance(requested, bool):
         return max(LONG_CALL_SECONDS, requested + TOOL_CALL_SLACK_SECONDS)
-    return LONG_CALL_SECONDS
+    return spec.seconds if spec.seconds is not None else LONG_CALL_SECONDS
 
 
 def _content(content: str | list[JsonValue]) -> str | list[str | dict]:
@@ -163,7 +164,7 @@ async def cited(
 
 async def _operate(
     backend: OpenSweBackend,
-    spec: OperationSpec,
+    spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     tool_call_id: str,
@@ -177,7 +178,7 @@ async def _operate(
         }
     )
     try:
-        answer = await call(backend, OPERATION, request, timeout=_seconds(arguments))
+        answer = await call(backend, OPERATION, request, timeout=_seconds(spec, arguments))
     except BackendTimeoutError:
         logger.warning("The backend did not answer an operation", exc_info=True)
         return ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
@@ -193,7 +194,7 @@ async def _operate(
 
 async def run_operation(
     backend: OpenSweBackend,
-    spec: OperationSpec,
+    spec: ToolSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
     *,
@@ -247,7 +248,7 @@ def _update(result: Command) -> dict[str, object]:
 
 
 def operation_tool(
-    spec: OperationSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
+    spec: ToolSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
 ) -> StructuredTool:
     async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
         return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
@@ -257,4 +258,38 @@ def operation_tool(
         name=spec.name,
         description=spec.description,
         args_schema=spec.parameters,
+    )
+
+
+# Any arguments: what the tool accepts is the backend's to check.
+_ANY_ARGUMENTS: Final[dict[str, JsonValue]] = {"type": "object", "additionalProperties": True}
+
+
+def backend_tool(
+    name: str,
+    backend: OpenSweBackend,
+    resolve: Callable[[str], Awaitable[ToolSpec | None]],
+) -> StructuredTool:
+    """A tool the run's catalog leaves out, called as ``name``.
+
+    The run calls it by the name ``search_tools`` gave, from code mode or directly;
+    ``resolve`` asks the backend which tool that is, with the run's grant of it.
+    Made for no run in particular: the call finds its run.
+    """
+
+    async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+        spec = await resolve(name)
+        if spec is None:
+            # Code mode throws it as a TypeError, as for any name that is not a function.
+            raise UnresolvedToolError(
+                f"{name} is not one of this run's tools; find the tool you want with search_tools"
+            )
+        cites_evidence = backend.run.catalog.incident_evidence
+        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
+
+    return StructuredTool.from_function(
+        coroutine=operate,
+        name=name,
+        description=f"The run's tool it calls as {name}.",
+        args_schema=_ANY_ARGUMENTS,
     )

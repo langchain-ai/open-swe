@@ -22,6 +22,7 @@ AttemptResult = Literal["succeeded", "failed", "timed_out", "cancelled"]
 class Lease:
     owner: UUID
     fence: int
+    configuration_generation: str | None = None
 
 
 class Record(Base, kw_only=True):

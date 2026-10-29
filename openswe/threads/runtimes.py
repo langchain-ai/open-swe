@@ -253,7 +253,6 @@ class MdaRuntime:
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
-        await self.ensure_remote_thread(thread_id)
         rewritten = await self.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )

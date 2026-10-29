@@ -1,4 +1,8 @@
 This deployment includes merge commit {{ merge_sha }}.
 The event names the target that finished syncing.
 Confirm the fix and look for regressions on that target.
+{% if slack_thread %}
+Report each environment result with `slack_reply` to the original requesting Slack thread (channel `{{ slack_thread.channel_id }}`, thread_ts `{{ slack_thread.thread_ts }}`) as well as a normal assistant message in the dashboard, even after a Web handoff.
+This destination applies only to rollout/deployment results.
+{% endif %}
 Cancel this subscription with listen_events after every target expected for this change has included the commit.

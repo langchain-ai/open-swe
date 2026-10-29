@@ -1,7 +1,8 @@
 import logging
-from typing import Any
 
 from langgraph.config import get_config
+
+from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ def _normalized(text: str) -> str:
     return " ".join(text.split()).rstrip(".").casefold()
 
 
-async def slack_no_reply_needed(reason: str, confirmation: str) -> dict[str, Any]:
+async def slack_no_reply_needed(reason: str, confirmation: str) -> dict[str, object]:
     """Implement the `slack_no_reply_needed` tool."""
     stated = reason.strip()
     if not stated:
@@ -38,4 +39,4 @@ async def slack_no_reply_needed(reason: str, confirmation: str) -> dict[str, Any
             "no_reply_reason": stated,
         },
     )
-    return {"success": True}
+    return {"success": True, "turn_closed": True, "next_step": prompt("runs/slack-turn-closed")}

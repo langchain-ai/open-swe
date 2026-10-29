@@ -292,24 +292,33 @@ def apply() -> None:
 
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
 
-    # Snapshot service: another external boundary. The E2E runs the local sandbox
-    # provider, so there is nothing to capture from — record the request in the
-    # fake store instead. The workspace tools, store writes, name/tag scheme
-    # and status transitions all still run for real.
+    # LangSmith's sandbox service: another external boundary. MDA creates every
+    # thread's box (mda_entrypoint.py) and the backend reconnects to it by id, both
+    # through the stand-in, which has no proxy to configure. Snapshots are recorded
+    # in the fake store; the workspace tools, store writes, name/tag scheme and
+    # status transitions all still run for real.
+    import sandbox_service
+
+    from openswe.sandboxes import lifecycle as sandbox_lifecycle
     from openswe.sandboxes.providers import langsmith as langsmith_integration
-    from openswe.workspaces import store as workspaces_store
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
-    # The capture path refuses to run off the langsmith provider; with that
-    # provider's snapshot API faked above, the E2E's local sandbox is capturable.
-    workspaces_store.require_capture_support = lambda: None
+    if not sandbox_service.REAL:
+        from openswe.github import proxy as github_proxy
 
-    # A refresh boots its own builder to run the scripts in. There is no platform
-    # to boot one from here, so the local provider stands in and nothing is
-    # reclaimed afterwards; the scripts, the capture and the record all run for real.
+        langsmith_integration.create_langsmith_sandbox = _stand_in_sandbox
+        langsmith_integration.configure_sandbox_proxy = _configure_no_proxy
+        sandbox_lifecycle.configure_sandbox_proxy = _configure_no_proxy
+        # The token a sandbox's GitHub proxy carries is minted from the App, like the
+        # other App tokens stubbed above; the stand-in has no proxy to carry it.
+        for module in (sandbox_lifecycle, github_proxy):
+            module.__dict__["workspace_token"] = _sandbox_github_access
+
+    # A refresh boots its own builder to run the scripts in: a stand-in box, of
+    # which nothing is reclaimed afterwards; the scripts, the capture and the
+    # record all run for real.
     from openswe.workspaces import refresh as workspace_refresh
 
-    workspace_refresh.require_capture_support = lambda: None
     workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
     workspace_refresh._release_builder_sandbox = _release_nothing
 
@@ -327,8 +336,8 @@ def apply() -> None:
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
 
-    # A scout sandbox clones the PR through the GitHub proxy, which the local
-    # provider cannot reach, so provisioning fails the way an unavailable
+    # A scout sandbox clones the PR through the GitHub proxy, which the stand-in
+    # sandboxes do not have, so provisioning fails the way an unavailable
     # sandbox provider does. The delay keeps the run visibly in flight first,
     # which is the state the review page polls through.
     review_scout_graph.__dict__["_ensure_scout_sandbox"] = _unavailable_scout_sandbox
@@ -445,9 +454,27 @@ async def _fake_assert_repo_access(full_name: str, token: str) -> str:
 
 
 async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) -> object:
-    from openswe.sandboxes.providers.registry import create_sandbox
+    import sandbox_service
 
-    return await create_sandbox()
+    return sandbox_service.open_box()
+
+
+async def _stand_in_sandbox(
+    sandbox_id: str | None = None, *_args: object, **_kwargs: object
+) -> object:
+    import sandbox_service
+
+    return sandbox_service.open_box(sandbox_id)
+
+
+async def _configure_no_proxy(*_args: object, **_kwargs: object) -> None:
+    return None
+
+
+async def _sandbox_github_access(*_args: object, **_kwargs: object) -> object:
+    from openswe.github.sandbox_access import SandboxGitHubAccess
+
+    return SandboxGitHubAccess("dummy-installation-token")
 
 
 async def _release_nothing(_sandbox_id: str) -> None:

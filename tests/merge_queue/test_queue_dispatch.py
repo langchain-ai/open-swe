@@ -69,11 +69,3 @@ async def test_dispatch_retries_only_authenticated_preflight_failures(
             await gateway.dispatch(contract, deadline)
     assert len(sent) == {"once": 2, "always": 3}.get(retry, 1)
     assert all(request.content == sent[0].content for request in sent)
-
-
-def test_dispatch_secret_disables_local_agent_shell(monkeypatch: pytest.MonkeyPatch) -> None:
-    from openswe.sandboxes.providers.local import create_local_sandbox
-
-    monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
-    with pytest.raises(ValueError, match="queue credentials"):
-        create_local_sandbox()

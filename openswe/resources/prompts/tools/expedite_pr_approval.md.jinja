@@ -25,7 +25,7 @@ Keep a `/baby-sit` watch on the PR so you know when checks are green, and call `
 You are also woken when someone approves the card; a dismissal only closes it, and anyone who wants changes tags you in the thread.
 A later commit that touches only tests keeps the approval.
 When one changes the diff shown on the card or an excluded hunk, `merge_expedited_pr` lets you judge whether the approver needs to look again; call this tool again for a fresh card only when they do.{% endif %} Calling it again for an unchanged diff does not post a second card.
-Use `action="cancel"` to withdraw a card you no longer want.
+Use `action="cancel"` to withdraw a card, but only replace it with a standard review when the requester explicitly asks.
 
 Pass `inline_summary` for a short description shown above the diff, like a human review card.
 When the repository configures `reviewChannel` in `.open-swe/settings.json`, the ready card is automatically broadcast there without a broadcast button; {% if mcp %}otherwise it offers the posting channel.

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import Callable, Coroutine
 
 import httpx2
@@ -21,14 +22,10 @@ type InstallTransport = Callable[[ResponseHandler], None]
 def transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> InstallTransport:
-    for name in (
-        "TYPESAFE_API_KEY",
-        "LANGSMITH_GATEWAY_API_KEY",
-        "LANGSMITH_API_KEY",
-        "LANGCHAIN_API_KEY",
-    ):
+    for name in ("LANGSMITH_GATEWAY_API_KEY", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "test-key")
+    monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
     client = httpx2.AsyncClient
 
     def install(handler: ResponseHandler) -> None:
@@ -67,7 +64,11 @@ async def test_classification_accepts_only_confident_valid_answers(
     transport: InstallTransport, choice: str, confidence: float, status: int, expected: str | None
 ) -> None:
     def handle(request: httpx2.Request) -> httpx2.Response:
-        assert json.loads(request.read())["state"] == "Fix the bug"
+        assert request.url == "https://gateway.example.com/v1/systemone"
+        assert request.headers["Authorization"] == "Bearer test-key"
+        payload = json.loads(request.read())
+        assert payload["state"] == "Fix the bug"
+        assert payload["model"] == "typesafe/jev-1.13.0"
         return httpx2.Response(
             status,
             json={
@@ -103,7 +104,7 @@ async def test_classification_accepts_only_confident_valid_answers(
 async def test_missing_credentials_skips_classification(
     monkeypatch: pytest.MonkeyPatch, transport: InstallTransport
 ) -> None:
-    monkeypatch.delenv("TYPESAFE_API_KEY")
+    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY")
 
     def handle(request: httpx2.Request) -> httpx2.Response:
         pytest.fail("Classification must not send a request without credentials")
@@ -132,6 +133,40 @@ async def test_classifier_deadline_cancels_stalled_request(
     assert await asyncio.wait_for(classify(decision), timeout=1) is None
     assert decision.outcome == "classifier_failure"
     assert cancelled.is_set()
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_rejected_credentials_report_all_decisions(
+    transport: InstallTransport, caplog: pytest.LogCaptureFixture, status: int
+) -> None:
+    requests: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(status)
+
+    transport(handle)
+    model_decision, effort_decision = JevDecision(), JevDecision()
+    with caplog.at_level(logging.ERROR):
+        assert (
+            await infer_requested_model(
+                messages=[HumanMessage("Use Opus with max reasoning effort")],
+                requested_models=available_requested_models(fable_enabled=False),
+                decision=model_decision,
+                effort_decision=effort_decision,
+            )
+            is None
+        )
+    assert len(requests) == 1
+    for decision in (model_decision, effort_decision):
+        assert decision.outcome == "classifier_failure"
+        assert decision.reason == "classifier_auth_failure"
+    (record,) = caplog.records
+    assert record.levelno == logging.ERROR
+    assert record.message == "Jev classifier credential rejected"
+    assert record.__dict__["status_code"] == status
+    assert record.__dict__["questions"] == ["runtime_model", "runtime_effort"]
+    assert "test-key" not in caplog.text
 
 
 @pytest.mark.parametrize("failed_question", [None, "runtime_model", "runtime_effort"])

@@ -234,6 +234,10 @@ class MarkReadyAction(_PullRequestActionBase):
         )
         if not response.is_success:
             raise self._refusal(response, pull)
+        if pull.get("state") == "closed":
+            raise HTTPException(
+                409, "This pull request is closed and cannot be marked ready for review."
+            )
         node_id = pull.get("node_id")
         if not isinstance(node_id, str) or not node_id:
             raise HTTPException(502, self.invalid_response)

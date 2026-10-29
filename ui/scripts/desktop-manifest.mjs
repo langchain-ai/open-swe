@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto"
+import { existsSync } from "node:fs"
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { gzipSync } from "node:zlib"
 
-const root = resolve(import.meta.dirname, "../.output/public")
+const root = [
+  resolve(import.meta.dirname, "../.output/public"),
+  resolve(import.meta.dirname, "../.vercel/output/static"),
+].find((dir) => existsSync(dir))
+if (!root) throw new Error("No dashboard build output to package")
 const output = resolve(import.meta.dirname, "../.output/desktop")
 const files = []
 for (const entry of await readdir(root, {

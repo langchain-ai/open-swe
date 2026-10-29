@@ -34,6 +34,7 @@ class GitCheckout(GitTarget):
 
 class GitSnapshot(BaseModel):
     repos: dict[str, GitCheckout] = {}
+    skipped: dict[str, str] = {}
 
     @classmethod
     def parse(cls, value: object) -> GitSnapshot | None:
@@ -49,7 +50,7 @@ class GitSnapshot(BaseModel):
         return [
             GitTarget(repo=checkout.repo, branch=checkout.branch)
             for path, checkout in self.repos.items()
-            if checkout != before.repos.get(path)
+            if path not in before.skipped and checkout != before.repos.get(path)
         ]
 
 
@@ -101,7 +102,12 @@ class TurnGitMetadata:
             result = await SandboxScript("git_trace.py", f"{root}/.open-swe/scripts").run(
                 backend, {"root": root}
             )
-            return GitSnapshot.parse(result)
+            snapshot = GitSnapshot.parse(result)
+            if snapshot is not None and snapshot.skipped:
+                logger.warning(
+                    "Skipped checkouts in turn git evidence", extra={"skipped": snapshot.skipped}
+                )
+            return snapshot
         except Exception:
             logger.warning("Could not capture turn git evidence", exc_info=True)
             return None

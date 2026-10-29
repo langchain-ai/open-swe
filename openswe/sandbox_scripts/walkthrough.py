@@ -21,7 +21,6 @@ import re
 import subprocess
 import sys
 
-BASE_REF = "refs/walkthrough/base"
 HEAD_REF = "refs/walkthrough/head"
 MERGE_BASE_REF = "refs/walkthrough/merge-base"
 GIT = ["git", "-c", "core.quotePath=false"]

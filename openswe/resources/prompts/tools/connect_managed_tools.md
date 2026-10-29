@@ -1,7 +1,7 @@
 Offer the person cards to connect services in this workspace's managed tools (a LangSmith Managed Tools gateway an admin picked).
 
 Managed tools are integration tools named `mcp_lmt_*`, and they run on the person's own accounts, so each service loads only once the person has connected it.
-When the person asks you to use a service (Linear, Notion, Pylon and the like, or asks to connect one) and no `mcp_lmt_*` tools for it are listed, call this with that service's name in `services` instead of saying you lack access.
+When the person asks you to use a service (Linear, Notion, Pylon and the like, or asks to connect one) and neither your tools nor `search_tools` show `mcp_lmt_*` tools for it, call this with that service's name in `services` instead of saying you lack access.
 Leave `services` empty only when the person asks to connect everything.
 Do not call it in a thread you are not running for its private owner.
 

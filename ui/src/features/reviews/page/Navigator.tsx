@@ -1,3 +1,5 @@
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { Button } from "@langchain/macaw-components/Button"
 import {
   CaretDownIcon,
   CheckIcon,
@@ -214,6 +216,7 @@ function StepList({
           (sum, entry) => sum + entry.deletions,
           0
         )
+        const progress = stepProgress(entries, viewed)
         return (
           <li
             key={step.index}
@@ -222,11 +225,15 @@ function StepList({
               active && "bg-selected"
             )}
           >
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={`Step ${step.index}: ${step.title}, ${progress}, ${plural(additions, "addition")}, ${plural(deletions, "deletion")}`}
               type="button"
               aria-current={active ? "step" : undefined}
               onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
-              className="flex min-w-0 flex-1 items-start gap-space-2 px-space-2 py-space-1 text-left text-xs leading-5"
+              className="h-auto min-w-0 flex-1 items-start justify-start gap-space-2 px-space-2 py-space-1 text-left leading-5 whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               <StepBadge
                 index={step.index}
@@ -243,7 +250,7 @@ function StepList({
               >
                 <InlineCode text={step.title} />
                 <span className="flex flex-wrap gap-x-space-2 text-xxs text-secondary tabular-nums">
-                  {stepProgress(entries, viewed)}
+                  {progress}
                   <span className="font-mono">
                     {additions > 0 && (
                       <span className="text-success-secondary">
@@ -256,27 +263,30 @@ function StepList({
                   </span>
                 </span>
               </span>
-            </button>
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={read}
-              aria-label={`Mark step ${step.index} read`}
-              title={read ? "Mark step unread" : "Mark step read"}
-              onClick={() => markStepRead(step.index)}
-              className={cn(
-                "mt-1.5 mr-space-2 flex size-4 shrink-0 items-center justify-center rounded-full border transition-opacity focus-visible:opacity-100",
-                read
-                  ? "border-brand bg-brand text-brand-on-fill opacity-0 group-hover/step:opacity-100"
-                  : offered
-                    ? "border-brand text-brand-primary opacity-70 hover:bg-brand-subtle hover:opacity-100"
-                    : "border-strong text-secondary opacity-0 group-hover/step:opacity-100"
+            </Button>
+            <span className="relative mt-1.5 mr-space-2 flex shrink-0">
+              <Checkbox
+                checked={read}
+                aria-label={`Mark step ${step.index} read`}
+                title={read ? "Mark step unread" : "Mark step read"}
+                onCheckedChange={() => markStepRead(step.index)}
+                size="sm"
+                className={cn(
+                  "peer transition-opacity focus-visible:opacity-100",
+                  offered
+                    ? "border-brand opacity-70 hover:opacity-100"
+                    : "opacity-0 group-hover/step:opacity-100"
+                )}
+              />
+              {/* Radix draws no check while unchecked; the faint one suggests marking this step read. */}
+              {offered && !read && (
+                <CheckIcon
+                  aria-hidden="true"
+                  weight="bold"
+                  className="pointer-events-none absolute inset-0 m-auto size-3 text-brand-primary opacity-70 peer-hover:opacity-100"
+                />
               )}
-            >
-              {(read || offered) && (
-                <CheckIcon weight="bold" className="size-2.5" />
-              )}
-            </button>
+            </span>
           </li>
         )
       })}
@@ -383,12 +393,16 @@ const TreeRow = memo(function TreeRow({
     )
   return (
     <li>
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={node.name}
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         style={{ paddingLeft: 6 + depth * 12 }}
-        className="flex h-6 w-full items-center gap-space-1 rounded-md pr-space-2 text-left text-xs text-secondary hover:bg-surface-level-1-hover"
+        className="h-6 w-full justify-start gap-space-1 pr-space-2 text-left whitespace-normal text-secondary hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         <CaretDownIcon
           className={cn(
@@ -398,7 +412,7 @@ const TreeRow = memo(function TreeRow({
         />
         <FolderSimpleIcon className="size-3.5 shrink-0" weight="regular" />
         <span className="truncate">{node.name}</span>
-      </button>
+      </Button>
       {open && (
         <ul>
           {node.children.map((child) => (
@@ -450,7 +464,10 @@ function FileRow({
     .join(", ")
   return (
     <li ref={ref}>
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
         type="button"
         aria-current={active ? "location" : undefined}
         aria-label={description}
@@ -460,7 +477,9 @@ function FileRow({
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
         className={cn(
-          "relative flex h-6 w-full items-center gap-space-2 rounded-md pr-space-2 text-left text-xs hover:bg-surface-level-1-hover",
+          "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          "justify-start",
+          "relative h-6 w-full gap-space-2 pr-space-2 text-left hover:bg-surface-level-1-hover",
           active
             ? "bg-selected text-primary"
             : viewed
@@ -511,7 +530,7 @@ function FileRow({
             className="size-3 shrink-0 text-brand-primary"
           />
         )}
-      </button>
+      </Button>
     </li>
   )
 }

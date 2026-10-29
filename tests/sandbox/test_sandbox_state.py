@@ -157,3 +157,17 @@ async def test_sandbox_proxy_delegates_delete_after_lazy_startup() -> None:
     result = await proxy.adelete("/workspace/file.txt")
 
     assert result.path == "/workspace/file.txt"
+
+
+@pytest.mark.parametrize(
+    ("bound", "kept"), [("sandbox-1", True), ("sandbox-mda", False), (None, False)]
+)
+def test_a_cached_box_the_thread_left_is_forgotten(bound: str | None, kept: bool) -> None:
+    """Another replica rebinds the thread (a move off a Mac, a hand-over to MDA); this one follows."""
+    proxy = SandboxBackendProxy(
+        cast("SandboxBackendProtocol", _FakeSandboxBackend()), thread_id="thread-follow"
+    )
+
+    proxy.follow(bound)
+
+    assert proxy.has_backend is kept

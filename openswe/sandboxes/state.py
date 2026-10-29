@@ -39,12 +39,21 @@ class SandboxUnreachableError(RuntimeError):
     carried on believing it was still there.
     """
 
-    def __init__(self, thread_id: str, sandbox_id: str | None, cause: str) -> None:
+    def __init__(
+        self, thread_id: str, sandbox_id: str | None, cause: str, *, reason: str | None = None
+    ) -> None:
         self.thread_id = thread_id
         self.sandbox_id = sandbox_id
+        # What the sandbox service answered, safe to show the person.
+        self.reason = reason
+        detail = f"{cause} ({reason})" if reason else cause
         super().__init__(
-            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {cause}"
+            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {detail}"
         )
+
+
+class SandboxHandedOverError(SandboxUnreachableError):
+    """The thread's old box is gone or set aside: its next run starts in a fresh one MDA opens."""
 
 
 _SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
@@ -82,9 +91,29 @@ class SandboxBackendProxy(BaseSandbox):
     def id(self) -> str:
         return self._get_backend().id
 
+    def get_work_dir(self) -> str | None:
+        """Expose the current backend's declared directory once connected."""
+        from openswe.sandboxes.paths import declared_work_dir
+
+        return declared_work_dir(self._backend) if self._backend is not None else None
+
     def replace_backend(self, backend: SandboxBackendProtocol) -> None:
         self._backend = backend
         self._startup_task = None
+
+    def detach(self) -> None:
+        """Forget the box; the next call connects to whatever the thread is bound to then."""
+        self._backend = None
+        self._startup_task = None
+
+    def follow(self, sandbox_id: object) -> None:
+        """Forget a cached box the thread is no longer bound to, on whichever replica holds it.
+
+        A thread moved off a Mac, or handed to MDA, is bound to a new box by another
+        process; this one would otherwise keep using the box the thread left.
+        """
+        if self._backend is not None and self._backend.id != sandbox_id:
+            self.detach()
 
     @property
     def has_backend(self) -> bool:

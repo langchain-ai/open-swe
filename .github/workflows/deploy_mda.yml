@@ -15,6 +15,7 @@ on:
       - "mda/**"
       - "packages/runtime-api/**"
       - "vendor/managed-deepagents-sdk/**"
+      - "vendor/langchain-quickjs/**"
       - ".github/workflows/deploy_mda.yml"
   workflow_dispatch:
     inputs:
@@ -73,7 +74,7 @@ jobs:
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk .github/workflows/deploy_mda.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk vendor/langchain-quickjs .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
@@ -155,8 +156,9 @@ jobs:
             exit 1
           fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # the gateway key it calls models with, and the secret it signs its calls to the backend with.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          # the gateway key it calls models with, the secret it signs its calls to the backend with,
+          # and the commit its traces name as their revision.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\nLANGSMITH_REVISION_ID=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" "$(git rev-parse HEAD)" >mda/.env
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"

@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { createContext, memo, useContext, useState } from "react"
 import { toast } from "sonner"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
@@ -149,7 +150,11 @@ function SlackButtons({ buttons }: { buttons: Array<SlackButton> }) {
     <div className="flex flex-wrap gap-space-2">
       {buttons.map(({ label, answer }, index) =>
         onAnswer && answer !== undefined ? (
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={label}
             key={index}
             type="button"
             disabled={sending}
@@ -157,7 +162,7 @@ function SlackButtons({ buttons }: { buttons: Array<SlackButton> }) {
             className={`${buttonClass} cursor-pointer hover:bg-surface-level-2 disabled:cursor-default disabled:opacity-60`}
           >
             {label}
-          </button>
+          </Button>
         ) : (
           <span key={index} className={buttonClass}>
             {label}

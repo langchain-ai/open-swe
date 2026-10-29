@@ -28,6 +28,8 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 
 ## Conventions
 
+- Before changing the dashboard (`ui/`), read `ui/AGENTS.md` and `ui/DESIGN.md`.
+
 - Async-only.
   Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
 - Strong types in Python and TypeScript.
@@ -44,6 +46,9 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`.
   Never inline prompt text in Python.
   User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
+- Internal agent notifications use `RunMessage` and the builders in `openswe/input_messages.py` (`system_input` or `build_input_messages`), not bare prose or feature-specific queue payloads.
+  Preserve structured messages through delivery instead of wrapping their envelopes again.
+  For model-only context, use the structured sender to exclude it from pending previews and the transcript; do not suppress ordinary human follow-ups or user-facing events.
 - Keep comments minimal and only explain non-obvious reasons.
 - Before asking a clarifying question about Open SWE's behavior or guidance, read where it lives (prompts in `openswe/resources/prompts/`, tools in `openswe/tools/`, graph wiring) to check the question makes sense.
   Before asking whether a change should be personal or shared, confirm from that code which scopes the behavior actually supports; never offer a scope it cannot have.
@@ -55,8 +60,9 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself.
   Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
-- Don't add new uses of `langgraph_client` in the backend.
+- Don't add new uses of the LangGraph SDK client (`langgraph_client`, `get_client`, `LangGraphClient`) in the backend.
   Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state.
+  Read and change threads, their metadata included, through `THREADS` (`openswe/threads/store.py`).
   Existing uses are legacy, not a pattern to copy.
 - Don't use the LangGraph Store (`client.store`) for state; keep it in PostgreSQL tables.
 - New tables share one shape: an `id uuid` primary key (`uuid7()`, set in Python); `created_at` and `updated_at` (`timestamptz NOT NULL DEFAULT clock_timestamp()`, `updated_at` set again on every write); and `created_by` and `updated_by` (`uuid REFERENCES users (id) ON DELETE SET NULL`: the person whose action caused the write, NULL for system, API-key and workflow writes).
@@ -66,8 +72,12 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - Structured logging: static message, values in `extra`.
   Avoid standard `LogRecord` field names in `extra`.
 - Prefer exposing UI write operations as authorized agent tools.
+  Whenever adding or changing a setting, add or update its authorized agent tool alongside the UI, reusing the same validation and permission checks.
+  Keep the tool guidance and `openswe/resources/default_prompt.md` dashboard settings map current with those changes.
   Destructive or sensitive actions may stay human-only.
   Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
+- Design new agent tools as fine-grained, Unix-style primitives: each does one thing and returns structured data that code mode can compose.
+  Don't add batch tools or combined orchestration tools; use code mode to loop, branch, and run independent calls in parallel instead.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
 - Only the agent that owns a Slack channel thread posts in it.
   Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run.

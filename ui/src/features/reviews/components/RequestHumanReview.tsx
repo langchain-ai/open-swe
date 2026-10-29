@@ -46,7 +46,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       }))
       if (result.reused) return
       toast.success(
-        `Asked Slack to review ${pullRequestKey(pr)}`,
+        `Asked ${result.channel_name ? `#${result.channel_name}` : "Slack"} to review ${pullRequestKey(pr)}`,
         result.permalink
           ? {
               action: {

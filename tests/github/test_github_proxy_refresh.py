@@ -12,6 +12,7 @@ from openswe.github import proxy as github_proxy
 from openswe.github.proxy import (
     PROXY_TOKEN_FALLBACK_TTL,
     proxy_token_needs_refresh,
+    proxy_token_set_since,
     record_proxy_token_expiry,
 )
 
@@ -45,6 +46,16 @@ class TestProxyTokenNeedsRefresh:
         assert proxy_token_needs_refresh("thread-1", now=now) is False
         later = now + PROXY_TOKEN_FALLBACK_TTL
         assert proxy_token_needs_refresh("thread-1", now=later) is True
+
+
+def test_only_a_token_set_since_preparation_began_is_reported() -> None:
+    # A record left by an earlier run may be for a box the thread has since left.
+    expires_at = datetime(2999, 1, 1, tzinfo=UTC)
+    record_proxy_token_expiry("thread-1", expires_at)
+    began = datetime.now(UTC)
+    assert proxy_token_set_since("thread-1", began) is None
+    record_proxy_token_expiry("thread-1", expires_at)
+    assert proxy_token_set_since("thread-1", began) == expires_at
 
 
 class TestRefreshGithubProxyMiddleware:

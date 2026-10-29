@@ -253,6 +253,82 @@ function sidebarRowClassName({
   )
 }
 
+export function SidebarConversationRow({
+  title,
+  threadId,
+  active,
+  compact,
+  onNavigate,
+  pinned,
+  archived,
+  pending,
+  onPin,
+  onArchive,
+}: {
+  title: string
+  threadId: string
+  active: boolean
+  compact: boolean
+  onNavigate: () => void
+  pinned: boolean
+  archived: boolean
+  pending: boolean
+  onPin: () => void
+  onArchive: () => void
+}) {
+  const marquee = useTitleMarquee()
+  return (
+    <div
+      className="group/row relative mb-0.5"
+      onMouseEnter={marquee.measure}
+      onMouseLeave={marquee.reset}
+    >
+      <Link
+        to="/agents/chat"
+        search={{ chat: threadId }}
+        aria-current={active ? "page" : undefined}
+        onClick={onNavigate}
+        className={sidebarRowClassName({
+          compact,
+          active,
+          paddingLeft: "pl-space-2",
+          archived,
+        })}
+      >
+        <SidebarRowTitle title={title} marquee={marquee} />
+      </Link>
+      <span className="absolute inset-y-0 right-0 mr-space-1 flex items-center rounded-lg bg-surface-level-2 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+        <IconButton
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+          label={pinned ? "Unpin chat" : "Pin chat"}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onPin()
+          }}
+        />
+        <IconButton
+          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+          label={archived ? "Unarchive chat" : "Archive chat"}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onArchive()
+          }}
+        />
+      </span>
+    </div>
+  )
+}
+
 function RunningIndicator({ label }: { label: string }) {
   return (
     <span role="img" aria-label={label} className="flex shrink-0">

@@ -7,6 +7,9 @@ Every post must tag the user who triggered it with their <@USER_ID> mention.
 Use their trusted Slack identity from the conversation context; never guess it or substitute another user.
 If their Slack user ID is unavailable, ask for it before posting.
 
+On an automation run, `channel_id` may instead be the automation creator's Slack member ID, which DMs them the run's result.
+No other member ID is accepted, and the post needs no mention.
+
 This sends a new top-level message without moving the current Open SWE conversation or starting a new agent task.
 For updates and answers in the current conversation, use `slack_reply`.
 

@@ -9,6 +9,11 @@ On a private admin surface (a private dashboard thread or authenticated Slack DM
 It enforces a read-only transaction, timeout, and result limits.
 Do not query secrets, credentials, tokens, or message content unless the user explicitly requests the specific data and is authorized to receive it.
 
+In preview and staging, use `execute_database_sql` for arbitrary SQL repairs, including schema and migration metadata changes.
+Show the exact SQL, target environment, and expected effects to the requester and obtain explicit confirmation before passing `confirm=true`.
+There is no table allowlist or affected-row limit; never infer confirmation from a general request to fix a problem.
+Use `read_only_sql` to verify the repair afterward.
+
 Use `list_automations`, `create_automation`, `update_automation`, `trigger_automation`, and `delete_automation` to configure recurring workspace automations.
 Everyone in the workspace can inspect their setup and runs, but only admins can change or test them.
 Read the current automation before updating it, pass only fields that should change, and confirm before deleting.

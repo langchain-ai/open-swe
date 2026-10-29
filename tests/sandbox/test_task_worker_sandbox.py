@@ -68,9 +68,6 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     monkeypatch.setattr(
         lifecycle, "thread_token_repositories", AsyncMock(return_value=["langchain-ai/open-swe"])
     )
-    from openswe.sandboxes import tool_access
-
-    monkeypatch.setattr(tool_access, "provision_tool_url", AsyncMock())
     SANDBOX_BACKENDS.clear()
     SANDBOX_CONNECTIONS.clear()
     return metadata
@@ -93,7 +90,7 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     backend = MagicMock(id=host_sandbox_id)
     connect = AsyncMock(return_value=backend)
     refresh = AsyncMock()
-    monkeypatch.setattr(lifecycle, "create_sandbox", connect)
+    monkeypatch.setattr(lifecycle, "connect_existing_sandbox", connect)
     monkeypatch.setattr(lifecycle, "_refresh_github_proxy", refresh)
 
     attached = await lifecycle.ensure_sandbox_for_thread("worker", workspace_slug="default")
@@ -117,7 +114,7 @@ async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
 ) -> None:
     monkeypatch.setattr(
         lifecycle,
-        "create_sandbox",
+        "connect_existing_sandbox",
         AsyncMock(side_effect=lambda sandbox_id: MagicMock(id=sandbox_id)),
     )
     monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
@@ -160,7 +157,7 @@ async def test_worker_reattach_recovers_a_missed_background_completion(
     backend = MagicMock(id="sb-old")
     backend.aexecute = AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
     dispatch = AsyncMock()
-    monkeypatch.setattr(lifecycle, "create_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(lifecycle, "connect_existing_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
@@ -181,19 +178,16 @@ async def test_worker_reattach_recovers_a_missed_background_completion(
     assert "cmd-worker" in dispatch.await_args.args[1]
 
 
-async def test_worker_does_not_replace_a_deleted_host_sandbox(
+async def test_worker_does_not_hand_over_a_deleted_host_sandbox(
     shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        lifecycle, "create_sandbox", AsyncMock(side_effect=SandboxGoneError("deleted"))
+        lifecycle, "connect_existing_sandbox", AsyncMock(side_effect=SandboxGoneError("deleted"))
     )
-    create = AsyncMock()
-    monkeypatch.setattr(lifecycle, "_create_sandbox_with_proxy", create)
 
     with pytest.raises(SandboxUnreachableError, match="coordinator must recover"):
-        await lifecycle.ensure_sandbox_for_thread("worker", allow_replacement=True)
+        await lifecycle.ensure_sandbox_for_thread("worker", abandon_unreachable=True)
 
-    create.assert_not_awaited()
     assert "worker" not in SANDBOX_BACKENDS
     assert shared_sandbox["worker"]["sandbox_id"] == "sb-old"
 
@@ -231,7 +225,7 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
     else:
         shared_sandbox["worker"]["github_token_repositories"] = []
     connect = AsyncMock()
-    monkeypatch.setattr(lifecycle, "create_sandbox", connect)
+    monkeypatch.setattr(lifecycle, "connect_existing_sandbox", connect)
 
     with pytest.raises(PermissionError):
         await lifecycle.ensure_sandbox_for_thread("worker")

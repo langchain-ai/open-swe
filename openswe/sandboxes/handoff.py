@@ -15,6 +15,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
+from openswe.bridge.store import Bridge, BridgeStore
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 
@@ -123,6 +124,14 @@ async def complete_handoff(
     if not isinstance(source_id, str) or source_id == target.id:
         return
     repo = _repo(metadata)
+    # A move to the cloud carries the checkout once MDA's box exists, by when the Mac
+    # it left may be gone: the thread then continues from the branch as pushed.
+    if Bridge.bridge_id_of(source_id) and not await BridgeStore.is_connected(source_id):
+        logger.warning(
+            "A thread's checkout stayed on a Mac that disconnected before its carry",
+            extra={"handoff_thread": thread_id, "handoff_from": source_id},
+        )
+        repo = None
     if repo is not None:
         bundle = f"/tmp/open-swe-handoff-{thread_id}.bundle"
         source = await connect_sandbox(source_id, thread_id=thread_id)

@@ -58,21 +58,29 @@ class _RetryableCreateError(Exception):
 
 
 class _FakeSandboxClient:
-    def __init__(self, failures: int) -> None:
+    def __init__(self, failures: int, error: Callable[[], Exception]) -> None:
         self.failures = failures
+        self.error = error
         self.calls = 0
 
     async def create_sandbox(self, **kwargs):
         self.calls += 1
         self.last_kwargs = kwargs
         if self.calls <= self.failures:
-            raise _RetryableCreateError("try again")
+            raise self.error()
         return {"sandbox": kwargs["snapshot_id"]}
 
 
 @pytest.mark.asyncio
-async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -> None:  # noqa: ANN001
-    client = _FakeSandboxClient(failures=2)
+@pytest.mark.parametrize(
+    "error",
+    [lambda: _RetryableCreateError("try again"), lambda: httpx2.ReadTimeout("")],
+    ids=["retryable-status", "read-timeout"],
+)
+async def test_create_sandbox_with_retry_retries_transient_errors(
+    monkeypatch: pytest.MonkeyPatch, error: Callable[[], Exception]
+) -> None:
+    client = _FakeSandboxClient(failures=2, error=error)
     monkeypatch.setattr("openswe.sandboxes.providers.langsmith.asyncio.sleep", AsyncMock())
 
     result = await _create_sandbox_with_retry(

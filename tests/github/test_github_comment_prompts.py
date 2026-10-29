@@ -54,7 +54,7 @@ def test_a_hostile_name_stays_out_of_the_system_prompt() -> None:
         github_login="oconnor",
     )
 
-    system_prompt = construct_system_prompt(working_dir="/workspace")
+    system_prompt = construct_system_prompt()
     person = ThreadParticipant(
         identity=identity, person_id="user:0199e0ae-0000-7000-8000-000000000000"
     ).as_person()

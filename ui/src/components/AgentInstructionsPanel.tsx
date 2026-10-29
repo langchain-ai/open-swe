@@ -192,19 +192,25 @@ export function AgentInstructionsPanel() {
             <ul className="flex flex-col gap-space-1">
               {(instructions.data ?? []).map((s) => (
                 <li key={s.full_name}>
-                  <button
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={s.full_name}
                     type="button"
                     aria-pressed={selected === s.full_name}
                     className={cn(
-                      "w-full truncate rounded-md px-space-2 py-space-2 text-left text-xs transition-colors",
+                      "h-auto justify-start whitespace-normal",
+                      "w-full truncate px-space-2 py-space-2 text-left text-inherit",
                       selected === s.full_name
-                        ? "bg-selected font-medium"
+                        ? "bg-selected font-medium hover:bg-selected dark:hover:bg-selected"
                         : "hover:bg-surface-level-1-hover"
                     )}
                     onClick={() => setSelected(s.full_name)}
                   >
-                    {s.full_name}
-                  </button>
+                    {/* A string child would be wrapped in Macaw's font-normal Text, dropping the selected weight. */}
+                    <span className="min-w-0 truncate">{s.full_name}</span>
+                  </Button>
                 </li>
               ))}
             </ul>

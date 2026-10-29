@@ -363,6 +363,7 @@ async def expedite_pr_approval(
         raise
     approval.slack_message_ts = message_ts
     card = ReviewCard(await approval.save())
+    await card.link_on_github()
     await card.broadcast_configured()
     await card.remove_superseded()
     readiness_warning = await card.prompt_author_ready()

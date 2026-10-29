@@ -702,7 +702,7 @@ test.describe("Human review in Slack", () => {
       .getByRole("listitem")
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) });
     await row.getByRole("button", { name: "Request review in Slack" }).click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -861,7 +861,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -959,7 +959,7 @@ test.describe("Human review in Slack", () => {
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
       .getByRole("button", { name: "Request review in Slack" })
       .click();
-    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+    await expect(page.getByText(/Asked #reviews to review/)).toBeVisible({
       timeout: 30_000,
     });
     const posted = await latestRequest(request);
@@ -1128,8 +1128,6 @@ test.describe("Human review in Slack", () => {
         { timeout: 90_000 },
       )
       .not.toBe("");
-    const posted = await latestRequest(request);
-
     await control(request, "/mock/slack/send", {
       thread_ts: asked.thread_ts,
       text: "<@U0BOT> take that review request down E2E_HUMAN_REVIEW_DISMISS",
@@ -1140,9 +1138,13 @@ test.describe("Human review in Slack", () => {
         timeout: 60_000,
       })
       .toBe("cancelled");
-    expect(cardText(await reviewCard(request, posted))).toContain(
-      "Review request: dismissed by Open SWE: posted with the wrong summary",
-    );
+    await expect
+      .poll(async () =>
+        cardText(await reviewCard(request, await latestRequest(request))),
+      )
+      .toContain(
+        "Review request: dismissed by Open SWE: posted with the wrong summary",
+      );
   });
 
   test("the oswe MCP tools' endpoints post a card with their summary, re-summarize it, and dismiss it", async ({

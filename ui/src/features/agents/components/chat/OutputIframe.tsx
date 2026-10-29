@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useState } from "react"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
@@ -29,9 +30,13 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
   return (
     <section className="my-space-2 overflow-hidden rounded-lg border border-default bg-surface-level-2">
       <header className="flex items-center gap-space-2 px-space-3 py-space-2">
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-label={display.title}
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-space-2 rounded-sm text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="min-w-0 flex-1 justify-start gap-space-2 text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
@@ -47,7 +52,7 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
           <span className="truncate text-xs font-medium text-primary">
             {display.title}
           </span>
-        </button>
+        </Button>
         {!isLegacy && (
           <IconButton
             icon={DownloadSimpleIcon}

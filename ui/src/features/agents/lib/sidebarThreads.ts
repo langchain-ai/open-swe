@@ -184,6 +184,32 @@ export function threadFamily(thread: AgentThread): Array<AgentThread> {
   return [thread, ...(thread.taskWorkers ?? [])]
 }
 
+/**
+ * One sidebar row for a task family seen through snapshots of differing age:
+ * `row` (usually the listed one, which honors the sidebar's filters) and
+ * `details` of the coordinator or an open worker, which poll on their own
+ * schedules. Each member keeps its newest copy, and a worker the row has not
+ * caught up with yet joins it unless it is archived.
+ */
+export function mergeTaskFamily(
+  row: AgentThread,
+  details: ReadonlyArray<AgentThread>
+): AgentThread {
+  const members = new Map(
+    threadFamily(row).map((member) => [member.id, member])
+  )
+  for (const member of details.flatMap(threadFamily)) {
+    const known = members.get(member.id)
+    if (known ? member.updatedAt >= known.updatedAt : !member.resolved) {
+      members.set(member.id, member)
+    }
+  }
+  const [root = row, ...workers] = members.values()
+  return root.taskWorkers || workers.length
+    ? { ...root, taskWorkers: workers }
+    : root
+}
+
 export function withoutNestedWorkers(
   threads: Array<AgentThread>
 ): Array<AgentThread> {

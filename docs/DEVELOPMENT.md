@@ -310,8 +310,7 @@ A task started from `http://localhost:3000` is a real run on that deployment, an
 The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
 
 1. Add the **`preview`** label to your PR.
-1. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour.
-   Labeling alone does not deploy.
+1. Labeling starts a run of [Build preview branch](https://github.com/langchain-ai/open-swe/actions/workflows/build_preview_branch.yml), as does every push to the PR and to `main`, and a scheduled run at :04, :19, :34, and :49 each hour; run it by hand with **force** unchecked to rebuild sooner.
 1. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**.
    A successful run may still omit a PR.
 1. Wait for the run's **Deploy the preview tree** job.
@@ -323,6 +322,7 @@ When PRs conflict with the preview tree, the run makes one `oswe` call (an Open 
 PRs the agent cannot resolve are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch.
 Resolve the conflict before reapplying the label.
 Use **force** only to rebuild an unchanged preview tree.
+The build cannot push a change to a workflow file, so the preview keeps the workflow files it last published; they never run there, since every workflow runs from `main`'s.
 
 Before publishing a changed tree, the run typechecks the dashboard.
 On failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged.

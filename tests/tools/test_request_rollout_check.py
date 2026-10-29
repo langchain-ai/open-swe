@@ -29,13 +29,19 @@ def _recorded(metadata: dict[str, object]) -> tuple[IndexedThread, IndexedThread
 
 
 @pytest.mark.asyncio
-async def test_request_rollout_check_marks_the_current_thread() -> None:
+@pytest.mark.parametrize("source", ["slack", "dashboard", None])
+async def test_request_rollout_check_marks_the_current_thread(source: str | None) -> None:
+    cfg = RunConfig.parse(
+        {
+            "thread_id": "thread-1",
+            "source": source,
+            "github_login": "octo",
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"},
+        }
+    )
     thread, updated, runtime = _recorded({})
     with (
-        patch(
-            "openswe.tools.request_rollout_check.RunConfig.from_runtime",
-            return_value=RunConfig(thread_id="thread-1"),
-        ),
+        patch("openswe.tools.request_rollout_check.RunConfig.from_runtime", return_value=cfg),
         patch("openswe.tools.request_rollout_check.index.get", new_callable=AsyncMock) as get,
         patch("openswe.tools.request_rollout_check.index.update", new_callable=AsyncMock) as update,
         patch("openswe.tools.request_rollout_check.RUNTIMES.copies", return_value=[runtime]),
@@ -44,8 +50,14 @@ async def test_request_rollout_check_marks_the_current_thread() -> None:
         update.return_value = updated
         result = await request_rollout_check()
     assert result == {"success": True, "rollout_check": True, "subscribed": False}
-    update.assert_awaited_once_with("thread-1", {"rollout_check": True})
-    runtime.update.assert_awaited_once_with("thread-1", {"rollout_check": True})
+    flag = {
+        "rollout_check": True,
+        "rollout_check_context": {
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"} if source == "slack" else None,
+        },
+    }
+    update.assert_awaited_once_with("thread-1", flag)
+    runtime.update.assert_awaited_once_with("thread-1", flag)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useRef } from "react"
+import { useEffect, useId, useRef, useState } from "react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ListNumbersIcon } from "@phosphor-icons/react/dist/ssr/ListNumbers"
 import { toast } from "sonner"
 
@@ -108,11 +110,33 @@ export function WalkthroughCallout({
 
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
+  const [expanded, setExpanded] = useState(false)
+  const activityId = useId()
+  const summary = `${plural(progress.steps, "step")} committed`
   return (
     <div className="mt-space-2 text-secondary">
-      <p>{plural(progress.steps, "step")} committed</p>
+      {recent.length > 0 ? (
+        <Button
+          size="sm"
+          color="secondary"
+          variant="plain"
+          leftDecorator={expanded ? CaretDownIcon : CaretRightIcon}
+          aria-label={`${summary}, walkthrough activity`}
+          aria-expanded={expanded}
+          aria-controls={activityId}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {summary}
+        </Button>
+      ) : (
+        <p>{summary}</p>
+      )}
       {recent.length > 0 && (
-        <ol className="mt-space-1 space-y-0.5 font-mono text-xxs">
+        <ol
+          id={activityId}
+          hidden={!expanded}
+          className="mt-space-1 space-y-0.5 font-mono text-xxs"
+        >
           {recent.map((action, index) => {
             const current = progress.running && index === recent.length - 1
             return (

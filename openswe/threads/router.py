@@ -17,6 +17,7 @@ keeps working unchanged:
   and served from then on.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -204,8 +205,10 @@ class ThreadRouter:
             metadata={**metadata, RUNTIME_METADATA_KEY: MDA_RUNTIME},
             if_exists=if_exists,
         )
-        await RUNTIMES.local.create(thread_id, thread.metadata)
-        await RUNTIMES.mda.create(thread_id, for_mda(thread.metadata))
+        await asyncio.gather(
+            RUNTIMES.local.create(thread_id, thread.metadata),
+            RUNTIMES.mda.create(thread_id, for_mda(thread.metadata)),
+        )
         return thread
 
     async def _thread_itself(
@@ -281,7 +284,12 @@ class ThreadRouter:
             send, on_success=None if cron else _started(thread_id, starting_ms)
         )
         mda = RUNTIMES.mda_runtime
-        await mda.ensure_remote_thread(thread_id)
+        if cron:
+            await mda.ensure_remote_thread(thread_id)
+        else:
+            # The index answered whether the thread exists; MDA makes its own copy if
+            # it has none, as when it never got one or swept it, in the same call.
+            payload["if_not_exists"] = "create"
         rewritten = await mda.run_payload(
             thread_id,
             payload,

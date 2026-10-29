@@ -13,9 +13,11 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.agent_overrides import get_profile_default_repo
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
-from openswe.slack.channels import SlackChannel
+from openswe.workspaces.configuration import configure_workspace, require_kitchen_eligible
 from openswe.workspaces.refresh import (
+    RefreshStartError,
     ensure_refresh_cron,
+    start_refresh,
     start_refresh_run,
 )
 from openswe.workspaces.store import (
@@ -46,26 +48,13 @@ def _normalized_slug(raw: str) -> str:
 def _save_conflict(error: ValueError) -> HTTPException:
     """409 when another workspace already holds what this one claims, else 400.
 
-    A slug or binding two admins raced for is a conflict the caller can retry
-    after reloading; everything else is a definition the store refuses.
+    A slug or binding two admins raced for, or a refresh already running, is a
+    conflict the caller can retry after reloading; everything else is a request
+    the store refuses.
     """
     if isinstance(error, WorkspaceConflictError):
         return HTTPException(409, str(error))
     return HTTPException(400, str(error))
-
-
-async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
-    """Reject newly enabled kitchen channels Slack would not deliver messages from."""
-    channels = await asyncio.gather(
-        *(SlackChannel.load(channel_id, use_cache=False) for channel_id in channel_ids)
-    )
-    for channel_id, channel in zip(channel_ids, channels, strict=True):
-        if channel is None or not channel.can_be_kitchen:
-            raise HTTPException(
-                400,
-                f"Slack channel {channel_id} cannot be a kitchen channel: choose an internal "
-                "Slack channel that Open SWE has joined.",
-            )
 
 
 @router.get("/workspaces")
@@ -85,8 +74,8 @@ async def api_create_workspace(
     request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
-    await _require_kitchen_eligible(body.kitchen_channel_ids)
     try:
+        await require_kitchen_eligible(body.kitchen_channel_ids)
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise _save_conflict(e) from e
@@ -152,36 +141,16 @@ async def api_update_workspace(
 ) -> Workspace:
     normalized = _normalized_slug(slug)
     previous = await WORKSPACES.get(normalized)
-    if previous is not None:
-        await bind_workspace(request, previous)
-    repos_changed = (
-        previous is not None
-        and body.repos is not None
-        and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
-    )
-    if repos_changed and previous.refresh_in_flight():
-        raise HTTPException(409, "a refresh of this workspace is already running")
-    if body.kitchen_channel_ids is not None:
-        already = set(previous.kitchen_channel_ids) if previous is not None else set()
-        await _require_kitchen_eligible(
-            [channel for channel in body.kitchen_channel_ids if channel not in already]
-        )
+    if previous is None:
+        raise HTTPException(400, f"no workspace named {normalized!r}")
+    await bind_workspace(request, previous)
     try:
-        record = await WORKSPACES.apply_update(normalized, body)
+        record = await configure_workspace(previous, body)
     except ValueError as e:
         raise _save_conflict(e) from e
+    except RefreshStartError as e:
+        raise HTTPException(502, str(e)) from e
     await bind_workspace(request, record)
-    if record.setup_script and not record.inherit_default_sandbox:
-        await ensure_refresh_cron(record.slug)
-        if repos_changed:
-            run_id = await start_refresh_run(record.slug)
-            if run_id is None:
-                raise HTTPException(
-                    502, "workspace was saved but its snapshot rebuild could not start"
-                )
-            return record.model_copy(
-                update={"refresh_status": "refreshing", "refresh_run_id": run_id}
-            )
     return record
 
 
@@ -250,13 +219,12 @@ async def api_refresh_workspace(
     if not record:
         raise HTTPException(404, "workspace not found")
     await bind_workspace(request, record)
-    if not record.setup_script:
-        raise HTTPException(400, "workspace has no setup script to run")
-    if record.refresh_in_flight():
-        raise HTTPException(409, "a refresh of this workspace is already running")
-    run_id = await start_refresh_run(normalized)
-    if run_id is None:
-        raise HTTPException(502, "could not start the refresh job")
+    try:
+        run_id = await start_refresh(record)
+    except ValueError as e:
+        raise _save_conflict(e) from e
+    except RefreshStartError as e:
+        raise HTTPException(502, str(e)) from e
     return {"started": True, "run_id": run_id}
 
 

@@ -1,3 +1,4 @@
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import type { ReactNode } from "react"
 import { Input } from "@langchain/macaw-components/Input"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -9,6 +10,7 @@ import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 import { slackChannelHref } from "@/lib/slack-channels"
+import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 export const githubRepoHref: ChipHref = (repo) =>
@@ -126,14 +128,18 @@ function SlackChannelRows({
           key={id}
           className="flex items-center justify-between gap-space-3 px-space-2 py-space-1"
         >
-          <a
+          <MacawLink
+            variant="xs"
             href={slackChannelHref(id)}
             target="_blank"
             rel="noopener noreferrer"
-            className="truncate text-xs text-primary hover:underline"
+            className={cn(
+              INHERITED_LINK,
+              "min-w-0 truncate text-xs text-primary hover:underline [&>span]:truncate"
+            )}
           >
             {channelLabel(id)}
-          </a>
+          </MacawLink>
           <label className="flex shrink-0 items-center gap-space-2 text-xs text-secondary">
             Kitchen
             <Switch

@@ -10,7 +10,7 @@ async function login(page: Page) {
 
 test.describe("output_iframe", () => {
   test.skip(
-    process.env.SANDBOX_TYPE !== "langsmith",
+    process.env.E2E_REAL_SANDBOX !== "1",
     "requires LangSmith sandbox download URLs",
   );
 

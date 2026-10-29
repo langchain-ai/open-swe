@@ -236,6 +236,13 @@ def _failure(response: httpx2.Response) -> ManagedToolsError:
     if response.status_code in {401, 403}:
         return ManagedToolsError("LangSmith refused access to this tool kit")
     if response.status_code == 404:
+        if not ENV.LMT_TENANT_ID.optional():
+            return ManagedToolsError(
+                "The tool kit was not found or is inaccessible in the current LangSmith workspace. "
+                "A workspace mismatch is one possible cause. Sign in to the workspace containing "
+                "the kit, or ask an administrator to verify the instance gateway and pin "
+                "LMT_TENANT_ID to its workspace."
+            )
         return ManagedToolsError("The tool kit no longer exists")
     return ManagedToolsError(f"Managed tools failed (HTTP {response.status_code}); retry later")
 

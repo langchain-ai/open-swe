@@ -4,7 +4,7 @@ This drives the **whole happy path** through two mock UIs:
 
 1. A user asks Open SWE to implement something in a **mock Slack** thread.
 1. The **real agent** runs: its model loop on a local **Managed Deep Agents** server (the real `mda/` project), its tools and middleware on the backend (`langgraph dev`).
-   It implements the change in a **local temp-dir sandbox**, pushes a branch, and opens a PR on a **fake GitHub**.
+   It implements the change in a **sandbox MDA creates**, which a stand-in for LangSmith's sandbox service roots in a local temp dir, pushes a branch, and opens a PR on a **fake GitHub**.
 1. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
 
 ## What is faked vs. real
@@ -18,7 +18,7 @@ All agent code runs for real.
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
 | Managed Deep Agents runtime (`mda/`, compiled by `mda build`)    | **real**, served locally by `mda-dev.sh` on `E2E_MDA_PORT` (default 2025)   |
 | `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
-| Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
+| Sandbox — LangSmith's sandbox service                           | **fake** (`sandbox_service.py`): MDA creates each box, the backend reconnects by id; a box is a shell rooted in a throwaway temp dir. `E2E_REAL_SANDBOX=1` keeps LangSmith |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
@@ -26,7 +26,7 @@ All agent code runs for real.
 | Workspace tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
-| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the local sandbox has nothing to snapshot         |
+| LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the stand-in sandbox has nothing to snapshot      |
 | GitHub App token mint + installation lookup, `api.github.com/user` identity | stubbed (offline)                                              |
 | GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
 | Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
@@ -39,8 +39,9 @@ The fake GitHub/Slack stores are the single source of truth the mock UIs render,
 
 ## Files
 
-- `e2e_env.py` — env + constants set before any `agent.*` import (sandbox=local, fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
+- `e2e_env.py` — env + constants set before any `agent.*` import (sandbox root, fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
+- `sandbox_service.py` — the stand-in for LangSmith's sandbox service, which both the MDA server and the backend open boxes through.
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches in the backend worker, re-exports the read-only `traced_agent`.
   Every Open SWE thread runs on Managed Deep Agents, whose hooks the backend answers from `plan_agent`.

@@ -51,11 +51,14 @@ async def approve_workflow_push(
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
     _assert_thread_promptable(metadata, session["sub"])
-    record = await decide_workflow_push_approval(
+    decision = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
-    if record is None:
+    if decision is None:
         raise HTTPException(404, "workflow push approval not found")
+    record, changed = decision
+    if not changed:
+        return {"status": f"already_{record['status']}", "fingerprint": fingerprint}
     await dispatch_followup(
         thread_id,
         metadata,
@@ -73,11 +76,14 @@ async def reject_workflow_push(
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
     _assert_thread_promptable(metadata, session["sub"])
-    record = await decide_workflow_push_approval(
+    decision = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )
-    if record is None:
+    if decision is None:
         raise HTTPException(404, "workflow push approval not found")
+    record, changed = decision
+    if not changed:
+        return {"status": f"already_{record['status']}", "fingerprint": fingerprint}
     return {"status": "rejected", "fingerprint": fingerprint}
 
 

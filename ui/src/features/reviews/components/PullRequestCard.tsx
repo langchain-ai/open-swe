@@ -1,5 +1,10 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
+import {
+  useId,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -49,15 +54,23 @@ export function PullRequestCard({
   onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
+  const contentId = useId()
   if (compact) {
     return (
-      <button
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-labelledby={contentId}
         type="button"
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
         className={cn(
-          "flex w-full gap-space-3 rounded-md py-space-2 pr-space-2 pl-space-2 text-left transition-colors",
-          selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
+          "h-auto justify-start whitespace-normal",
+          "w-full gap-space-3 py-space-2 pr-space-2 pl-space-2 text-left",
+          selected
+            ? "bg-selected hover:bg-selected dark:hover:bg-selected"
+            : "hover:bg-surface-level-1-hover",
           outcome && "opacity-60"
         )}
       >
@@ -68,7 +81,7 @@ export function PullRequestCard({
             selected ? "bg-brand" : "bg-transparent"
           )}
         />
-        <span className="min-w-0 flex-1">
+        <span id={contentId} className="min-w-0 flex-1">
           <span className="flex items-baseline gap-space-2 text-xs text-secondary">
             <span className="min-w-0 truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
@@ -95,7 +108,7 @@ export function PullRequestCard({
             </>
           )}
         </span>
-      </button>
+      </Button>
     )
   }
 
@@ -137,13 +150,19 @@ export function PullRequestCard({
             weight="medium"
             className="mt-space-1 break-words"
           >
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="xs"
+              aria-label={pr.title}
               type="button"
-              className="text-left hover:underline"
+              className="block h-auto max-w-full border-0 px-0 text-left whitespace-normal hover:underline"
               onClick={onSelect}
             >
-              {pr.title}
-            </button>
+              <Text as="span" variant="h5" weight="medium" color="primary">
+                {pr.title}
+              </Text>
+            </Button>
           </Text>
         </div>
         <div className="flex flex-wrap items-center gap-x-space-5 gap-y-space-2 text-xs text-secondary">

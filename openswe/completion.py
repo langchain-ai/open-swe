@@ -28,7 +28,7 @@ from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
 from openswe.model_failures import ModelError
 from openswe.review.findings import REVIEWER_THREAD_KIND
-from openswe.review.publish import settle_review_check_run
+from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
@@ -171,6 +171,9 @@ class _FailureReason:
             _REASON_FOLLOW_UP.get(code, _DEFAULT_FOLLOW_UP),
         )
 
+    def description(self, status: str) -> str:
+        return self._parts(status)[0]
+
     def summary(self, status: str) -> str:
         """What the dashboard shows on the failed turn."""
         reason, follow_up = self._parts(status)
@@ -194,55 +197,6 @@ def _status_reason(status: str) -> str:
     if status == "interrupted":
         return "the run was interrupted before it could finish"
     return "the run hit an unexpected error"
-
-
-async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]) -> None:
-    """Best-effort cleanup for reviewer checks left open by graph failures."""
-    if metadata.get("kind") != REVIEWER_THREAD_KIND:
-        return
-    if not isinstance(metadata.get("review_check_run_id"), int):
-        return
-    pr = metadata.get("pr")
-    if not isinstance(pr, dict):
-        return
-    owner = pr.get("owner")
-    repo = pr.get("name")
-    if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
-        return
-    try:
-        token = await get_github_app_installation_token()
-        if not token:
-            logger.warning("run-complete: no GitHub token to settle review check for %s", thread_id)
-            return
-        pending = metadata.get("review_check_pending_result")
-        if isinstance(pending, dict) and pending.get("conclusion") in {
-            "success",
-            "neutral",
-            "failure",
-        }:
-            conclusion = pending["conclusion"]
-            title = str(pending.get("title") or "Review completed")
-            summary = str(pending.get("summary") or "")
-        else:
-            conclusion = "neutral"
-            title = "Review did not complete"
-            summary = (
-                "The Open SWE review run ended without publishing a review. "
-                "Re-trigger the review by pushing a commit or re-requesting it."
-            )
-        await settle_review_check_run(
-            thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            token=token,
-            conclusion=conclusion,
-            title=title,
-            summary=summary,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "run-complete: could not settle review check for %s", thread_id, exc_info=True
-        )
 
 
 async def _post_failure_reply(
@@ -643,7 +597,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         from openswe.incidents import turns
 
         return await turns.handle_run_completion(thread_id, run_id, str(status))
-    await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
     if run_id is None:
@@ -653,6 +606,21 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             return {"status": "ignored", "reason": "failure reply already posted"}
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
+
+    reason = _FailureReason.of(error, metadata, run_id)
+    review_failure = ReviewRunFailure.of(
+        thread_id=thread_id,
+        run_id=run_id,
+        status=str(status),
+        error=error,
+        code=reason.code,
+        reason=reason.description(str(status)),
+        metadata=metadata,
+    )
+    reported = False
+    if review_failure is not None:
+        review_failure.log()
+        reported = await review_failure.report()
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.
@@ -681,7 +649,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
         return {"status": "ignored", "reason": "repeated failures"}
 
-    reason = _FailureReason.of(error, metadata, run_id)
     error_message = error.get("message") if isinstance(error, dict) else error
     posted = await _post_failure_reply(
         thread_id,
@@ -691,7 +658,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         invocation_id=_invocation_id(payload),
         terminal_error=error_message if isinstance(error_message, str) else None,
     )
-    if not posted:
+    if not posted and not reported:
         return {"status": "ignored", "reason": "no reply posted"}
 
     try:

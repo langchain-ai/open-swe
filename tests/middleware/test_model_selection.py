@@ -6,12 +6,15 @@ import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
 
-from openswe.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+from openswe.middleware.model_selection import (
+    ModelSelectionMiddleware,
+    ModelSelectionState,
+    RouteSelection,
+)
 
 
 @pytest.fixture(autouse=True)
 def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
 
@@ -27,7 +30,7 @@ def _middleware(routing_mode: Literal["auto", "fast"] = "auto") -> ModelSelectio
 async def test_route_is_stored_in_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    jev = AsyncMock(return_value="fast")
+    jev = AsyncMock(return_value=RouteSelection("fast"))
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     middleware = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
@@ -64,7 +67,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
 
 @pytest.mark.asyncio
 async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    jev = AsyncMock(return_value="balanced")
+    jev = AsyncMock(return_value=RouteSelection("balanced"))
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     middleware = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
@@ -92,7 +95,7 @@ _PERSON_BLOCK = (
 async def test_jev_sees_the_human_request_not_injected_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    jev = AsyncMock(return_value="balanced")
+    jev = AsyncMock(return_value=RouteSelection("balanced"))
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", jev)
     middleware = _middleware()
     state = {
@@ -105,10 +108,11 @@ async def test_jev_sees_the_human_request_not_injected_context(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [None, "timeout", "http", "malformed", "confidence", "nan"])
-@pytest.mark.parametrize("use_gateway", [False, True])
+@pytest.mark.parametrize(
+    "failure", [None, "auth", "timeout", "http", "malformed", "confidence", "nan"]
+)
 async def test_jev_routes_or_falls_back(
-    monkeypatch: pytest.MonkeyPatch, failure: str | None, use_gateway: bool
+    monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
     requests: list[httpx2.Request] = []
 
@@ -118,12 +122,14 @@ async def test_jev_routes_or_falls_back(
             raise httpx2.TimeoutException("timed out")
         if failure == "http":
             return httpx2.Response(503)
+        if failure == "auth" and len(requests) == 1:
+            return httpx2.Response(403)
         if failure == "malformed":
             return httpx2.Response(200, json={"answers": {}})
         return httpx2.Response(
             200,
             json={
-                "model": "typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0",
+                "model": "typesafe/jev-1.13.0",
                 "answers": {
                     "route": {
                         "type": "choice",
@@ -147,33 +153,28 @@ async def test_jev_routes_or_falls_back(
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
     monkeypatch.setenv("LANGSMITH_API_KEY", "other-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
-    monkeypatch.setenv("TYPESAFE_BASE_URL", "https://typesafe.example.com/")
-    if not use_gateway:
-        monkeypatch.setenv("TYPESAFE_API_KEY", "typesafe-key")
     monkeypatch.setattr(
         "httpx2.AsyncClient",
         lambda **kwargs: client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
     middleware = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
-    route = await middleware.select_route(state)
-    assert route == ("default" if failure else "fast")
+    update = await middleware.abefore_model(state, MagicMock())
+    state.update(update)
+    assert update == ({} if failure else {"model_route": "fast"})
     assert len(requests) == 1
-    assert requests[0].url == (
-        "https://gateway.example.com/v1/systemone"
-        if use_gateway
-        else "https://typesafe.example.com/v1/systemone"
-    )
-    assert requests[0].headers["Authorization"] == (
-        "Bearer gateway-key" if use_gateway else "Bearer typesafe-key"
-    )
+    assert requests[0].url == "https://gateway.example.com/v1/systemone"
+    assert requests[0].headers["Authorization"] == "Bearer gateway-key"
     payload = json.loads(requests[0].read())
     assert payload["state"] == "x" * 8_000
-    assert payload["model"] == ("typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0")
+    assert payload["model"] == "typesafe/jev-1.13.0"
     assert payload["questions"]["route"]["type"] == "choice"
-    state["model_route"] = route
-    assert await middleware.select_route(state) == route
-    assert len(requests) == 1
+    state.update(await middleware.abefore_model(state, MagicMock()))
+    assert len(requests) == (2 if failure else 1)
+    if failure == "auth":
+        assert state["model_route"] == "fast"
+        await middleware.abefore_model(state, MagicMock())
+        assert len(requests) == 2
 
 
 @pytest.mark.asyncio

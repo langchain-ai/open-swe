@@ -75,13 +75,29 @@ async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
     ) == ["deploy", "unit tests"]
 
 
-async def test_required_checks_unavailable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("rule_type", [None, "workflows", "code_scanning"])
+async def test_required_checks_unavailable_is_none(
+    monkeypatch: pytest.MonkeyPatch, rule_type: str | None
+) -> None:
     async def request(_client: object, _method: str, url: str, **_: object) -> httpx2.Response:
-        return _response(url, {"message": "boom"}, 500)
+        if rule_type is None:
+            return _response(url, {"message": "boom"}, 500)
+        return _response(
+            url,
+            [{"type": rule_type}]
+            if "/rules/" in url
+            else {"protection": {"required_status_checks": {"contexts": ["lint"]}}},
+        )
 
     monkeypatch.setattr(github_http, "github_request", request)
 
-    assert await github_ci.RequiredCheck.for_branch(_repo(), "main") is None
+    assert (
+        await github_ci.RequiredCheck.for_branch(_repo(), "main", require_mappable_rules=True)
+        is None
+    )
+    assert await github_ci.RequiredCheck.for_branch(_repo(), "main") == (
+        None if rule_type is None else {github_ci.RequiredCheck("lint")}
+    )
 
 
 async def test_commit_statuses_keep_the_latest_per_context(

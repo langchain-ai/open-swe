@@ -27,7 +27,7 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch):
         workflow_approval_api, "fetch_thread_metadata", AsyncMock(return_value=metadata)
     )
     monkeypatch.setattr(
-        workflow_approval_api, "decide_workflow_push_approval", AsyncMock(return_value={})
+        workflow_approval_api, "decide_workflow_push_approval", AsyncMock(return_value=({}, True))
     )
     dispatch = AsyncMock(return_value={"run_id": "approval-run"})
     monkeypatch.setattr(workflow_approval_api, "dispatch_agent_run", dispatch)

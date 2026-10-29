@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -9,6 +10,7 @@ import {
   useEffect,
   useEffectEvent,
   useLayoutEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -88,8 +90,13 @@ function OptionRow({
   onClick?: () => void
   onMouseEnter?: () => void
 }) {
+  const labelId = useId()
   return (
-    <button
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      aria-labelledby={labelId}
       type="button"
       role="option"
       aria-selected={selected}
@@ -97,15 +104,20 @@ function OptionRow({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       className={cn(
-        "flex w-full items-center gap-space-2 px-space-3 py-space-1 text-left text-xs whitespace-nowrap transition-colors",
+        "h-auto justify-start",
+        "w-full gap-space-2 px-space-3 py-space-1 text-left whitespace-nowrap",
         selected ? "text-primary" : "text-secondary",
-        focused && "bg-elevated-hover",
+        focused
+          ? "bg-elevated-hover disabled:bg-elevated-hover"
+          : "disabled:bg-transparent",
         disabled
           ? "cursor-default opacity-40"
           : "cursor-pointer hover:bg-elevated-hover"
       )}
     >
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span id={labelId} className="min-w-0 flex-1 truncate">
+        {label}
+      </span>
       {trailing ??
         (selected && (
           <CheckIcon
@@ -114,7 +126,7 @@ function OptionRow({
             className="shrink-0 text-icon-tertiary"
           />
         ))}
-    </button>
+    </Button>
   )
 }
 
@@ -361,13 +373,17 @@ export function ModelPicker({
     <div className={cn("relative min-w-0 shrink", className)}>
       <Popover open={open && !pickerDisabled} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button
+          <Button
+            color="secondary"
+            variant="plain"
+            size="sm"
+            aria-label={triggerLabel}
             type="button"
             disabled={pickerDisabled}
             aria-haspopup="listbox"
             title={triggerTitle}
             className={cn(
-              "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-xs text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+              "max-w-[220px] cursor-pointer gap-0.5 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:bg-transparent disabled:opacity-60",
               triggerClassName
             )}
           >
@@ -379,7 +395,7 @@ export function ModelPicker({
                 className="shrink-0 opacity-60"
               />
             )}
-          </button>
+          </Button>
         </PopoverTrigger>
         <PopoverContent
           ref={mainPaneRef}

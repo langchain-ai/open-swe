@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { memo, useLayoutEffect, useRef } from "react"
 import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
@@ -87,10 +88,15 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
       {items.length > 0 ? (
         <div ref={listRef} className="max-h-64 overflow-y-auto py-space-1">
           {items.map((item) => (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={`${item.label} ${item.description}`}
               aria-selected={activeItemId === item.id}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-space-2 px-space-3 py-space-1 text-left text-xs/relaxed text-primary select-none",
+                "h-auto justify-start whitespace-normal",
+                "w-full cursor-pointer gap-space-2 px-space-3 py-space-1 text-left text-xs/relaxed text-primary select-none",
                 activeItemId === item.id && "bg-elevated-hover"
               )}
               data-composer-item-id={item.id}
@@ -125,7 +131,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               <span className="min-w-0 flex-1 truncate text-tertiary">
                 {item.description}
               </span>
-            </button>
+            </Button>
           ))}
         </div>
       ) : (

@@ -5,6 +5,14 @@
 export { cn } from "@langchain/macaw-components/utils/cn"
 
 /**
+ * For Macaw `Link`s inside metadata text (authors, timestamps, GitHub links):
+ * Link sets its own type size and colors its inner span as a link; these take
+ * the surrounding size and color instead, so the anchor's own `text-*` classes show.
+ */
+export const INHERITED_LINK =
+  "text-[length:inherit] leading-[inherit] tracking-[inherit] [&>span]:text-inherit [&>span]:hover:text-inherit"
+
+/**
  * Format an elapsed duration in milliseconds as a compact string (e.g. "5s", "3m 20s").
  */
 export function formatElapsed(ms: number): string {

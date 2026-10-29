@@ -1,0 +1,18 @@
+# Run context
+
+<pr_title>{{ pr_title }}</pr_title>
+
+The repository is checked out at the pull request head in `{{ repo_dir }}`.
+Read the change with `git diff --no-renames refs/walkthrough/merge-base refs/walkthrough/head` (add `--stat` or paths as you need, but never `-U0`: the plan's hunks are the ones the default context prints), and files at the head with `git show refs/walkthrough/head:<path>` or from the checkout.
+
+{% if carried %}
+The pull request moved since the plan was made, and the plan below was carried over.
+Place only the unplanned hunks, next to the chunks they belong with.
+{% else %}
+Send the hunks that are only noise to Other with `walkthrough_move_to_other`, then place the chunks in reading order with `walkthrough_plan_chunk`, each gathering the related hunks across files.
+Split a hunk with `walkthrough_split_hunks` when only part of it belongs.
+{% endif %}
+
+# The plan now
+
+{% include "walkthrough/plan-status.md.jinja" %}

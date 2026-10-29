@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -175,6 +176,54 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+
+
+async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    history_started, profile_started = asyncio.Event(), asyncio.Event()
+    history_finished, profile_finished = asyncio.Event(), asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def read_history(thread_id: str) -> dict[str, object]:
+        history_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            history_finished.set()
+
+    async def read_profile(login: str) -> dict[str, object]:
+        profile_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            profile_finished.set()
+
+    error = HTTPException(401)
+
+    async def reject_start(login: str) -> None:
+        await profile_started.wait()
+        await history_started.wait()
+        raise error
+
+    monkeypatch.setattr(thread_runs.THREADS, "state", read_history)
+    monkeypatch.setattr(thread_runs, "get_profile", read_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", reject_start)
+
+    try:
+        with pytest.raises(HTTPException) as raised:
+            await thread_runs._enrich_run_start_command(
+                "tid", "octocat", {"method": "run.start"}, metadata={}
+            )
+        assert raised.value is error
+        assert profile_finished.is_set()
+        assert history_finished.is_set()
+    finally:
+        blocked.set()
+        await profile_finished.wait()
+        await history_finished.wait()
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -419,6 +468,9 @@ async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
     assert ("system:dashboard-handoff" in texts) is not relayed
     assert ('surface="web"' in texts) is not relayed
     assert thread_runs.RELAYED_FROM_KEY not in enriched["params"]
+    assert enriched["params"]["config"]["configurable"].get(thread_runs.RELAYED_FROM_KEY) == (
+        "coordinator-tid" if relayed else None
+    )
     source = "slack" if relayed else "dashboard"
     assert enriched["params"]["config"]["configurable"]["source"] == source
     assert cast(dict[str, object], created["metadata"])["source"] == source
@@ -653,12 +705,11 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
 
-    _, injected, _ = await thread_runs._attributed_run_messages(
-        "tid",
+    _, injected = await thread_runs._attributed_run_messages(
         "octocat",
         metadata={"injected_dynamic_context_hashes": [linked_hash, unlinked_hash]},
+        history=await thread_runs._ThreadHistory.of("tid"),
         content="Continue",
-        creating=False,
         email=None,
     )
 
@@ -744,14 +795,32 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
     assert exc_info.value is error
 
 
-async def test_proxy_commands_closes_the_turn_of_a_start_that_could_not_be_delivered(
-    monkeypatch,
+_REFUSED_START = json.dumps(
+    {"type": "error", "id": 0, "error": "unknown_error", "message": "failed to create run"}
+).encode()
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status_code"),
+    [
+        pytest.param(httpx.ConnectError("MDA unreachable"), 500, id="undeliverable"),
+        pytest.param(
+            thread_proxy.CommandReply(200, _REFUSED_START, "application/json"),
+            200,
+            id="runtime-refused",
+        ),
+    ],
+)
+async def test_proxy_commands_closes_the_turn_of_a_start_that_did_not_start(
+    monkeypatch, refusal: Exception | thread_proxy.CommandReply, status_code: int
 ) -> None:
     turn_id = uuid7()
 
     class UndeliverableThreads(ThreadStoreOverClient):
         async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
-            raise httpx.ConnectError("MDA unreachable")
+            if isinstance(refusal, Exception):
+                raise refusal
+            return refusal
 
     class IdleThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -775,7 +844,7 @@ async def test_proxy_commands_closes_the_turn_of_a_start_that_could_not_be_deliv
         "tid", "ada", b'{"method": "run.start", "params": {}}'
     )
 
-    assert status == 500
+    assert status == status_code
     failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
 
 

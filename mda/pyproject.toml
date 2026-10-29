@@ -35,6 +35,8 @@ test = [
 # Editable, so that CLI is read from the source tree.
 [tool.uv.sources]
 managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
+# The code mode, vendored too, so Open SWE can change it before upstream does.
+langchain-quickjs = { path = "../vendor/langchain-quickjs", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
 

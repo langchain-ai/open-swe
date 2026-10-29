@@ -27,6 +27,8 @@ class PrepareRunState(AgentState):
     run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    # Set once the prompt is the thread's for good; a thread from before that renders it once more.
+    system_prompt_fixed: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
     selected_model_id: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
@@ -65,7 +67,7 @@ class BasePrepareRunMiddleware(RenderedSystemPromptMiddleware):
     Subclasses must keep `_prepare` idempotent. LangGraph checkpoints the
     `run_prepared_for` latch after this before-agent node, so resumed attempts
     of the same invocation skip completed setup while later invocations on the
-    same thread re-prepare fresh tokens, prompts, and diff context. If a run
+    same thread re-prepare fresh tokens and diff context. If a run
     fails before that checkpoint, setup may execute again and every operation it
     calls must tolerate that.
     """

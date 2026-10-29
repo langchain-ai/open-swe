@@ -50,6 +50,28 @@ describe("formatToolDisplay", () => {
     ).toBe('Search "tool_calls"')
   })
 
+  it.each([
+    ["cd /workspace/open-swe && pnpm lint", "pnpm lint"],
+    ["cd '/workspace/my repo'; pnpm lint", "pnpm lint"],
+    ['cd "/workspace/my repo"\npnpm lint', "pnpm lint"],
+    ["cd -- /workspace/my\\ repo && cd ui && pnpm lint", "pnpm lint"],
+    ["cd /workspace && echo 'a && b'; cd ui", "echo 'a && b'; cd ui"],
+    ["cd /workspace", "cd /workspace"],
+    ["cd /workspace &&", "cd /workspace &&"],
+    ["cd /workspace || exit 1", "cd /workspace || exit 1"],
+    [
+      "cd $(prepare_workspace) && pnpm lint",
+      "cd $(prepare_workspace) && pnpm lint",
+    ],
+    ["echo cd /workspace && pnpm lint", "echo cd /workspace && pnpm lint"],
+  ])("formats shell display for %s", (command, expected) => {
+    const input = { command }
+    expect(formatToolDisplay("execute", "execute", input)).toBe(
+      `Shell ${expected}`
+    )
+    expect(input.command).toBe(command)
+  })
+
   it("sentence-cases raw tool names", () => {
     expect(formatToolDisplay("save_plan", "other", {}, repoPath)).toBe(
       "Save plan"
