@@ -38,7 +38,7 @@ from rt.model_calls import (
     ReplayableHistoryMiddleware,
     model_call_guards,
 )
-from rt.model_retries import ModelRetriesMiddleware, PartialModelOutputError
+from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from runtime_api.catalog import Catalog
 
@@ -475,8 +475,8 @@ async def test_retry_after_beyond_sleep_budget_is_not_retried_early(
     assert attempts == expected_attempts
 
 
-@pytest.mark.parametrize("outcome", ["error", "stall", "continues"])
-async def test_streamed_partial_output_is_not_retried_or_sent_to_fallback(
+@pytest.mark.parametrize("outcome", ["error", "exhausted", "stall", "continues"])
+async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:
@@ -485,6 +485,7 @@ async def test_streamed_partial_output_is_not_retried_or_sent_to_fallback(
     from langchain_core.outputs import ChatGenerationChunk
 
     attempts = 0
+    monkeypatch.setattr("rt.model_retries.random.uniform", lambda *args: 0.0)
 
     async def partial(
         self: ChatOpenAI,
@@ -495,10 +496,19 @@ async def test_streamed_partial_output_is_not_retried_or_sent_to_fallback(
     ) -> AsyncIterator[ChatGenerationChunk]:
         nonlocal attempts
         attempts += 1
-        chunk = ChatGenerationChunk(message=AIMessageChunk(content="incomplete"))
+        chunk = ChatGenerationChunk(
+            message=AIMessageChunk(
+                content="recovered"
+                if attempts > (6 if outcome == "exhausted" else 1)
+                else "incomplete",
+                id=f"attempt-{attempts}",
+            )
+        )
         if run_manager is not None:
             await run_manager.on_llm_new_token("incomplete", chunk=chunk)
         yield chunk
+        if attempts > (6 if outcome == "exhausted" else 1):
+            return
         if outcome == "continues":
             await asyncio.sleep(0.12)
             return
@@ -525,15 +535,30 @@ async def test_streamed_partial_output_is_not_retried_or_sent_to_fallback(
         {"messages": [HumanMessage(content="go")], "open_swe_call": call.model_dump()},
         stream_mode="messages",
     )
-    if outcome == "continues":
-        chunks = [chunk async for chunk in stream]
-        assert chunks
+    chunks = []
+    if outcome == "stall":
+        with pytest.raises(ModelCallTimeoutError):
+            async for chunk in stream:
+                chunks.append(chunk)
+        assert attempts == 1
     else:
-        expected = ModelCallTimeoutError if outcome == "stall" else PartialModelOutputError
-        with pytest.raises(expected):
-            async for _ in stream:
-                pass
-    assert attempts == 1
+        chunks = cast(
+            list[tuple[BaseMessage, dict[str, object]]], [chunk async for chunk in stream]
+        )
+        expected = 7 if outcome == "exhausted" else 1 if outcome == "continues" else 2
+        assert attempts == expected
+        superseded = {
+            message.id
+            for message, _ in chunks
+            if message.response_metadata.get("open_swe_superseded")
+        }
+        assert superseded == {f"attempt-{index}" for index in range(1, expected)}
+        if expected > 1:
+            assert any(
+                message.id == f"attempt-{expected}" and "recovered" in str(message.content)
+                for message, _ in chunks
+            )
+        assert f"attempt-{expected}" not in superseded
 
 
 @pytest.mark.parametrize("jitter", ["lower", "upper"])

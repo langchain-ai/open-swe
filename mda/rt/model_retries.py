@@ -6,6 +6,7 @@ import math
 import random
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
+from copy import copy
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Final
@@ -14,11 +15,14 @@ import httpx
 import httpx2
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.callbacks import AsyncCallbackHandler
+from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager
+from langchain_core.messages import AIMessageChunk
 from langchain_core.runnables.config import ensure_config, patch_config, var_child_runnable_config
 from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
+from langgraph.pregel._messages import StreamMessagesHandler  # noqa: PLC2701
+from langgraph.pregel.protocol import StreamChunk
 
 from rt.models import middleware_retries
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
@@ -28,16 +32,44 @@ MAX_RETRIES: Final = 5
 MAX_RETRY_SLEEP_SECONDS: Final = 60.0
 
 
-class PartialModelOutputError(RuntimeError):
-    """A failed model attempt already emitted output and must not be replayed."""
-
-
 class ModelOutput(AsyncCallbackHandler):
     """Track output locally to a model call, never across runs or concurrent calls."""
 
     def __init__(self) -> None:
         self.streamed = False
         self.deadline: asyncio.Timeout | None = None
+        self._messages: dict[str, tuple[StreamMessagesHandler, StreamChunk]] = {}
+
+    def _forward(self, source: StreamMessagesHandler, chunk: StreamChunk) -> None:
+        namespace, mode, data = chunk
+        if mode == "messages":
+            message, _ = data
+            if message.id and isinstance(message, AIMessageChunk):
+                if message.response_metadata.get("open_swe_superseded"):
+                    self._messages.pop(message.id, None)
+                else:
+                    self._messages[message.id] = (source, chunk)
+        source.stream(chunk)
+
+    def supersede(self) -> None:
+        """Retract only this failed attempt's visible messages, never graph state."""
+        for message_id, (source, chunk) in self._messages.items():
+            namespace, mode, (_, metadata) = chunk
+            source.stream(
+                (
+                    namespace,
+                    mode,
+                    (
+                        AIMessageChunk(
+                            content="",
+                            id=message_id,
+                            response_metadata={"open_swe_superseded": True},
+                        ),
+                        metadata,
+                    ),
+                )
+            )
+        self._messages.clear()
 
     async def on_llm_new_token(self, token: object, **kwargs: object) -> None:
         self.streamed = True
@@ -51,18 +83,25 @@ class ModelOutput(AsyncCallbackHandler):
     def tracking(self) -> Iterator[None]:
         config = ensure_config()
         callbacks = AsyncCallbackManager.configure(config.get("callbacks"))
+        replacements: dict[int, StreamMessagesHandler] = {}
+
+        def tracked(handler: BaseCallbackHandler) -> BaseCallbackHandler:
+            if not isinstance(handler, StreamMessagesHandler):
+                return handler
+            if id(handler) not in replacements:
+                replacement = copy(handler)
+                replacement.stream = lambda chunk, source=handler: self._forward(source, chunk)
+                replacements[id(handler)] = replacement
+            return replacements[id(handler)]
+
+        callbacks.handlers = [tracked(handler) for handler in callbacks.handlers]
+        callbacks.inheritable_handlers = [
+            tracked(handler) for handler in callbacks.inheritable_handlers
+        ]
         callbacks.add_handler(self, inherit=True)
         token = var_child_runnable_config.set(patch_config(config, callbacks=callbacks))
         try:
             yield
-        except GraphBubbleUp:
-            raise
-        except Exception as exc:
-            if self.streamed and not isinstance(exc, PartialModelOutputError):
-                raise PartialModelOutputError(
-                    "The model stopped after streaming partial output; not replaying the call"
-                ) from exc
-            raise
         finally:
             var_child_runnable_config.reset(token)
 
@@ -75,7 +114,7 @@ def _status(error: Exception) -> int | None:
 
 
 def _transient(error: Exception) -> bool:
-    if isinstance(error, PartialModelOutputError | GraphBubbleUp):
+    if isinstance(error, GraphBubbleUp):
         return False
     if (status := _status(error)) is not None:
         return status in (408, 409, 429) or 500 <= status < 600
@@ -108,7 +147,7 @@ def _retry_after(error: Exception) -> float | None:
 
 
 class ModelRetriesMiddleware(AgentMiddleware):
-    """Own transient model retries without replaying tools or partial streamed output."""
+    """Retry transient model failures, superseding partial output without replaying tools."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
@@ -120,8 +159,9 @@ class ModelRetriesMiddleware(AgentMiddleware):
         retries = MAX_RETRIES if middleware_retries(request.model) else 0
         spent = 0.0
         for attempt in range(retries + 1):
+            output = ModelOutput()
             try:
-                with ModelOutput().tracking():
+                with output.tracking():
                     return await handler(request)
             except GraphBubbleUp:
                 raise
@@ -135,6 +175,7 @@ class ModelRetriesMiddleware(AgentMiddleware):
                     logger.warning("Model retry would exceed its sleep budget")
                     raise
                 spent += delay
+                output.supersede()
                 logger.warning(
                     "Retrying model call",
                     extra={"attempt": attempt + 1, "max_retries": retries, "delay_seconds": delay},
@@ -145,6 +186,7 @@ class ModelRetriesMiddleware(AgentMiddleware):
                         "attempt": attempt + 1,
                         "max_retries": retries,
                         "delay_seconds": delay,
+                        "output_may_have_started": output.streamed,
                     }
                 )
                 await asyncio.sleep(delay)

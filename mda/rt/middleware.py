@@ -98,7 +98,7 @@ from rt.backend import (
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
 from rt.model_calls import MODEL_CALL_TIMEOUT_SECONDS, PROMPT_CACHE_TTL, ModelCallTimeoutMiddleware
-from rt.model_retries import ModelOutput, PartialModelOutputError
+from rt.model_retries import ModelOutput
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.tools import STATE_KEY, cited, run_id, tool_report
@@ -558,13 +558,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         except Exception as exc:
             if (
                 planned.fallback is None
-                or isinstance(exc, PartialModelOutputError | GraphBubbleUp)
+                or isinstance(exc, GraphBubbleUp)
                 or _tool_pairing_error(exc)
             ):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
             fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            output.supersede()
             self._traces.get(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(
                 request.override(
