@@ -21,6 +21,7 @@ from openswe.middleware.model_selection import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.model_request import ModelRequestIntent
+from openswe.prompt import SystemPrompt
 from openswe.utils.jev import JevDecision
 from openswe.utils.thread_settings import ThreadSettings
 
@@ -58,7 +59,9 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_thread_participant_identities", AsyncMock(return_value=[]))
-    monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kw: "system prompt")
+    monkeypatch.setattr(
+        server, "construct_system_prompt", lambda *args, **kw: SystemPrompt("system prompt", "")
+    )
     monkeypatch.setattr(
         server,
         "client",

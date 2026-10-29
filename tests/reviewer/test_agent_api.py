@@ -181,6 +181,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     from openswe.agent_api import graph as graph_module
     from openswe.agent_api.graph import RemoteGraph
     from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.prompt import SystemPrompt
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     async def never_planned(config: object, surface: ToolSurface) -> None:
@@ -202,9 +203,9 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
     monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
 
-    def render(**kwargs: object) -> str:
+    def render(**kwargs: object) -> SystemPrompt:
         prompts.append(kwargs)
-        return "You code."
+        return SystemPrompt(shared="You code.", thread="")
 
     monkeypatch.setattr(server, "construct_system_prompt", render)
     for name in (

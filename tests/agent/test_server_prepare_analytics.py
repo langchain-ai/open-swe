@@ -17,7 +17,7 @@ from langgraph.runtime import Runtime
 import openswe.server as server
 from openswe.agent_api.tokens import AgentTurnSettings
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.prompt import construct_system_prompt
+from openswe.prompt import SystemPrompt, construct_system_prompt
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.utils import ttl_cache
 
@@ -117,7 +117,9 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
     monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
-    monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
+    monkeypatch.setattr(
+        server, "construct_system_prompt", lambda *args, **kwargs: SystemPrompt("system prompt", "")
+    )
 
     class _Threads:
         async def get(self, thread_id: str) -> dict[str, Any]:
@@ -273,6 +275,29 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
         cast(PrepareRunState, legacy), runtime
     )
     assert rerendered["rendered_system_prompt"] == system_prompt
+
+
+def test_threads_share_their_system_prompt_up_to_what_only_each_says() -> None:
+    """A new thread's first call reads the shared part from the cache another wrote."""
+    first = construct_system_prompt(
+        dashboard_base_url="https://dashboard.invalid",
+        artifact_url="https://dashboard.invalid/threads/1/plan",
+        default_repo={"owner": "acme", "name": "api"},
+        repo_custom_instructions="Run make test.",
+        workspace_name="Backend",
+        workspace_instructions="Use uv.",
+        workspace_repos=["acme/api"],
+        admin_workspaces=True,
+        sole_writer=True,
+        continued_from_collaborative=True,
+    )
+    second = construct_system_prompt(
+        dashboard_base_url="https://dashboard.invalid",
+        artifact_url="https://dashboard.invalid/threads/2/plan",
+    )
+
+    assert first.shared == second.shared
+    assert "https://dashboard.invalid/threads/1/plan" in first.thread
 
 
 class AnyContext:
