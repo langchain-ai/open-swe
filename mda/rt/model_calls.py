@@ -9,13 +9,11 @@ cache is marked here too, where the call's real model is known.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from typing import Final
 
-from langchain.agents.middleware import (
-    AgentMiddleware,
-    ModelRetryMiddleware,
-)
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -23,12 +21,12 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 
+from rt.model_retries import ModelRetriesMiddleware
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
-# Above the provider client's own request timeout (rt/models.py), so a stalled
-# request fails and retries inside the client first.
+# Covers provider-owned retries and the primary/fallback pair, including reasoning.
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
 # As the in-process graphs': a tool call can outlast the 5m default between model calls.
 PROMPT_CACHE_TTL: Final = "1h"
@@ -153,9 +151,19 @@ class ModelCallTimeoutMiddleware(_ModelCallGuard):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        async with self.deadline():
+            return await handler(request)
+
+    @asynccontextmanager
+    async def deadline(self) -> AsyncIterator[asyncio.Timeout]:
+        """Bound model attempts together without reclassifying provider timeouts."""
+        timeout = asyncio.timeout(self._timeout_seconds)
         try:
-            return await asyncio.wait_for(handler(request), timeout=self._timeout_seconds)
+            async with timeout:
+                yield timeout
         except TimeoutError as exc:
+            if not timeout.expired():
+                raise
             logger.warning(
                 "Model call exceeded its deadline", extra={"timeout_seconds": self._timeout_seconds}
             )
@@ -191,18 +199,16 @@ def model_call_guards(
 ) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
-    They see the model the call really goes to, the fallback included. One deadline
-    covers the call and its retries. An agent's call that still fails raises, so the
-    fallback takes over and the run-complete webhook sees why; a subagent's that
-    times out becomes its answer. The prompt cache replaces deepagents' own 5m
-    one by name, in place.
+    They see the model the call really goes to, the fallback included. Middleware
+    owns retries for providers whose SDK retries are disabled. BackendRunMiddleware
+    bounds primary and fallback together. A subagent's timeout becomes its answer.
+    The prompt cache replaces deepagents' own 5m one by name, in place.
     """
     return [
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
-        # Its default answers with the error as the model's reply instead of raising.
-        ModelRetryMiddleware(retry_on=(TimeoutError,), on_failure="error"),
+        ModelRetriesMiddleware(),
         # With BackendRunMiddleware's static-prompt breakpoint this fills all four of a
         # request's cache breakpoints (static prompt, last system block, last tool, automatic);
         # Anthropic rejects a fifth, so anything adding one must give one up.

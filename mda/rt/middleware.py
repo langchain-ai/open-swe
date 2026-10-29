@@ -59,6 +59,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
@@ -97,7 +98,8 @@ from rt.backend import (
 from rt.git_baseline import TurnBaseline
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
-from rt.model_calls import PROMPT_CACHE_TTL
+from rt.model_calls import MODEL_CALL_TIMEOUT_SECONDS, PROMPT_CACHE_TTL, ModelCallTimeoutMiddleware
+from rt.model_retries import ModelOutput
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.tools import STATE_KEY, cited, run_id, tool_report
@@ -336,8 +338,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
         read_ahead: Sequence[Callable[[], None]] = (),
+        *,
+        model_timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
     ) -> None:
         self._backend = backend
+        self._model_timeout = ModelCallTimeoutMiddleware(model_timeout_seconds)
+        self._primary_timeout = ModelCallTimeoutMiddleware(model_timeout_seconds * 2 / 3)
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
@@ -528,7 +534,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
-        response = await self._call_model(request, handler)
+        async with self._model_timeout.deadline():
+            response = await self._call_model(request, handler)
         # The reply's report rides with the reply into the run's checkpoint.
         carried = self._backend.outbox.carried(request.state)
         if carried is None:
@@ -586,17 +593,27 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
             self._traces.get(self._backend.run).record_model(model.model_id)
         try:
-            return await handler(
-                request.override(
+            output = ModelOutput()
+            with output.tracking():
+                primary = request.override(
                     system_message=_with_run_prompt(static, planned.system_prompt, request.model)
                 )
-            )
+                if planned.fallback is None:
+                    return await handler(primary)
+                async with self._primary_timeout.deadline() as primary_deadline:
+                    output.deadline = primary_deadline
+                    return await handler(primary)
         except Exception as exc:
-            if planned.fallback is None or _tool_pairing_error(exc):
+            if (
+                planned.fallback is None
+                or isinstance(exc, GraphBubbleUp)
+                or _tool_pairing_error(exc)
+            ):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
             fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            output.supersede()
             self._traces.get(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(
                 request.override(

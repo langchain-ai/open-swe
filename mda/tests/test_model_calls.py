@@ -1,10 +1,15 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
+import httpx2
+import openai
 import pytest
+from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import (
     AgentState,
     ExtendedModelResponse,
@@ -21,6 +26,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -30,8 +36,10 @@ from rt.model_calls import (
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
+    model_call_guards,
 )
-from rt.models import ModelSpec
+from rt.model_retries import ModelRetriesMiddleware
+from rt.models import ModelSpec, build_model
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -188,8 +196,69 @@ async def test_a_hanging_model_call_fails_as_a_timeout() -> None:
         await ModelCallTimeoutMiddleware(timeout_seconds=0.01).awrap_model_call(
             cast(ModelRequest, MagicMock()), hang
         )
-    # The retry and the fallback both act on TimeoutError.
     assert isinstance(raised.value, TimeoutError)
+
+
+async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None:
+    error = TimeoutError("provider timed out before the overall deadline")
+    handler = AsyncMock(side_effect=error)
+
+    with pytest.raises(TimeoutError) as raised:
+        await ModelCallTimeoutMiddleware().awrap_model_call(
+            cast(ModelRequest, MagicMock()), handler
+        )
+
+    assert raised.value is error
+
+
+@pytest.mark.parametrize(
+    "primary_stalls,fallback_stalls", [(False, True), (True, True), (True, False)]
+)
+async def test_primary_and_fallback_share_one_elapsed_budget(
+    monkeypatch: pytest.MonkeyPatch, primary_stalls: bool, fallback_stalls: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, *, use_gateway: _OPENAI)
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    call = ModelCall(
+        system_prompt="prompt",
+        fallback=ModelSpec(model_id="openai:fallback", kwargs={}),
+        use_gateway=False,
+    )
+    messages: list[AnyMessage] = [HumanMessage(content="go")]
+    request = ModelRequest(
+        model=_ANTHROPIC,
+        messages=messages,
+        state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+    )
+    attempted: list[BaseChatModel | str] = []
+    cancelled: list[BaseChatModel | str] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        attempted.append(request.model)
+        try:
+            if request.model is _ANTHROPIC:
+                await asyncio.sleep(60 if primary_stalls else 0.03)
+                raise TimeoutError("provider timeout")
+            await asyncio.sleep(60 if fallback_stalls else 0)
+            return ModelResponse(result=[AIMessage(content="too late")])
+        except asyncio.CancelledError:
+            cancelled.append(request.model)
+            raise
+
+    middleware = BackendRunMiddleware(run.backend, model_timeout_seconds=0.05)
+    if fallback_stalls:
+        with pytest.raises(ModelCallTimeoutError):
+            await middleware.awrap_model_call(request, handler)
+    else:
+        response = await middleware.awrap_model_call(request, handler)
+        assert isinstance(response, ModelResponse)
+        assert response.result[0].content == "too late"
+
+    assert attempted == [_ANTHROPIC, _OPENAI]
+    assert cancelled == ([_ANTHROPIC] if primary_stalls else []) + (
+        [_OPENAI] if fallback_stalls else []
+    )
 
 
 @pytest.mark.parametrize("with_image", [True, False])
@@ -275,3 +344,279 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
         {"type": "text", "text": "First run's prompt"},
     ]
     assert static.content == "The graph's own instructions"
+
+
+@pytest.mark.parametrize("status,expected_attempts", [(429, 3), (401, 1), (503, 6)])
+async def test_provider_http_retries_are_owned_by_model_middleware(
+    status: int, expected_attempts: int
+) -> None:
+    attempts = 0
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        attempts += 1
+        if status == 429 and attempts == 1:
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "chat-tool",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "completed",
+                                        "type": "function",
+                                        "function": {"name": "complete", "arguments": "{}"},
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                },
+            )
+        if status == 429 and attempts == 3:
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "chat-test",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": "recovered"},
+                        }
+                    ],
+                },
+            )
+        return httpx2.Response(
+            status,
+            headers={"retry-after": "0"},
+            json={"error": {"message": "provider error", "type": "test", "code": None}},
+        )
+
+    completed: list[str] = []
+
+    @tool
+    async def complete() -> str:
+        """Complete one side effect."""
+        completed.append("done")
+        return "done"
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+        model = build_model(
+            ModelSpec(
+                model_id="openai:test",
+                kwargs={
+                    "api_key": "test",
+                    "max_retries": 9,
+                },
+            ),
+            use_gateway=False,
+        )
+        assert isinstance(model, ChatOpenAI)
+        assert model.max_retries is not None
+        model = model.model_copy(
+            update={
+                "use_responses_api": False,
+                "include": None,
+                "async_client": openai.AsyncOpenAI(
+                    api_key="test", max_retries=model.max_retries, http_client=client
+                ).chat.completions,
+            }
+        )
+        graph = create_agent(model=model, tools=[complete], middleware=model_call_guards())
+        if status == 429:
+            result = await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+            assert result["messages"][-1].content == "recovered"
+            assert completed == ["done"]
+        else:
+            with pytest.raises(openai.APIStatusError):
+                await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+    assert attempts == expected_attempts
+
+
+@pytest.mark.parametrize(
+    "retry_after,budget,expected_attempts", [("61", 60.0, 1), ("0.03", 0.05, 2)]
+)
+async def test_retry_after_beyond_sleep_budget_is_not_retried_early(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str, budget: float, expected_attempts: int
+) -> None:
+    monkeypatch.setattr("rt.model_retries.MAX_RETRY_SLEEP_SECONDS", budget)
+    attempts = 0
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx2.Response(
+            429,
+            headers={"retry-after": retry_after},
+            json={"error": {"message": "wait", "type": "rate_limit", "code": None}},
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+        sdk = openai.AsyncOpenAI(api_key="test", max_retries=0, http_client=client)
+        model = ChatOpenAI(
+            model="test", api_key="test", max_retries=0, async_client=sdk.chat.completions
+        )
+        graph = create_agent(model=model, middleware=model_call_guards())
+        with pytest.raises(openai.RateLimitError):
+            await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+    assert attempts == expected_attempts
+
+
+@pytest.mark.parametrize("outcome", ["error", "exhausted", "stall", "continues"])
+async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+    from langchain_core.messages import AIMessageChunk
+    from langchain_core.outputs import ChatGenerationChunk
+
+    attempts = 0
+    monkeypatch.setattr("rt.model_retries.random.uniform", lambda *args: 0.0)
+
+    async def partial(
+        self: ChatOpenAI,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        nonlocal attempts
+        attempts += 1
+        chunk = ChatGenerationChunk(
+            message=AIMessageChunk(
+                content="recovered"
+                if attempts > (6 if outcome == "exhausted" else 1)
+                else "incomplete",
+                id=f"attempt-{attempts}",
+            )
+        )
+        if run_manager is not None:
+            await run_manager.on_llm_new_token("incomplete", chunk=chunk)
+        yield chunk
+        if attempts > (6 if outcome == "exhausted" else 1):
+            return
+        if outcome == "continues":
+            await asyncio.sleep(0.12)
+            return
+        if outcome == "stall":
+            await asyncio.sleep(60)
+        raise httpx.ReadError("stream dropped")
+
+    monkeypatch.setattr(ChatOpenAI, "_astream", partial)
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    model = ChatOpenAI(model="test", api_key="test", max_retries=0)
+    backend_middleware = BackendRunMiddleware(
+        run.backend, model_timeout_seconds=2.0 if outcome == "exhausted" else 0.15
+    )
+    for name in ("_before_agent", "_before_model", "_after_model", "_after_agent"):
+        monkeypatch.setattr(backend_middleware, name, AsyncMock(return_value=None))
+    graph = create_agent(
+        model=model,
+        middleware=cast(list[AgentMiddleware], [backend_middleware, *model_call_guards()]),
+    )
+    call = ModelCall(
+        system_prompt="prompt",
+        fallback=ModelSpec(model_id="openai:backup", kwargs={"api_key": "test"}),
+    )
+    stream = graph.astream(
+        {"messages": [HumanMessage(content="go")], "open_swe_call": call.model_dump()},
+        stream_mode="messages",
+    )
+    chunks = []
+    if outcome == "stall":
+        with pytest.raises(ModelCallTimeoutError):
+            async for chunk in stream:
+                chunks.append(chunk)
+        assert attempts == 1
+    else:
+        chunks = cast(
+            list[tuple[BaseMessage, dict[str, object]]], [chunk async for chunk in stream]
+        )
+        expected = 7 if outcome == "exhausted" else 1 if outcome == "continues" else 2
+        assert attempts == expected
+        superseded = {
+            message.id
+            for message, _ in chunks
+            if message.response_metadata.get("open_swe_superseded")
+        }
+        assert superseded == {f"attempt-{index}" for index in range(1, expected)}
+        if expected > 1:
+            assert any(
+                message.id == f"attempt-{expected}" and "recovered" in str(message.content)
+                for message, _ in chunks
+            )
+        assert f"attempt-{expected}" not in superseded
+
+
+@pytest.mark.parametrize("jitter", ["lower", "upper"])
+async def test_retry_backoff_allows_a_temporary_provider_outage_to_recover(
+    monkeypatch: pytest.MonkeyPatch, jitter: str
+) -> None:
+    elapsed = 0.0
+    attempts = 0
+    events: list[dict[str, object]] = []
+
+    async def sleep(delay: float) -> None:
+        nonlocal elapsed
+        elapsed += delay
+
+    async def provider(request: ModelRequest) -> ModelResponse:
+        nonlocal attempts
+        attempts += 1
+        if elapsed < 20:
+            raise httpx.ReadError("provider temporarily unavailable")
+        return ModelResponse(result=[AIMessage(content="recovered")])
+
+    monkeypatch.setattr("rt.model_retries.asyncio.sleep", sleep)
+    monkeypatch.setattr(
+        "rt.model_retries.random.uniform",
+        lambda lower, upper: lower if jitter == "lower" else upper,
+    )
+    monkeypatch.setattr("rt.model_retries.get_stream_writer", lambda: events.append)
+    request = ModelRequest(
+        model=ChatOpenAI(model="test", api_key="test", max_retries=0),
+        messages=[HumanMessage(content="go")],
+    )
+
+    response = await ModelRetriesMiddleware().awrap_model_call(request, provider)
+
+    assert response.result[0].content == "recovered"
+    assert attempts <= 6
+    assert 20 <= elapsed <= 60
+    assert len(events) == attempts - 1
+
+
+async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backing_off = asyncio.Event()
+    monkeypatch.setattr("rt.model_retries.random.uniform", lambda *args: 10.0)
+    monkeypatch.setattr(
+        "rt.model_retries.get_stream_writer", lambda: lambda event: backing_off.set()
+    )
+    request = ModelRequest(
+        model=ChatOpenAI(model="test", api_key="test", max_retries=0),
+        messages=[HumanMessage(content="go")],
+    )
+    handler = AsyncMock(side_effect=httpx.ReadError("connection dropped"))
+    task = asyncio.create_task(ModelRetriesMiddleware().awrap_model_call(request, handler))
+    await asyncio.wait_for(backing_off.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert handler.await_count == 1
