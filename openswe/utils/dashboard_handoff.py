@@ -3,7 +3,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from openswe.input_messages import FieldValue, FieldValues, InputMessageContext
+from openswe.input_messages import (
+    FieldValue,
+    FieldValues,
+    InputMessageContext,
+    RunMessage,
+    SystemIdentity,
+    build_input_messages,
+)
 
 DASHBOARD_HANDOFF_SENDER_ID = "system:dashboard-handoff"
 DASHBOARD_HANDOFF_BODY = (
@@ -75,8 +82,32 @@ def dashboard_input_context(
         data["reply"] = [reply.fields() for reply in replies]
     context: InputMessageContext = {"sender_id": sender_id, "surface": "web", "kind": "human"}
     if relayed_from is not None:
-        context["surface"] = "automation"
+        context.update(sender_id="system:open-swe", surface="automation", kind="system")
+        data["requested_by"] = sender_id
         data["relayed_from_thread"] = relayed_from
     if data:
         context["data"] = data
     return context
+
+
+def dashboard_input_messages(
+    content: str | list[dict[str, object]],
+    sender_id: str,
+    relayed_from: str | None,
+    replies: Sequence[PassageReply] = (),
+    *,
+    systems: list[SystemIdentity] | None = None,
+    injected_dynamic_context_hashes: set[str] | None = None,
+) -> list[RunMessage]:
+    """Attribute agent relays to Open SWE without changing who authorized the run."""
+    introductions = list(systems or ())
+    if relayed_from is not None:
+        introductions.append(
+            {"id": "system:open-swe", "display_name": "Open SWE", "platform": "open-swe"}
+        )
+    return build_input_messages(
+        content,
+        dashboard_input_context(sender_id, relayed_from, replies),
+        systems=introductions,
+        injected_dynamic_context_hashes=injected_dynamic_context_hashes,
+    )

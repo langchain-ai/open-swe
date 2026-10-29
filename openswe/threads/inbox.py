@@ -45,7 +45,7 @@ from openswe.utils.dashboard_handoff import (
     RELAY_RUN_ID_KEY,
     RELAYED_FROM_KEY,
     REPLIES_KEY,
-    dashboard_input_context,
+    dashboard_input_messages,
     passage_replies,
 )
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -331,13 +331,11 @@ class ThreadInbox:
                             cast(dict[str, str], person)[key] = value
                     person = await User.canonical_person(person)
                     relayed_from = content.get(RELAYED_FROM_KEY)
-                    structured = build_input_messages(
+                    structured = dashboard_input_messages(
                         blocks,
-                        dashboard_input_context(
-                            person["id"],
-                            relayed_from if isinstance(relayed_from, str) else None,
-                            passage_replies(content.get(REPLIES_KEY)),
-                        ),
+                        person["id"],
+                        relayed_from if isinstance(relayed_from, str) else None,
+                        passage_replies(content.get(REPLIES_KEY)),
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)

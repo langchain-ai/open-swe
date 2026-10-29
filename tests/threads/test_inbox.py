@@ -96,6 +96,9 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+    assert 'sender="system:open-swe"' in envelopes
+    assert 'requested_by="github:octocat"' in envelopes
+    assert "display_name: Open SWE" in envelopes
     assert taken.state_update("run-1") == {
         "relayed_from_thread_id": "worker-thread",
         "relay_run_id": "run-1",

@@ -92,7 +92,7 @@ from openswe.utils.dashboard_handoff import (
     RELAYED_FROM_KEY,
     REPLIES_KEY,
     PassageReply,
-    dashboard_input_context,
+    dashboard_input_messages,
     passage_replies,
 )
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
@@ -831,9 +831,11 @@ async def _attributed_run_messages(
                 prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
             )
         )
-    structured = build_input_messages(
+    structured = dashboard_input_messages(
         content,
-        dashboard_input_context(sender_id, relayed_from, replies),
+        sender_id,
+        relayed_from,
+        replies,
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -1088,7 +1090,11 @@ async def _enrich_run_start_command(
                             # carries the sender and surface a reader attributes
                             # the message by.
                             text=_command_prompt_text(structured[-1].get("content")),
-                            sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                            sender=MessageSender(
+                                login=login,
+                                kind="automation" if relayed_from else DASHBOARD_SOURCE,
+                                display_name="Open SWE" if relayed_from else None,
+                            ),
                             attachments=attachments,
                             model_id=run_model,
                             effort=run_effort,
@@ -1255,7 +1261,11 @@ async def steer_running_thread(
                         message_id=message_id,
                         role="human",
                         text=_command_prompt_text(structured[-1].get("content")),
-                        sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                        sender=MessageSender(
+                            login=login,
+                            kind="automation" if relayed_from else DASHBOARD_SOURCE,
+                            display_name="Open SWE" if relayed_from else None,
+                        ),
                         attachments=attachments or None,
                         created_at=datetime.now(UTC),
                     ),

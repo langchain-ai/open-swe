@@ -8,7 +8,11 @@ from openswe.input_messages import (
     person_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.utils.dashboard_handoff import PassageReply, dashboard_input_context
+from openswe.utils.dashboard_handoff import (
+    PassageReply,
+    dashboard_input_context,
+    dashboard_input_messages,
+)
 
 
 def _parse(content: str) -> ElementTree.Element:
@@ -78,6 +82,31 @@ def test_replies_ride_as_escaped_elements_even_without_text() -> None:
         "comment: Draft?",
         "",
     ]
+
+
+def test_agent_relay_is_attributed_to_open_swe_not_the_requester() -> None:
+    messages = dashboard_input_messages("Continue", "github:octocat", "source-thread")
+    introduction, message = messages
+    assert isinstance(introduction["content"], str)
+    assert "display_name: Open SWE" in introduction["content"]
+    assert isinstance(message["content"], str)
+    root = _parse(message["content"])
+    assert root.attrib == {
+        "sender": "system:open-swe",
+        "surface": "automation",
+        "kind": "system",
+        "requested_by": "github:octocat",
+        "relayed_from_thread": "source-thread",
+    }
+    assert (root.text or "").strip() == "Continue"
+    direct = dashboard_input_messages("Continue", "github:octocat", None)
+    assert len(direct) == 1
+    assert isinstance(direct[0]["content"], str)
+    assert _parse(direct[0]["content"]).attrib == {
+        "sender": "github:octocat",
+        "surface": "web",
+        "kind": "human",
+    }
 
 
 def _person_intro_message(entity_id: str) -> HumanMessage:
