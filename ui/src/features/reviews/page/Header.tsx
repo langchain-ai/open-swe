@@ -65,12 +65,14 @@ export function Header({
   compactRail,
   navigatorShown,
   showFileControls,
+  frontendActive = false,
 }: {
   pr: PullRequestRef
   leftInset: string
   compactRail: boolean
   navigatorShown: boolean
   showFileControls: boolean
+  frontendActive?: boolean
 }) {
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
@@ -112,13 +114,13 @@ export function Header({
       <IconButton
         asChild
         icon={ArrowLeftIcon}
-        label="Back to reviews"
+        label={frontendActive ? "Back to Design QA" : "Back to reviews"}
         size="md"
         color="secondary"
         variant="plain"
         className="max-sm:hidden"
       >
-        <Link to="/agents/reviews" />
+        <Link to={frontendActive ? "/agents/qa" : "/agents/reviews"} />
       </IconButton>
       {showFileControls && (
         <IconButton

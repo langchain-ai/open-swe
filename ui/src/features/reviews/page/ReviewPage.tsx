@@ -94,15 +94,11 @@ export function ReviewPage({
       markReviewViewed(queryClient, pr, chatThreadId)
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
-  useCollapseAppSidebar(pr)
+  useCollapseAppSidebar(pr, frontendActive)
   const sidebar = useSidebarControls()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const leftInset = sidebar?.collapsed
-    ? isDesktop
-      ? "pl-32"
-      : "pl-space-8"
-    : "pl-space-3"
+  const leftInset = sidebar?.collapsed && isDesktop ? "pl-32" : "pl-space-3"
 
   const navigatorInline = navigatorOpen && roomForNavigator
 
@@ -111,6 +107,7 @@ export function ReviewPage({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
         <Header
           pr={pr}
+          frontendActive={frontendActive}
           leftInset={leftInset}
           compactRail={!wide || frontendActive}
           navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
@@ -252,7 +249,7 @@ function PullRequestUnavailable({
 }
 
 /** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
-function useCollapseAppSidebar(pr: PullRequestRef) {
+function useCollapseAppSidebar(pr: PullRequestRef, frontendActive: boolean) {
   const sidebar = useSidebarControls()
   const sidebarRef = useRef(sidebar)
   const fromSidebar = useRef(reviewOpenedFromSidebar(pr))
@@ -261,8 +258,14 @@ function useCollapseAppSidebar(pr: PullRequestRef) {
   }, [sidebar])
   useLayoutEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed || fromSidebar.current) return
+    if (
+      frontendActive ||
+      !controls ||
+      controls.collapsed ||
+      fromSidebar.current
+    )
+      return
     controls.setCollapsedForPage(true)
     return () => controls.setCollapsedForPage(false)
-  }, [])
+  }, [frontendActive])
 }

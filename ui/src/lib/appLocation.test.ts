@@ -64,13 +64,14 @@ describe("section location", () => {
     expect(getLastSectionLocation("/agents/reviews")).toBe("/agents/reviews")
   })
 
-  it("keeps saved frontend evidence in the QA section without replacing code review history", () => {
+  it("returns Design QA navigation to its inbox while preserving the last opened evidence", () => {
     rememberAppLocation("/agents/reviews/acme/api/42")
     const savedQA =
       "/agents/reviews/acme/api/42?view=frontend&run=00000000-0000-0000-0000-000000000001"
     rememberAppLocation(savedQA)
 
-    expect(getLastSectionLocation("/agents/qa")).toBe(savedQA)
+    expect(getLastSectionLocation("/agents/qa")).toBe("/agents/qa")
+    expect(getLastAppLocation()).toBe(savedQA)
     expect(getLastSectionLocation("/agents/reviews")).toBe(
       "/agents/reviews/acme/api/42"
     )

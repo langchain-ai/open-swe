@@ -218,7 +218,7 @@ export function AgentThreadHeader({
       <div
         className={cn(
           "flex h-full w-full items-center gap-space-3 px-space-4",
-          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8"),
+          sidebarCollapsed && isDesktop && "pl-32",
           panelCollapsed && "pr-space-8"
         )}
       >

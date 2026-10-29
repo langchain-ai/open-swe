@@ -57,7 +57,7 @@ export function OpenPullRequestInput({
               : "Open a pull request review"
           }
           isError={invalid}
-          aria-describedby={frontend ? hintId : undefined}
+          aria-describedby={frontend && invalid ? hintId : undefined}
           placeholder={
             frontend
               ? "PR number, owner/repo#123, or GitHub link"
@@ -82,15 +82,13 @@ export function OpenPullRequestInput({
           </Button>
         )}
       </div>
-      {frontend && (
+      {frontend && invalid && (
         <p
           id={hintId}
-          role={invalid ? "alert" : undefined}
-          className={`mt-space-2 text-xs ${invalid ? "text-error-secondary" : "text-secondary"}`}
+          role="alert"
+          className="mt-space-2 text-xs text-error-secondary"
         >
-          {invalid
-            ? "Enter a PR number, owner/repo#123, or a GitHub PR link."
-            : "Numbers open langchain-ai/langchainplus."}
+          Enter a PR number, owner/repo#123, or a GitHub PR link.
         </p>
       )}
     </form>

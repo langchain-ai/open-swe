@@ -62,6 +62,7 @@ export function getLastAppLocation(): string {
 }
 
 export function getLastSectionLocation(section: SectionRoot): string {
+  if (section === "/agents/qa") return section
   if (typeof window === "undefined") return section
   const href = window.sessionStorage.getItem(
     `${SECTION_STORAGE_PREFIX}${section}`

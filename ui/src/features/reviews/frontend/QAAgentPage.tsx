@@ -35,10 +35,6 @@ export function QAAgentPage() {
             <h1 className="text-2xl font-semibold tracking-tight text-primary">
               Design QA
             </h1>
-            <p className="mt-space-2 text-sm text-secondary">
-              Your visual review inbox. Compare screenshots and interaction
-              states for PRs requested from you or your teams.
-            </p>
           </div>
           <div className="min-w-0">
             <OpenPullRequestInput frontend />

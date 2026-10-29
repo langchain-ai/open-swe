@@ -129,24 +129,29 @@ export function SidebarFrame({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   if (collapsed) {
-    // Electron resolves window drag regions in DOM order, ignoring z-index, so
-    // a page header marked draggable would swallow clicks on this floating
-    // toggle if it came earlier. Portal it after all content to keep it last.
-    return createPortal(
+    const expandButton = (
       <IconButton
         icon={SidebarSimpleIcon}
         label="Expand sidebar"
         color="secondary"
         variant="plain"
-        size="sm"
+        size={isDesktop ? "sm" : "md"}
+        aria-expanded={false}
         data-sidebar-expand=""
         onClick={toggle}
-        className={cn(
-          "fixed top-2 left-2 z-sidebar size-7",
-          isDesktop && "left-[90px]"
-        )}
-      />,
-      document.body
+        className={cn(isDesktop && "fixed top-2 left-[90px] z-sidebar size-7")}
+      />
+    )
+    // Electron drag regions resolve in DOM order, so its floating toggle must
+    // remain after draggable page headers.
+    if (isDesktop) return createPortal(expandButton, document.body)
+    return (
+      <aside
+        aria-label="Sidebar controls"
+        className="w-space-8 flex h-svh shrink-0 flex-col items-center border-r border-subtle bg-surface-level-2 py-space-2"
+      >
+        {expandButton}
+      </aside>
     )
   }
 
@@ -243,6 +248,7 @@ export function SidebarCollapseButton({
     <IconButton
       icon={SidebarSimpleIcon}
       label="Collapse sidebar"
+      aria-expanded={true}
       color="secondary"
       variant="plain"
       size="sm"
