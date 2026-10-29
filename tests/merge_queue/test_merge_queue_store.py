@@ -22,7 +22,7 @@ from openswe.merge_queue import controller, runtime
 from openswe.merge_queue.admission import Admission, AdmissionReader, CheckSource, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.controller import QueueController
-from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected, WorkflowPolicyMismatch
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -1620,6 +1620,9 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "slow_dispatch",
         "dispatch_tuning",
         "dispatch_response_lost",
+        "dispatch_policy_mismatch",
+        "report_policy_mismatch",
+        "policy_discovery",
         "rerun_after_success",
         "report_rejected",
         "issuer",
@@ -1654,6 +1657,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         operator_emails=frozenset({"operator@example.com"}),
         policy=policy,
     )
+    config = config.model_copy(update={"sync_workflow_policy": True, "workflow_policy_revision": 1})
     await save_configuration(config)
     repo = Mock(spec=RepoClient)
     repo.raw_file = AsyncMock(return_value=b"reviewed workflow")
@@ -1681,9 +1685,31 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     )
     sent: list[httpx2.Request] = []
     report_status = 502
+    policy_revision = 2
     tuned = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
 
     async def deliver(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/workflow-policy"):
+            body = json.dumps(
+                {
+                    "nonce": request.url.params["nonce"],
+                    "repository": config.repository,
+                    "repository_id": config.repository_id,
+                    "workflow_digest": config.workflow_digest,
+                    "workflow_policy_revision": policy_revision,
+                    "dispatch_actor_id": 123,
+                    "check_app_id": 456,
+                }
+            ).encode()
+            return httpx2.Response(
+                200,
+                content=body,
+                headers={
+                    "X-Merge-Queue-Signature": hmac.digest(
+                        b"s" * 32, b"workflow-policy-response:" + body, "sha256"
+                    ).hex()
+                },
+            )
         sent.append(request)
         report = request.url.path.endswith("/check-reports")
         prefix = b"check-report:" if report else b""
@@ -1691,6 +1717,18 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             request.headers["X-Merge-Queue-Signature"]
             == hmac.digest(b"s" * 32, prefix + request.content, "sha256").hex()
         )
+        mismatch = (fault == "dispatch_policy_mismatch" and len(sent) == 1) or (
+            fault == "report_policy_mismatch" and len(sent) == 2
+        )
+        if mismatch:
+            return httpx2.Response(
+                412,
+                headers={
+                    "X-Merge-Queue-Policy-Signature": hmac.digest(
+                        b"s" * 32, b"policy-mismatch:" + request.content, "sha256"
+                    ).hex()
+                },
+            )
         if report:
             body = json.loads(request.content)
             assert body["dispatch_body"].encode() == next(
@@ -1713,6 +1751,13 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         yield repo
 
     async def reconcile() -> None:
+        if fault == "policy_discovery":
+            monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
+            monkeypatch.setattr(QueueController, "open_repo", lambda self, queue: open_repo(queue))
+            controller = QueueController(config)
+            controller.queue = queue
+            await controller.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
+            return
         worker = NativeQueueRuntime(
             queue.id,
             42,
@@ -1744,8 +1789,25 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     elif fault == "dispatch_response_lost":
         with pytest.raises(httpx2.ReadTimeout):
             await reconcile()
+    elif fault == "report_policy_mismatch":
+        with pytest.raises(WorkflowPolicyMismatch):
+            await reconcile()
+    elif fault == "dispatch_policy_mismatch":
+        await reconcile()
+        await reconcile()
+        assert sent[0].content == sent[1].content
     else:
         await reconcile()
+    if fault == "policy_discovery":
+        assert json.loads(sent[0].content)["workflow_policy_revision"] == 2
+        configured = await QueueConfiguration.load(queue.workspace_id)
+        assert configured is not None and configured.workflow_policy_revision == 2
+        policy_revision = 1
+        count = len(sent)
+        await reconcile()
+        assert len(sent) == count
+        assert await QueueConfiguration.load(queue.workspace_id) == configured
+        policy_revision = 2
     request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
     run = ValidationRun(
         id=42,
@@ -1808,7 +1870,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     history = await queue.history(request.batch_id)
     assert history.attempts[0].state == "succeeded"
     assert all(evidence.key != "validation-revoked" for evidence in history.evidence)
-    assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == 1
+    assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == (
+        2 if fault == "dispatch_policy_mismatch" else 1
+    )
     successes = [
         r
         for r in sent
@@ -1889,3 +1953,113 @@ async def test_configuration_fences_stale_workers_and_serializes_check_publicati
     await queue.release(new_lease)
     with pytest.raises(LeaseLost, match="disabled or invalid"):
         await queue.claim(uuid7(), timedelta(minutes=1), config=changed_trust)
+
+
+async def test_workflow_policy_adoption_preserves_budget_and_fences_old_results(queue_controller):
+    from openswe.merge_queue.dispatch import WorkflowPolicy
+
+    queue = queue_controller.queue
+    policy, lease, _ = await enable_native_validation(queue)
+    await queue.release(lease)
+    config = queue_controller.config.model_copy(
+        update={
+            "mode": "native",
+            "policy": policy,
+            "check_app_id": 456,
+            "sync_workflow_policy": True,
+        }
+    )
+    await save_configuration(config)
+    approved = WorkflowPolicy(
+        nonce=uuid7(),
+        repository=config.repository,
+        repository_id=config.repository_id,
+        workflow_policy_revision=1,
+        workflow_digest=config.workflow_digest,
+        dispatch_actor_id=123,
+        check_app_id=456,
+    )
+    config = await queue.adopt_workflow_policy(config, approved)
+    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+    assert lease is not None
+    work = await queue.prepare_native_validation(
+        native_snapshot(), 600, lease, policy=policy, trust=config.native_trust
+    )
+    assert work is not None
+    await queue.bind_validation_run(work.attempt.id, 42, lease)
+    await queue.finish_native_validation(
+        work,
+        {
+            **work.request.model_dump(mode="json"),
+            "run_id": 42,
+            "run_attempt": 1,
+            "tested_sha": work.request.candidate_sha,
+        },
+        lease,
+        succeeded=True,
+    )
+    changed = approved.model_copy(
+        update={"workflow_policy_revision": 2, "workflow_digest": "b" * 64}
+    )
+    updated = await queue.adopt_workflow_policy(config, changed)
+    assert (await QueueConfiguration.load(queue.workspace_id)) == updated
+    with pytest.raises(LeaseLost):
+        await queue.authorize_native_result(work, native_snapshot(), lease)
+    await queue.release(lease)
+    with pytest.raises(LeaseLost):
+        await queue.adopt_workflow_policy(config, changed)
+    for rejected in (
+        approved,
+        changed.model_copy(update={"workflow_digest": "c" * 64}),
+        changed.model_copy(update={"repository_id": 999}),
+        changed.model_copy(update={"dispatch_actor_id": 999}),
+        changed.model_copy(update={"check_app_id": 999}),
+    ):
+        with pytest.raises(ValueError):
+            await queue.adopt_workflow_policy(updated, rejected)
+    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=updated)
+    assert lease is not None
+    assert not await queue.authorize_native_result(work, native_snapshot(), lease)
+    pending_rebuild = native_snapshot().model_copy(update={"main_sha": "e" * 40})
+    assert (
+        await queue.prepare_native_validation(
+            pending_rebuild, 600, lease, policy=policy, trust=updated.native_trust
+        )
+        is None
+    )
+    assert (await queue.history(work.batch.id)).batch.state == "active"
+    rebuilt = native_snapshot(main="e" * 40)
+    replacement = await queue.prepare_native_validation(
+        rebuilt, 600, lease, policy=policy, trust=updated.native_trust
+    )
+    assert replacement is not None and replacement.dispatch
+    assert replacement.batch.id == work.batch.id
+    assert replacement.batch.deadline == work.batch.deadline
+    assert replacement.batch.max_attempts == work.batch.max_attempts
+    assert replacement.attempt.number == 2
+    assert replacement.request.attempt_id != work.request.attempt_id
+    assert replacement.request.workflow_sha == rebuilt.main_sha
+    assert replacement.batch.candidate == work.batch.candidate
+    await queue.release(lease)
+    rollback = approved.model_copy(update={"workflow_policy_revision": 3})
+    reverted = await queue.adopt_workflow_policy(updated, rollback)
+    assert reverted.workflow_digest == config.workflow_digest
+    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=reverted)
+    assert lease is not None
+    last = await queue.prepare_native_validation(
+        rebuilt, 600, lease, policy=policy, trust=reverted.native_trust
+    )
+    assert last is not None and last.attempt.number == 3
+    assert last.batch.deadline == work.batch.deadline
+    await queue.release(lease)
+    exhausted = await queue.adopt_workflow_policy(
+        reverted, changed.model_copy(update={"workflow_policy_revision": 4})
+    )
+    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=exhausted)
+    assert lease is not None
+    assert (
+        await queue.prepare_native_validation(
+            rebuilt, 600, lease, policy=policy, trust=exhausted.native_trust
+        )
+        is None
+    )
