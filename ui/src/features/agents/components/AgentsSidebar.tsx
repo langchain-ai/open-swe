@@ -7,7 +7,9 @@ import {
   PushPinRegularIcon,
   StackRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { getLastSectionLocation, useHrefLinkOptions } from "@/lib/appLocation"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
@@ -184,6 +186,10 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const fleetSelected = useRouterState({
+    select: (state) => state.location.pathname === "/agents/chat",
+  })
+  const linkOptions = useHrefLinkOptions()
   const newThreadShortcut = useShortcutLabel("mod+n")
   const profile = useProfile()
   const concierge = useQuery({
@@ -666,6 +672,37 @@ export function AgentsSidebar({
         </div>
       </div>
 
+      <div className="px-space-2 pb-space-4">
+        <GroupedTabs
+          size="md"
+          className="w-full"
+          value={fleetSelected ? "fleet" : "openswe"}
+          options={[
+            {
+              value: "openswe",
+              display: "OpenSWE",
+              className: "flex-1",
+              "aria-label": "OpenSWE",
+            },
+            {
+              value: "fleet",
+              display: "Fleet",
+              className: "flex-1",
+              "aria-label": "Fleet",
+            },
+          ]}
+          onChange={(value) => {
+            void navigate(
+              linkOptions(
+                value === "fleet"
+                  ? getLastSectionLocation("/agents/chat")
+                  : "/agents"
+              )
+            )
+            layout.closeOnMobile()
+          }}
+        />
+      </div>
       <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
         <Link
           to="/agents"
