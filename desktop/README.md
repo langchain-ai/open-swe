@@ -151,7 +151,7 @@ An update from an installed Open SWE app and a Homebrew reinstall still need mac
 ## macOS releases
 
 `desktop/package.json` is the latest stable version.
-Every **Promote main to prod** run publishes a prerelease nightly from the promoted commit with a UTC timestamp, such as `desktop-v0.2.3-nightly.20260902080000`.
+Merging a production release PR triggers **Release to prod**, which publishes a prerelease nightly from the pinned commit with a UTC timestamp, such as `desktop-v0.2.3-nightly.20260902080000`.
 Nightly releases never publish the stable version.
 
 Stable releases use a deliberate bump, test, release process: bump `desktop/package.json` in a normal pull request, merge it to `main`, test the resulting code as needed, then run **Release Desktop** manually.
