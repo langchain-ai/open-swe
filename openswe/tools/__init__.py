@@ -76,6 +76,8 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
+    "slack_btw_answer": "openswe.slack.tools.by_the_way",
+    "slack_btw_ask_in_dm": "openswe.slack.tools.by_the_way",
     "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
@@ -159,6 +161,8 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_reply",
     "slack_breakout_thread",
+    "slack_btw_answer",
+    "slack_btw_ask_in_dm",
     "slack_start_review_channel",
     "submit_thread_feedback",
     "suggest_task",
@@ -172,6 +176,7 @@ if TYPE_CHECKING:
     from openswe.incidents.tools import manage_incident
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html
+    from openswe.slack.tools.by_the_way import slack_btw_answer, slack_btw_ask_in_dm
     from openswe.slack.tools.channels import (
         slack_list_channel_members,
         slack_list_channels,

@@ -162,6 +162,8 @@ class RunConfig(BaseModel):
     stop_summary: bool | None = None
     slack_ask: bool | None = None
     slack_kickoff_eligible: bool | None = None
+    # A turn in the DM a `/btw` question continues in, before its answer is posted.
+    slack_btw_follow_up: bool | None = None
     # First run of a thread broken out from another Slack thread.
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.

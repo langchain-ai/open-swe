@@ -1,0 +1,9 @@
+This DM continues the `/btw` question {{ asked_by }} asked{% if dm.permalink %} in {{ dm.permalink }}{% endif %}.
+You asked them here:
+
+<btw-dm-question>
+{{ dm.question }}
+</btw-dm-question>
+
+Talk with them here through `slack_reply` until you can answer the question completely.
+Then post the answer where they asked with `slack_btw_answer`; it posts once, so never send it partial.
