@@ -23,7 +23,8 @@ from openswe.human_review.standard import (
     review_reminder_at,
     summary_line,
 )
-from openswe.slack.blocks import block_payload
+from openswe.slack.blocks import block_payload, section
+from openswe.slack.http import SlackRequestError
 from openswe.users import User, UserIdentity
 from tests.conftest import FakeUserRecords
 
@@ -70,7 +71,9 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
 
 @pytest.mark.parametrize("updated", [True, False])
 async def test_completed_pick_marks_dm_stale_and_preserves_reviewer(updated: bool) -> None:
-    request = HumanReviewRequest(pull_request_id=User().id, head_sha="abc", kind="standard")
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
     user = User(identities=[UserIdentity(provider="github", external_id="grace", login="Grace")])
     pick = HumanReviewParticipant(
         user_id=user.id,
@@ -90,18 +93,18 @@ async def test_completed_pick_marks_dm_stale_and_preserves_reviewer(updated: boo
     with (
         patch.object(HumanReviewRequest, "locked", locked),
         patch(
-            "openswe.human_review.pick_message.PickMessage.show", AsyncMock(return_value=updated)
-        ) as show,
+            "openswe.human_review.pick_message.update_slack_message",
+            AsyncMock(side_effect=None if updated else SlackRequestError("rate_limited")),
+        ) as update,
     ):
         await ReviewPicks(request).complete({"grace"})
-        show.assert_awaited_once_with(
-            "Review submitted on GitHub. This assignment is no longer active."
-        )
+        text = f"Review submitted for <{pr.url}|{pr.label}>."
+        update.assert_awaited_once_with("D1", "1.2", text, blocks=block_payload([section(text)]))
         assert request.participants == [pick]
         assert pick.decision == ("review" if updated else "picked")
         assert pick.dm_ts == ("" if updated else "1.2")
         await ReviewPicks(request).complete({"grace"})
-        assert show.await_count == (1 if updated else 2)
+        assert update.await_count == (1 if updated else 2)
 
 
 async def test_decline_only_withdraws_the_users_pending_pick() -> None:
