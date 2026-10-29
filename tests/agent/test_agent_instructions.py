@@ -46,7 +46,9 @@ async def test_update_agent_instructions_limits_utf8_bytes(monkeypatch, characte
             "/agent-instructions/acme/repo", json={"instructions": boundary + "a"}
         )
         assert response.status_code == 422
-        assert "32,768 UTF-8 bytes" in response.json()["detail"][0]["msg"]
+        assert response.json() == {
+            "detail": "Repository custom instructions must not exceed 32 KiB (32,768 UTF-8 bytes)"
+        }
         store.assert_not_awaited()
 
 
