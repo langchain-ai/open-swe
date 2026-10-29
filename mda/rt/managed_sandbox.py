@@ -77,14 +77,17 @@ def _selected(runtime: object) -> SandboxDefinition | None:
     except BackendCallError:
         # Not started yet, or not an Open SWE run, so nothing may open a box for it.
         return None
-    return None if spec is None else definition(spec.create, spec.thread_id)
+    return None if spec is None else definition(spec.create, spec.thread_id, spec.sandbox_id)
 
 
-def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
+def definition(
+    create: SandboxCreate, thread_id: str | None, sandbox_id: str | None = None
+) -> SandboxDefinition:
     """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``."""
     return define_sandbox(
         _openswe_per_thread=True,
         _openswe_thread_id=thread_id,
+        _openswe_sandbox_id=sandbox_id,
         _openswe_no_manage_proxy=True,
         _openswe_create_fields=dict(create.extra_fields),
         default_timeout=EXECUTE_TIMEOUT_SECONDS,

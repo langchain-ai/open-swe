@@ -380,27 +380,113 @@ def test_thread_sandbox_failures_never_create_a_second_workspace(
     assert len(client.create_sandbox.call_args_list) == (1 if failure == "conflict" else 0)
 
 
-def test_losing_a_thread_sandbox_does_not_implicitly_replace_its_workspace(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("replaced", [False, True])
+def test_losing_a_thread_sandbox_only_reconnects_to_an_existing_replacement(
+    monkeypatch: pytest.MonkeyPatch, replaced: bool
 ) -> None:
     spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
     assert spec is not None
     sandbox = definition(spec.create, None)
     original = MagicMock(spec=SandboxBackendProtocol)
     original.execute.side_effect = ResourceNotFoundError("sandbox is gone")
-    entry = mda_runtime._ManagedSandboxEntry(original, host_name="original")
+    entry = mda_runtime._ManagedSandboxEntry(original, host_name="original", sandbox_id="old-id")
     monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {"thread:thread-1": entry})
     client = MagicMock()
-    client.get_sandbox.side_effect = ResourceNotFoundError("sandbox is gone")
+    replacement = MagicMock(name="original", status="running")
+    replacement.name = "original"
+    replacement.id = "new-id"
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+    if replaced:
+        client.get_sandbox.return_value = replacement
+    else:
+        client.get_sandbox.side_effect = ResourceNotFoundError("sandbox is gone")
     monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
     backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
 
     with pytest.raises(ResourceNotFoundError, match="sandbox is gone"):
         backend.execute("pwd")
 
-    assert backend._backend() is original
+    assert backend._backend() is (resolved if replaced else original)
     assert entry.backend is original
     client.create_sandbox.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_persisted_sandbox_binding_overrides_another_replicas_canonical_cache(
+    monkeypatch: pytest.MonkeyPatch, missing: bool
+) -> None:
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    bound_name = "original-legacy-suffix"
+    sandbox = definition(spec.create, None, bound_name)
+    stale = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(
+        mda_runtime,
+        "_managed_sandboxes",
+        {"thread:thread-1": mda_runtime._ManagedSandboxEntry(stale, host_name="original")},
+    )
+    client = MagicMock()
+    handle = MagicMock(status="running")
+    handle.name = bound_name
+    handle.id = "bound-id"
+    if missing:
+        client.get_sandbox.side_effect = ResourceNotFoundError("not found")
+    else:
+        client.get_sandbox.return_value = handle
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+
+    if missing:
+        with pytest.raises(RuntimeError, match="bound sandbox.*no longer exists"):
+            mda_runtime._resolve_managed_sandbox(sandbox, _thread("thread-1"))
+    else:
+        assert mda_runtime._resolve_managed_sandbox(sandbox, _thread("thread-1")) is resolved
+    assert all(call.args == (bound_name,) for call in client.get_sandbox.call_args_list)
+    client.create_sandbox.assert_not_called()
+    client.update_sandbox.assert_not_called()
+    client.stop_sandbox.assert_not_called()
+    client.delete_sandbox.assert_not_called()
+
+
+@pytest.mark.parametrize("bound", [False, True])
+async def test_explicit_recreation_can_replace_a_failed_uncached_sandbox(
+    monkeypatch: pytest.MonkeyPatch, bound: bool
+) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    monkeypatch.delenv("LANGSMITH_DEPLOYMENT_NAME", raising=False)
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    bound_name = (
+        "original-legacy-suffix"
+        if bound
+        else mda_runtime._managed_sandbox_name("open-swe-mda-prod", "thread:thread-1")
+    )
+    sandbox = definition(spec.create, None, bound_name if bound else None)
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
+    client = MagicMock()
+    client.get_sandbox.return_value = MagicMock(status="failed")
+    fresh = MagicMock(status="running")
+    fresh.name = bound_name
+    fresh.id = "fresh-id"
+    client.create_sandbox.return_value = fresh
+    resolved = MagicMock(spec=SandboxBackendProtocol)
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
+    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: resolved)
+    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-1"))
+
+    with pytest.raises(RuntimeError, match="not usable"):
+        await backend.aopen()
+    client.create_sandbox.assert_not_called()
+    replacement = await backend.areplace()
+
+    assert replacement.new_name == bound_name
+    assert replacement.old_name.startswith(f"{bound_name}-old-")
+    assert client.update_sandbox.call_args.args == (bound_name,)
+    assert client.create_sandbox.call_args.kwargs["name"] == bound_name
+    assert await backend.aopen() == resolved.id
+    client.delete_sandbox.assert_not_called()
 
 
 @pytest.mark.parametrize("code_mode", [False, True])

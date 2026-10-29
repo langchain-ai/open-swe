@@ -95,6 +95,7 @@ class SandboxDefinition:
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
         "_openswe_per_thread",
         "_openswe_thread_id",
+        "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
         "_openswe_select",

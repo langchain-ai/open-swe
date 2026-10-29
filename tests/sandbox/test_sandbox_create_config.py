@@ -137,6 +137,11 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
         return
     assert sandbox is not None
     assert sandbox.thread_id == (None if owner == "own" else owner)
+    assert sandbox.sandbox_id == (
+        metadata.get("sandbox_id")
+        if owner == _HOST or metadata.get("sandbox_owner") == "mda"
+        else None
+    )
     assert sandbox.create.snapshot_id == "snap-1"
     assert sandbox.create.extra_fields == {
         **workspace.create_params,
