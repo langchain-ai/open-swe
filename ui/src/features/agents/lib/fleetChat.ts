@@ -1,3 +1,5 @@
+import type { Thread } from "@langchain/langgraph-sdk"
+export type { Thread }
 import { Client } from "@langchain/langgraph-sdk"
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
@@ -7,18 +9,6 @@ export interface Workspace {
   id: string
   name: string
 }
-export interface ChatMessage {
-  type?: string
-  role?: string
-  content: string | Array<{ type: string; text?: string }>
-}
-export interface Thread {
-  thread_id: string
-  status: string
-  metadata?: { thread_title?: string; first_message_preview?: string }
-  values?: { messages?: ChatMessage[] }
-}
-
 export function fleetClient(workspaceId: string) {
   return new Client({
     apiUrl: new URL(

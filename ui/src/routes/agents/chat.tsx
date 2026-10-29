@@ -19,6 +19,7 @@ function ChatPage() {
   const navigate = Route.useNavigate()
   return (
     <FleetChat
+      key={search.workspace}
       workspaceId={search.workspace}
       threadId={search.chat}
       onSelect={(workspace, chat) => {

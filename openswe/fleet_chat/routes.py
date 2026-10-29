@@ -19,7 +19,7 @@ router = APIRouter(prefix="/fleet-chat", tags=["fleet-chat"])
 _ID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
 _PATHS = {
     "GET": rf"threads/{_ID}(?:/state|/runs(?:/{_ID}(?:/stream)?)?)?",
-    "POST": rf"threads(?:/search|/{_ID}/runs(?:/{_ID}/cancel)?)?",
+    "POST": rf"threads(?:/search|/{_ID}/runs(?:/stream|/{_ID}/cancel)?)?",
 }
 
 
@@ -115,5 +115,12 @@ async def proxy(workspace_id: UUID, path: str, request: Request) -> StreamingRes
         chunks(),
         status_code=response.status_code,
         media_type=response.headers.get("content-type", "application/json"),
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store",
+            **(
+                {"Content-Location": response.headers["content-location"]}
+                if "content-location" in response.headers
+                else {}
+            ),
+        },
     )

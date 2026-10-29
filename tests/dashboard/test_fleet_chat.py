@@ -53,7 +53,8 @@ async def test_proxy_rejects_arbitrary_paths_before_obtaining_credentials(monkey
     assert response.status_code == 404
 
 
-async def test_proxy_preserves_sdk_payload_and_existing_fleet_threads(monkeypatch):
+@pytest.mark.parametrize("operation", ["search", f"{THREAD}/runs/stream"])
+async def test_proxy_preserves_sdk_payload_and_existing_fleet_threads(monkeypatch, operation):
     payload = {"metadata": {"assistant_id": "builtin-chat"}, "limit": 50}
 
     async def upstream(request):
@@ -63,7 +64,9 @@ async def test_proxy_preserves_sdk_payload_and_existing_fleet_threads(monkeypatc
 
         assert json.loads(request.content) == payload
         return httpx.Response(
-            200, json=[{"thread_id": THREAD, "metadata": {"assistant_id": "builtin-chat"}}]
+            200,
+            json=[{"thread_id": THREAD, "metadata": {"assistant_id": "builtin-chat"}}],
+            headers={"Content-Location": f"/threads/{THREAD}/runs/{THREAD}"},
         )
 
     async def client(request):
@@ -77,6 +80,7 @@ async def test_proxy_preserves_sdk_payload_and_existing_fleet_threads(monkeypatc
     async with httpx.AsyncClient(
         base_url="http://test", transport=httpx.ASGITransport(app=app)
     ) as http:
-        response = await http.post(f"/fleet-chat/{WORKSPACE}/threads/search", json=payload)
+        response = await http.post(f"/fleet-chat/{WORKSPACE}/threads/{operation}", json=payload)
     assert response.status_code == 200
     assert response.json()[0]["thread_id"] == THREAD
+    assert response.headers["content-location"] == f"/threads/{THREAD}/runs/{THREAD}"
