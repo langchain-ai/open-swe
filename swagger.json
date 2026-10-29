@@ -2819,6 +2819,18 @@
             "title": "Allowed Tools",
             "type": "array"
           },
+          "auth": {
+            "anyOf": [
+              {
+                "const": "oauth",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth"
+          },
           "enabled": {
             "default": true,
             "title": "Enabled",
@@ -2839,6 +2851,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MCPOAuth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "oauth_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MCPOAuthStatus"
               },
               {
                 "type": "null"
@@ -2885,6 +2907,18 @@
             },
             "title": "Allowed Tools",
             "type": "array"
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "const": "oauth",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth"
           },
           "enabled": {
             "default": true,
@@ -2983,6 +3017,37 @@
           "client_id"
         ],
         "title": "MCPOAuth",
+        "type": "object"
+      },
+      "MCPOAuthStatus": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "status": {
+            "enum": [
+              "not_connected",
+              "connecting",
+              "connected",
+              "reconnect_required",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "MCPOAuthStatus",
         "type": "object"
       },
       "MCPOAuthUpdate": {
@@ -4361,6 +4426,19 @@
           "discarded"
         ],
         "title": "PendingReviewDiscarded",
+        "type": "object"
+      },
+      "PersonalOAuthStart": {
+        "properties": {
+          "authorization_url": {
+            "title": "Authorization Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "title": "PersonalOAuthStart",
         "type": "object"
       },
       "PlanUpdate": {
@@ -13016,6 +13094,94 @@
         ]
       }
     },
+    "/dashboard/api/my-mcps/oauth/callback": {
+      "get": {
+        "operationId": "api_my_mcp_oauth_callback_dashboard_api_my_mcps_oauth_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iss",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Iss"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api My Mcp Oauth Callback",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/my-mcps/{name}": {
       "delete": {
         "operationId": "api_delete_my_mcp_dashboard_api_my_mcps__name__delete",
@@ -13219,6 +13385,138 @@
           }
         ],
         "summary": "Api Reveal My Mcp Headers",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}/oauth": {
+      "delete": {
+        "operationId": "api_disconnect_my_mcp_oauth_dashboard_api_my_mcps__name__oauth_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Disconnect My Mcp Oauth",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "get": {
+        "operationId": "api_my_mcp_oauth_status_dashboard_api_my_mcps__name__oauth_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPOAuthStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api My Mcp Oauth Status",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-mcps/{name}/oauth/authorization": {
+      "post": {
+        "operationId": "api_start_my_mcp_oauth_dashboard_api_my_mcps__name__oauth_authorization_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalOAuthStart"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Start My Mcp Oauth",
         "tags": [
           "dashboard"
         ]
