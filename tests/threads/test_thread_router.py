@@ -177,11 +177,15 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
 ) -> None:
     harness = _Harness(monkeypatch)
 
+    metadata: dict[str, JsonValue] = {
+        "owner_login": "ada",
+        "source_context": {"slack_thread": {"channel_id": "C123"}},
+    }
     status, created = await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
+        "POST", "/threads", {"thread_id": THREAD, "metadata": metadata}
     )
     assert status == 200 and isinstance(created, dict)
-    assert created["metadata"] == {"owner_login": "ada", "runtime": "mda"}
+    assert created["metadata"] == {**metadata, "runtime": "mda"}
     assert (await harness.request("POST", "/threads", {"thread_id": THREAD}))[0] == 409
 
     await harness.request("PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Fix it"}})
@@ -198,14 +202,18 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     _, missed = await harness.request("POST", "/threads/count?text=nope", {})
 
     assert isinstance(read, dict)
-    assert read["metadata"] == {"owner_login": "ada", "title": "Fix it", "runtime": "mda"}
+    assert read["metadata"] == {**metadata, "title": "Fix it", "runtime": "mda"}
     assert found == [{"thread_id": THREAD}]
     assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
     assert missed == 0
     assert counted == 1
     await store.THREADS.copies.settled(THREAD)
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
-    assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
+    assert harness.runtimes.mda.threads[THREAD]["metadata"] == {
+        "owner_login": "ada",
+        "title": "Fix it",
+        "runtime": "mda",
+    }
     assert harness.reached_here == []
 
 

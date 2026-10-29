@@ -30,8 +30,8 @@ READ_ONLY: Final = (
 
 
 def for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    """Metadata as MDA keeps it: there every Open SWE graph is ``open-swe``."""
-    copied = dict(metadata)
+    """Trace metadata for MDA; source payloads stay in the backend's thread index."""
+    copied = {key: value for key, value in metadata.items() if key != "source_context"}
     if "graph_id" in copied:
         copied["graph_id"] = MDA_GRAPH_ID
     return copied
