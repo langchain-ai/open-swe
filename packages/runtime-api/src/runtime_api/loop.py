@@ -156,6 +156,8 @@ class Routed(RunRequest):
 class ScoutPlanEnd(RunRequest):
     # What the people who asked for the pull request said, as the scout summarized it.
     human_input_summary: str = ""
+    # Whether the run planned: one that found the plan already complete, or its head stale, did not.
+    planned: bool = True
 
 
 class SandboxGone(RunRequest):

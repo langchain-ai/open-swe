@@ -14,6 +14,7 @@ const SILENT_SENDERS = new Set([
   "system:sender-context",
   "system:dashboard-handoff",
   "system:slack-note",
+  "system:review-walkthrough",
 ])
 
 export function isSilentSender(sender: string): boolean {

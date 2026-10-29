@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from langgraph_sdk.errors import NotFoundError
@@ -8,25 +7,23 @@ from openswe.database import postgres
 from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
+from openswe.message_queue import REVIEW_WALKTHROUGH_SENDER, QueuedMessage
 from openswe.prompts import prompt
-from openswe.thread_ids import review_scout_thread_id
+from openswe.thread_ids import review_scout_thread_id, reviewer_thread_id
 from openswe.threads import index, succession
 from openswe.threads.creation import ensure_titled_thread
 from openswe.threads.status import thread_run_error
+from openswe.utils.thread_ops import queue_system_note_for_thread
 from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)
 
 ASSISTANT_ID = "review-scout"
-# The reviewer waits this long for the walkthrough before reviewing without it;
-# the scout keeps running and still stores its result for the review page.
-SCOUT_WAIT_SECONDS = 600
-# The reviewer resumes up to one interval after the scout finishes; a poll is one run read.
-_POLL_SECONDS = 1
-_ACTIVE_STATUSES = frozenset({"pending", "running"})
 _FAILED_STATUSES = frozenset({"error", "timeout"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
+# Queue ids of the walkthroughs handed to a running reviewer, one per head.
+_REVIEWER_NOTE_PREFIX = "review-walkthrough:"
 
 
 class _ScoutRun(BaseModel):
@@ -130,6 +127,11 @@ class ReviewScoutTarget(BaseModel):
             "pr_number": self.pr_number,
             "scout_head_sha": self.head_sha,
         }
+
+    @property
+    def plannable(self) -> bool:
+        """Whether a scout can plan this head: it needs both ends of the diff and a database."""
+        return bool(self.base_sha and self.head_sha) and postgres.configured()
 
     async def walkthrough(self) -> WalkthroughView | None:
         return await WalkthroughView.for_head(self.owner, self.repo, self.pr_number, self.head_sha)
@@ -238,29 +240,58 @@ class ReviewScoutTarget(BaseModel):
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id
 
-    async def await_walkthrough(self) -> WalkthroughView | None:
-        """Wait up to SCOUT_WAIT_SECONDS for this head's walkthrough, starting its scout if needed."""
-        if not postgres.configured() or not self.base_sha or not self.head_sha:
-            return None
-        try:
-            async with asyncio.timeout(SCOUT_WAIT_SECONDS):
-                existing = await self.walkthrough()
-                if existing is not None:
-                    return existing
-                run_id = await self.start()
-                # Polled rather than joined: one join request idles for the whole run
-                # and would hit the client's 300s read timeout first.
-                client = dispatch_client()
-                thread_id = await self.current_thread_id()
-                while True:
-                    run = _ScoutRun.model_validate(await client.runs.get(thread_id, run_id))
-                    if run.status not in _ACTIVE_STATUSES:
-                        return await self.walkthrough()
-                    await asyncio.sleep(_POLL_SECONDS)
-        except TimeoutError:
-            logger.warning(
-                "Review scout did not finish in time for the reviewer",
-                extra=self.log_extra,
-                exc_info=True,
+    async def walkthrough_for_reviewer(self, reviewer_thread_id: str) -> WalkthroughView | None:
+        """This head's walkthrough when it is ready; else its scout starts and hands it over on finishing.
+
+        Walkthroughs queued for the reviewer's earlier runs are dropped: the one this run
+        renders, or a stale head's, would only repeat or mislead.
+        """
+        walkthrough = await self.walkthrough()
+        if walkthrough is None:
+            await self.start()
+        await discard_reviewer_walkthroughs(
+            reviewer_thread_id, keep_head=None if walkthrough else self.head_sha
+        )
+        return walkthrough
+
+    async def hand_to_reviewer(self) -> None:
+        """Queue this head's walkthrough for the PR's reviewer while a review is running.
+
+        A review that ends first, or never wanted one, goes without: the walkthrough
+        is advisory, and the next review reads it in its run context.
+        """
+        walkthrough = await self.walkthrough()
+        if walkthrough is None:
+            return
+        thread_id = await index.current_thread_id(
+            reviewer_thread_id(self.owner, self.repo, self.pr_number)
+        )
+        thread = await index.get(thread_id)
+        if thread is None or thread.status != "busy":
+            return
+        note = prompt(
+            "reviewer/walkthrough-arrived",
+            head_sha=self.head_sha,
+            blocks=walkthrough.reviewer_blocks(),
+        )
+        if await queue_system_note_for_thread(
+            thread_id,
+            note,
+            sender_id=REVIEW_WALKTHROUGH_SENDER,
+            queue_id=f"{_REVIEWER_NOTE_PREFIX}{self.head_sha}",
+        ):
+            logger.info(
+                "Handed the walkthrough to the running reviewer",
+                extra={**self.log_extra, "agent_thread_id": thread_id},
             )
-            return None
+
+
+async def discard_reviewer_walkthroughs(thread_id: str, *, keep_head: str | None = None) -> None:
+    """Drop the walkthroughs queued for a reviewer thread, but ``keep_head``'s."""
+    if not postgres.configured():
+        return
+    await QueuedMessage.discard(
+        thread_id,
+        prefix=_REVIEWER_NOTE_PREFIX,
+        keep=f"{_REVIEWER_NOTE_PREFIX}{keep_head}" if keep_head else None,
+    )

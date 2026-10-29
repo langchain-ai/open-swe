@@ -1,4 +1,3 @@
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -123,50 +122,52 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     assert prompts[0] == prompts[1]
 
 
-@pytest.mark.parametrize("stage", ["lookup", "startup", "poll"])
-async def test_walkthrough_wait_bounds_lookup_startup_and_polling(
-    monkeypatch: pytest.MonkeyPatch, stage: str
+async def test_walkthrough_reaches_a_running_reviewer_once_and_not_its_next_run(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    cancelled = asyncio.Event()
+    from openswe.message_queue import QueuedMessage
+    from openswe.thread_ids import reviewer_thread_id
+    from openswe.walkthrough.record import WalkthroughStepView, WalkthroughView
 
-    async def wait() -> None:
-        try:
-            await asyncio.Event().wait()
-        finally:
-            cancelled.set()
-
-    async def walkthrough(self: launch.ReviewScoutTarget) -> None:
-        if stage == "lookup":
-            await wait()
-
-    async def start(self: launch.ReviewScoutTarget) -> str:
-        if stage == "startup":
-            await wait()
-        return "run-1"
-
-    async def current_thread_id(self: launch.ReviewScoutTarget) -> str:
-        return "scout-thread"
-
-    async def poll(thread_id: str, run_id: str) -> None:
-        await wait()
-
-    monkeypatch.setattr(launch.postgres, "configured", lambda: True)
-    monkeypatch.setattr(launch, "SCOUT_WAIT_SECONDS", 0.01)
-    monkeypatch.setattr(launch.ReviewScoutTarget, "walkthrough", walkthrough)
-    monkeypatch.setattr(launch.ReviewScoutTarget, "start", start)
-    monkeypatch.setattr(launch.ReviewScoutTarget, "current_thread_id", current_thread_id)
-    monkeypatch.setattr(
-        launch, "dispatch_client", lambda: SimpleNamespace(runs=SimpleNamespace(get=poll))
+    walkthrough = WalkthroughView(
+        head_sha="head",
+        human_input="",
+        steps=[
+            WalkthroughStepView(
+                index=1, title="Parse the config", summary="Summary", other=False, files=[]
+            )
+        ],
     )
+    monkeypatch.setattr(
+        launch.ReviewScoutTarget, "walkthrough", AsyncMock(return_value=walkthrough)
+    )
+    status = "busy"
+
+    async def indexed(thread_id: str) -> SimpleNamespace:
+        return SimpleNamespace(status=status)
+
+    monkeypatch.setattr(launch.index, "get", indexed)
     target = launch.ReviewScoutTarget(
         owner="acme",
-        repo="widgets",
+        repo="api",
         pr_number=7,
         pr_title="Change",
         base_sha="base",
         head_sha="head",
         workspace_slug=None,
     )
-    async with asyncio.timeout(1):
-        assert await target.await_walkthrough() is None
-    assert cancelled.is_set()
+    reviewer = reviewer_thread_id("acme", "api", 7)
+
+    await target.hand_to_reviewer()
+    await target.hand_to_reviewer()
+    [queued] = await QueuedMessage.for_thread(reviewer)
+    assert queued.hidden
+    assert "Parse the config" in str(queued.content)
+
+    # The walkthrough already in a run's context is not delivered to it again.
+    assert await target.walkthrough_for_reviewer(reviewer) is walkthrough
+    assert await QueuedMessage.for_thread(reviewer) == []
+
+    status = "idle"
+    await target.hand_to_reviewer()
+    assert await QueuedMessage.for_thread(reviewer) == []

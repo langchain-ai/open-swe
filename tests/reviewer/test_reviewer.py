@@ -379,7 +379,8 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         "openswe.review.styles.get_repo_custom_prompt", AsyncMock(return_value=None)
     )
     walkthrough = AsyncMock()
-    monkeypatch.setattr(reviewer.ReviewScoutTarget, "await_walkthrough", walkthrough)
+    monkeypatch.setattr(reviewer.ReviewScoutTarget, "walkthrough_for_reviewer", walkthrough)
+    monkeypatch.setattr(reviewer.ReviewScoutTarget, "plannable", True)
     findings = AsyncMock(return_value=[])
     monkeypatch.setattr(reviewer, "list_findings_async", findings)
     history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]

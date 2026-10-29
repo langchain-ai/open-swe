@@ -1144,7 +1144,12 @@ class TokenRun:
 
     async def finish_scout_plan(self, request: ScoutPlanEnd) -> Done:
         async def finish() -> None:
-            await finish_scout_plan(self.run.thread_id, self.config, request.human_input_summary)
+            await finish_scout_plan(
+                self.run.thread_id,
+                self.config,
+                request.human_input_summary,
+                planned=request.planned,
+            )
 
         await self.in_run("finish_scout_plan", finish)
         return Done()

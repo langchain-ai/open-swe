@@ -48,6 +48,7 @@ from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.author_guidance import SteeringHistory
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -255,13 +256,19 @@ class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         self._config = config
 
     async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        await finish_scout_plan(self._thread_id, self._config, state.get("human_input_summary", ""))
+        await finish_scout_plan(
+            self._thread_id,
+            self._config,
+            state.get("human_input_summary", ""),
+            planned=not state.get("scout_nothing_to_plan"),
+        )
 
 
 async def finish_scout_plan(
-    thread_id: str, config: RunnableConfig, human_input_summary: str
+    thread_id: str, config: RunnableConfig, human_input_summary: str, *, planned: bool
 ) -> None:
-    """Send whatever the scout left unplanned to Other, and keep what people asked for."""
+    """Send whatever the scout left unplanned to Other, keep what people asked for, and
+    hand the walkthrough this run planned to a review already running."""
     cfg = RunConfig.from_config(config)
     if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
         return
@@ -292,6 +299,21 @@ async def finish_scout_plan(
             "scout_settled_lines": settled,
         },
     )
+    if not planned:
+        return
+    target = ReviewScoutTarget(
+        owner=cfg.repo.owner,
+        repo=cfg.repo.name,
+        pr_number=cfg.pr_number,
+        pr_title=cfg.pr_title or "",
+        base_sha=cfg.base_sha or "",
+        head_sha=cfg.head_sha,
+        workspace_slug=cfg.workspace_slug,
+    )
+    try:
+        await target.hand_to_reviewer()
+    except Exception:
+        logger.warning("Could not hand the walkthrough to the reviewer", exc_info=True, extra=extra)
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:

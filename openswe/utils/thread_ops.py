@@ -13,7 +13,7 @@ from langgraph_sdk import get_client
 
 from openswe.config import ENV
 from openswe.input_messages import system_input
-from openswe.message_queue import QueuedContent, QueuedMessage
+from openswe.message_queue import SLACK_NOTE_SENDER, QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,18 @@ def langgraph_client():
     return get_client(url=langgraph_url())
 
 
-async def queue_system_note_for_thread(thread_id: str, note: str) -> bool:
-    """Queue internal context without exposing it as a person's pending message."""
+async def queue_system_note_for_thread(
+    thread_id: str, note: str, *, sender_id: str = SLACK_NOTE_SENDER, queue_id: str | None = None
+) -> bool:
+    """Queue internal context without exposing it as a person's pending message.
+
+    ``sender_id`` must be one of the queue's silent senders; a ``queue_id`` already
+    queued is not queued again.
+    """
     message = system_input(
-        note, {"sender_id": "system:slack-note", "surface": "automation", "kind": "system"}
+        note, {"sender_id": sender_id, "surface": "automation", "kind": "system"}
     )
-    return await queue_message_for_thread(thread_id, dict(message))
+    return await _queue(thread_id, dict(message), queue_id)
 
 
 async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:
@@ -41,10 +47,12 @@ async def queue_message_for_thread(thread_id: str, message_content: QueuedConten
     flight; webhook triggers use ``multitask_strategy="interrupt"`` instead.
     """
     queue_id = message_content.get("queue_id") if isinstance(message_content, dict) else None
+    return await _queue(thread_id, message_content, queue_id if isinstance(queue_id, str) else None)
+
+
+async def _queue(thread_id: str, message_content: QueuedContent, queue_id: str | None) -> bool:
     try:
-        await QueuedMessage.put(
-            thread_id, message_content, queue_id=queue_id if isinstance(queue_id, str) else None
-        )
+        await QueuedMessage.put(thread_id, message_content, queue_id=queue_id)
         logger.info("Queued message for thread %s", thread_id)
         return True
     except Exception:

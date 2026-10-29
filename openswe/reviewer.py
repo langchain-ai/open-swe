@@ -78,7 +78,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review_scout.launch import ReviewScoutTarget
+from openswe.review_scout.launch import ReviewScoutTarget, discard_reviewer_walkthroughs
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -106,6 +106,7 @@ from openswe.tools import (
 from openswe.utils import ttl_cache
 from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
+from openswe.utils.data_block import escape_for_data_block
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import (
     DEFAULT_LLM_REASONING,
@@ -114,7 +115,6 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.utils.startup_trace import aphase
-from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 
@@ -185,48 +185,9 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     body = pr_body.strip() if isinstance(pr_body, str) else ""
     if not title and not body:
         return ""
-    safe_title = _escape_for_data_block(title)
-    safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
+    safe_title = escape_for_data_block(title)
+    safe_body = escape_for_data_block(body) if body else "_(no description provided)_"
     return prompt("reviewer/pr-overview", title=safe_title, body=safe_body)
-
-
-def _format_human_input(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's summary of what people asked for, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.human_input:
-        return ""
-    return prompt("reviewer/human-input", summary=walkthrough.human_input)
-
-
-def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
-    return [
-        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
-    ]
-
-
-def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
-    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
-    if walkthrough is None or not walkthrough.steps:
-        return ""
-    steps: list[str] = []
-    for step in walkthrough.steps:
-        files = "\n".join(
-            " ".join(
-                [
-                    _escape_for_data_block(file.path),
-                    *_format_line_ranges("+", file.added),
-                    *_format_line_ranges("-", file.deleted),
-                ]
-            )
-            for file in step.files
-        )
-        steps.append(
-            f'<step index="{step.index}">\n'
-            f"<title>{_escape_for_data_block(step.title)}</title>\n"
-            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
-            f"<files>\n{files}\n</files>\n"
-            "</step>"
-        )
-    return prompt("reviewer/walkthrough", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -305,7 +266,7 @@ def _build_finding_reply_context(
         pr_url=pr_url,
         finding_id=finding_id,
         safe_author=_safe_login(reply_author),
-        safe_reply_body=_escape_for_data_block(reply_body),
+        safe_reply_body=escape_for_data_block(reply_body),
         overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
         existing_threads=existing_threads_block,
@@ -322,38 +283,6 @@ def _safe_login(value: object) -> str:
     if isinstance(value, str) and _GITHUB_LOGIN_RE.match(value):
         return value
     return "unknown"
-
-
-# Closing tags of the wrappers used in this module. XML tolerates whitespace
-# around the tag name (e.g. `</body >`, `</ body\n>`), so a literal `.replace()`
-# of the canonical spelling alone is insufficient — we match each end tag
-# whitespace-tolerantly and rewrite it to an inert, human-readable form.
-_DATA_BLOCK_WRAPPER_TAGS = (
-    "pr_review_threads",
-    "thread",
-    "comment",
-    "body",
-    "pr_overview",
-    "title",
-    "review_walkthrough",
-    "step",
-    "summary",
-    "files",
-)
-_CLOSING_TAG_RE = re.compile(
-    r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
-    re.IGNORECASE,
-)
-
-
-def _escape_for_data_block(text: str) -> str:
-    """Neutralize closing tags so an attacker-controlled body can't break out.
-
-    Matches each wrapper's end tag whitespace-tolerantly (XML allows whitespace
-    before/after the tag name) and rewrites it to an inert ``</name_>`` form
-    that stays human-readable but is no longer a valid closer.
-    """
-    return _CLOSING_TAG_RE.sub(lambda m: f"</{m.group(1).lower()}_>", text)
 
 
 def _format_pr_review_threads(threads: list[dict]) -> str:
@@ -424,7 +353,7 @@ def _format_pr_review_threads(threads: list[dict]) -> str:
             # Trim very long bodies so a single comment can't blow up context.
             if len(body_raw) > 4000:  # noqa: PLR2004
                 body_raw = body_raw[:4000] + "\n...[truncated]"
-            body_safe = _escape_for_data_block(body_raw)
+            body_safe = escape_for_data_block(body_raw)
             out.append(f'    <comment author="{login}">')
             out.append("      <body>")
             out.append(body_safe)
@@ -675,8 +604,6 @@ async def prepare_reviewer_run(
                     sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
                 )
                 if skill_sources:
-                    # Reading every SKILL.md takes seconds on skill-heavy repos;
-                    # here it overlaps the walkthrough wait.
                     skills_prompt = await _trusted_skills_prompt(
                         sandbox_backend, skill_sources, runtime, config
                     )
@@ -776,9 +703,15 @@ async def prepare_reviewer_run(
             )
             return ""
 
-    async def _await_walkthrough() -> WalkthroughView | None:
-        if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
-            return None
+    async def _walkthrough_blocks() -> list[str]:
+        if reviewer_eval or not isinstance(pr_number, int):
+            return []
+        if reviewer_event == "finding_reply":
+            try:
+                await discard_reviewer_walkthroughs(thread_id)
+            except Exception:
+                logger.warning("Could not drop queued walkthroughs", exc_info=True)
+            return []
         pr_title, _ = await pr_overview_task
         target = ReviewScoutTarget(
             owner=repo_owner,
@@ -789,12 +722,17 @@ async def prepare_reviewer_run(
             head_sha=head_sha,
             workspace_slug=cfg.workspace_slug,
         )
+        if not target.plannable:
+            return []
         try:
             async with aphase(thread_id, "prepare.walkthrough"):
-                return await target.await_walkthrough()
+                walkthrough = await target.walkthrough_for_reviewer(thread_id)
         except Exception:
             logger.warning("Reviewing without a walkthrough", exc_info=True, extra=target.log_extra)
-            return None
+            return []
+        if walkthrough is None:
+            return [prompt("reviewer/walkthrough-pending")]
+        return walkthrough.reviewer_blocks()
 
     # Benchmark runs score the stock reviewer, without our workspace's
     # guidelines, per-repo style prompts, or API standards.
@@ -843,12 +781,11 @@ async def prepare_reviewer_run(
             return None
         return await approval_policy_for_review(repo_owner, repo_name, token=github_token)
 
-    # Only the diff waits on the checkout; the walkthrough above all, a whole
-    # scout run in its own sandbox, must not queue behind the clone.
+    # Only the diff waits on the checkout.
     checkout_task = asyncio.create_task(_check_out())
     diff_context_task = asyncio.create_task(_fetch_diff_context())
     pr_overview_task = asyncio.create_task(_fetch_pr_overview())
-    walkthrough_task = asyncio.create_task(_await_walkthrough())
+    walkthrough_task = asyncio.create_task(_walkthrough_blocks())
     existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
     repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
     agents_md_task = asyncio.create_task(_fetch_agents_md_context())
@@ -880,9 +817,8 @@ async def prepare_reviewer_run(
         org_guidelines = await org_guidelines_task
         approval_policy = await approval_policy_task
         api_standards_skill = await api_standards_task
-        walkthrough = await walkthrough_task
+        walkthrough_blocks = await walkthrough_task
     finally:
-        # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -960,8 +896,7 @@ async def prepare_reviewer_run(
                     head_sha=head_sha,
                 ),
                 review_context,
-                _format_walkthrough(walkthrough),
-                _format_human_input(walkthrough),
+                *walkthrough_blocks,
             )
             if block
         ],
