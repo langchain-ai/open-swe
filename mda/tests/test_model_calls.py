@@ -23,8 +23,10 @@ from langchain_core.messages import (
 )
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from langgraph.runtime import ExecutionInfo, Runtime
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
+from rt.cache_affinity import OpenAICacheAffinityMiddleware
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
     ModelCallTimeoutError,
@@ -239,12 +241,21 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
     run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
     static = SystemMessage(content="The graph's own instructions")
     sent: list[ModelRequest] = []
+    affinity = OpenAICacheAffinityMiddleware()
+    monkeypatch.setattr(
+        "rt.cache_affinity.get_config", lambda: {"configurable": {"thread_id": "thread"}}
+    )
 
     async def handler(request: ModelRequest) -> ModelResponse:
         sent.append(request)
         if request.model is _ANTHROPIC:
+            assert request.model_settings == {}
             raise RuntimeError("overloaded")
+        assert "prompt_cache_key" in request.model_settings
         return ModelResponse(result=[AIMessage(content="ok")])
+
+    async def with_affinity(request: ModelRequest) -> ModelResponse:
+        return await affinity.awrap_model_call(request, handler)
 
     for prompt in ("First run's prompt", "Next run's prompt"):
         call = ModelCall(
@@ -260,7 +271,8 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
             system_message=static,
             state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
         )
-        await BackendRunMiddleware(run.backend).awrap_model_call(request, handler)
+        await BackendRunMiddleware(run.backend).awrap_model_call(request, with_affinity)
+        assert request.model_settings == {}
 
     cached = {"type": "ephemeral", "ttl": "1h"}
     first, first_fallback, second, _ = (cast(SystemMessage, r.system_message) for r in sent)
@@ -275,3 +287,57 @@ async def test_the_graphs_system_prompt_leads_each_runs_and_is_cached_on_its_own
         {"type": "text", "text": "First run's prompt"},
     ]
     assert static.content == "The graph's own instructions"
+
+
+async def test_cache_affinity_stays_local_to_each_request() -> None:
+    middleware = OpenAICacheAffinityMiddleware()
+    requests = [
+        ModelRequest(
+            model=_OPENAI,
+            messages=[],
+            runtime=Runtime(execution_info=ExecutionInfo("", "", "", thread_id=thread)),
+        )
+        for thread in ("thread-a", "thread-b", "thread-a", None)
+    ]
+    keys: dict[str | None, object] = {}
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        await asyncio.sleep(0)
+        execution = request.runtime.execution_info
+        assert execution is not None
+        thread = execution.thread_id
+        key = request.model_settings.get("prompt_cache_key")
+        assert key == keys.setdefault(thread, key)
+        return ModelResponse(result=[AIMessage("ok")])
+
+    await asyncio.gather(*(middleware.awrap_model_call(r, handler) for r in requests))
+    assert keys["thread-a"] and keys["thread-b"] and keys["thread-a"] != keys["thread-b"]
+    assert keys[None] is None
+    assert all(r.model_settings == {} for r in requests)
+    assert "prompt_cache_key" not in _OPENAI.model_kwargs
+
+
+@pytest.mark.parametrize("source", ["model", "request", "model_extra", "request_extra"])
+async def test_cache_affinity_preserves_explicit_openai_keys(
+    monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setattr(
+        "rt.cache_affinity.get_config", lambda: {"configurable": {"thread_id": "thread"}}
+    )
+    key = {"prompt_cache_key": "explicit"}
+    model = _OPENAI.model_copy(
+        update={
+            "model_kwargs": key if source == "model" else {},
+            "extra_body": key if source == "model_extra" else None,
+        }
+    )
+    settings = (
+        key if source == "request" else {"extra_body": key} if source == "request_extra" else {}
+    )
+    request = ModelRequest(model=model, messages=[], model_settings=settings)
+
+    async def handler(selected: ModelRequest) -> ModelResponse:
+        assert selected.model_settings == settings
+        return ModelResponse(result=[AIMessage("ok")])
+
+    await OpenAICacheAffinityMiddleware().awrap_model_call(request, handler)
