@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 from runtime_api.catalog import InboxSpec, LoopRules
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
@@ -42,6 +43,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 
+from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
@@ -56,8 +58,10 @@ from openswe.middleware import (
     settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -568,10 +572,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        model: ReviewerModelChoice,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._model = model
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -590,7 +596,36 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        await self._record_run()
         return await prepare_reviewer_run(self._thread_id, self._config, runtime)
+
+    async def _record_run(self) -> None:
+        """Attribute the run to its model before the transcript and usage observers read it."""
+        cfg = RunConfig.from_config(self._config)
+        try:
+            async with aphase(self._thread_id, "prepare.record_run"):
+                await get_client().threads.update(
+                    thread_id=self._thread_id,
+                    metadata={
+                        "agent_kind": "reviewer",
+                        "model": self._model.model_id,
+                        "effort": self._model.effort,
+                    },
+                )
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
+                        thread_id=self._thread_id,
+                        github_login=cfg.github_login,
+                        github_user_id=cfg.github_user_id,
+                        user_email=cfg.user_email,
+                        model_id=self._model.model_id,
+                        effort=self._model.effort,
+                        source=cfg.source,
+                        repository=cfg.repo_full_name or None,
+                    )
+        except Exception:
+            logger.warning("Failed to record the reviewer run", exc_info=True)
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
         await ensure_reviewer_github_token(self._thread_id, RunConfig.from_config(self._config))
@@ -948,6 +983,7 @@ async def prepare_reviewer_run(
 class ReviewerModelChoice(NamedTuple):
     model_id: str
     kwargs: ModelKwargs
+    effort: str | None
 
 
 class ReviewerModels(NamedTuple):
@@ -998,6 +1034,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            reasoning_effort,
         ),
         subagent=ReviewerModelChoice(
             subagent_model_id,
@@ -1007,6 +1044,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            subagent_effort,
         ),
         use_gateway=settings.effective_gateway_enabled,
     )
@@ -1064,7 +1102,10 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
                 thread_id=thread_id,
                 config=config,
                 use_gateway=use_gateway,
+                model=models.main,
             ),
+            TranscriptMiddleware(),
+            record_run_usage,
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),

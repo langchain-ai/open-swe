@@ -529,7 +529,10 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         ToolSurface(
             middleware=[
                 reviewer.PrepareReviewerRunMiddleware(
-                    thread_id=RUN.thread_id, config=config, use_gateway=False
+                    thread_id=RUN.thread_id,
+                    config=config,
+                    use_gateway=False,
+                    model=reviewer.ReviewerModelChoice("openai:gpt-6.1-sol", {}, None),
                 )
             ]
         ),
@@ -545,6 +548,56 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         await session.rejoin_preparation(None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_reviewer_runs_record_transcript_model_and_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid7
+
+    from langchain_core.messages import AIMessage, HumanMessage, messages_to_dict
+
+    import openswe.reviewer as reviewer
+    from openswe.agent_api.reviewer import REVIEWER
+    from openswe.database import analytics
+    from openswe.sandboxes.managed import ManagedSandbox
+    from openswe.transcript.snapshot import load_snapshot
+
+    monkeypatch.setattr(analytics, "_WORKSPACE_ID", None)
+    await analytics.load_workspace()
+    thread_id, run_id = str(uuid7()), str(uuid7())
+    configurable = {"thread_id": thread_id, "invocation_id": run_id, "source": "github"}
+    run = RUN.model_copy(update={"thread_id": thread_id, "configurable": configurable})
+    metadata: dict[str, object] = {}
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": metadata})
+    client.threads.update = AsyncMock(side_effect=lambda *_, **kw: metadata.update(kw["metadata"]))
+    monkeypatch.setattr(reviewer, "get_client", lambda: client)
+    monkeypatch.setattr("openswe.middleware.transcript.get_client", lambda: client)
+    monkeypatch.setattr(reviewer, "prepare_reviewer_run", AsyncMock(return_value={}))
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    schedule = AsyncMock(return_value=True)
+    monkeypatch.setattr("openswe.agent_cost.schedule_agent_cost_refresh", schedule)
+    asked = HumanMessage(content="Review this PR", id="human")
+    reply = AIMessage(
+        content="Reviewed",
+        id="reply",
+        usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+    )
+
+    await REVIEWER.api(run, "prepare", {"run_id": run_id, "messages": messages_to_dict([asked])})
+    await REVIEWER.api(
+        run, "model_result", {"run_id": run_id, "response": messages_to_dict([reply])}
+    )
+    await REVIEWER.api(run, "run_ended", {"run_id": run_id})
+
+    assert metadata["agent_kind"] == "reviewer" and metadata["model"]
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None and snapshot.turns[0].state == "completed"
+    assert snapshot.messages[-1].usage["invocation_id"] == run_id
+    assert schedule.await_args.args[0]["invocation_id"] == run_id
 
 
 @pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
@@ -1186,17 +1239,17 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
 ) -> None:
     from pydantic import BaseModel
     from runtime_api.endpoint import Handlers
-    from runtime_api.loop import PREPARE, PhaseResult, Prepare
+    from runtime_api.loop import PREPARE, Prepare, Prepared
 
     from openswe.agent_api import server
 
     class Strict(BaseModel):
         count: int
 
-    async def prepare(run: RemoteRun, request: Prepare) -> PhaseResult:
+    async def prepare(run: RemoteRun, request: Prepare) -> Prepared:
         # A bug in the phase's own code, not in what MDA sent.
         Strict.model_validate({"count": "many"})
-        return PhaseResult()
+        return Prepared()
 
     handlers = Handlers[RemoteRun]()
     handlers.serve(PREPARE, prepare)

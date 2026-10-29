@@ -464,6 +464,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         # What the backend's preparation writes wins over where a turn starts from.
         starting = self._loop.starting() if self._loop is not None else {}
+        if self._loop is not None:
+            prepared.update.update(self._loop.prepared(prepared))
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared.update))
         return {**update, "open_swe_prepared_for": invocation}, opened.error is None
