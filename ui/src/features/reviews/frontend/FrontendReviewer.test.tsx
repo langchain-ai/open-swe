@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
@@ -141,7 +142,16 @@ it("filters unchanged routes while preserving incomplete evidence and a sensible
     mask_rects: [],
     tile_size: 24,
     min_region_pixels: 4,
-    annotations: [],
+    annotations: [
+      {
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        title: "Check unchanged state",
+        body: "Compare the focus treatment.",
+      },
+    ],
     error: null,
   }
   const scenarios: FrontendScenario[] = [
@@ -185,6 +195,9 @@ it("filters unchanged routes while preserving incomplete evidence and a sensible
     report: { ...run.report!, summary: "Saved review", scenarios },
   }
   const { rerender } = render(<FrontendReportView run={captured} />)
+  expect(
+    within(screen.getByLabelText("AI Recap")).queryByText("Saved review")
+  ).toBeNull()
   expect(screen.getByRole("heading", { name: "Unchanged route" })).toBeTruthy()
   expect(
     screen.getByRole("button", {
@@ -203,10 +216,24 @@ it("filters unchanged routes while preserving incomplete evidence and a sensible
       screen.getByRole("button", { name: new RegExp(`^${title}`) })
     ).toBeTruthy()
 
-  fireEvent.click(screen.getByRole("button", { name: /^Failed route/ }))
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Changes and incomplete" })
+  rerender(
+    <FrontendReportView
+      run={{
+        ...captured,
+        report: { ...captured.report!, ai_review_status: "complete" },
+      }}
+    />
   )
+  expect(
+    within(screen.getByLabelText("AI Recap")).getByText("Saved review")
+  ).toBeTruthy()
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Inspect Check unchanged state" })[0]!
+  )
+  expect(screen.getByRole("heading", { name: "Unchanged route" })).toBeTruthy()
+  expect(screen.getByText("Showing 5/5 routes")).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: /^Failed route/ }))
   expect(screen.getByRole("heading", { name: "Failed route" })).toBeTruthy()
   expect(screen.getByText("Showing 5/5 routes")).toBeTruthy()
 

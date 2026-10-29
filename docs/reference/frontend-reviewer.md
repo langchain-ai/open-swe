@@ -10,6 +10,10 @@ The feature uses the dashboard's existing deployment, GitHub session, and reposi
 
 Surface roles follow LangChainPlus's `smith-frontend/STYLES.md`: level 1 for the page, level 2 through Macaw's default neutral `Card`, level 3 for nested screenshot headers and canvas wells, and `bg-elevated` for labels floating over evidence. Inputs and the run picker inherit the installed Macaw controls' theme, hover, focus, and disabled styles. Screenshot pixels and the diagnostic pink diff mask remain independent of the viewer's theme.
 
+For a login-free designer walkthrough, build the UI and run `pnpm --dir ui demo:design-qa`, then open `http://127.0.0.1:4189/agents/qa`. This temporary local server supplies scripted PRs, recap text, interaction checkpoints, and capture progress while exercising the real pixel viewer and chat attachment flow. Setup, walkthrough, limitations, and removal steps are documented in [`ui/scripts/design-qa-demo/README.md`](../../ui/scripts/design-qa-demo/README.md).
+
+**AI Recap** shows the saved assessment summary and up to three evidence-linked notes when an AI review has completed. A capture summary is not presented as an AI recap while assessment is pending, not run, or failed. Design QA starts with a full-width, side-by-side comparison; **Chat** or **Ask about this change** opens the conversation. **Display and sensitivity** and preview/revision details are collapsed to keep attention on the evidence. Review annotations are available as an optional overlay.
+
 ## Capture and inspect
 
 Supply a base preview, the PR preview, and up to five matching routes. For LangChainPlus, the head URL defaults to `https://pr-<number>-fe.review.smith.langchain.com`. Build the base preview from the PR's exact base commit; a shared development deployment is not a reliable baseline.

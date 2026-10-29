@@ -53,8 +53,8 @@ export function QAAgentPage() {
         </header>
 
         <Card className="p-space-4 text-sm text-secondary">
-          Saved evidence is available. Live captures are paused until the
-          browser’s network isolation is configured.
+          Explore saved visual reviews. Capturing new previews is not available
+          yet.
         </Card>
 
         <GroupedTabs<Scope>

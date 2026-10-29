@@ -182,13 +182,13 @@ function DiffCrop({
 }
 
 export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
-  const [mode, setMode] = useState<ViewMode>("overlay")
+  const [mode, setMode] = useState<ViewMode>("split")
   const [opacity, setOpacity] = useState(72)
   const [threshold, setThreshold] = useState(scenario.metrics?.threshold ?? 18)
   const [wipe, setWipe] = useState(50)
   const [showPixels, setShowPixels] = useState(true)
   const [showRegions, setShowRegions] = useState(false)
-  const [showAnnotations, setShowAnnotations] = useState(true)
+  const [showAnnotations, setShowAnnotations] = useState(false)
   const [regionIndex, setRegionIndex] = useState(0)
   const [focus, setFocus] = useState<PixelRect | null>(null)
   const [singleImage, setSingleImage] = useState<"before" | "after">("after")
@@ -497,52 +497,65 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
           </Badge>
           <span>
             {comparison.changedPixels.toLocaleString()} pixels ·{" "}
-            {regions.length} regions
+            {regions.length} {regions.length === 1 ? "region" : "regions"}
           </span>
         </div>
       </div>
-      <Card className="flex flex-wrap items-center gap-x-space-6 gap-y-space-3 p-space-3">
-        <Checkbox
-          label="Pixel highlights"
-          checked={showPixels}
-          onCheckedChange={(checked) => setShowPixels(checked === true)}
-        />
-        <Checkbox
-          label="Region outlines"
-          checked={showRegions}
-          onCheckedChange={(checked) => setShowRegions(checked === true)}
-        />
-        <Checkbox
-          label="Review annotations"
-          checked={showAnnotations}
-          onCheckedChange={(checked) => setShowAnnotations(checked === true)}
-        />
-        <label className="flex w-36 flex-col gap-space-2 text-xs text-secondary">
-          Highlight opacity · {opacity}%
-          <Slider
-            aria-label="Highlight opacity"
-            min={0}
-            max={100}
-            value={opacity}
-            onChange={(value) =>
-              setOpacity(Array.isArray(value) ? (value[0] ?? 72) : value)
-            }
-          />
-        </label>
-        <label className="flex w-36 flex-col gap-space-2 text-xs text-secondary">
-          Difference threshold · {threshold}
-          <Slider
-            aria-label="Difference threshold"
-            min={0}
-            max={255}
-            value={threshold}
-            onChange={(value) => {
-              setThreshold(Array.isArray(value) ? (value[0] ?? 18) : value)
-              setRegionIndex(0)
-              setFocus(null)
-            }}
-          />
-        </label>
+      <Card className="p-0">
+        <details>
+          <summary className="cursor-pointer px-space-3 py-space-2 text-xs font-medium text-secondary">
+            Display and sensitivity
+          </summary>
+          <div className="flex flex-wrap items-start gap-x-space-6 gap-y-space-3 border-t border-default p-space-3">
+            <Checkbox
+              label="Pixel highlights"
+              checked={showPixels}
+              onCheckedChange={(checked) => setShowPixels(checked === true)}
+            />
+            <Checkbox
+              label="Region outlines"
+              checked={showRegions}
+              onCheckedChange={(checked) => setShowRegions(checked === true)}
+            />
+            <Checkbox
+              label="Review annotations"
+              checked={showAnnotations}
+              onCheckedChange={(checked) =>
+                setShowAnnotations(checked === true)
+              }
+            />
+            <label className="flex w-36 flex-col gap-space-2 text-xs text-secondary">
+              Highlight opacity · {opacity}%
+              <Slider
+                aria-label="Highlight opacity"
+                min={0}
+                max={100}
+                value={opacity}
+                onChange={(value) =>
+                  setOpacity(Array.isArray(value) ? (value[0] ?? 72) : value)
+                }
+              />
+            </label>
+            <label className="flex w-36 flex-col gap-space-2 text-xs text-secondary">
+              Difference threshold · {threshold}
+              <Slider
+                aria-label="Difference threshold"
+                min={0}
+                max={255}
+                value={threshold}
+                onChange={(value) => {
+                  setThreshold(Array.isArray(value) ? (value[0] ?? 18) : value)
+                  setRegionIndex(0)
+                  setFocus(null)
+                }}
+              />
+              <span className="text-xxs">
+                0 detects even faint color changes. Higher values filter
+                rendering noise.
+              </span>
+            </label>
+          </div>
+        </details>
       </Card>
       <div className="flex flex-wrap items-center gap-space-2">
         <Button

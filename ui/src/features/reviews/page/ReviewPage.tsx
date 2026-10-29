@@ -112,7 +112,7 @@ export function ReviewPage({
         <Header
           pr={pr}
           leftInset={leftInset}
-          compactRail={!wide}
+          compactRail={!wide || frontendActive}
           navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
           showFileControls={!frontendActive}
         />
@@ -161,13 +161,18 @@ export function ReviewPage({
                 <Changes pr={pr} />
               )}
             </section>
-            {wide && (
+            {wide && (!frontendActive || railOpen) && (
               <RightPanelShell
                 mode="inline"
                 widthStorageKey="open-swe.review-panel.width"
                 defaultWidth={420}
               >
-                <Rail pr={pr} />
+                <Rail
+                  pr={pr}
+                  onClose={
+                    frontendActive ? () => setRailOpen(false) : undefined
+                  }
+                />
               </RightPanelShell>
             )}
           </div>

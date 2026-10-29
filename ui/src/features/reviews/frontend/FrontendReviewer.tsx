@@ -11,7 +11,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
 import {
@@ -241,9 +241,8 @@ function ReviewSetup({
             role="status"
             className="mt-space-2 text-xs text-warning-secondary"
           >
-            Live capture is currently blocked until the browser provider
-            enforces network isolation. Dummy login is available to verify the
-            review flow.
+            Live preview capture is not available yet. Dummy login records an
+            authentication blocker so you can check the review flow.
           </p>
         </div>
         <div className="grid gap-space-3 md:grid-cols-2">
@@ -331,6 +330,7 @@ export function FrontendReportView({
   const [scenarioId, setScenarioId] = useState(run.report?.scenarios[0]?.id)
   const [changesOnly, setChangesOnly] = useState(false)
   const report = run.report
+  const comparisonRef = useRef<HTMLElement>(null)
   const scenarios = report?.scenarios ?? []
   const changesAndIncomplete = scenarios.filter(
     (item) =>
@@ -365,6 +365,9 @@ export function FrontendReportView({
         : run.status === "complete"
           ? "success"
           : "secondary"
+  const reviewNotes = scenarios.flatMap((item) =>
+    item.annotations.map((note) => ({ ...note, scenario: item }))
+  )
   return (
     <div className="flex flex-col gap-space-4">
       {currentHeadSha && currentHeadSha !== run.head_sha && (
@@ -379,6 +382,76 @@ export function FrontendReportView({
             <span className="font-mono">{currentHeadSha.slice(0, 12)}</span>.
             Start a new Design QA review to check the latest changes.
           </p>
+        </Card>
+      )}
+      {report && (
+        <Card aria-label="AI Recap" className="flex flex-col gap-space-3">
+          <div className="flex flex-wrap items-center gap-space-2">
+            <h3 className="text-sm font-semibold">AI Recap</h3>
+            <Badge color="secondary" size="xs">
+              {report.ai_review_status === "complete"
+                ? "Ready"
+                : report.ai_review_status === "running"
+                  ? "Reviewing"
+                  : report.ai_review_status === "failed"
+                    ? "Unavailable"
+                    : "Not run"}
+            </Badge>
+          </div>
+          <p className="text-sm whitespace-pre-wrap text-secondary">
+            {report.ai_review_status === "complete"
+              ? report.summary
+              : report.ai_review_status === "running"
+                ? "Reviewing the saved screenshots and interaction states. You can inspect the evidence while the recap is prepared."
+                : report.ai_review_status === "failed"
+                  ? "The AI recap could not be prepared. Your captured evidence is still available below."
+                  : "An AI recap has not run for this review. Inspect the captured evidence below."}
+          </p>
+          {report.ai_review_status === "complete" && reviewNotes.length > 0 && (
+            <ul className="divide-y divide-default border-t border-default">
+              {reviewNotes.slice(0, 3).map((note, index) => (
+                <li
+                  key={`${note.scenario.id}:${index}`}
+                  className="flex items-start justify-between gap-space-3 py-space-3 last:pb-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{note.title}</p>
+                    <p className="mt-space-1 text-xs text-secondary">
+                      {note.body}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    color="secondary"
+                    variant="outlined"
+                    aria-label={`Inspect ${note.title}`}
+                    onClick={() => {
+                      setChangesOnly(false)
+                      setScenarioId(note.scenario.id)
+                      comparisonRef.current?.scrollIntoView({ block: "start" })
+                    }}
+                  >
+                    Inspect
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {report.assessment_error && (
+            <p role="status" className="text-xs text-warning-secondary">
+              AI review: {report.assessment_error}. Captured evidence is still
+              available.
+            </p>
+          )}
+          {report.assessment_thread_id && (
+            <Link
+              to="/agents/$threadId"
+              params={{ threadId: report.assessment_thread_id }}
+              className="w-fit text-xs text-secondary underline underline-offset-2"
+            >
+              Open AI review conversation
+            </Link>
+          )}
         </Card>
       )}
       <Card className="flex flex-col gap-space-3 p-space-4">
@@ -396,7 +469,7 @@ export function FrontendReportView({
                 : "No visual evidence captured"}
           </h3>
         </div>
-        {report?.summary && (
+        {report?.summary && report.ai_review_status !== "complete" && (
           <p className="text-sm whitespace-pre-wrap text-secondary">
             {report.summary}
           </p>
@@ -443,37 +516,27 @@ export function FrontendReportView({
             whole planned flow.
           </p>
         )}
-        {report?.assessment_error && (
-          <p role="status" className="text-sm text-warning-secondary">
-            AI review: {report.assessment_error}. Captured evidence is still
-            available.
-          </p>
-        )}
-        {report?.assessment_thread_id && (
-          <Link
-            to="/agents/$threadId"
-            params={{ threadId: report.assessment_thread_id }}
-            className="text-xs text-secondary underline underline-offset-2"
-          >
-            Open AI review conversation
-          </Link>
-        )}
-        <div className="grid gap-space-2 border-t border-default pt-space-3 text-xs sm:grid-cols-2">
-          <p className="min-w-0 truncate text-secondary" title={run.base_url}>
-            Base{" "}
-            <span className="font-mono text-primary">
-              {run.base_sha.slice(0, 12)}
-            </span>{" "}
-            · {run.base_url}
-          </p>
-          <p className="min-w-0 truncate text-secondary" title={run.head_url}>
-            PR{" "}
-            <span className="font-mono text-primary">
-              {run.head_sha.slice(0, 12)}
-            </span>{" "}
-            · {run.head_url}
-          </p>
-        </div>
+        <details className="border-t border-default pt-space-3 text-xs text-secondary">
+          <summary className="w-fit cursor-pointer">
+            Preview and revision details
+          </summary>
+          <div className="mt-space-3 grid gap-space-2 sm:grid-cols-2">
+            <p className="min-w-0 truncate text-secondary" title={run.base_url}>
+              Base{" "}
+              <span className="font-mono text-primary">
+                {run.base_sha.slice(0, 12)}
+              </span>{" "}
+              · {run.base_url}
+            </p>
+            <p className="min-w-0 truncate text-secondary" title={run.head_url}>
+              PR{" "}
+              <span className="font-mono text-primary">
+                {run.head_sha.slice(0, 12)}
+              </span>{" "}
+              · {run.head_url}
+            </p>
+          </div>
+        </details>
       </Card>
       {run.status === "blocked" && (
         <Card className="p-space-4">
@@ -570,7 +633,11 @@ export function FrontendReportView({
         </div>
       )}
       {scenario && (
-        <section aria-label={scenario.title} className="min-w-0">
+        <section
+          ref={comparisonRef}
+          aria-label={scenario.title}
+          className="min-w-0"
+        >
           <div className="mb-space-3 flex flex-wrap items-center gap-space-2">
             <h3 className="text-sm font-medium">{scenario.title}</h3>
             <span className="text-xs text-secondary">{scenario.path}</span>

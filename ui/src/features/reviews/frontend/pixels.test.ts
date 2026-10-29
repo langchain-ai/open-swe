@@ -3,6 +3,29 @@ import { describe, expect, it } from "vitest"
 import { comparePixels, cropRegion } from "./pixels"
 
 describe("frontend changed pixels", () => {
+  it("detects faint color shifts at exact sensitivity and a two-pixel size change", () => {
+    const before = new Uint8ClampedArray(40 * 40 * 4).fill(255)
+    for (let y = 10; y < 24; y++)
+      for (let x = 10; x < 30; x++)
+        before.set([36, 74, 63, 255], (y * 40 + x) * 4)
+    const color = new Uint8ClampedArray(before)
+    for (let y = 10; y < 24; y++)
+      for (let x = 10; x < 30; x++)
+        color.set([44, 82, 71, 255], (y * 40 + x) * 4)
+    expect(
+      comparePixels(before, color, 40, 40, { threshold: 0 }).changedPixels
+    ).toBe(280)
+    expect(
+      comparePixels(before, color, 40, 40, { threshold: 18 }).changedPixels
+    ).toBe(0)
+
+    const taller = new Uint8ClampedArray(before)
+    for (let y = 24; y < 26; y++)
+      for (let x = 10; x < 30; x++)
+        taller.set([36, 74, 63, 255], (y * 40 + x) * 4)
+    expect(comparePixels(before, taller, 40, 40).changedPixels).toBe(40)
+  })
+
   it("keeps unchanged pixels transparent and excludes masked changes from coverage and regions", () => {
     const before = new Uint8ClampedArray(12 * 4).fill(255)
     const after = new Uint8ClampedArray(before)

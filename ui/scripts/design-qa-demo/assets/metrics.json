@@ -1,0 +1,38 @@
+{
+  "color": {
+    "changed_pixels": 4999,
+    "total_pixels": 504000,
+    "changed_ratio": 0.009918650793650794,
+    "threshold": 0
+  },
+  "size": {
+    "changed_pixels": 302,
+    "total_pixels": 504000,
+    "changed_ratio": 0.0005992063492063492,
+    "threshold": 0
+  },
+  "hover": {
+    "changed_pixels": 5015,
+    "total_pixels": 504000,
+    "changed_ratio": 0.009950396825396826,
+    "threshold": 0
+  },
+  "pressed": {
+    "changed_pixels": 5011,
+    "total_pixels": 504000,
+    "changed_ratio": 0.009942460317460317,
+    "threshold": 0
+  },
+  "dialog": {
+    "changed_pixels": 168004,
+    "total_pixels": 504000,
+    "changed_ratio": 0.3333412698412698,
+    "threshold": 0
+  },
+  "filled": {
+    "changed_pixels": 168257,
+    "total_pixels": 504000,
+    "changed_ratio": 0.333843253968254,
+    "threshold": 0
+  }
+}
