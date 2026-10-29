@@ -6,6 +6,8 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 import asyncio
 import re
+from collections.abc import Awaitable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -601,15 +603,56 @@ async def _valid_access_token(login: str | None) -> str | None:
         return None
 
 
-async def slack_login(user_id: str, user_email: str | None = None) -> str | None:
-    """GitHub login for a Slack user: by Slack id first, then by profile email."""
+@dataclass(frozen=True)
+class SlackSenderProfile:
+    """What Slack's profile says about the person who sent a message."""
+
+    email: str | None = None
+    name: str = ""
+    timezone: str = ""
+
+    @classmethod
+    async def lookup(cls, user_id: str) -> SlackSenderProfile:
+        """The profile Slack reports, empty when Slack does not answer."""
+        if not user_id:
+            return cls()
+        slack_user = await common.get_slack_user_info(user_id)
+        if not slack_user:
+            return cls()
+        email: str | None = None
+        name = ""
+        profile = slack_user.get("profile", {})
+        if isinstance(profile, dict):
+            email = profile.get("email")
+            name = (
+                profile.get("display_name")
+                or profile.get("real_name")
+                or slack_user.get("real_name")
+                or slack_user.get("name")
+                or ""
+            )
+        timezone = slack_user.get("tz")
+        return cls(
+            email=email,
+            name=name,
+            timezone=timezone.strip() if isinstance(timezone, str) else "",
+        )
+
+
+async def slack_login(
+    user_id: str, profile: Awaitable[SlackSenderProfile] | None = None
+) -> str | None:
+    """GitHub login for a Slack user: by Slack id first, then by profile email.
+
+    ``profile`` is the sender's profile lookup already under way; it is waited on
+    only when the Slack id maps to nobody.
+    """
     if login := await User.login_for_slack(user_id):
         return login
-    if user_email is None and user_id:
-        slack_user = await common.get_slack_user_info(user_id)
-        profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
-        user_email = profile.get("email") if isinstance(profile, dict) else None
-    return await User.login_for_email(user_email) if user_email else None
+    if not user_id:
+        return None
+    email = (await (profile or SlackSenderProfile.lookup(user_id))).email
+    return await User.login_for_email(email) if email else None
 
 
 def _slack_thread_title(request_text: str, concierge_mode: bool, name: str) -> str:
@@ -770,38 +813,33 @@ async def _process_slack_mention_impl(
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
                 return False
-    user_email = None
-    user_name = allowed_bot.name if allowed_bot is not None else ""
-    user_timezone = ""
-    if user_id and allowed_bot is None:
-        slack_user = await common.get_slack_user_info(user_id)
-        if slack_user:
-            profile = slack_user.get("profile", {})
-            if isinstance(profile, dict):
-                user_email = profile.get("email")
-                user_name = (
-                    profile.get("display_name")
-                    or profile.get("real_name")
-                    or slack_user.get("real_name")
-                    or slack_user.get("name")
-                    or ""
-                )
-            timezone_value = slack_user.get("tz")
-            if isinstance(timezone_value, str):
-                user_timezone = timezone_value.strip()
-
+    # A bot sender has no Slack profile; a person's is shared by the login lookup,
+    # which waits on it only when their Slack id maps to nobody.
+    sender_profile = asyncio.ensure_future(
+        SlackSenderProfile.lookup(user_id)
+        if allowed_bot is None
+        else _resolved(SlackSenderProfile(name=allowed_bot.name))
+    )
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
-    mapped_login, thread_record, thread_messages, _ = await asyncio.gather(
-        slack_login(user_id, user_email) if allowed_bot is None else _resolved(None),
+    mapped_login, thread_record, thread_messages, sender = await asyncio.gather(
+        slack_login(user_id, sender_profile) if allowed_bot is None else _resolved(None),
         common.ThreadRecord.read(thread_id),
         _resolved([])
         if message_update
         else common.fetch_slack_thread_messages(
             request.context_channel_id or channel_id, context_thread_ts
         ),
-        persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
+        sender_profile,
     )
+    user_email, user_name, user_timezone = sender.email, sender.name, sender.timezone
     thread_metadata = thread_record.authorize(mapped_login or "")
+    # A new thread's metadata links back to Slack. Looking that link up here keeps
+    # it off the metadata write, which would otherwise wait on it before dispatch.
+    opening_permalink = asyncio.ensure_future(
+        common.get_slack_permalink(channel_id, thread_ts)
+        if not thread_record.exists and not request.web_only
+        else _resolved(None)
+    )
     # The thread's state only matters once dispatching, but reading it is one of
     # the slowest lookups here and nothing below changes it before the run.
     dispatched_context = asyncio.ensure_future(
@@ -865,8 +903,16 @@ async def _process_slack_mention_impl(
         channel_names_by_id,
         (logins_by_user_id, person_ids_by_user_id),
         user_token,
+        _,
     ) = await asyncio.gather(
-        common.get_slack_user_names([*context_user_ids, *mentioned_user_ids]),
+        # The sender's name came with their profile; Slack is asked only for the rest.
+        common.get_slack_user_names(
+            [
+                named
+                for named in (*context_user_ids, *mentioned_user_ids)
+                if named != user_id or allowed_bot is not None or not user_name
+            ]
+        ),
         _public_slack_channel_names(
             [
                 mentioned
@@ -876,6 +922,7 @@ async def _process_slack_mention_impl(
         ),
         _slack_accounts_by_user_id([*context_user_ids, user_id]),
         _valid_access_token(mapped_login),
+        persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
     )
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
@@ -1184,6 +1231,14 @@ async def _process_slack_mention_impl(
         configurable.pop("slack_breakout", None)
         configurable.pop("admin_thread", None)
         configurable["source"] = "web"
+    source_context = (
+        None
+        if request.web_only
+        else SourceContext.parse({"slack_thread": configurable["slack_thread"]})
+    )
+    opened_at = source_context.slack_thread if source_context is not None else None
+    if opened_at is not None and (permalink := await opening_permalink):
+        opened_at.permalink = permalink
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="web" if request.web_only else "slack",
@@ -1196,11 +1251,7 @@ async def _process_slack_mention_impl(
         if (is_first_mention or concierge_mode)
         else "",
         static_title=concierge_mode,
-        source_context=(
-            None
-            if request.web_only
-            else SourceContext.parse({"slack_thread": configurable["slack_thread"]})
-        ),
+        source_context=source_context,
         workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes

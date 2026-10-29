@@ -32,6 +32,7 @@ from runtime_api.loop import (
     GitBaseline,
     GitHubProxyRefreshed,
     PhaseResult,
+    Prepared,
     Route,
     TaskContext,
 )
@@ -465,14 +466,17 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     backend, calls = _backend(
         monkeypatch,
         {
-            "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
+            "prepare": Prepared(
+                update={"rendered_system_prompt": "You review."},
+                github_proxy=GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
+            ),
             "git_baseline": GitBaseline(),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
-        LoopRules(at_end=["settle_review_check"]),
+        LoopRules(at_end=["settle_review_check"], refresh_github_proxy=True),
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",

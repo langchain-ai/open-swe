@@ -12,9 +12,9 @@ import (``runtime_api``):
   lists every tool but the run's integrations, and the context names them only:
   every tool is kept by digest (``run_tool_sets``), which
   ``tool_specs``, ``search_tools`` and ``resolve_tool`` read
-- ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
-  prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
-  plans the run again
+- ``prepare`` readies the run: the thread's sandbox, checkout and prompt, the
+  transcript turn, skills and reply bookkeeping. Agent runs carry immutable
+  preparation inputs in their signed settings; older runs rebuild their plan
 - every other call is a ``TokenRun``, answered from the token and the request with
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
   named calls MDA's middleware makes around a model call (``route_model``,
@@ -39,6 +39,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
@@ -135,6 +136,7 @@ from runtime_api.loop import (
     ModelResult,
     PhaseResult,
     Prepare,
+    Prepared,
     ReplyOnBehalf,
     Report,
     Route,
@@ -205,6 +207,7 @@ from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.github.proxy import proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -226,7 +229,8 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -245,6 +249,7 @@ from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
 from openswe.utils.startup_trace import apm_span
+from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
 
@@ -646,7 +651,8 @@ class RunSession:
         answered = await in_graph_context({**self.config, "run_name": phase}, run, events=events)
         return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
 
-    async def prepare(self, request: Prepare) -> PhaseResult:
+    async def prepare(self, request: Prepare) -> Prepared:
+        started = datetime.now(UTC)
         # MDA opened the box before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
@@ -654,11 +660,21 @@ class RunSession:
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(cfg.thread_id).receive(events=_carried_events(self.config))
 
-        async def begun(state: dict[str, object], runtime: Runtime) -> PhaseResult:
+        async def begun(state: dict[str, object], runtime: Runtime) -> Prepared:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
-            # The turn's git trace starts afresh; MDA asks for its baseline (``git_baseline``)
-            # alongside the first model call.
-            return result.model_copy(update={"update": {**result.update, BASELINE: None}})
+            sandbox = SANDBOX_BACKENDS.get(cfg.thread_id or "")
+            if sandbox is not None and sandbox.has_backend:
+                backend = sandbox.current
+                if isinstance(backend, TimeoutLangSmithSandbox):
+                    await backend.ensure_git_identity()
+            expires_at = proxy_token_set_since(cfg.thread_id, started)
+            return Prepared(
+                **result.model_dump(exclude={"update"}),
+                update={**result.update, BASELINE: None},
+                github_proxy=None
+                if expires_at is None
+                else GitHubProxyRefreshed(expires_at=expires_at),
+            )
 
         return await self._answer_phase("before_agent", request, begun)
 
@@ -885,9 +901,9 @@ class TokenRun:
     async def inbox(self, request: InboxRead) -> Inbox:
         if request.spec is None:
             return Inbox()
-        taken = await ThreadInbox(self.run.thread_id).read(
-            request.run_id or str(uuid4()), request.spec
-        )
+        inbox = ThreadInbox(self.run.thread_id)
+        await inbox.receive(request.received.queued, request.received.events)
+        taken = await inbox.read(request.run_id or str(uuid4()), request.spec)
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
             update=taken.state_update(request.run_id),
@@ -1071,7 +1087,9 @@ class TokenRun:
                 message=await coordination.context_message(),
             )
 
-        return await self.in_run("task_context", read)
+        return await in_graph_context(
+            {**self.config, "run_name": "task_context"}, lambda _runtime: read()
+        )
 
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
@@ -1222,9 +1240,15 @@ class RemoteGraph:
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        tools = await session.tool_set().keep()
-        settings = session.settings().model_copy(update={"tools": tools})
-        return RunStart(catalog=await session.plan(), settings=settings)
+        tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
+        cfg = RunConfig.from_config(session.config)
+        preparation = (
+            None if self.parts.legacy(cfg) else self.parts.preparation_plan(session.surface)
+        )
+        settings = session.settings().model_copy(
+            update={"tools": tools, "preparation": preparation}
+        )
+        return RunStart(catalog=catalog, settings=settings)
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
@@ -1245,6 +1269,13 @@ class RemoteGraph:
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), without its plan when it can."""
+        if endpoint != PREPARE.name:
+            return await self._answer(run, endpoint, raw)
+        # Planning and preparing read the same thread from many places; one read serves them.
+        async with shared_thread_reads():
+            return await self._answer(run, endpoint, raw)
+
+    async def _answer(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
         run_id = raw_id if isinstance(raw_id, str) else None
         if RUN_CALLS.serves(endpoint):
@@ -1255,6 +1286,20 @@ class RemoteGraph:
                 return await TOOL_CALLS.dispatch(endpoint, call, raw)
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
+        if endpoint == PREPARE.name and run.settings.preparation is not None:
+            call = TokenRun(self, run, run_id)
+            if not call.legacy:
+                surface = await self.parts.preparation(call.config, run.settings.preparation)
+                if surface is not None:
+                    session = RunSession(
+                        surface,
+                        call.config,
+                        self.parts.restore,
+                        started_here=True,
+                        assistant_id=self.assistant_id,
+                        run=run,
+                    )
+                    return await API.dispatch(endpoint, session, raw)
         # Preparation starts the run's session; the end of the run closes it.
         session = await self.session(run, run_id, fresh=endpoint == PREPARE.name)
         try:
