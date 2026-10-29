@@ -83,6 +83,32 @@ def _render_collaboration_section() -> str:
     )
 
 
+@dataclass(frozen=True)
+class SystemPrompt:
+    """A thread's system prompt, rendered on its first run and kept for its whole life.
+
+    Any byte that differs between two runs makes the model provider's prompt cache
+    miss from there on, so every later turn would pay again for the whole
+    conversation. What can change from one turn to the next is a ``TurnContext``.
+
+    ``shared`` is the same for every thread of the deployment; ``thread`` is what only
+    this thread's says. The thread's part comes last, so a new thread's first model
+    call reads the shared part from the cache an earlier thread wrote.
+    """
+
+    shared: str
+    thread: str
+
+    def state(self) -> dict[str, str | bool]:
+        """What the thread's state keeps: the whole prompt, which ends in the thread's
+        part, and that part, which the runtime caches apart from the rest."""
+        return {
+            "rendered_system_prompt": "\n\n".join(p for p in (self.shared, self.thread) if p),
+            "rendered_thread_prompt": self.thread,
+            "system_prompt_fixed": True,
+        }
+
+
 def construct_system_prompt(
     dashboard_base_url: str = "",
     artifact_url: str | None = None,
@@ -95,38 +121,37 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
-) -> str:
-    """Render the agent's system prompt, once for the thread's whole life.
-
-    Any byte that differs between two runs makes the model provider's prompt cache
-    miss from there on, so every later turn would pay again for the whole
-    conversation. What can change from one turn to the next is a ``TurnContext``.
-    """
-    return prompt(
+) -> SystemPrompt:
+    """Render the agent's system prompt, once for the thread's whole life."""
+    shared = prompt(
         "system/main",
         allow_workflow_edits=allow_workflow_edits,
-        admin_workspaces=admin_workspaces,
-        sole_writer=sole_writer,
-        continued_from_collaborative=continued_from_collaborative,
+        dashboard_context_section=prompt(
+            "system/dashboard-context",
+            environment=ENV.OPENSWE_ENV.optional(),
+            dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
+        ),
+        default_prompt_section=_load_default_prompt(),
+        collaboration_section=_render_collaboration_section(),
+        external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
+    )
+    thread = prompt(
+        "system/thread",
+        artifact_url=artifact_url or "(artifact link unavailable)",
         default_repo=(
             f"{default_repo['owner']}/{default_repo['name']}"
             if default_repo and default_repo.get("owner") and default_repo.get("name")
             else ""
         ),
-        dashboard_context_section=prompt(
-            "system/dashboard-context",
-            environment=ENV.OPENSWE_ENV.optional(),
-            dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
-            artifact_url=artifact_url or "(artifact link unavailable)",
-        ),
-        default_prompt_section=_load_default_prompt(),
-        collaboration_section=_render_collaboration_section(),
-        external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
+        continued_from_collaborative=continued_from_collaborative,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         workspace_section=_render_workspace_section(
             workspace_name, workspace_instructions, workspace_repos
         ),
+        admin_workspaces=admin_workspaces,
+        sole_writer=sole_writer,
     )
+    return SystemPrompt(shared=shared, thread=thread)
 
 
 @dataclass(frozen=True)
