@@ -45,15 +45,13 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     configurable = get_config().get("configurable", {})
     source = configurable.get("source") or "agent"
     github_login = configurable.get("github_login", "")
-    # Quiet agents review their own drafts and report the outcome themselves once ready.
-    quiet = (
-        bool(github_login) and (await User.preferences_for_login(github_login)).quiet_until_ready
-    )
+    # Goal-mode agents review their own drafts and report the outcome themselves once ready.
+    goal_mode = bool(github_login) and (await User.preferences_for_login(github_login)).goal_mode
     slack_thread = configurable.get("slack_thread") or {}
     thread_id = configurable.get("thread_id")
     active = (
         None
-        if quiet
+        if goal_mode
         else await get_active_slack_thread(
             get_client(),
             thread_id if isinstance(thread_id, str) else None,
@@ -68,7 +66,7 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         github_user_id=configurable.get("github_user_id"),
         slack_channel_id=slack_thread.get("channel_id", ""),
         slack_thread_ts=slack_thread.get("thread_ts", ""),
-        allow_draft=quiet,
+        allow_draft=goal_mode,
     )
     if result.get("success") and (
         review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)

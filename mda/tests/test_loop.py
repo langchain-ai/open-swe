@@ -404,7 +404,7 @@ async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_
     assert on_the_web == PhaseResult()
 
 
-async def test_quiet_work_is_sent_back_until_it_reports_its_state_or_waits(
+async def test_goal_mode_work_is_sent_back_until_it_reports_its_state_or_waits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     guard = "system:work-state-guard"

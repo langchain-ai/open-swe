@@ -1,6 +1,6 @@
 """Tool: ``report_work_state``. Say the work is blocked or complete, with the reply that says so.
 
-Offered only to people with **Quiet until ready** on, whose runs keep going until
+Offered only to people with **Goal mode** on, whose runs keep going until
 this call or a wait that wakes the thread again.
 """
 

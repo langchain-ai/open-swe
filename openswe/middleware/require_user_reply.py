@@ -116,7 +116,7 @@ def reply_nudge(
 
 
 def work_state_nudge(tool_name: str) -> list[str]:
-    """What sends a quiet-until-ready run back to work until it reports where the work stands."""
+    """What sends a goal-mode run back to work until it reports where the work stands."""
     built = build_input_messages(
         prompt("runs/unfinished-work", tool=tool_name),
         {"sender_id": WORK_STATE_GUARD["id"], "surface": "automation", "kind": "system"},

@@ -11,7 +11,7 @@ class UserPreferences(BaseModel):
     pr_review_links: bool = False
     pr_failure_reactions: bool = False
     # Stay silent until blocked on this person or a reviewed, green PR with a walkthrough is ready.
-    quiet_until_ready: bool = False
+    goal_mode: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
     experimental_act_as_approval: bool = False
     # Open SWE acts as this person in shared threads without asking first.
@@ -26,9 +26,7 @@ class UserPreferencesPatch(BaseModel):
     pr_failure_reactions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    quiet_until_ready: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
+    goal_mode: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     # A consent control, so never agent-manageable.
     experimental_act_as_approval: bool | None = None
     act_as_always_allowed: bool | None = None

@@ -4705,6 +4705,17 @@
             ],
             "title": "Experimental Monitor"
           },
+          "goal_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Mode"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -4726,17 +4737,6 @@
               }
             ],
             "title": "Pr Review Links"
-          },
-          "quiet_until_ready": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Quiet Until Ready"
           },
           "review_draft_prs": {
             "anyOf": [

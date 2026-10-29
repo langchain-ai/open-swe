@@ -149,7 +149,7 @@ class TurnContext:
     slack_by_the_way: bool = False
     slack_follow_up_suggestions: bool = False
     # The sender only wants to hear about blockers and reviewed, ready PRs.
-    quiet_until_ready: bool = False
+    goal_mode: bool = False
     sandbox_file_downloads: bool = False
     local_checkout: bool = False
     local_checkout_client: BridgeClient = "cli"
@@ -176,8 +176,8 @@ class TurnContext:
         sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
         if not self.local_checkout and (scope := _render_repository_scope_section()):
             sections.append(scope)
-        if self.quiet_until_ready:
-            sections.append(prompt("system/quiet-until-ready"))
+        if self.goal_mode:
+            sections.append(prompt("system/goal-mode"))
         return "\n\n".join(sections)
 
     def _source_guidance(self) -> str:

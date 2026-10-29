@@ -40,8 +40,8 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="quiet_until_ready"
-          label="Quiet until ready"
+          field="goal_mode"
+          label="Goal mode"
           description="Open SWE keeps working without messaging you until it is blocked on you, or its pull request has passing checks, a few rounds of Open SWE review with the obvious findings fixed, and a walkthrough of the latest version."
         />
         <ProfileSwitchRow

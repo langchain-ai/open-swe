@@ -1459,8 +1459,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
-            quiet_until_ready=bool(self._profile_login)
-            and (await User.preferences_for_login(self._profile_login)).quiet_until_ready,
+            goal_mode=bool(self._profile_login)
+            and (await User.preferences_for_login(self._profile_login)).goal_mode,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
@@ -1706,8 +1706,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
     monitors_enabled = bool(sender_profile and sender_profile.get("experimental_monitor") is True)
-    quiet_until_ready = bool(profile_login) and (
-        (await User.preferences_for_login(profile_login)).quiet_until_ready
+    goal_mode = bool(profile_login) and (
+        (await User.preferences_for_login(profile_login)).goal_mode
     )
     work_state_tool = _registered_tool_name(report_work_state)
     configurable["draft_prs"] = sender_draft_prs
@@ -1839,7 +1839,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     ]
     withheld = [
         *(() if monitors_enabled else (monitor,)),
-        *(() if quiet_until_ready else (report_work_state,)),
+        *(() if goal_mode else (report_work_state,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools,)),
@@ -2040,7 +2040,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 replies=frozenset(
                     {
                         *(GUIDE_REPLY_TOOLS if guide is not None else ()),
-                        *((work_state_tool,) if quiet_until_ready else ()),
+                        *((work_state_tool,) if goal_mode else ()),
                     }
                 ),
             ),
@@ -2077,7 +2077,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                     {
                         *CARD_TOOLS,
                         *(GUIDE_REPLY_TOOLS if guide is not None else ()),
-                        *((work_state_tool,) if quiet_until_ready else ()),
+                        *((work_state_tool,) if goal_mode else ()),
                     }
                 ),
                 nudge=reply_nudge(reply_tool, no_reply_tool),
@@ -2095,7 +2095,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 nudge=work_state_nudge(work_state_tool),
                 nudge_sender=WORK_STATE_GUARD["id"],
             )
-            if quiet_until_ready
+            if goal_mode
             else None,
             task_coordination=task_coordination is not None,
             client_tools=client_tools is not None,
