@@ -151,7 +151,7 @@ from openswe.sandboxes.lifecycle import (
     take_stale_boot,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
-from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox, service_identity_jwks_url
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from openswe.sandboxes.state import (
     SandboxHandedOverError,
@@ -1413,6 +1413,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             triggering_user_identity, sandbox_backend = await self._attach_sandbox(
                 triggering_user_identity_task, bound
             )
+            if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
+                sandbox_backend.reset_git_identity()
             async with aphase(self._thread_id, "prepare.slack_files"):
                 await deliver_slack_files(self._thread_id, bound, sandbox_backend)
             async with aphase(self._thread_id, "prepare.work_dir"):

@@ -175,6 +175,9 @@ class InboxItems(BaseModel):
 class InboxRead(RunRequest):
     # The catalog's ``inbox``; None reads nothing.
     spec: InboxSpec | None = None
+    # What earlier model calls received whose receipt the backend may not have yet:
+    # received before reading, so none of it comes again.
+    received: InboxItems = InboxItems()
 
 
 class Inbox(BaseModel):

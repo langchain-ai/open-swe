@@ -18,6 +18,7 @@ import openswe.server as server
 from openswe.agent_api.tokens import AgentTurnSettings
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.prompt import construct_system_prompt
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
@@ -228,6 +229,10 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     monkeypatch.setattr(server, "construct_system_prompt", construct_system_prompt)
     monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
     prepare_harness["thread_metadata"] = {}
+    backend = TimeoutLangSmithSandbox(MagicMock(name="sandbox-test"))
+    proxy = _ReadyProxy()
+    monkeypatch.setattr(proxy, "ready", AsyncMock(return_value=backend))
+    monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", lambda _: proxy)
     runtime = cast(Runtime[Any], MagicMock())
     asked = HumanMessage(content="Fix the login", id="human-1")
 
@@ -235,6 +240,8 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
         cast(PrepareRunState, {"messages": [asked]}), runtime
     )
     said = cast(list[dict[str, str]], from_slack["messages"])
+    first_reset = backend._git_identity_pending
+    assert first_reset is not None
     told = [HumanMessage(content=message["content"]) for message in said]
     later = cast(
         PrepareRunState,
@@ -245,6 +252,8 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     )
     dashboard = {"thread_id": "thread-1", "source": "dashboard", "invocation_id": "inv-2"}
     from_dashboard = await _middleware({"configurable": dashboard})._prepare(later, runtime)
+    assert backend._git_identity_pending is not None
+    assert backend._git_identity_pending != first_reset
 
     system_prompt = cast(str, from_slack["rendered_system_prompt"])
     assert "triggered from Slack" not in system_prompt and "/workspace" not in system_prompt

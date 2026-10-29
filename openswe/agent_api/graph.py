@@ -229,7 +229,8 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
-from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -321,6 +322,15 @@ class RecordsRemoteTools(Protocol):
     async def atool_started(self, tool_call: ToolCall, message_id: str | None) -> None: ...
 
     async def atool_finished(self, result: ToolMessage) -> None: ...
+
+
+async def _finish_git_identity(thread_id: str | None) -> None:
+    """Write the bot's git identity a box preparation connected to still has pending."""
+    sandbox = SANDBOX_BACKENDS.get(thread_id or "")
+    if sandbox is not None and sandbox.has_backend:
+        backend = sandbox.current
+        if isinstance(backend, TimeoutLangSmithSandbox):
+            await backend.ensure_git_identity()
 
 
 class RunSession:
@@ -661,6 +671,7 @@ class RunSession:
 
         async def begun(state: dict[str, object], runtime: Runtime) -> Prepared:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
+            await _finish_git_identity(cfg.thread_id)
             expires_at = proxy_token_set_since(cfg.thread_id, started)
             return Prepared(
                 **result.model_dump(exclude={"update"}),
@@ -885,9 +896,9 @@ class TokenRun:
     async def inbox(self, request: InboxRead) -> Inbox:
         if request.spec is None:
             return Inbox()
-        taken = await ThreadInbox(self.run.thread_id).read(
-            request.run_id or str(uuid4()), request.spec
-        )
+        inbox = ThreadInbox(self.run.thread_id)
+        await inbox.receive(request.received.queued, request.received.events)
+        taken = await inbox.read(request.run_id or str(uuid4()), request.spec)
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
             update=taken.state_update(request.run_id),
@@ -982,6 +993,7 @@ class TokenRun:
 
         async def prepared(runtime: Runtime) -> Prepared:
             result = await run_hooks(preparation, "before_agent", state, runtime)
+            await _finish_git_identity(self.run.thread_id)
             # A box the backend connected to, such as a bridged machine, got a fresh token.
             expires_at = proxy_token_set_since(self.run.thread_id, started)
             return Prepared(
