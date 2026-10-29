@@ -86,9 +86,20 @@ async def test_sql_repair_commits_ddl_bulk_writes_and_migration_metadata(registr
         "UPDATE alembic_version SET version_num = 'repaired'", confirm=True
     )
     assert result["row_count"] == 1
+    await execute_database_sql("ALTER TABLE repair_example ADD COLUMN config jsonb", confirm=True)
+    await execute_database_sql(
+        'UPDATE repair_example SET config = \'{"enabled":true,"disabled":false,"empty":null,"n":1}\'::jsonb',
+        confirm=True,
+    )
     async with postgres.connection() as conn:
         assert await conn.scalar(text("SELECT count(*) FROM repair_example")) == 101
         assert await conn.scalar(text("SELECT version_num FROM alembic_version")) == "repaired"
+        assert await conn.scalar(text("SELECT config FROM repair_example LIMIT 1")) == {
+            "enabled": True,
+            "disabled": False,
+            "empty": None,
+            "n": 1,
+        }
     with pytest.raises(DBAPIError):
         await execute_database_sql(
             "WITH changed AS (DELETE FROM repair_example RETURNING id) "

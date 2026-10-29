@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from sqlalchemy import MetaData, Table, and_, delete, insert, text, update
+from sqlalchemy import MetaData, Table, and_, delete, insert, update
 
 from openswe.config import ENV
 from openswe.database import postgres
@@ -45,7 +45,7 @@ async def execute_database_sql(query: str, confirm: bool = False) -> dict[str, o
                 await conn.exec_driver_sql(f"SET LOCAL search_path TO {postgres.SCHEMA}, public")
                 await conn.exec_driver_sql("SET LOCAL statement_timeout = 60000")
                 await conn.exec_driver_sql("SET LOCAL lock_timeout = 3000")
-                result = await conn.execute(text(query))
+                result = await conn.exec_driver_sql(query)
                 row_count = result.rowcount
                 result.close()
         finally:
