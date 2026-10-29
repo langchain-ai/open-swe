@@ -25,11 +25,14 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
-from openswe.middleware.sandbox_circuit_breaker import SANDBOX_UNREACHABLE_NOTICE
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
 from openswe.session_cost import schedule_session_cost_refresh
-from openswe.slack.client import SlackNotice, post_slack_thread_reply
+from openswe.slack.client import (
+    SANDBOX_UNREACHABLE_NOTICE,
+    SlackNotice,
+    post_slack_thread_reply,
+)
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext

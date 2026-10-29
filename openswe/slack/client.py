@@ -43,6 +43,7 @@ from openswe.utils.user_messages import WARNING_ICON
 logger = logging.getLogger(__name__)
 
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
+SANDBOX_UNREACHABLE_NOTICE = "sandbox_unreachable"
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 

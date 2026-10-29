@@ -14,6 +14,7 @@ from openswe.linear.notifications import post_linear_notification
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     LANGGRAPH_URL,
+    SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
     get_active_slack_thread,
     post_slack_thread_reply,
@@ -21,8 +22,6 @@ from openswe.slack.client import (
 from openswe.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
-
-SANDBOX_UNREACHABLE_NOTICE = "sandbox_unreachable"
 
 
 def sandbox_unreachable_message(
