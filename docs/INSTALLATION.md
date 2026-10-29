@@ -43,6 +43,7 @@ What a deployment needs:
 | `LANGGRAPH_URL` | The deployment's own public URL |
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on.
+The backend refuses to start if any of the five required Slack app variables above are missing or blank.
 Every variable Open SWE reads is declared in `openswe/config.py` with its description and default; that file is the complete reference.
 
 ### Optional PostHog usage tracking
