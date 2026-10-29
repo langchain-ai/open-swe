@@ -9,10 +9,11 @@ from langgraph.graph.state import RunnableConfig
 
 from openswe import server
 from openswe.sandboxes import lifecycle
+from openswe.slack.channels import SlackChannel
 from openswe.tools import workspaces as env_tools
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
-from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
+from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate, WorkspaceUpdate
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
@@ -87,6 +88,11 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
         assert (await env_tools.snapshotctl("rebuild", "base"))["ok"] is False
+        assert (
+            await env_tools.configure_workspace(
+                "base", WorkspaceUpdate(kitchen_channel_ids=["C0NEW"])
+            )
+        )["ok"] is False
 
 
 # --- publish: capture this sandbox, then record ---
@@ -216,7 +222,7 @@ async def test_publishing_over_an_existing_workspace_retires_its_old_image(
         result = await env_tools.publish_workspace("base", "prompt")
 
     assert seams.calls == ["capture", "write"]
-    assert isinstance(seams.definition, env_tools.store.WorkspaceUpdate)
+    assert isinstance(seams.definition, WorkspaceUpdate)
     # The old image goes only after the record points at the new one.
     seams.retire.assert_awaited_once_with("base", "snap-old", "snap-new")
     assert result["created"] is False
@@ -339,3 +345,32 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com,bob")
     assert (await server._thread_participant(bob, admin_requester_config)).workspace_admin is True
+
+
+@pytest.mark.parametrize("eligible", [True, False])
+async def test_configure_workspace_preserves_definition_and_checks_kitchen(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, eligible: bool
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", prompt="keep me", slack_channel_ids=["C0OLD", "C0NEW"]),
+        "ramonn",
+    )
+    channel = SlackChannel(
+        id="C0NEW",
+        payload={"is_member": eligible, "is_ext_shared": False, "is_pending_ext_shared": False},
+    )
+    config = _config(admin_thread=True, github_login="ramonn")
+    with (
+        patch("openswe.run_config.get_config", return_value=config),
+        patch.object(SlackChannel, "load", AsyncMock(return_value=channel)),
+    ):
+        result = await env_tools.configure_workspace(
+            "core", WorkspaceUpdate(kitchen_channel_ids=["C0NEW"])
+        )
+    assert result["ok"] is eligible
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.prompt == "keep me"
+    assert stored.slack_channel_ids == ["C0NEW", "C0OLD"]
+    assert stored.kitchen_channel_ids == (["C0NEW"] if eligible else [])

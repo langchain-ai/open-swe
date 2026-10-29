@@ -380,12 +380,15 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.server import ADMIN_TOOLS
-    from openswe.tools import read_only_sql
+    from openswe.tools import execute_database_sql, read_only_sql
+
+    monkeypatch.setenv("OPENSWE_ENV", "preview")
     from openswe.tools.manage_feature_flags import manage_feature_flags
 
     captured = await _plan_agent()
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ not in tools
+    assert execute_database_sql.__name__ not in tools
     assert manage_feature_flags.__name__ not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
@@ -396,6 +399,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ in tools
+    assert execute_database_sql.__name__ in tools
     assert manage_feature_flags.__name__ in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
@@ -403,6 +407,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     assert general_purpose.tools is not None
     # SQL needs the parent; the subagent keeps the rest.
     assert read_only_sql.__name__ not in general_purpose.tools
+    assert execute_database_sql.__name__ not in general_purpose.tools
     assert manage_feature_flags.__name__ in general_purpose.tools
 
     configurable["source"] = "slack"
@@ -415,6 +420,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ in tools
+    assert execute_database_sql.__name__ in tools
     assert manage_feature_flags.__name__ in tools
 
     assert all(tool.__name__ in tools for tool in ADMIN_TOOLS)
@@ -423,6 +429,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ not in tools
+    assert execute_database_sql.__name__ not in tools
     assert manage_feature_flags.__name__ not in tools
     assert all(tool.__name__ not in tools for tool in ADMIN_TOOLS)
 
@@ -431,6 +438,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ not in tools
+    assert execute_database_sql.__name__ not in tools
     assert manage_feature_flags.__name__ not in tools
 
 

@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -26,7 +27,13 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
+from runtime_api.loop import (
+    Done,
+    GitHubProxyRefreshed,
+    PhaseResult,
+    Route,
+    TaskContext,
+)
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
@@ -124,6 +131,37 @@ async def test_a_failed_github_token_refresh_waits_before_the_next_try(
     assert [name for name, _ in calls] == ["refresh_github_proxy"]
 
 
+async def test_failed_task_context_preserves_error_and_cleans_up_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = BackendCallError("context unavailable")
+    backend, _ = _backend(monkeypatch, {}, LoopRules())
+    loop = RunLoop(backend)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def refresh(_held: Mapping[str, object]) -> dict[str, JsonValue]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+        return {}
+
+    async def context() -> TaskContext:
+        await started.wait()
+        raise failure
+
+    monkeypatch.setattr(loop, "_github_proxy", refresh)
+    monkeypatch.setattr(loop, "_task_context", context)
+
+    with pytest.raises(BackendCallError) as caught:
+        await loop.before_model(_state())
+
+    assert caught.value is failure
+    assert stopped.is_set()
+
+
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,7 +186,23 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         rendered_system_prompt="You are Open SWE.",
     )
 
-    planned = await loop.before_model(state)
+    barrier = asyncio.Barrier(2)
+    post = backend.post
+
+    async def overlapping_post(
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        await asyncio.wait_for(barrier.wait(), timeout=1)
+        return await post(path, body, timeout=timeout, delivery=delivery, headers=headers)
+
+    with monkeypatch.context() as preparation:
+        preparation.setattr(backend, "post", overlapping_post)
+        planned = await loop.before_model(state)
     await backend.outbox.drain()
 
     assert planned.call is not None
@@ -236,6 +290,21 @@ async def test_a_run_context_summarized_away_is_sent_again(
         }
     )
     assert again.messages == []
+
+    edited = '<dynamic-context kind="run" id="source">Edited</dynamic-context>'
+    history[4].content = [{"type": "text", "text": edited}]
+    history[7] = HumanMessage(
+        content='<dynamic-context kind="run" id="review-guide">Reopened</dynamic-context>'
+    )
+    history[5] = AIMessage(content=history[5].content)
+    changed = await loop.before_model(
+        {"messages": history, STATE_KEY: {}, "_summarization_event": {"cutoff_index": 8}}
+    )
+    assert [message.content for message in messages_from_dict(changed.messages)] == [
+        edited,
+        history[7].content,
+        "# Run context\nhead_sha: new",
+    ]
 
 
 async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the_rest(

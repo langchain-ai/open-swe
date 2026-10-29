@@ -13,11 +13,10 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.agent_overrides import get_profile_default_repo
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
-from openswe.slack.channels import SlackChannel
+from openswe.workspaces.configuration import configure_workspace, require_kitchen_eligible
 from openswe.workspaces.refresh import (
     RefreshStartError,
     ensure_refresh_cron,
-    save_definition,
     start_refresh,
     start_refresh_run,
 )
@@ -58,20 +57,6 @@ def _save_conflict(error: ValueError) -> HTTPException:
     return HTTPException(400, str(error))
 
 
-async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
-    """Reject newly enabled kitchen channels Slack would not deliver messages from."""
-    channels = await asyncio.gather(
-        *(SlackChannel.load(channel_id, use_cache=False) for channel_id in channel_ids)
-    )
-    for channel_id, channel in zip(channel_ids, channels, strict=True):
-        if channel is None or not channel.can_be_kitchen:
-            raise HTTPException(
-                400,
-                f"Slack channel {channel_id} cannot be a kitchen channel: choose an internal "
-                "Slack channel that Open SWE has joined.",
-            )
-
-
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -89,8 +74,8 @@ async def api_create_workspace(
     request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
-    await _require_kitchen_eligible(body.kitchen_channel_ids)
     try:
+        await require_kitchen_eligible(body.kitchen_channel_ids)
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise _save_conflict(e) from e
@@ -159,13 +144,8 @@ async def api_update_workspace(
     if previous is None:
         raise HTTPException(400, f"no workspace named {normalized!r}")
     await bind_workspace(request, previous)
-    if body.kitchen_channel_ids is not None:
-        already = set(previous.kitchen_channel_ids)
-        await _require_kitchen_eligible(
-            [channel for channel in body.kitchen_channel_ids if channel not in already]
-        )
     try:
-        record = await save_definition(previous, body)
+        record = await configure_workspace(previous, body)
     except ValueError as e:
         raise _save_conflict(e) from e
     except RefreshStartError as e:
