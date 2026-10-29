@@ -13,7 +13,10 @@ from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
     configure_sandbox_proxy,
 )
-from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
+from openswe.sandboxes.tool_access import (
+    SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
+)
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -366,3 +369,84 @@ async def test_a_reused_box_keeps_its_token_only_while_it_holds_this_scope_long_
 
     refreshed = 1 if changed == "nothing" else 2
     assert mint.await_count == configure.await_count == refreshed
+
+
+@pytest.mark.parametrize("refresh", ["connection", "in-run", "middleware"])
+async def test_shared_sandbox_connections_restore_each_threads_github_scope(
+    monkeypatch: pytest.MonkeyPatch, refresh: str
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from openswe.github import proxy as github_proxy
+    from openswe.sandboxes import lifecycle
+    from openswe.sandboxes.providers.langsmith import SandboxProxy, TimeoutLangSmithSandbox
+    from openswe.sandboxes.state import SANDBOX_CONNECTIONS
+
+    metadata: dict[str, dict[str, JsonValue]] = {
+        "host": {"sandbox_id": "shared"},
+        "guest": {"sandbox_id": "shared", SANDBOX_HOST_THREAD_KEY: "host"},
+        "worker": {
+            "sandbox_id": "shared",
+            SANDBOX_HOST_THREAD_KEY: "host",
+            "task_id": "00000000-0000-0000-0000-000000000001",
+        },
+    }
+    repositories = {"host": ["org/host"], "guest": None, "worker": None}
+    expires_at = (datetime.now(UTC) + timedelta(minutes=50)).isoformat()
+    installed: str | None = None
+    sandbox = MagicMock(id="box-1")
+    sandbox.name = "shared"
+
+    async def read(thread_id: str) -> dict[str, JsonValue]:
+        return deepcopy(metadata[thread_id])
+
+    async def record(thread_id: str, patch: dict[str, JsonValue]) -> None:
+        metadata[thread_id].update(patch)
+
+    async def mint(
+        _workspace: str | None, *, repositories: list[str] | None, permissions: object
+    ) -> SandboxGitHubAccess:
+        return SandboxGitHubAccess("ghs_host" if repositories else "ghs_guest", expires_at)
+
+    async def configure(_self: SandboxProxy, token: str | None) -> None:
+        nonlocal installed
+        installed = token
+
+    monkeypatch.setattr(lifecycle, "get_sandbox_metadata", read)
+    monkeypatch.setattr(lifecycle.THREADS, "update", record)
+    monkeypatch.setattr(lifecycle, "workspace_token", mint)
+    monkeypatch.setattr(
+        lifecycle, "thread_token_repositories", AsyncMock(side_effect=lambda tid: repositories[tid])
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "connect_existing_sandbox",
+        AsyncMock(return_value=TimeoutLangSmithSandbox(sandbox)),
+    )
+    monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
+    monkeypatch.setattr(lifecycle, "complete_handoff", AsyncMock())
+    monkeypatch.setattr(SandboxProxy, "configure", configure)
+    monkeypatch.setattr(
+        "openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=None)
+    )
+
+    async def connect(thread_id: str) -> None:
+        SANDBOX_CONNECTIONS.clear()
+        await lifecycle.ensure_sandbox_for_thread(thread_id)
+        assert installed == f"ghs_{thread_id}"
+
+    await connect("host")
+    await connect("guest")
+    if refresh == "in-run":
+        await lifecycle.refresh_thread_github_proxy("guest")
+    await connect("host")
+    await connect("guest")
+    await lifecycle.refresh_thread_github_proxy("host")
+    if refresh == "middleware":
+        github_proxy.record_proxy_token_expiry("guest", None)
+        monkeypatch.setattr(github_proxy, "workspace_token", mint)
+        await github_proxy.refresh_proxy_token("guest")
+        await connect("host")
+    await connect("guest")
+    await lifecycle.refresh_thread_github_proxy("worker")
+    await connect("host")

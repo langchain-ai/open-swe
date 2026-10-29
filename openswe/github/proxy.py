@@ -176,8 +176,12 @@ async def refresh_proxy_token(
         permissions=dict(permission_key) if permission_key else None,
     )
 
+    from openswe.sandboxes.lifecycle import ProxyGrant
     from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy
 
+    grant_thread_id, grant = await ProxyGrant.for_thread(thread_id)
+    if grant is not None:
+        await ProxyGrant.forget(grant_thread_id)
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)
     if base_proxy_config is not None:
