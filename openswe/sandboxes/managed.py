@@ -21,6 +21,7 @@ class ManagedSandbox(BaseModel):
     """What MDA creates a thread's box with, and whose box the thread uses."""
 
     create: LangSmithCreateOptions
+    sandbox_id: str | None = None
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
 
@@ -53,4 +54,8 @@ class ManagedSandbox(BaseModel):
         ):
             return None
         config = await SandboxCreateConfig.for_thread(raw, workspace_slug)
-        return cls(create=config.langsmith_options(), thread_id=owner)
+        return cls(
+            create=config.langsmith_options(),
+            thread_id=owner,
+            sandbox_id=metadata.sandbox_id if owner or metadata.sandbox_owner == "mda" else None,
+        )
