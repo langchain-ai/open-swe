@@ -148,6 +148,7 @@ def direct_user_run(cfg: RunConfig) -> bool:
         and not cfg.background_task_completion
         and not cfg.schedule_id
         and not cfg.watch_key
+        and not cfg.background_event
     )
 
 

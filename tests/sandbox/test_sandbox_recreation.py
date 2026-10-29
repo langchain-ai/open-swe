@@ -37,7 +37,7 @@ async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) 
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update,
     ):
-        with pytest.raises(PermissionError, match="coordinator must recover"):
+        with pytest.raises(PermissionError, match="host must recover"):
             await hand_sandbox_to_mda("worker")
 
     sandbox_client.stop_sandbox.assert_not_awaited()

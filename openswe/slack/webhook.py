@@ -791,7 +791,7 @@ async def _process_slack_mention_impl(
                 user_timezone = timezone_value.strip()
 
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
-    mapped_login, thread_record, thread_messages, _ = await asyncio.gather(
+    mapped_login, thread_record, thread_messages, _, _ = await asyncio.gather(
         slack_login(user_id, user_email) if allowed_bot is None else _resolved(None),
         common.ThreadRecord.read(thread_id),
         _resolved([])
@@ -800,6 +800,7 @@ async def _process_slack_mention_impl(
             request.context_channel_id or channel_id, context_thread_ts
         ),
         persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
+        common.User.remember_slack_timezone(user_id, user_timezone),
     )
     thread_metadata = thread_record.authorize(mapped_login or "")
     # The thread's state only matters once dispatching, but reading it is one of
@@ -1035,7 +1036,7 @@ async def _process_slack_mention_impl(
             thread_id,
             reason,
         )
-        if user_id:
+        if user_id and not request.background_event:
             await common.post_account_link_prompt(
                 channel_id,
                 thread_ts,
@@ -1156,6 +1157,8 @@ async def _process_slack_mention_impl(
         configurable["admin_thread"] = True
     if request.context_thread_ts:
         configurable["slack_breakout"] = True
+    if request.background_event:
+        configurable["background_event"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
@@ -1245,17 +1248,21 @@ async def _process_slack_mention_impl(
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
     # behind it. A review guide's turns wait instead: interrupting one mid-post
-    # loses the chunk it was showing.
-    explicitly_tagged = not review_guide and (
-        concierge_mode
-        or _interrupts_active_run(
-            text,
-            bot_user_id,
-            treat_all_messages_as_mentions=treat_all_messages_as_mentions
-            and not request.kitchen_channel,
-            code_channel=code_channel,
-            message_update=message_update,
-            explicit_request=request.explicit_request or performance_command,
+    # loses the chunk it was showing, and a background event never cuts off the person's own run.
+    explicitly_tagged = (
+        not review_guide
+        and not request.background_event
+        and (
+            concierge_mode
+            or _interrupts_active_run(
+                text,
+                bot_user_id,
+                treat_all_messages_as_mentions=treat_all_messages_as_mentions
+                and not request.kitchen_channel,
+                code_channel=code_channel,
+                message_update=message_update,
+                explicit_request=request.explicit_request or performance_command,
+            )
         )
     )
     visible_context_hashes, dispatched_timestamps = await dispatched_context

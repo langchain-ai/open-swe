@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class UserPreferences(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    # The person's Slack DM with the bot is one conversation instead of a thread per message.
+    # The person's Slack DM with the bot is one conversation instead of a thread per message,
+    # whose agent checks in on their work every 30 minutes.
     concierge_mode: bool = False
     pr_review_links: bool = False
     pr_failure_reactions: bool = False

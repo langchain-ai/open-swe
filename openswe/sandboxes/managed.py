@@ -31,15 +31,16 @@ class ManagedSandbox(BaseModel):
         New threads and MDA's own get MDA's box, created from the replacement
         ``recreate_sandbox`` asked for if any. A thread the backend gave a box before
         MDA owned them keeps it until it is gone, when this run starts in MDA's
-        instead; bridged threads run on the user's machine. A task worker shares its coordinator's MDA box once the
-        backend has attached it there, which checks that it may.
+        instead; bridged threads run on the user's machine. A guest (a task worker or
+        a concierge background thread) shares its host's MDA box once the backend has
+        attached it there, which checks that it may.
         """
         raw = await get_sandbox_metadata(thread_id)
         metadata = ThreadMetadata.model_validate(raw)
         if metadata.sandbox_id is not None and Bridge.bridge_id_of(metadata.sandbox_id):
             return None
         owner: str | None = None
-        if metadata.task_id is not None:
+        if metadata.shares_sandbox:
             owner = metadata.sandbox_host_thread_id
             if owner is None or metadata.sandbox_id is None:
                 return None

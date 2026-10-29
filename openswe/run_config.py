@@ -180,6 +180,8 @@ class RunConfig(BaseModel):
     watch_key: str | None = None
     schedule_id: str | None = None
     background_task_completion: bool | None = None
+    # Open SWE started the run for itself, such as a concierge check-in; no person did.
+    background_event: bool | None = None
 
     @classmethod
     def parse(cls, raw: Any) -> Self:

@@ -30,7 +30,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="concierge_mode"
           label="Concierge mode"
-          description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
+          description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message. Every 30 minutes it also checks in on your work and messages you when it finds something useful."
         />
         <ProfileSwitchRow
           field="pr_review_links"

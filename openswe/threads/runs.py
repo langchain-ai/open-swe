@@ -97,6 +97,7 @@ from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.utils.thread_reads import read_thread
 from openswe.utils.thread_settings import thread_model_choice
 from openswe.workspaces.routing import resolve_workspace
 
@@ -487,6 +488,52 @@ async def start_dashboard_thread(
         client=client,
     )
     return thread_id
+
+
+async def create_system_thread(
+    login: str,
+    email: str | None,
+    *,
+    title: str,
+    text: str,
+    visibility: Literal["public", "private"],
+    workspace: str | None,
+    extra_metadata: Mapping[str, Any],
+) -> str:
+    """Create a person's repository-less dashboard thread for Open SWE to run on its own messages."""
+    await _ensure_dashboard_github_token(login)
+    thread = await create_dashboard_thread_record(
+        str(uuid.uuid4()),
+        login=login,
+        email=email,
+        repo_config={},
+        repo_explicitly_none=True,
+        prompt=text,
+        title=title,
+        visibility=visibility,
+        workspace=workspace,
+        extra_metadata=extra_metadata,
+    )
+    return str(thread["thread_id"])
+
+
+async def run_on_system_message(
+    thread_id: str, login: str, text: str, system: SystemIdentity
+) -> None:
+    """Run a person's dashboard thread on a message Open SWE wrote, queued behind any run."""
+    thread = await read_thread(thread_id)
+    configurable = await _build_dashboard_configurable(thread_id, login, thread_metadata(thread))
+    configurable["background_event"] = True
+    await dispatch_agent_run(
+        thread_id,
+        text,
+        configurable,
+        source=DASHBOARD_SOURCE,
+        thread_title=None,
+        context={"sender_id": system["id"], "surface": "automation", "kind": "system"},
+        systems=[system],
+        multitask_strategy="enqueue",
+    )
 
 
 async def start_sandbox_guest_run(

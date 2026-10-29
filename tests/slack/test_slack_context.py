@@ -547,10 +547,14 @@ async def test_slack_files_wait_only_for_an_account_and_a_persisted_thread(
         assert "run_create" not in captured
 
 
+@pytest.mark.parametrize("background_event", [False, True])
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
 @pytest.mark.parametrize("kitchen_channel", [True, False])
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool
+    monkeypatch: pytest.MonkeyPatch,
+    explicitly_tagged: bool,
+    kitchen_channel: bool,
+    background_event: bool,
 ) -> None:
     import importlib
 
@@ -583,6 +587,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
                 bot_user_id="UBOT",
                 kitchen_channel=kitchen_channel,
                 treat_all_messages_as_mentions=kitchen_channel,
+                background_event=background_event,
             ),
             webhook_common.SlackRepoResolution(
                 Repo(owner="langchain-ai", name="open-swe"), explicit=True
@@ -592,7 +597,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
-    assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
+    # A background event queues behind the person's own run instead of cutting it off.
+    interrupts = explicitly_tagged and not background_event
+    assert kwargs["multitask_strategy"] == ("interrupt" if interrupts else "enqueue")
     trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
     assert "<@UBOT>" not in (trigger.text or "")
@@ -607,10 +614,11 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     assert saved_metadata["owner_login"] == "alice"
 
 
+@pytest.mark.parametrize("background_event", [False, True])
 def test_process_slack_mention_unmapped_user_blocked_and_prompted(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, background_event: bool
 ) -> None:
-    """An unmapped Slack user is blocked (no run) and prompted to link."""
+    """An unmapped Slack user is blocked (no run) and prompted to link, unless nobody asked."""
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
 
@@ -643,6 +651,7 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
                     "user_id": "U123",
                     "text": "<@UBOT> do the thing",
                     "bot_user_id": "UBOT",
+                    "background_event": background_event,
                 }
             ),
             webhook_common.SlackRepoResolution(
@@ -652,6 +661,9 @@ def test_process_slack_mention_unmapped_user_blocked_and_prompted(
     )
 
     assert "run_create" not in captured
+    if background_event:
+        assert "prompt" not in captured
+        return
     assert captured["prompt"] == {
         "user_id": "U123",
         "user_email": "mason@example.com",

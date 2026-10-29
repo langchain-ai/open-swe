@@ -21,6 +21,7 @@ from langgraph_sdk import get_client
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
+from openswe.concierge.records import ConciergeBackground
 from openswe.github.app import PermissionMap
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import (
@@ -51,7 +52,7 @@ from openswe.sandboxes.state import (
     unwrap_sandbox_backend,
 )
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
-from openswe.tasks.schemas import ThreadMetadata
+from openswe.tasks.schemas import ThreadMetadata, shares_sandbox
 from openswe.tasks.store import TaskMembership
 from openswe.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from openswe.utils.startup_trace import aphase
@@ -360,23 +361,22 @@ async def _connect_existing_sandbox(
     return refreshed
 
 
-async def _attach_task_worker_sandbox(
-    thread_id: str,
-    metadata: Mapping[str, object],
-    *,
-    github_proxy_repositories: Sequence[str] | None,
-    workspace_slug: str | None,
-) -> SandboxBackendProtocol:
-    worker = ThreadMetadata.model_validate(metadata)
+async def _guest_workspace(thread_id: str, guest: ThreadMetadata, host_id: str) -> str:
+    """The workspace a guest shares its host's sandbox in, once the pairing checks out.
+
+    A task worker shares its coordinator's; a concierge background thread, the DM
+    thread it was started for.
+    """
+    if guest.task_id is None:
+        if not await ConciergeBackground.shares_sandbox(thread_id, host_id):
+            raise PermissionError("The shared sandbox host is not this thread's concierge DM")
+        return ThreadMetadata.model_validate(await get_sandbox_metadata(host_id)).workspace_slug
     context = await TaskMembership.context_for_thread(thread_id)
-    host_id = worker.sandbox_host_thread_id
     if (
         context is None
-        or not host_id
         or context.membership.role != "worker"
-        or context.task.id != worker.task_id
+        or context.task.id != guest.task_id
         or host_id != context.task.coordinator_thread_id
-        or host_id == thread_id
     ):
         raise PermissionError("The shared sandbox host does not match this worker's task")
     host_context = await TaskMembership.context_for_thread(host_id)
@@ -386,15 +386,29 @@ async def _attach_task_worker_sandbox(
         or host_context.membership.role != "coordinator"
     ):
         raise PermissionError("The shared sandbox host is not this task's coordinator")
+    return context.task.workspace.slug
+
+
+async def _attach_guest_sandbox(
+    thread_id: str,
+    metadata: Mapping[str, object],
+    *,
+    github_proxy_repositories: Sequence[str] | None,
+    workspace_slug: str | None,
+) -> SandboxBackendProtocol:
+    worker = ThreadMetadata.model_validate(metadata)
+    host_id = worker.sandbox_host_thread_id
+    if not host_id or host_id == thread_id:
+        raise PermissionError("This thread names no other thread's sandbox to share")
+    workspace = await _guest_workspace(thread_id, worker, host_id)
     host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
     if (
-        host.sandbox_host_thread_id
-        or host.task_id
+        host.shares_sandbox
         or worker.owner_type != host.owner_type
         or (worker.owner_type == "system" and worker.visibility != "public")
-        or worker.workspace != context.task.workspace.slug
-        or (host.workspace or host.environment or "default") != context.task.workspace.slug
-        or (workspace_slug is not None and workspace_slug != context.task.workspace.slug)
+        or worker.workspace_slug != workspace
+        or host.workspace_slug != workspace
+        or (workspace_slug is not None and workspace_slug != workspace)
         or worker.admin_thread != host.admin_thread
         or worker.visibility != host.visibility
     ):
@@ -419,11 +433,11 @@ async def _attach_task_worker_sandbox(
             if binding.owner_user_id is None:
                 await client.threads.update(target_id, metadata={"owner_user_id": str(owner.id)})
     backend = await ensure_sandbox_for_thread(
-        host_id, workspace_slug=context.task.workspace.slug, require_existing=True
+        host_id, workspace_slug=workspace, require_existing=True
     )
     current_host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
     if current_host.sandbox_id != backend.id:
-        raise RuntimeError("The coordinator's sandbox changed while the worker was attaching")
+        raise RuntimeError("The host's sandbox changed while the guest was attaching")
     await client.threads.update(
         thread_id=thread_id,
         metadata={
@@ -477,8 +491,8 @@ async def ensure_sandbox_for_thread(
 
     1. Metadata has an id -> reuse this process's connection to that sandbox if
        it has one, else reconnect; then refresh proxy.
-    2. A task worker (metadata has ``task_id``) -> attach to its coordinator's
-       existing sandbox.
+    2. A guest (a task worker or a concierge background thread) -> attach to its
+       host's existing sandbox.
     3. No sandbox yet -> ``SandboxUnreachableError``: MDA creates the thread's box
        when its run starts, and binds the thread to it before preparing.
 
@@ -506,8 +520,8 @@ async def ensure_sandbox_for_thread(
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
-    if sandbox_metadata.get("task_id") is not None:
-        return await _attach_task_worker_sandbox(
+    if shares_sandbox(sandbox_metadata):
+        return await _attach_guest_sandbox(
             thread_id,
             sandbox_metadata,
             github_proxy_repositories=github_proxy_repositories,
@@ -519,7 +533,7 @@ async def ensure_sandbox_for_thread(
         raise SandboxUnreachableError(
             thread_id,
             None,
-            "The coordinator must attach its sandbox first"
+            "The host thread must attach its sandbox first"
             if require_existing
             else "Managed Deep Agents could not open this thread's sandbox"
             if sandbox_metadata.get("sandbox_owner") == "mda"
@@ -559,7 +573,7 @@ async def ensure_sandbox_for_thread(
             raise SandboxUnreachableError(
                 thread_id,
                 sandbox_id,
-                "The coordinator must recover its sandbox before workers attach",
+                "The host thread must recover its sandbox before guests attach",
             ) from exc
         owned_by_mda = sandbox_metadata.get("sandbox_owner") == "mda"
         if not owned_by_mda and (isinstance(exc, SandboxGoneError) or abandon_unreachable):
@@ -598,12 +612,12 @@ async def bind_mda_sandbox(
     does any reused box: proxy credentials, git identity, the tool channel. With no
     ``sandbox_id`` MDA could not open the box (``open_error`` says why), and the thread
     stays MDA's: preparing connects to the box it was bound to before, and a thread
-    bound to none is unreachable rather than given one here. A task worker attaches to
-    its coordinator's box through the backend, as before.
+    bound to none is unreachable rather than given one here. A guest attaches to its
+    host's box through the backend, as before.
     """
     raw = await get_sandbox_metadata(thread_id)
     metadata = ThreadMetadata.model_validate(raw)
-    if metadata.task_id is not None:
+    if metadata.shares_sandbox:
         return
     if not (metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id)):
         await _bind_mda_sandbox(thread_id, sandbox_id, raw, workspace_slug)
@@ -742,9 +756,9 @@ async def hand_sandbox_to_mda(
     """
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
-    if metadata.get("task_id") is not None:
+    if shares_sandbox(metadata):
         raise PermissionError(
-            "Task workers cannot recreate the shared sandbox; the coordinator must recover it"
+            "A thread sharing another's sandbox cannot recreate it; its host must recover it"
         )
     raw_sandbox_id = metadata.get("sandbox_id")
     metadata_sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None

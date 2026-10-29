@@ -64,6 +64,7 @@ from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
+from openswe.concierge.records import ConciergeBackground
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
     load_profile,
@@ -184,6 +185,7 @@ from openswe.tools import (
     background_execute,
     background_task,
     code_channel_set_view,
+    concierge_background,
     configure_repository,
     configure_workspace,
     connect_managed_tools,
@@ -248,6 +250,7 @@ from openswe.tools import (
     submit_thread_feedback,
     suggest_task,
     switch_to_performance_model,
+    tell_concierge,
     trigger_automation,
     update_automation,
     web_search,
@@ -627,6 +630,8 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "listen_events",
         "request_rollout_check",
         "manage_thread",
+        "concierge_background",
+        "tell_concierge",
         "read_incident",
         "read_only_sql",
         "execute_database_sql",
@@ -701,6 +706,8 @@ AGENT_TOOLS: Final = (
     message_task_thread,
     control_worker,
     start_thread,
+    concierge_background,
+    tell_concierge,
     manage_baby_sit,
     switch_to_performance_model,
     expedite_pr_approval,
@@ -1602,6 +1609,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     settings_workspace = workspace_slug(cfg)
     async with aphase(thread_id, "factory.bridged_thread"):
         bridge_client = await _bridge_client(thread_id)
+    async with aphase(thread_id, "factory.concierge_background"):
+        concierge_background_run = bool(
+            thread_id and await ConciergeBackground.for_thread(thread_id) is not None
+        )
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             await load_thread_settings(client, thread_id)
@@ -1837,6 +1848,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         *(() if monitors_enabled else (monitor,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
+        *(() if _slack_concierge_run(cfg) else (concierge_background,)),
+        *(() if concierge_background_run else (tell_concierge,)),
         *(() if managed_gateway else (connect_managed_tools,)),
         *(
             ()

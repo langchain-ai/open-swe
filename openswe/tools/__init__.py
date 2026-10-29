@@ -9,6 +9,7 @@ _TOOL_MODULES = {
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "code_channel_set_view": ".code_channel_set_view",
+    "concierge_background": ".concierge",
     "connect_managed_tools": ".connect_managed_tools",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
@@ -80,6 +81,7 @@ _TOOL_MODULES = {
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
     "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
+    "tell_concierge": ".concierge",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
@@ -94,6 +96,7 @@ __all__ = [
     "background_execute",
     "background_task",
     "code_channel_set_view",
+    "concierge_background",
     "connect_managed_tools",
     "create_automation",
     "create_sandbox_file_download_url",
@@ -165,6 +168,7 @@ __all__ = [
     "slack_breakout_thread",
     "slack_start_review_channel",
     "submit_thread_feedback",
+    "tell_concierge",
     "suggest_task",
     "trigger_automation",
     "update_automation",
@@ -201,6 +205,7 @@ if TYPE_CHECKING:
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
     from openswe.tools.code_channel_set_view import code_channel_set_view
+    from openswe.tools.concierge import concierge_background, tell_concierge
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
