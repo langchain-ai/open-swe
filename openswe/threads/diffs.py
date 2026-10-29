@@ -3,14 +3,13 @@
 import base64
 import json
 import logging
-from functools import cache
-from importlib import resources
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
+from openswe.sandboxes import scripts as sandbox_scripts
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.proxy import _PROXY_REQUEST_TIMEOUT
@@ -34,13 +33,8 @@ async def connect_sandbox(sandbox_id: str, *, thread_id: str) -> SandboxBackendP
     return await _connect_sandbox(sandbox_id, thread_id=thread_id)
 
 
-@cache
 def _recovery_patch_script() -> str:
-    return (
-        resources.files("openswe.resources")
-        .joinpath("recovery_patch.py")
-        .read_text(encoding="utf-8")
-    )
+    return sandbox_scripts.source("recovery_patch.py")
 
 
 def _recovery_patch_filename(thread_id: str) -> str:
@@ -216,10 +210,10 @@ async def get_dashboard_thread_branch_diff(
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     pr_number = metadata.get("pr_number")
     pr_ref = parse_github_pr_url(str(metadata.get("pr_url") or ""))
-    _, _, full_name = _metadata_repo(metadata)
+    owner, name, _ = _metadata_repo(metadata)
     if pr_ref and pr_ref.number == pr_number:
-        full_name = f"{pr_ref.owner}/{pr_ref.repo}"
-    if not full_name:
+        owner, name = pr_ref.owner, pr_ref.repo
+    if not owner or not name:
         raise HTTPException(404, "thread has no repository")
     pull_request: int | None = pr_number if isinstance(pr_number, int) else None
 
@@ -229,10 +223,11 @@ async def get_dashboard_thread_branch_diff(
         raise HTTPException(404, "thread never branched off its base")
 
     async with GitHubClient.as_user(login, timeout=_PROXY_REQUEST_TIMEOUT) as github:
+        repository = github.repo(owner, name)
         if pull_request is not None:
-            diff = await build_pr_diff_files(github.http, full_name, pull_request)
+            diff = await build_pr_diff_files(repository.pull_request(pull_request))
         elif head_ref is not None:
-            diff = await build_compare_diff_files(github.http, full_name, base_ref, head_ref)
+            diff = await build_compare_diff_files(repository, base_ref, head_ref)
         else:
             raise HTTPException(404, "thread has no branch")
 

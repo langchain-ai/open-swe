@@ -23,7 +23,14 @@ web_url: http://127.0.0.1:3100/agents/<thread-id>
 <dynamic-context kind="system" id="system:slack-context">
 display_name: Slack context
 platform: slack
-content: This is a non-kitchen Slack channel. Always respond when a human explicitly tags you, even if the message is a question, comment, or ambiguous request rather than an implementation task. Do not ignore a message that tags you. Respond appropriately with `slack_reply`, unless another tool has already responded visibly, such as an approval card or a breakout thread; in those flows, follow their instructions for `slack_no_reply_needed`. Responding does not mean turning discussion into a code-change task, but a reported problem is a request to investigate and fix it.
+content:
+  This is a non-kitchen Slack channel.
+  Respond when a human addresses you, whether or not they explicitly tag you, even if the message is a question, comment, or ambiguous request rather than an implementation task.
+  In an ongoing thread conversation with you, treat untagged follow-ups as addressed to you unless they are clearly directed at another participant.
+  A missing tag or non-kitchen channel is not a reason to stay silent.
+  Do not ignore a message that tags you.
+  Respond appropriately with `slack_reply`, unless another tool has already responded visibly, such as an approval card or a breakout thread; in those flows, follow their instructions for `slack_no_reply_needed`.
+  Responding does not mean turning discussion into a code-change task, but a reported problem is a request to investigate and fix it.
 </dynamic-context>
 ```
 
@@ -105,7 +112,7 @@ platform: open-swe
 
 ```xml
 <input-message sender="system:dashboard-handoff" surface="automation" kind="system">
-This follow-up was sent from Web. The conversation has moved to Web, so answer in the dashboard stream with a normal assistant message. Do not call slack_reply unless a later Slack message explicitly moves the conversation back to Slack.
+This follow-up was sent from Web. The conversation has moved to Web, so answer in the dashboard stream with a normal assistant message. Do not call slack_reply unless a later Slack message explicitly moves the conversation back to Slack, or an event-subscription turn explicitly directs rollout/deployment results to the Slack thread where that check was requested. That exception applies only to those results.
 </input-message>
 ```
 

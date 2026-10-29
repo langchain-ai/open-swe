@@ -90,30 +90,20 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
+    if metadata.get("visibility", "public") == "private":
+        return _private_owner_login(cfg, metadata)
     owner = metadata.get("owner_login")
     has_owner = isinstance(owner, str) and bool(owner.strip())
-    shared_user_thread = (
-        metadata.get("visibility", "public") != "private"
-        and metadata.get("owner_type") != "system"
-        and (has_owner or metadata.get("owner_type") == "user")
+    shared_user_thread = metadata.get("owner_type") != "system" and (
+        has_owner or metadata.get("owner_type") == "user"
     )
     if shared_user_thread and (participant := _requested_participant(requested, metadata)):
         return participant
-    if (
-        cfg.background_task_completion
-        and metadata.get("owner_type") != "system"
-        and (
-            metadata.get("visibility") == "private"
-            or metadata.get("owner_type") == "user"
-            or has_owner
-        )
-    ):
+    if shared_user_thread and cfg.background_task_completion:
         raise RuntimeError(
             "Background completion cannot identify the PR requester; pass `author` naming a "
             "thread participant"
         )
-    if metadata.get("visibility", "public") == "private":
-        return _private_owner_login(cfg, metadata)
     if metadata.get("owner_type") == "system":
         return None
     if has_owner:

@@ -1,6 +1,5 @@
 import http from "node:http"
 import { execSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
@@ -45,9 +44,10 @@ const BACKEND_PREFIXES = [
 function matchesBackendPrefix(url?: string): boolean {
   return (
     !!url &&
-    BACKEND_PREFIXES.some(
-      (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
-    )
+    (url.split("?")[0] === "/desktop-ui.json" ||
+      BACKEND_PREFIXES.some(
+        (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
+      ))
   )
 }
 
@@ -154,11 +154,14 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production"
 const devRouteRules = IS_PRODUCTION
   ? {}
   : Object.fromEntries(
-      BACKEND_PREFIXES.map((prefix) => [
-        `${prefix}/**`,
+      [
+        "/desktop-ui.json",
+        ...BACKEND_PREFIXES.map((prefix) => `${prefix}/**`),
+      ].map((route) => [
+        route,
         {
           proxy: {
-            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
+            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${route}`,
             fetchOptions: { redirect: "manual" as const },
           },
         },
@@ -275,15 +278,16 @@ function buildInfoStamp(): Plugin {
   return {
     name: "build-info-stamp",
     apply: "build",
-    closeBundle() {
+    applyToEnvironment: (environment) => environment.name === "client",
+    generateBundle() {
       const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
       const commit = sourceCommit()
       if (commit) info.commit = commit
-      mkdirSync(".output/public", { recursive: true })
-      writeFileSync(
-        ".output/public/open-swe-build-info.json",
-        JSON.stringify(info)
-      )
+      this.emitFile({
+        type: "asset",
+        fileName: "open-swe-build-info.json",
+        source: JSON.stringify(info),
+      })
     },
   }
 }
@@ -317,6 +321,8 @@ const config = defineConfig({
     devtools(),
     nitro({
       routeRules: devRouteRules,
+      // Ships gzip and brotli copies of the build, served to a browser that accepts them.
+      compressPublicAssets: true,
       // Registered explicitly: nitro's convention scan does not reach this
       // directory under the vite plugin. The backend prefixes are proxied by a
       // deployed build only — dev proxies them through devRouteRules, which has
@@ -325,6 +331,10 @@ const config = defineConfig({
       // shadow nitro's assets.
       handlers: IS_PRODUCTION
         ? [
+            {
+              route: "/desktop-ui.json",
+              handler: "./server/backend-proxy.ts",
+            },
             {
               route: "/.well-known/apple-app-site-association",
               handler: "./server/apple-app-site-association.ts",

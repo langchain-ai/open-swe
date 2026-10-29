@@ -1,6 +1,15 @@
+import { AgentsApiError } from "@/features/agents/lib/api"
+
+/** Whether the server started a run for a message, and its reason when it refused. */
+export type RunAcceptance =
+  | { accepted: true }
+  | { accepted: false; refusal?: AgentsApiError }
+
+const NOT_ACCEPTED: RunAcceptance = { accepted: false }
+
 /** Match command acceptance to its submitted human message, not stream completion. */
 export function createRunAcceptanceTracker(fetcher: typeof fetch) {
-  const submissions = new Map<string, { response?: Promise<boolean> }>()
+  const submissions = new Map<string, { response?: Promise<RunAcceptance> }>()
   const trackedFetch = Object.assign((...args: Parameters<typeof fetch>) => {
     const [input, init] = args
     const response = fetcher(...args)
@@ -21,9 +30,15 @@ export function createRunAcceptanceTracker(fetcher: typeof fetch) {
       const submission = submissions.get(message.id)
       if (!submission) continue
       submission.response = response
-        .then(async (result) => {
+        .then(async (result): Promise<RunAcceptance> => {
+          // The SDK reports a refusal without the body's reason, so keep it here.
+          if (result.status >= 400 && result.status < 500)
+            return {
+              accepted: false,
+              refusal: await AgentsApiError.fromResponse(result.clone()),
+            }
           if (!result.ok || result.status === 202 || result.status === 204)
-            return false
+            return NOT_ACCEPTED
           const body: unknown = await result.clone().json()
           const run =
             isCommand && isRecord(body) && body.type === "success"
@@ -32,19 +47,21 @@ export function createRunAcceptanceTracker(fetcher: typeof fetch) {
                 ? undefined
                 : body
           return isRecord(run) && typeof run.run_id === "string"
+            ? { accepted: true }
+            : NOT_ACCEPTED
         })
-        .catch(() => false)
+        .catch(() => NOT_ACCEPTED)
     }
     return response
   }, fetcher)
   return {
     fetch: trackedFetch,
     track(messageId: string) {
-      const submission: { response?: Promise<boolean> } = {}
+      const submission: { response?: Promise<RunAcceptance> } = {}
       submissions.set(messageId, submission)
-      return async () => {
+      return async (): Promise<RunAcceptance> => {
         try {
-          return (await submission.response) ?? false
+          return (await submission.response) ?? NOT_ACCEPTED
         } finally {
           if (submissions.get(messageId) === submission)
             submissions.delete(messageId)

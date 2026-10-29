@@ -1,4 +1,5 @@
-import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
@@ -14,7 +15,7 @@ import { isRenderable } from "./diffEntries"
 import { useEntry, useMarkers } from "./entries"
 import { findingGroupColor, findingTarget, threadTarget } from "./findings"
 import type { PullRequestRef } from "./queries"
-import { isCollapsed, useReviewPage } from "./store"
+import { isCollapsed, isRead, useReviewPage } from "./store"
 import { Tag } from "./Tag"
 import { plural, splitPath } from "./text"
 
@@ -35,8 +36,12 @@ const onHover = "hidden group-focus-within/header:flex group-hover/header:flex"
 export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   const entry = useEntry(id)
   const path = entry?.file.path ?? ""
-  const viewed = useReviewPage((state) => state.viewed.has(path))
-  const collapsed = useReviewPage((state) => isCollapsed(state, path))
+  const viewed = useReviewPage((state) =>
+    entry ? isRead(state.viewed, entry) : false
+  )
+  const collapsed = useReviewPage((state) =>
+    entry ? isCollapsed(state, entry) : false
+  )
   const markViewed = useReviewPage((state) => state.markViewed)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const askInChat = useReviewPage((state) => state.askInChat)
@@ -71,9 +76,9 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         if (
           renderable &&
           event.target instanceof Element &&
-          !event.target.closest("button, a")
+          !event.target.closest("button, a, label")
         )
-          toggleCollapsed(path)
+          toggleCollapsed(entry.readKey)
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
@@ -86,7 +91,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         label={folded ? `Expand ${path}` : `Collapse ${path}`}
         aria-expanded={!folded}
         disabled={!renderable}
-        onClick={() => toggleCollapsed(path)}
+        onClick={() => toggleCollapsed(entry.readKey)}
         tooltipProps={{ disabled: true }}
         iconClassName={cn("transition-transform", folded && "-rotate-90")}
         {...quiet}
@@ -133,27 +138,35 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         )}
       </span>
       {worst && (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
           type="button"
           onClick={() => showFinding(worst.id, findingTarget(worst))}
-          className="flex shrink-0 items-center gap-space-1 rounded-sm px-space-1 text-xxs hover:bg-surface-level-1-hover"
+          className="h-auto shrink-0 gap-space-1 border-0 px-space-1 hover:bg-surface-level-1-hover"
           style={{ color: findingGroupColor[worst.group] }}
           title={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
         >
           <AgentMark className="size-3" />
           {findings.length}
-        </button>
+        </Button>
       )}
       {firstThread && (
-        <button
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={`${plural(threads.length, "open conversation")}; go to the first`}
           type="button"
           onClick={() => jumpTo(threadTarget(firstThread))}
-          className="flex shrink-0 items-center gap-space-1 rounded-sm px-space-1 text-xxs text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          className="h-auto shrink-0 gap-space-1 border-0 px-space-1 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
           title={`${plural(threads.length, "open conversation")}; go to the first`}
         >
           <ChatCircleIcon className="size-3" weight="regular" />
           {threads.length}
-        </button>
+        </Button>
       )}
       {!renderable && (
         <span className="truncate text-secondary">
@@ -185,31 +198,18 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           rel="noreferrer"
         />
       </IconButton>
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={viewed}
-        aria-label={`Viewed ${path}`}
-        onClick={() => markViewed(id)}
-        className={cn(
-          "flex shrink-0 items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-xxs transition-colors",
-          viewed
-            ? "border-transparent bg-brand-subtle text-brand-primary"
-            : "border-default text-secondary hover:text-primary"
-        )}
-      >
-        <span
-          className={cn(
-            "flex size-3 items-center justify-center rounded-xs border",
-            viewed
-              ? "border-brand bg-brand text-brand-on-fill"
-              : "border-strong"
-          )}
-        >
-          {viewed && <CheckIcon weight="bold" className="size-2.5" />}
-        </span>
-        <span className="max-sm:hidden">Viewed</span>
-      </button>
+      <Checkbox
+        checked={viewed}
+        onCheckedChange={() => markViewed(id)}
+        label={
+          <>
+            Viewed<span className="sr-only"> {path}</span>
+          </>
+        }
+        labelClassName="text-xxs text-secondary max-sm:sr-only"
+        containerClassName="shrink-0"
+        size="sm"
+      />
     </div>
   )
 }

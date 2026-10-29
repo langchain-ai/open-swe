@@ -5,12 +5,9 @@ object (``common.X``) so tests that monkeypatch them keep working.
 """
 
 import asyncio
-import posixpath
 import re
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
-from urllib.parse import urlparse
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -45,6 +42,11 @@ from openswe.slack.failures import report_slack_failure
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
+from openswe.slack.staged_files import (
+    queue_slack_files,
+    slack_file_entries,
+    slack_files_section,
+)
 from openswe.slack.thinking import (
     clear_slack_thinking_status_if_idle,
     restore_slack_thinking_status,
@@ -200,132 +202,6 @@ async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[set[st
 
 
 _SLACK_CONTEXT_SENDER_ID = "system:slack-context"
-
-_SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
-_MAX_SLACK_FILE_ATTACHMENTS = 10
-
-
-@dataclass(frozen=True)
-class SlackFileEntry:
-    """A non-image file Slack attached to a message."""
-
-    name: str
-    url: str
-
-
-@dataclass(frozen=True)
-class StagedSlackFile:
-    """A Slack file staged in the thread's sandbox."""
-
-    filename: str
-    sandbox_path: str
-
-
-def _slack_file_entries(messages: list[dict[str, Any]]) -> list[SlackFileEntry]:
-    """Non-image files attached to the given messages, in first-seen order."""
-    entries: list[SlackFileEntry] = []
-    seen: set[str] = set()
-    for message in messages:
-        files = message.get("files")
-        if not isinstance(files, list):
-            continue
-        for file_info in files:
-            if not isinstance(file_info, dict) or file_info.get("url_private") in (None, ""):
-                continue
-            mimetype = file_info.get("mimetype")
-            if isinstance(mimetype, str) and mimetype.startswith("image/"):
-                continue
-            url = str(file_info["url_private"])
-            if url in seen:
-                continue
-            seen.add(url)
-            entries.append(
-                SlackFileEntry(
-                    name=file_info.get("name") if isinstance(file_info.get("name"), str) else "",
-                    url=url,
-                )
-            )
-            if len(entries) >= _MAX_SLACK_FILE_ATTACHMENTS:
-                return entries
-    return entries
-
-
-def _sanitize_slack_filename(name: str, url: str) -> str:
-    filename = name.strip()
-    if not filename or "/" in filename or "\x00" in filename:
-        parsed = urlparse(url).path
-        filename = posixpath.basename(parsed) if parsed else ""
-    filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename).strip("._") or "slack-file"
-    return filename[:120]
-
-
-async def _download_slack_files_to_sandbox(
-    entries: list[SlackFileEntry], thread_id: str, *, workspace_slug: str | None = None
-) -> list[StagedSlackFile]:
-    """Download Slack files and stage them in the thread's sandbox.
-
-    Best-effort: a missing sandbox or a failed download only skips that file.
-    """
-    if not entries:
-        return []
-    try:
-        from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
-
-        backend = await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace_slug)
-    except Exception:
-        common.logger.warning(
-            "Could not reach sandbox for thread %s; skipping Slack file attachments",
-            thread_id,
-            exc_info=True,
-        )
-        return []
-    staged: list[StagedSlackFile] = []
-    used_names: set[str] = set()
-    for entry in entries:
-        try:
-            content = await slack_utils.download_slack_file(entry.url)
-        except slack_utils.SlackFileDownloadError as error:
-            common.logger.info("Slack file download skipped", extra={"slack_error": error.code})
-            continue
-        filename = _sanitize_slack_filename(entry.name, entry.url)
-        base = filename
-        suffix = 1
-        while filename in used_names:
-            filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
-            suffix += 1
-        used_names.add(filename)
-        sandbox_path = posixpath.join(_SLACK_FILE_DIR, filename)
-        try:
-            responses = await backend.aupload_files([(sandbox_path, content)])
-        finally:
-            del content
-        if not responses:
-            continue
-        response = responses[0]
-        error = (
-            response.get("error")
-            if isinstance(response, dict)
-            else getattr(response, "error", None)
-        )
-        if error:
-            common.logger.info(
-                "Slack file staging failed", extra={"slack_error": str(error), "file": filename}
-            )
-            continue
-        staged.append(StagedSlackFile(filename, sandbox_path))
-    return staged
-
-
-def _slack_files_section(staged: list[StagedSlackFile]) -> str:
-    lines = [
-        "## Slack File Attachments",
-        "These files from Slack were staged into this thread's sandbox:",
-        *[
-            f"- `{file.sandbox_path}` (originally uploaded to Slack as `{file.filename}`)"
-            for file in staged
-        ],
-    ]
-    return "\n".join(lines)
 
 
 async def _slack_accounts_by_user_id(
@@ -683,7 +559,9 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo:
+async def workspace_scoped_default_repo(
+    candidate: Repo | None, workspace: str | None, login: str | None = None
+) -> Repo | None:
     """Keep a defaulted repository unless another workspace prefers it.
 
     Nobody named this repository, so it did not pick the workspace, and the
@@ -691,7 +569,10 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     its own default repository takes over when it has one. Every workspace can
     use every repository, so the candidate stays otherwise.
     """
-    if not workspace:
+    personal = await common.get_profile_default_repo(login, workspace, fallback_global=False)
+    if personal:
+        return Repo.model_validate(personal)
+    if not workspace or candidate is None:
         return candidate
     preferred_by = await workspace_for_repo(candidate.owner, candidate.name)
     if preferred_by is None or preferred_by == workspace:
@@ -1185,8 +1066,25 @@ async def _process_slack_mention_impl(
     if (code_channel or concierge_mode) and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
-    if repo is not None and not resolution.explicit:
-        repo = await workspace_scoped_default_repo(repo, thread_workspace)
+    review_card = (
+        await HumanReviewRequest.card_in_thread(channel_id, thread_ts)
+        if event_ts != thread_ts
+        and context_thread_ts == thread_ts
+        and any(
+            slack_utils.is_own_slack_message(message, bot_user_id)
+            and isinstance(message.get("text"), str)
+            and message["text"].startswith(
+                ("Review requested for ", "Expedited review requested for ")
+            )
+            for message in thread_messages
+        )
+        else None
+    )
+    if review_card is not None and not resolution.explicit:
+        reviewed = review_card.pull_request
+        repo = Repo.model_validate({"owner": reviewed.owner, "name": reviewed.repo})
+    elif not resolution.explicit:
+        repo = await workspace_scoped_default_repo(repo, thread_workspace, mapped_login)
     repo_dict = repo.model_dump() if repo else None
 
     channel_identity = await _slack_channel_identity(
@@ -1230,18 +1128,8 @@ async def _process_slack_mention_impl(
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
             request.turn_context,
-            prompt("runs/slack-review-request")
-            if event_ts != thread_ts
-            and context_thread_ts == thread_ts
-            and any(
-                slack_utils.is_own_slack_message(message, bot_user_id)
-                and isinstance(message.get("text"), str)
-                and message["text"].startswith(
-                    ("Review requested for ", "Expedited review requested for ")
-                )
-                for message in thread_messages
-            )
-            and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
+            prompt("runs/slack-review-request", pull_request=review_card.pull_request)
+            if review_card is not None
             else "",
             resolved_links_section,
         )
@@ -1349,13 +1237,9 @@ async def _process_slack_mention_impl(
         return False
 
     if persisted:
-        staged_files = await _download_slack_files_to_sandbox(
-            _slack_file_entries(source_messages),
-            thread_id,
-            workspace_slug=thread_workspace,
-        )
+        staged_files = await queue_slack_files(thread_id, slack_file_entries(source_messages))
         if staged_files:
-            files_section = _slack_files_section(staged_files)
+            files_section = slack_files_section(staged_files)
             turn_context = f"{turn_context}\n\n{files_section}" if turn_context else files_section
 
     # Anything said in a DM is said to Open SWE, and the person expects the next

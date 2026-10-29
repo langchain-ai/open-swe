@@ -1,13 +1,25 @@
+import asyncio
 import json
+import shlex
+import time
+from pathlib import Path
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
+from runtime_api.operations import ShellVerdict
 
+from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.tokens import RemoteRun
 from openswe.middleware import workflow_push_guard as guard
+from openswe.sandboxes import connect, state
 from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 class _Response:
@@ -27,11 +39,13 @@ class _Backend:
         inherited_from_main: bool = False,
         workflows_changed_by_merge: bool = True,
         inspectable: bool = True,
+        pending_workflows: bool = False,
     ) -> None:
         self.workflow_files = workflow_files
         self.inherited_from_main = inherited_from_main
         self.workflows_changed_by_merge = workflows_changed_by_merge
         self.inspectable = inspectable
+        self.pending_workflows = pending_workflows
         self.commands: list[str] = []
         self.head = "a" * 40
 
@@ -39,11 +53,15 @@ class _Backend:
         self.commands.append(command)
         if not self.inspectable:
             return _Response("fatal: not a git repository", 128)
+        if "status --porcelain" in command:
+            return _Response(" M .github/workflows/x.yml" if self.pending_workflows else "")
         if "rev-parse --show-toplevel" in command:
             return _Response("/repo\n")
         if "rev-parse --verify refs/remotes/origin/feature" in command:
             return _Response("", 1)
         if "symbolic-ref --short refs/remotes/origin/HEAD" in command:
+            return _Response("origin/main\n")
+        if "rev-parse --symbolic-full-name" in command:
             return _Response("origin/main\n")
         if "rev-list --parents -n 1" in command:
             if self.inherited_from_main:
@@ -69,7 +87,10 @@ class _Backend:
             return _Response("git@github.com:langchain-ai/open-swe.git\n")
         if "rev-parse --abbrev-ref HEAD" in command:
             return _Response("feature\n")
-        if any(f"rev-parse {ref}" in command for ref in ("HEAD", "feature", "refs/heads/feature")):
+        if any(
+            f"rev-parse {ref}" in command
+            for ref in ("HEAD", "feature", "refs/heads/feature", "evil")
+        ):
             return _Response(f"{self.head}\n")
         return _Response("")
 
@@ -128,7 +149,6 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
 @pytest.mark.parametrize(
     "options",
     [
-        "--force",
         "--force-with-lease=",
         "--force-with-lease=../feature",
         "--force-with-lease=feature:not-a-sha",
@@ -174,6 +194,96 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     )
     assert lease_change is not None
     assert lease_change.fingerprint != change.fingerprint
+    backend.head = "b" * 40
+    same_diff = await guard._workflow_change_for_push(
+        backend, guard.ParsedGitPush("/repo", "origin", "feature", "feature")
+    )
+    assert same_diff is not None
+    assert same_diff.fingerprint == change.fingerprint
+    assert backend.head in same_diff.fixed_command
+    backend.workflow_files = ".github/workflows/other.yml"
+    different_diff = await guard._workflow_change_for_push(
+        backend, guard.ParsedGitPush("/repo", "origin", "feature", "feature")
+    )
+    assert different_diff is not None
+    assert different_diff.fingerprint != change.fingerprint
+
+
+class _GitBackend:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> _Response:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            cwd=self.root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return _Response(output.decode(), process.returncode or 0)
+
+    async def git(self, args: str) -> str:
+        result = await self.aexecute(f"git {args}")
+        assert result.exit_code == 0, result.output
+        return result.output.strip()
+
+
+@pytest.mark.parametrize("upstream", [False, True])
+async def test_release_branch_push_excludes_inherited_workflows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: bool
+) -> None:
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b main")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    workflow = tmp_path / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("main workflow\n")
+    await backend.git("add .")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
+    await backend.git("commit -qm main")
+    await backend.git("update-ref refs/remotes/origin/main HEAD")
+    await backend.git("checkout -b v15-stable")
+    workflow.write_text("release workflow\n")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-02T00:00:00+00:00")
+    await backend.git("commit -qam release")
+    release_sha = await backend.git("rev-parse HEAD")
+    await backend.git("update-ref refs/remotes/origin/v15-stable HEAD")
+    await backend.git("checkout -b feature")
+    (tmp_path / "uv.lock").write_text("dependency update\n")
+    await backend.git("add uv.lock")
+    await backend.git("commit -qm dependency")
+    if upstream:
+        await backend.git("config remote.origin.url https://github.com/example/repo.git")
+        await backend.git("config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'")
+        await backend.git("branch --set-upstream-to=origin/v15-stable")
+    monkeypatch.setattr(guard, "_backend", AsyncMock(return_value=backend))
+    request = _Request(f"git -C {shlex.quote(str(tmp_path))} push origin feature")
+    middleware = guard.WorkflowPushGuardMiddleware()
+    assert await middleware._change_for_request(request) is None
+
+    workflow.write_text("new workflow\n")
+    await backend.git("commit -qam workflow")
+    change = await middleware._change_for_request(request)
+    assert change is not None
+    assert change.base_sha == release_sha
+    assert "-release workflow" in change.diff_preview
+    assert "+new workflow" in change.diff_preview
+
+    if not upstream:
+        await backend.git("update-ref refs/remotes/origin/other-feature HEAD")
+        assert await middleware._change_for_request(request) is None
+
+
+async def test_new_branch_without_shared_remote_history_fails_closed(tmp_path: Path) -> None:
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b feature")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    await backend.git("commit --allow-empty -qm initial")
+    head = await backend.git("rev-parse HEAD")
+    assert await guard._new_branch_base(backend, str(tmp_path), head) == ""
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
@@ -247,15 +357,13 @@ async def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
 async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     backend = _Backend()
 
-    assert (
+    with pytest.raises(guard.WorkflowPushInspectionError):
         await guard._workflow_change_for_push(
             backend,
             guard.ParsedGitPush(
                 repo_dir="/repo", remote="origin", local_ref="evil", remote_ref="feature"
             ),
         )
-        is None
-    )
 
 
 @pytest.mark.parametrize("tool_name", ["execute", "background_execute"])
@@ -269,6 +377,9 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
         f"git -C /repo push --force-with-lease=refs/heads/feature:{'b' * 40} origin feature",
         "git -C /repo push --force-with-lease origin HEAD:refs/heads/feature",
         "git -C /repo push --force-with-lease origin refs/heads/feature:refs/heads/feature",
+        "git -C /repo push --force-with-lease --force-if-includes origin feature",
+        "git -C /repo push -f origin feature",
+        "git -C /repo push origin feature --force",
     ],
 )
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
@@ -351,6 +462,9 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         "--force-with-lease=feature",
         "--force-with-lease=refs/heads/feature:",
         f"--force-with-lease=refs/heads/feature:{'b' * 40}",
+        "--force-with-lease --force-if-includes",
+        "-f",
+        "--force",
     ],
 )
 @pytest.mark.parametrize(
@@ -382,17 +496,21 @@ async def test_approved_workflow_push_runs_fixed_command(
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
-    options = f"--set-upstream {lease} ".replace("  ", " ")
+    options = "--set-upstream "
+    if lease:
+        # The fake remote has no ``feature`` branch, so a forced push is leased to its absence.
+        options += "--force-with-lease=refs/heads/feature: "
+        if "--force-if-includes" in lease:
+            options += "--force-if-includes "
     assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
 
 
-@pytest.mark.parametrize(
-    "command",
-    ["git -C /repo push origin feature", "git -C /repo push --force-with-lease origin feature"],
-)
+@pytest.mark.parametrize("option", ["", "--force-with-lease", "--force", "--verbose"])
+@pytest.mark.parametrize("refspec", ["feature", "evil:feature", "feature:other"])
 async def test_non_workflow_push_runs_without_approval(
-    monkeypatch: pytest.MonkeyPatch, command: str
+    monkeypatch: pytest.MonkeyPatch, option: str, refspec: str
 ) -> None:
+    command = f"git -C /repo push {option} origin {refspec}"
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend(workflow_files="")), thread_id="thread-1"
     )
@@ -424,7 +542,7 @@ async def test_non_workflow_push_runs_without_approval(
 )
 async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bool) -> None:
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
-        cast(SandboxBackendProtocol, _Backend(workflow_files="", inspectable=inspectable)),
+        cast(SandboxBackendProtocol, _Backend(inspectable=inspectable)),
         thread_id="thread-1",
     )
 
@@ -447,10 +565,11 @@ async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bo
         "git -C /repo add -A && git -C /repo commit -qm 'Add CI' && "
         "git -C /repo push -u origin feature",
         "git commit -qam 'Add CI'&&git push",
+        "git commit -qam 'Add CI'&&git push --force-with-lease origin feature",
         "(cd /repo && git push)",
         "cd /repo; git push",
     ],
-    ids=["spaced", "unspaced", "subshell", "semicolon"],
+    ids=["spaced", "unspaced", "force-push", "subshell", "semicolon"],
 )
 @pytest.mark.parametrize(
     ("backend", "refused"),
@@ -488,3 +607,154 @@ async def test_chained_push_runs_only_without_workflow_changes(
     if refused:
         assert result.status == "error"
         assert json.loads(str(result.content))["error_type"] == "WorkflowPushMustStandAlone"
+
+
+async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    backend = LocalShellBackend(root_dir=str(repo), virtual_mode=False, inherit_env=True)
+    setup = await backend.aexecute("""
+        set -e
+        git init -q -b main
+        git config user.name Test
+        git config user.email test@example.com
+        mkdir -p .github/workflows
+        printf 'name: old\n' > .github/workflows/ci.yml
+        git add .github/workflows/ci.yml
+        git commit -qm base
+        git init -q --bare -b main ../origin.git
+        git remote add origin ../origin.git
+        git checkout -qb feature
+        git push -qu origin feature
+        git clone -q -b feature ../origin.git ../other
+        git -C ../other -c user.name=Other -c user.email=other@example.com \
+            commit -q --allow-empty -m 'unseen remote commit'
+        git -C ../other push -q origin feature
+        printf 'name: new\n' > .github/workflows/ci.yml
+        git commit -qam workflow
+    """)
+    assert setup.exit_code == 0, setup.output
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
+
+    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        command = request.tool_call["args"]["command"]
+        assert isinstance(command, str)
+        pushed = await backend.aexecute(command)
+        return ToolMessage(content=str(pushed.exit_code), tool_call_id="call-1")
+
+    stale_tip = (await backend.aexecute("git rev-parse origin/feature")).output.strip()
+    remote_tip = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert stale_tip not in remote_tip
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(
+            ToolCallRequest,
+            _Request(f"git -C {shlex.quote(str(repo))} push --force origin feature"),
+        ),
+        handler,
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.content != "0"
+    after = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert after == remote_tip
+
+
+@pytest.mark.parametrize(
+    ("chained", "connection", "inspectable", "approved", "lease", "error"),
+    [
+        (True, "missing", True, False, "", "WorkflowPushMustStandAlone"),
+        (True, "registered", True, False, "", "WorkflowPushMustStandAlone"),
+        (True, "reconnect", True, False, "", "WorkflowPushMustStandAlone"),
+        (False, "reconnect", True, False, "", "WorkflowPushApprovalRequired"),
+        (False, "registered", True, True, "", None),
+        (False, "reconnect", True, True, "", None),
+        (False, "registered", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
+        (False, "reconnect", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
+        (False, "missing", True, False, "--verbose ", "WorkflowPushUnsupportedFlags"),
+        (False, "missing", True, False, "", "WorkflowPushInspectionError"),
+        (False, "missing", True, False, "--force-with-lease ", "WorkflowPushInspectionError"),
+        (False, "registered", False, False, "", "WorkflowPushInspectionError"),
+        (False, "registered", False, False, "--force-with-lease ", "WorkflowPushInspectionError"),
+    ],
+)
+async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    chained: bool,
+    connection: str,
+    inspectable: bool,
+    approved: bool,
+    lease: str,
+    error: str | None,
+) -> None:
+    backend = _Backend(
+        inspectable=inspectable,
+        pending_workflows=chained,
+        workflow_files="" if chained else ".github/workflows/ci.yml",
+    )
+    if connection == "registered":
+        state.set_sandbox_backend("thread-1", cast(SandboxBackendProtocol, backend))
+
+    async def sandbox_id(thread_id: str) -> str:
+        assert thread_id == "thread-1"
+        if connection == "missing":
+            raise RuntimeError("Sandbox metadata unavailable")
+        return backend.id
+
+    async def connect_box(
+        sandbox_id: str, *, thread_id: str | None = None
+    ) -> SandboxBackendProtocol:
+        assert sandbox_id == backend.id
+        assert thread_id == "thread-1"
+        return cast(SandboxBackendProtocol, backend)
+
+    monkeypatch.setattr(state, "get_sandbox_id_from_metadata", sandbox_id)
+    monkeypatch.setattr(connect, "connect_sandbox", connect_box)
+    monkeypatch.setattr(guard, "workflow_push_approved", AsyncMock(return_value=approved))
+    monkeypatch.setattr(
+        guard, "ensure_workflow_push_pending", AsyncMock(return_value=({"status": "pending"}, True))
+    )
+    monkeypatch.setattr(guard, "_post_slack_approval_if_needed", AsyncMock())
+
+    command = f"git -C /repo push {lease}origin feature"
+    if chained:
+        command = (
+            "git -C /repo add .github/workflows/x.yml && git -C /repo commit -m m && " + command
+        )
+    verdict = await _check_shell(command)
+
+    assert verdict.allowed is (error is None)
+    if error is None:
+        assert verdict.command == f"git -C /repo push origin {backend.head}:refs/heads/feature"
+    else:
+        assert json.loads(str(verdict.refusal))["error_type"] == error
+    if connection != "missing":
+        assert backend.commands
+        assert all(
+            " push " not in command and " commit " not in command for command in backend.commands
+        )
+
+
+async def _check_shell(command: str) -> ShellVerdict:
+    class Parts(RunParts):
+        shell_guards = (guard.WorkflowPushGuardMiddleware(),)
+
+    async def never_plan(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("Shell checks must not plan a run")
+
+    run = RemoteRun(
+        thread_id="thread-1",
+        assistant_id="agent",
+        configurable={},
+        expires_at=int(time.time()) + 3600,
+    ).granting()
+    verdict = await RemoteGraph("agent", never_plan, Parts()).api(
+        run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
+    )
+    return ShellVerdict.model_validate(verdict)

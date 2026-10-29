@@ -43,6 +43,7 @@ from openswe.human_review.requests import (
     RequestState,
 )
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
 from openswe.slack.cards import origin_footer, repost_thread_card
 from openswe.slack.channels import SlackChannel
@@ -58,6 +59,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
+from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -102,7 +104,15 @@ class ReviewCard:
         pr = self.request.pull_request
         try:
             async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                return await ChangedFile.of_pull(pull)
+                standard = self.request.kind == "standard"
+                files = await ChangedFile.of_pull(
+                    pull,
+                    max_pages=30 if standard else 1,
+                    count=pr.changed_files if standard else None,
+                )
+                if standard and files is not None and pr.changed_files != len(files):
+                    return None
+                return files
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read the changed files",
@@ -290,7 +300,7 @@ class ReviewCard:
         author = await request.author_mention()
         states = await self._review_states() if outcome in (None, "merged") else {}
         if outcome is not None:
-            return standard_card.closed_card(
+            return await standard_card.closed_card(
                 request, title=pr.title, author=author, outcome=outcome, review_states=states
             )
         from openswe.human_review.standard import merge_wait
@@ -302,19 +312,25 @@ class ReviewCard:
                 request.created_at,
                 states,
                 datetime.now(UTC),
+                auto_merge=request.auto_merge,
             )
             is None
         ):
-            return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome="approved", review_states=states
+            return await standard_card.closed_card(
+                request,
+                title=pr.title,
+                author=author,
+                outcome="approved",
+                review_states=states,
             )
         requester = request.requested_by
-        return standard_card.open_card(
+        return await standard_card.open_card(
             request,
             title=pr.title,
             author=author,
             requester=standard_card.mention(requester) if requester is not None else None,
             review_states=states,
+            files=await self._files(),
         )
 
     async def render(
@@ -322,8 +338,9 @@ class ReviewCard:
     ) -> tuple[str, list[Block]]:
         """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
         text, blocks = await self._warn_target(await self._render_card(outcome, copy=copy))
-        if copy or dm or (self.request.kind == "standard" and not self.request.slack_thread_ts):
-            blocks.extend(await origin_footer(self.request.thread_id))
+        if copy or dm or self.request.kind == "standard":
+            source = RunConfig.parse(self.request.run_config).slack_thread
+            blocks.extend(await origin_footer(self.request.thread_id, fallback=source))
         return text, blocks
 
     async def _render_card(self, outcome: str | None, *, copy: bool) -> tuple[str, list[Block]]:
@@ -734,16 +751,17 @@ class ReviewCard:
                     row.slack_message_ts = ""
 
     async def _react(self, emoji: str, fallback: str | None = None) -> None:
-        """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+        """React to a separate thread root, or a watched post; never to our own status card."""
         if skip_on_preview("pr_reaction"):
             return
         request = self.request
-        location = request.slack_location or (
-            (request.slack_channel_id, request.slack_message_ts)
-            if request.slack_channel_id and request.slack_message_ts
-            else None
-        )
-        if location is None or await add_slack_reaction(location[0], location[1], emoji):
+        if request.kind == "posted":
+            await self.update_post_reactions()
+            return
+        location = request.slack_location
+        if location is None or location == (request.slack_channel_id, request.slack_message_ts):
+            return
+        if await add_slack_reaction(location[0], location[1], emoji):
             return
         if fallback is not None:
             await add_slack_reaction(location[0], location[1], fallback)
@@ -755,26 +773,87 @@ class ReviewCard:
         request = self.request
         if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
             return
-        async with HumanReviewRequest.locked(request.id) as (_, row):
+        await self.update_post_reactions(snapshot)
+
+    async def update_post_reactions(self, snapshot: PullRequestSnapshot | None = None) -> None:
+        """Positive reactions need every linked PR; any active PR can supply a blocker."""
+        if skip_on_preview("update_post_reactions"):
+            return
+        request = self.request
+        async with HumanReviewRequest.locked_post(
+            request.slack_channel_id, request.slack_message_ts
+        ) as rows:
+            row = next((row for row in rows if row.id == request.id), None)
             if row is None:
                 return
-            failing = conflicted = False
-            if (
-                row.state == "open"
-                and snapshot is not None
-                and snapshot.state == "open"
-                and not snapshot.merged
-            ):
-                author = snapshot.author or row.pull_request.author
-                preferences = await User.preferences_for_login(author)
+            if snapshot is not None:
+                preferences = await User.preferences_for_login(
+                    snapshot.author or row.pull_request.author
+                )
                 failing = preferences.pr_failure_reactions and snapshot.check_state in {
                     "failure",
                     "blocked",
                 }
-                conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
-            for emoji, blocked in (("x", failing), ("construction", conflicted)):
-                react = add_slack_reaction if blocked else remove_slack_reaction
-                await react(row.slack_channel_id, row.slack_message_ts, emoji)
+                reason = ", ".join(snapshot.failing_checks) or "a check finished without success"
+                row.run_config = {
+                    **row.run_config,
+                    "posted_failure": reason if failing else "",
+                    "posted_draft": snapshot.draft,
+                    "posted_conflicted": snapshot.mergeable is False
+                    or snapshot.mergeable_state == "dirty",
+                }
+            active = [row for row in rows if row.state == "open"]
+            failures = sorted(
+                f"{row.pull_request.url}: {row.run_config['posted_failure']}"
+                for row in active
+                if row.run_config.get("posted_failure")
+            )
+            expected = row.run_config.get("posted_pr_urls")
+            complete = not isinstance(expected, list) or set(expected) == {
+                row.pull_request.url.lower() for row in rows
+            }
+            reactions = {
+                "warning": bool(failures),
+                "construction": any(row.run_config.get("posted_conflicted") for row in active),
+                "pencil2": any(row.run_config.get("posted_draft") for row in active),
+                "white_check_mark": complete
+                and all(
+                    row.approved_at is not None and row.state in {"open", "merged"} for row in rows
+                ),
+            }
+            if complete and all(row.state == "merged" for row in rows):
+                reactions["merged"] = True
+            await remove_slack_reaction(request.slack_channel_id, request.slack_message_ts, "x")
+            failure_reacted = False
+            for emoji, enabled in reactions.items():
+                react = add_slack_reaction if enabled else remove_slack_reaction
+                success = await react(request.slack_channel_id, request.slack_message_ts, emoji)
+                if emoji == "warning":
+                    failure_reacted = enabled and success
+                if emoji == "merged" and enabled and not success:
+                    await add_slack_reaction(
+                        request.slack_channel_id,
+                        request.slack_message_ts,
+                        "twisted_rightwards_arrows",
+                    )
+            notice = "\n".join(failures)
+            first = rows[0]
+            if notice and not failure_reacted:
+                return
+            if notice and first.run_config.get("posted_failure_notice") != notice:
+                requester = first.requested_by
+                if requester is not None and requester.slack_user_id:
+                    try:
+                        await wake_thread_owner(
+                            request.slack_channel_id,
+                            request.slack_message_ts,
+                            requester.slack_user_id,
+                            prompt("slack/pr-failure-reaction", failures=notice),
+                        )
+                    except Exception:
+                        logger.warning("Could not explain PR failure reaction", exc_info=True)
+                        return
+            first.run_config = {**first.run_config, "posted_failure_notice": notice}
 
     async def mark_merged(self) -> None:
         updated = await self.retire("merged", "merged")
@@ -844,8 +923,9 @@ class ReviewPicks:
             message = participant.pick_message
             if message is None:
                 continue
-            status = "Review submitted on GitHub. This assignment is no longer active."
-            if not await message.show(status):
+            pr = self.request.pull_request
+            status = f"Review submitted for <{pr.url}|{pr.label}>."
+            if not await message.replace(status):
                 continue
             if participant.user.slack_user_id:
                 await note_for_concierge(
@@ -853,7 +933,7 @@ class ReviewPicks:
                     message.channel_id,
                     prompt(
                         "slack/concierge-dm-edited",
-                        text=message.text,
+                        text=status,
                         status=status,
                     ),
                 )

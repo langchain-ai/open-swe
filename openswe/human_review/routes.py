@@ -160,7 +160,7 @@ async def api_human_review_availability(
         sha = await or_none(pull.head_sha())
         if sha is None:
             raise HTTPException(404, "Pull request is unavailable")
-        settings = await RepoSettings.fetch(pull.repo, ref=sha)
+        settings = await RepoSettings.cached(owner, repo)
         channel = await settings.channel_for_pr(pull)
         active = await HumanReviewRequest.active_for(owner, repo, number)
         blockers = None if active is not None else await review_blockers(pull)

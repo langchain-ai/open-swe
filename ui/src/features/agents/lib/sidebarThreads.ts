@@ -184,6 +184,32 @@ export function threadFamily(thread: AgentThread): Array<AgentThread> {
   return [thread, ...(thread.taskWorkers ?? [])]
 }
 
+/**
+ * One sidebar row for a task family seen through snapshots of differing age:
+ * `row` (usually the listed one, which honors the sidebar's filters) and
+ * `details` of the coordinator or an open worker, which poll on their own
+ * schedules. Each member keeps its newest copy, and a worker the row has not
+ * caught up with yet joins it unless it is archived.
+ */
+export function mergeTaskFamily(
+  row: AgentThread,
+  details: ReadonlyArray<AgentThread>
+): AgentThread {
+  const members = new Map(
+    threadFamily(row).map((member) => [member.id, member])
+  )
+  for (const member of details.flatMap(threadFamily)) {
+    const known = members.get(member.id)
+    if (known ? member.updatedAt >= known.updatedAt : !member.resolved) {
+      members.set(member.id, member)
+    }
+  }
+  const [root = row, ...workers] = members.values()
+  return root.taskWorkers || workers.length
+    ? { ...root, taskWorkers: workers }
+    : root
+}
+
 export function withoutNestedWorkers(
   threads: Array<AgentThread>
 ): Array<AgentThread> {
@@ -206,40 +232,17 @@ export function sidebarItemContains(
 }
 
 export function sidebarRefreshInterval(
-  threads: ReadonlyArray<AgentThread> = [],
-  hierarchy = true
+  threads: ReadonlyArray<AgentThread> = []
 ): number | false {
   if (
     threads.some((thread) =>
-      (hierarchy ? threadFamily(thread) : [thread]).some(
-        (member) => member.status === "running"
-      )
+      threadFamily(thread).some((member) => member.status === "running")
     )
   )
     return 2000
-  return hierarchy &&
-    threads.some((thread) => thread.taskMembership?.role === "coordinator")
+  return threads.some((thread) => thread.taskMembership?.role === "coordinator")
     ? 30_000
     : false
-}
-
-export function sidebarThreadForMode(
-  thread: AgentThread,
-  hierarchy: boolean
-): AgentThread {
-  if (
-    hierarchy ||
-    (!thread.taskWorkers && thread.taskMembership?.role !== "coordinator")
-  )
-    return thread
-  return {
-    ...thread,
-    taskWorkers: undefined,
-    taskMembership:
-      thread.taskMembership?.role === "worker"
-        ? thread.taskMembership
-        : undefined,
-  }
 }
 
 export function pinnedThreadShortcuts(

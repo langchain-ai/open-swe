@@ -159,6 +159,33 @@ async def test_ending_one_of_two_open_turns_keeps_the_thread_running(registry_db
     assert snapshot.thread.status == "idle"
 
 
+async def test_a_request_no_run_took_does_not_keep_the_thread_running(registry_db: None) -> None:
+    """A start that died after recording its turn, then a later turn that ran."""
+    thread_id = str(uuid7())
+    stranded_turn, later_turn = uuid7(), uuid7()
+    await _create(thread_id)
+    await _request_turn(thread_id, stranded_turn)
+    await _request_turn(thread_id, later_turn)
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{later_turn}:started",
+                event=TurnStarted(turn_id=later_turn, run_id="run-1"),
+                actor_kind="agent",
+                run_id="run-1",
+                turn_id=later_turn,
+            )
+        ],
+    )
+
+    await _end_turn(thread_id, later_turn, tag="completed")
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    assert snapshot.thread.status == "idle"
+
+
 async def test_a_late_completion_of_an_interrupted_turn_leaves_the_thread_alone(
     registry_db: None,
 ) -> None:

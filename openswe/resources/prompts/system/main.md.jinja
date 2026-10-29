@@ -1,8 +1,4 @@
-{{ working_environment_section }}
-
 {{ dashboard_context_section }}
-
-{{ source_guidance_section }}
 
 {% include "system/self-awareness.md" +%}
 
@@ -12,10 +8,6 @@
 {% endif %}
 {% if default_repo %}
 When a repository is not explicitly mentioned, use `{{ default_repo }}`.
-
-{% endif %}
-{% if repository_scope_section %}
-{{ repository_scope_section }}
 
 {% endif %}
 {% include "system/repository-setup.md.jinja" +%}
@@ -38,10 +30,6 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {{ repo_instructions_section }}
 
 {% endif %}
-{% if recent_thread_context_section %}
-{{ recent_thread_context_section }}
-
-{% endif %}
 {% if workspace_section %}
 {{ workspace_section }}
 
@@ -57,8 +45,3 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% endif %}
 
 {% include "system/shared-base.md" +%}
-
-{% if sandbox_file_downloads %}
-
-{% include "system/sandbox-file-downloads.md" +%}
-{% endif %}

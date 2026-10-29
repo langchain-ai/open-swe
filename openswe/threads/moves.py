@@ -99,21 +99,24 @@ class SandboxMove:
         """Point the thread at its new sandbox and carry its checkout there, or not at all.
 
         A carry that fails puts the thread back where it was, so it is never
-        half-moved: its checkout stays in the sandbox it was asked to leave.
+        half-moved: its checkout stays in the sandbox it was asked to leave. A move to
+        the cloud has no sandbox to carry it to yet: MDA creates the thread's box when
+        its next run starts, and the checkout comes over when that run connects to it.
         """
         from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
 
         await self._write(self.update)
-        try:
-            await ensure_sandbox_for_thread(self.thread_id, workspace_slug=self._workspace)
-        except BaseException:
-            logger.warning(
-                "Could not carry a thread's checkout over; moving it back",
-                extra={"move_thread": self.thread_id},
-                exc_info=True,
-            )
-            await self._write(self._before)
-            raise
+        if not self.to_cloud:
+            try:
+                await ensure_sandbox_for_thread(self.thread_id, workspace_slug=self._workspace)
+            except BaseException:
+                logger.warning(
+                    "Could not carry a thread's checkout over; moving it back",
+                    extra={"move_thread": self.thread_id},
+                    exc_info=True,
+                )
+                await self._write(self._before)
+                raise
         logger.info(
             "Moved a thread",
             extra={"move_thread": self.thread_id, "move_to_cloud": self.to_cloud},
@@ -129,7 +132,12 @@ class SandboxMove:
         if not (self._transcribed and postgres.configured()):
             return
         destination = "the cloud" if self.to_cloud else f"{self._login}'s Mac"
-        if self.carried:
+        if self.carried and self.to_cloud:
+            body = (
+                "Moved this thread to the cloud. Its branch, unpushed commits and "
+                "uncommitted changes come with it when its next run starts."
+            )
+        elif self.carried:
             body = (
                 f"Moved this thread to {destination}. Its branch, unpushed commits and "
                 "uncommitted changes came with it."

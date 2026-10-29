@@ -59,10 +59,18 @@ class Job(BaseModel):
     created_at: datetime
     # The claim a worker's run holds this job under; ``None`` while it waits.
     claim_token: uuid.UUID | None = None
+    # When this claim took the job over from one whose lease ran out: its worker
+    # died or stalled mid-run.
+    lapsed_lease: datetime | None = None
 
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
         return cls.model_validate(dict(row))
+
+    @property
+    def underway(self) -> bool:
+        """Whether a worker holds this job or it is due for one now."""
+        return self.claim_token is not None or self.due_at <= datetime.now(UTC)
 
     def next_fire_after(self, moment: datetime) -> datetime:
         if self.cron is None:
@@ -109,6 +117,14 @@ class Job(BaseModel):
                 },
             )
 
+    async def stop(self) -> None:
+        """Delete this job for good, unless it was queued again while this run held it."""
+        async with transaction() as conn:
+            await conn.execute(
+                text("DELETE FROM job WHERE id = :id AND claim_token = :token"),
+                {"id": self.id, "token": self.claim_token},
+            )
+
     async def retry_later(self) -> None:
         """After a failure: back off a one-shot job, or skip a cron job to its next fire time."""
         if self.cron is not None:
@@ -144,9 +160,11 @@ async def schedule(
     key: str | None = None,
     metadata: Mapping[str, JsonValue] | None = None,
     by: uuid.UUID | None = None,
+    replace: bool = True,
 ) -> Job:
     """Queue a job; one with ``key`` replaces the job queued under that key before.
 
+    With ``replace=False``, an existing keyed job keeps its payload, schedule and claim.
     ``by`` is the person whose action queued it, ``None`` for the system's own work.
     """
     if cron is not None and not croniter.is_valid(cron):
@@ -165,6 +183,15 @@ async def schedule(
     )
     if cron is not None and due_at is None:
         job.due_at = job.next_fire_after(datetime.now(UTC))
+    updates = (
+        "kind = EXCLUDED.kind, payload = EXCLUDED.payload, "
+        "due_at = EXCLUDED.due_at, cron = EXCLUDED.cron, "
+        "timezone = EXCLUDED.timezone, metadata = EXCLUDED.metadata, "
+        "attempts = 0, locked_until = NULL, claim_token = NULL, "
+        "updated_at = clock_timestamp(), updated_by = EXCLUDED.updated_by"
+        if replace
+        else "key = EXCLUDED.key"
+    )
     async with transaction() as conn:
         row = (
             (
@@ -175,12 +202,7 @@ async def schedule(
                                      created_by, updated_by)
                     VALUES (:id, :kind, CAST(:payload AS jsonb), :due_at, :cron, :timezone,
                             :key, CAST(:metadata AS jsonb), :by, :by)
-                    ON CONFLICT (key) DO UPDATE SET
-                        kind = EXCLUDED.kind, payload = EXCLUDED.payload,
-                        due_at = EXCLUDED.due_at, cron = EXCLUDED.cron,
-                        timezone = EXCLUDED.timezone, metadata = EXCLUDED.metadata,
-                        attempts = 0, locked_until = NULL, claim_token = NULL,
-                        updated_at = clock_timestamp(), updated_by = EXCLUDED.updated_by
+                    ON CONFLICT (key) DO UPDATE SET {updates}
                     RETURNING {_COLUMNS}
                     """
                     ),
@@ -225,6 +247,19 @@ async def get(key: str) -> Job | None:
     return None if row is None else Job.from_row(row)
 
 
+async def run_now(key: str, *, by: uuid.UUID | None = None) -> None:
+    """Make the job queued under ``key`` due now; one a worker holds is already running."""
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE job SET due_at = least(due_at, clock_timestamp()), "
+                "updated_at = clock_timestamp(), updated_by = :by "
+                "WHERE key = :key AND claim_token IS NULL"
+            ),
+            {"key": key, "by": by},
+        )
+
+
 async def cancel(job_id: uuid.UUID) -> bool:
     """Cancel a job; whether there was one."""
     async with transaction() as conn:
@@ -255,7 +290,7 @@ async def claim_due(limit: int) -> list[Job]:
                 text(
                     f"""
                     WITH due AS (
-                        SELECT id FROM job
+                        SELECT id, locked_until AS lapsed_lease FROM job
                         WHERE due_at <= clock_timestamp()
                             AND (locked_until IS NULL OR locked_until < clock_timestamp())
                         ORDER BY due_at
@@ -265,7 +300,8 @@ async def claim_due(limit: int) -> list[Job]:
                     UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval),
                         claim_token = gen_random_uuid(), {_SYSTEM_WRITE}
                     FROM due WHERE job.id = due.id
-                    RETURNING {", ".join(f"job.{c.strip()}" for c in _COLUMNS.split(","))}
+                    RETURNING {", ".join(f"job.{c.strip()}" for c in _COLUMNS.split(","))},
+                        due.lapsed_lease
                     """
                 ),
                 {"limit": limit, "ttl": CLAIM_TTL},

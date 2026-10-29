@@ -1,4 +1,5 @@
 import type { ImageChunk } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 
 export function imageBlocks(images: ReadonlyArray<ImageChunk> = []) {
@@ -10,10 +11,14 @@ export function imageBlocks(images: ReadonlyArray<ImageChunk> = []) {
   }))
 }
 
-/** The human message a prompt bar submission becomes on the graph. */
+/**
+ * The human message a prompt bar submission becomes on the graph. Replies ride
+ * beside the content for the server to add to the message's envelope.
+ */
 export function promptMessage(
   text: string,
-  images: ReadonlyArray<ImageChunk> = []
+  images: ReadonlyArray<ImageChunk> = [],
+  replies: ReadonlyArray<PassageReply> = []
 ) {
   const trimmed = text.trim()
   return {
@@ -22,6 +27,7 @@ export function promptMessage(
       ...imageBlocks(images),
       ...(trimmed ? [{ type: "text" as const, text: trimmed }] : []),
     ],
+    ...(replies.length ? { additional_kwargs: { replies } } : {}),
   }
 }
 

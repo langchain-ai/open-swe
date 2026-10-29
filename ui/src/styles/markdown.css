@@ -213,10 +213,8 @@
 .chat-markdown .chat-markdown-table {
   margin: 0.65rem 0;
   max-width: 100%;
-  overflow-x: auto;
   border: 1px solid var(--border-default);
   border-radius: 0.5rem;
-  scrollbar-width: thin;
 }
 
 .chat-markdown table {

@@ -34,7 +34,6 @@ def credentials(monkeypatch):
         "get_github_app_installation_token_with_expiry",
         AsyncMock(return_value=("bot-token", None)),
     )
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
     return user
 
 
@@ -147,7 +146,7 @@ async def test_private_pr_rejects_another_requester(monkeypatch, thread_metadata
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["public", "private", "legacy", "system", "unowned"])
-async def test_background_completion_cannot_publish_with_saved_user_identity(
+async def test_background_completion_publishes_only_as_a_pinned_identity(
     monkeypatch, thread_metadata, credentials, scope
 ):
     opr = importlib.import_module("openswe.tools.open_pull_request")
@@ -166,6 +165,10 @@ async def test_background_completion_cannot_publish_with_saved_user_identity(
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
     )
+    if scope == "private":
+        assert await opr._resolve_pr_author_token() == ("personal-token", "user")
+        credentials.assert_awaited_once_with("alice")
+        return
     if scope in ("system", "unowned"):
         assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
     else:
@@ -304,7 +307,6 @@ async def test_private_thread_does_not_fall_back_to_bot(
 ):
     thread_metadata["visibility"] = "private"
     credentials.return_value = None
-    monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
     with pytest.raises(auth.GitHubUserAuthRequired):
         await auth.resolve_github_token(config(), "thread-1")
 
@@ -330,7 +332,6 @@ async def test_metadata_lookup_failure_cannot_use_personal_credentials(
 async def test_github_webhook_context_always_uses_workspace_bot(monkeypatch, credentials):
     from openswe.webhooks import common
 
-    monkeypatch.setattr(common, "is_bot_token_only_mode", lambda: False)
     monkeypatch.setattr(
         common,
         "get_github_app_installation_token_with_expiry",

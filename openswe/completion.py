@@ -26,7 +26,7 @@ from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
-from openswe.review.publish import settle_review_check_run
+from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
@@ -38,7 +38,7 @@ from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -96,24 +96,30 @@ _REASON_TEXT = {
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
     "sandbox_unreachable": "the run lost its sandbox",
+    "backend_interrupted": "the connection to the Open SWE backend was interrupted",
     "step_limit": "the run hit its step limit",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+    "backend_interrupted": "Re-trigger the run to try again.",
 }
 
 
-def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
+def _failure_reason(status: str, reason_code: str | None) -> str:
     reason = _REASON_TEXT.get(reason_code or "")
-    if reason is None:
-        if status == "timeout":
-            reason = "the run timed out"
-        elif status == "interrupted":
-            reason = "the run was interrupted before it could finish"
-        else:
-            reason = "the run hit an unexpected error"
+    if reason is not None:
+        return reason
+    if status == "timeout":
+        return "the run timed out"
+    if status == "interrupted":
+        return "the run was interrupted before it could finish"
+    return "the run hit an unexpected error"
+
+
+def _failure_text(status: str, trace_url: str | None = None, reason_code: str | None = None) -> str:
+    reason = _failure_reason(status, reason_code)
     follow_up = _REASON_FOLLOW_UP.get(reason_code or "", _DEFAULT_FOLLOW_UP)
     text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
     if trace_url:
@@ -139,57 +145,14 @@ def _failure_reason_code(error: Any, metadata: dict[str, Any], run_id: str | Non
     return code_for_error_type(error_type)
 
 
-async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]) -> None:
-    """Best-effort cleanup for reviewer checks left open by graph failures."""
-    if metadata.get("kind") != REVIEWER_THREAD_KIND:
-        return
-    if not isinstance(metadata.get("review_check_run_id"), int):
-        return
-    pr = metadata.get("pr")
-    if not isinstance(pr, dict):
-        return
-    owner = pr.get("owner")
-    repo = pr.get("name")
-    if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
-        return
-    try:
-        token = await get_github_app_installation_token()
-        if not token:
-            logger.warning("run-complete: no GitHub token to settle review check for %s", thread_id)
-            return
-        pending = metadata.get("review_check_pending_result")
-        if isinstance(pending, dict) and pending.get("conclusion") in {
-            "success",
-            "neutral",
-            "failure",
-        }:
-            conclusion = pending["conclusion"]
-            title = str(pending.get("title") or "Review completed")
-            summary = str(pending.get("summary") or "")
-        else:
-            conclusion = "neutral"
-            title = "Review did not complete"
-            summary = (
-                "The Open SWE review run ended without publishing a review. "
-                "Re-trigger the review by pushing a commit or re-requesting it."
-            )
-        await settle_review_check_run(
-            thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            token=token,
-            conclusion=conclusion,
-            title=title,
-            summary=summary,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "run-complete: could not settle review check for %s", thread_id, exc_info=True
-        )
-
-
 async def _post_failure_reply(
-    thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
+    thread_id: str,
+    metadata: dict[str, Any],
+    status: str,
+    reason_code: str | None = None,
+    *,
+    invocation_id: str | None = None,
+    terminal_error: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -198,7 +161,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_trace_url(thread_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
@@ -419,6 +382,8 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
     """
     if status == "success":
         outcome: TurnOutcome = "completed"
+    elif status == "interrupted":
+        outcome = "interrupted"
     elif status in _TERMINAL_FAILURE_STATUSES:
         outcome = "failed"
     else:
@@ -572,7 +537,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         from openswe.incidents import turns
 
         return await turns.handle_run_completion(thread_id, run_id, str(status))
-    await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
     if run_id is None:
@@ -582,6 +546,21 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             return {"status": "ignored", "reason": "failure reply already posted"}
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
+
+    reason_code = _failure_reason_code(error, metadata, run_id)
+    review_failure = ReviewRunFailure.of(
+        thread_id=thread_id,
+        run_id=run_id,
+        status=str(status),
+        error=error,
+        code=reason_code,
+        reason=_failure_reason(str(status), reason_code),
+        metadata=metadata,
+    )
+    reported = False
+    if review_failure is not None:
+        review_failure.log()
+        reported = await review_failure.report()
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.
@@ -610,9 +589,16 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
         return {"status": "ignored", "reason": "repeated failures"}
 
-    reason_code = _failure_reason_code(error, metadata, run_id)
-    posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
-    if not posted:
+    error_message = error.get("message") if isinstance(error, dict) else error
+    posted = await _post_failure_reply(
+        thread_id,
+        metadata,
+        status,
+        reason_code,
+        invocation_id=_invocation_id(payload),
+        terminal_error=error_message if isinstance(error_message, str) else None,
+    )
+    if not posted and not reported:
         return {"status": "ignored", "reason": "no reply posted"}
 
     try:

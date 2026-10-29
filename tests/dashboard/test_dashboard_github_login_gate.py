@@ -1,11 +1,14 @@
 """Tests for the dashboard GitHub login allowlists."""
 
+import asyncio
 from unittest.mock import AsyncMock, call
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard import oauth
+from openswe.github import org_membership
 from openswe.users import authorization
 
 
@@ -90,6 +93,39 @@ async def test_gate_uses_union_when_both_allowlists_are_set(
         membership.assert_not_awaited()
     else:
         membership.assert_awaited_once_with("insider", "primary")
+
+
+@pytest.mark.parametrize("retry_after", ["0", "60"])
+async def test_gate_retries_membership_lookup_within_deadline(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    monkeypatch.setattr(
+        org_membership, "get_github_app_installation_id_for_org", AsyncMock(return_value=1)
+    )
+    monkeypatch.setattr(
+        org_membership, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(org_membership, "_MEMBERSHIP_REQUEST_TIMEOUT", 0.1)
+    monkeypatch.setattr(
+        httpx2.AsyncClient,
+        "request",
+        AsyncMock(
+            side_effect=[
+                httpx2.Response(503, headers={"Retry-After": retry_after}),
+                httpx2.Response(200, json={"state": "active"}),
+            ]
+        ),
+    )
+
+    async with asyncio.timeout(1):
+        if retry_after == "0":
+            await oauth.enforce_github_login_gate("insider")
+        else:
+            with pytest.raises(HTTPException) as exc:
+                await oauth.enforce_github_login_gate("insider")
+            assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio

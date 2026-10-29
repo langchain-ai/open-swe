@@ -11,6 +11,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { toast } from "sonner"
 
 import {
   api,
@@ -25,6 +26,10 @@ import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 const FETCHED_AT = "2026-09-11T12:01:30Z"
 
@@ -108,6 +113,7 @@ function modelRows(table: HTMLTableElement) {
 
 afterEach(() => {
   cleanup()
+  vi.clearAllMocks()
   vi.restoreAllMocks()
 })
 
@@ -1600,9 +1606,11 @@ it("copies an allowlisted diagnostics snapshot to the clipboard", async () => {
   fireEvent.click(await screen.findByText("Details"))
   const copy = screen.getByRole("button", { name: "Copy diagnostics" })
   fireEvent.click(copy)
-  expect(
-    await screen.findByText("Diagnostics copied to clipboard.")
-  ).toBeTruthy()
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      "Diagnostics copied to clipboard."
+    )
+  )
 
   expect(writeText).toHaveBeenCalledTimes(1)
   const text = writeText.mock.calls[0]?.[0] as string
@@ -1671,9 +1679,11 @@ it.each([
     ).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
-    expect(
-      await screen.findByText("Diagnostics copied to clipboard.")
-    ).toBeTruthy()
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Diagnostics copied to clipboard."
+      )
+    )
     const copied = JSON.parse(writeText.mock.calls[0]?.[0] as string)
     expect(copied.pr_report.last_refresh_failed).toBe(true)
     expect(copied.metrics.avg_delivery_seconds).toEqual({
@@ -1695,11 +1705,11 @@ it("copies diagnostics from the keyboard and reports a denied clipboard", async 
   expect(document.activeElement).toBe(copy)
   fireEvent.keyDown(copy, { key: "Enter" })
   fireEvent.click(copy)
-  expect(
-    await screen.findByText(
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
       "Clipboard unavailable. Check the browser's clipboard permission."
     )
-  ).toBeTruthy()
+  )
   expect(writeText).toHaveBeenCalled()
   client.clear()
 })

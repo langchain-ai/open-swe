@@ -35,6 +35,7 @@ from openswe.database import postgres
 from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
 from openswe.github.comments import fence_github_comment_body
+from openswe.github.http import github_reauth_message
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
@@ -467,7 +468,7 @@ async def list_agent_schedules() -> list[dict[str, Any]]:
 async def _ensure_dashboard_github_token(login: str) -> None:
     token = await get_valid_access_token(login)
     if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
+        raise HTTPException(401, github_reauth_message(login))
 
 
 async def _create_cron(
@@ -1080,7 +1081,6 @@ async def _launch_agent_schedule_record(
         thread_title=None,
         config=run_config,
         client=client,
-        stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     # The run is durable now; bookkeeping failures must not release delivery claims.

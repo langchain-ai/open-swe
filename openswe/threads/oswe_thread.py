@@ -1,53 +1,55 @@
 """Open SWE's typed view of a LangGraph thread."""
 
-import logging
+import hashlib
 from typing import Self
 
 from langgraph_sdk.client import LangGraphClient
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
-from openswe.utils import ttl_cache
-from openswe.utils.json_types import ThreadLike, thread_metadata
-
-logger = logging.getLogger(__name__)
-
-PREFER_TOOLS_IN_SANDBOX_KEY = "prefer_tools_in_sandbox"
-# Fixed at creation, so a cached read never goes stale.
-_TOOLS_IN_SANDBOX_CACHE_TTL_SECONDS = 3600
+from openswe.input_messages import message_sender_id
 
 
-class OsweThreadMetadata(BaseModel):
+class OsweThreadMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    owner_login: str | None = None
-    # Stamped from the owner's preference at creation; never changes afterwards.
-    prefer_tools_in_sandbox: bool = False
+    id: str | None = None
+    content: JsonValue = None
+
+    @property
+    def from_person(self) -> bool:
+        return message_sender_id(self.content, kind="human") is not None
 
 
-class OsweThread(BaseModel):
-    metadata: OsweThreadMetadata
+class OsweThreadValues(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
-    @classmethod
-    def from_sdk(cls, thread: ThreadLike) -> Self:
-        return cls(metadata=OsweThreadMetadata.model_validate(thread_metadata(thread)))
+    messages: list[OsweThreadMessage] = []
+
+
+class OsweThreadState(BaseModel):
+    """Open SWE's typed view of a LangGraph thread's saved state."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    values: OsweThreadValues | None = None
 
     @classmethod
     async def get(cls, client: LangGraphClient, thread_id: str) -> Self:
-        return cls.from_sdk(await client.threads.get(thread_id=thread_id))
+        return cls.model_validate(await client.threads.get_state(thread_id))
 
-    @classmethod
-    async def prefers_tools_in_sandbox(cls, client: LangGraphClient, thread_id: str) -> bool:
-        async def _load() -> bool:
-            return (await cls.get(client, thread_id)).metadata.prefer_tools_in_sandbox
+    @property
+    def messages(self) -> list[OsweThreadMessage]:
+        return self.values.messages if self.values else []
 
-        try:
-            return await ttl_cache.cached(
-                f"prefer-tools-in-sandbox:{thread_id}", _TOOLS_IN_SANDBOX_CACHE_TTL_SECONDS, _load
-            )
-        except Exception:
-            logger.warning(
-                "Could not read tools-in-sandbox mode for thread",
-                exc_info=True,
-                extra={"thread_id": thread_id},
-            )
-            return False
+    @property
+    def latest_human_message_key(self) -> str:
+        """A key for the newest message a person sent, which changes with each new one.
+
+        The runs a thread may start for itself are counted against it.
+        """
+        for index in range(len(self.messages) - 1, -1, -1):
+            message = self.messages[index]
+            if message.from_person:
+                identity = message.id or repr(message.content)
+                return hashlib.sha256(f"{index}:{identity}".encode()).hexdigest()
+        return "no-human-message"

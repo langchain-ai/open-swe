@@ -1,11 +1,22 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
+import { toast } from "sonner"
 import { renderToString } from "react-dom/server"
 import { afterEach, expect, it, vi } from "vitest"
 
 import type { SessionUser } from "@/lib/api"
 import { AboutSection } from "./AboutSection"
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 const user: SessionUser = {
   login: "reader",
@@ -28,6 +39,7 @@ const user: SessionUser = {
 
 afterEach(() => {
   cleanup()
+  vi.clearAllMocks()
   vi.restoreAllMocks()
   delete window.__OPEN_SWE_BUNDLE__
 })
@@ -121,9 +133,11 @@ it("copies only environment diagnostics from session data", async () => {
   }
   render(<AboutSection user={session} />)
   fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
-  expect(
-    await screen.findByText("Diagnostics copied to clipboard.")
-  ).toBeTruthy()
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      "Diagnostics copied to clipboard."
+    )
+  )
   const text = writeText.mock.calls[0]![0] as string
   expect(JSON.parse(text)).toMatchObject({
     report: "open-swe-environment-diagnostics",
