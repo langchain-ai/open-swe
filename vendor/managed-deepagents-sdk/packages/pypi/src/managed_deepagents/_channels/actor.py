@@ -57,7 +57,10 @@ class LinearActor:
 
 
 ChannelActor = SlackActor | GitHubActor | LinearActor
-"""Who caused an event, on any channel; switch on ``provider``."""
+"""Who caused an event, on any channel; switch on ``provider``.
+
+Experimental: this may change in a minor release.
+"""
 
 
 class SlackEndpointActor(TypedDict):

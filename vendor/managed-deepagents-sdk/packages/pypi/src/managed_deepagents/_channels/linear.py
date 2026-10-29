@@ -119,6 +119,10 @@ def linear_channel(
     own. A run's reply is posted as a comment on the issue, under the comment
     that started it, or in the agent session that asked.
 
+    !!! warning "Experimental"
+
+        The Linear channel may change in a minor release.
+
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
             message, or state), or ``None`` to skip. A handler may also be an

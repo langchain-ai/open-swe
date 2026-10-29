@@ -264,7 +264,6 @@ def definition(
     writes its proxy config.
     """
     return define_sandbox(
-        _openswe_per_thread=True,
         _openswe_thread_id=thread_id,
         _openswe_no_manage_proxy=proxy_config is None,
         _openswe_create_fields=dict(create.extra_fields),
@@ -282,7 +281,6 @@ def definition(
 def box(without_box: SandboxBackendProtocol) -> SandboxDefinition:
     """The box every run's catalog picks from, and ``without_box`` for a run it gives none."""
     return define_sandbox(
-        _openswe_per_thread=True,
         _openswe_no_manage_proxy=True,
         _openswe_select=_selected,
         _openswe_without_box=without_box,

@@ -58,8 +58,8 @@ pub(crate) use trigger_server::{
     ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
     SlackCustomerApp, SlackManager, SlackTriggerMode,
 };
-pub(crate) use workspaces::AuthIdentity;
 pub use workspaces::DeployTarget;
+pub(crate) use workspaces::{AuthIdentity, KeyCheck};
 
 pub(crate) use login::{
     is_cli_session_api_key, note_session_api_key, resolve_login_api_url, ApiKey, Login,
@@ -438,12 +438,12 @@ impl Client {
 
     /// The headers that authenticate a request as this client, for senders
     /// with their own HTTP stack.
-    pub(crate) fn auth_headers(&self) -> Result<Vec<(&'static str, String)>> {
+    pub(crate) fn auth_headers(&self) -> Vec<(&'static str, String)> {
         let mut headers = vec![("X-Api-Key", self.api_key().to_string())];
         if let Some(tenant) = &self.tenant_id {
             headers.push((TENANT_HEADER, tenant.clone()));
         }
-        Ok(headers)
+        headers
     }
 
     /// Perform a request against `base_url` and decode the JSON response (or

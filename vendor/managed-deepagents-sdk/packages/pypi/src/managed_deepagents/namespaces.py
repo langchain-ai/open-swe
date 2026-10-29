@@ -46,7 +46,8 @@ class _Namespace:
 class _Channels(_Namespace):
     """Inbound messaging surfaces (Events ingress + outbound messaging).
 
-    Slack ingress through Trigger Server.
+    Slack ingress through Trigger Server. ``github`` and ``linear`` are
+    experimental and may change in a minor release.
     """
 
     github = staticmethod(github_channel)
@@ -79,7 +80,7 @@ class _LangSmithSandboxArgs(BaseModel):
     environment-variable name; MDA creates or updates the Host registry.
     Unmodeled keys pass through as LangSmith create options. MDA owns naming,
     lifecycle, ``setup.sh`` bake, and cleanup — the envelope rejects the keys
-    it owns. Reuse is one box per thread and selection.
+    it owns. Reuse is always one box per thread.
 
     The ``_openswe_*`` arguments of :func:`define_sandbox` exist only for Open
     SWE's vendored copy and are not MDA's API: see Open SWE's
@@ -99,7 +100,6 @@ class _LangSmithSandboxArgs(BaseModel):
 
 def define_sandbox(
     *,
-    _openswe_per_thread: bool = False,
     _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
@@ -134,7 +134,6 @@ def define_sandbox(
         {
             key: value
             for key, value in {
-                "_openswe_per_thread": _openswe_per_thread or None,
                 "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,

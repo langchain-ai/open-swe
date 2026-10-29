@@ -193,6 +193,14 @@ secrets. Provider keys must be in `.env` or configured as LangSmith workspace
 secrets — a value exported in your shell is not read. Set
 `LANGSMITH_WORKSPACE_ID` or pass `--workspace-id` if your LangSmith API key
 requires a workspace selection.
+
+To keep separate settings per environment, pass `--env-file` to `mda dev`,
+`mda chat`, `mda deploy`, `mda delete`, `mda logs` or `mda connections` in
+place of `.env`:
+
+```bash
+mda deploy --agent-environment staging --env-file .env.staging
+```
 "#
     )
 }

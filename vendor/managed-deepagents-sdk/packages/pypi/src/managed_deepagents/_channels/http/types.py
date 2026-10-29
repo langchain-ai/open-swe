@@ -37,16 +37,20 @@ class HttpChannelInboundMessage(TypedDict):
     target: JsonValue
     delivery_key: NotRequired[str]
     """The provider's ID for this delivery. A thread runs each delivery once, so
-    a redelivered event starts nothing."""
+    a redelivered event starts nothing. Experimental: this may change in a minor release."""
     background: NotRequired[bool]
     """Answer the provider before the channel's ``input`` decides what the run
     starts with, and start it in the background: for input that may take longer
     than the provider waits, such as an event endpoint's. A failure then can't
-    fail the delivery, so the provider doesn't redeliver it."""
+    fail the delivery, so the provider doesn't redeliver it. Experimental: this may
+    change in a minor release."""
 
 
 class HttpChannelCancelMessage(TypedDict):
-    """The thread a ``cancel`` result stops, and who to tell."""
+    """The thread a ``cancel`` result stops, and who to tell.
+
+    Experimental: this may change in a minor release.
+    """
 
     user_id: str
     thread_id: str
@@ -227,7 +231,7 @@ class HttpChannelCancelResult(_CancelResultRequired, total=False):
     """Stop the work on the message's thread.
 
     MDA cancels its queued and running runs, keeping their progress, then calls
-    ``on_finish``.
+    ``on_finish``. Experimental: this may change in a minor release.
     """
 
     response: Response

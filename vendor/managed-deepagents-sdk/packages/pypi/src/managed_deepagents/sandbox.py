@@ -93,7 +93,6 @@ class SandboxDefinition:
 
     #: Options that shape how MDA resolves the box rather than the create request.
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
-        "_openswe_per_thread",
         "_openswe_thread_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
@@ -216,11 +215,6 @@ def without_box(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
     """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
     backend = sandbox.options.get("_openswe_without_box")
     return backend if isinstance(backend, SandboxBackendProtocol) else None
-
-
-def is_per_thread(options: Mapping[str, object]) -> bool:
-    """Whether the thread keeps one box whatever a dynamic selection's options."""
-    return options.get("_openswe_per_thread") is True
 
 
 def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:

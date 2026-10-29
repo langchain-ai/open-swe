@@ -46,8 +46,8 @@ use crate::deploy::helpers::{
 };
 use crate::deploy::langsmith_context::{LangSmithContext, WORKSPACE_FLAG_HINT};
 use crate::deploy::{
-    agent_target, delete_managed_crons, ensure_project, env_file, find_target_deployment,
-    resolve_api_key, step,
+    agent_environment, agent_target, delete_managed_crons, ensure_project, env_file,
+    find_target_deployment, resolve_api_key, step,
 };
 use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
 use crate::install::Installation;
@@ -70,6 +70,8 @@ pub struct DeleteOptions {
     pub workspace_id: Option<String>,
     /// Host backend URL override.
     pub host_url: Option<String>,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
     /// Skip the confirmation prompt.
     pub yes: bool,
 }
@@ -175,9 +177,9 @@ fn run_session(
     project: &project::Project,
     root: &Path,
 ) -> Result<CommandCompletion> {
-    let env_path = root.join(".env");
+    let env_path = env_file::project_env_path(root, opts.env_file.as_deref());
     let env_vars = env_file::parse_env_file(&env_path);
-    let ctx = LangSmithContext::resolve(
+    let ctx = LangSmithContext::resolve_verified(
         &env_vars,
         opts.host_url.as_deref(),
         opts.workspace_id.as_deref(),
@@ -189,17 +191,18 @@ fn run_session(
         Some(name) => normalize_name(name)?,
         None => agent_config::agent_assistant_id(project)?,
     };
-    let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
+    let environment = agent_environment(opts.agent_environment, &env_vars)?;
+    let (name, deployment_agent) = agent_target(base_name, environment)?;
     update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
 
     let client = ctx.client()?;
     let context_client = ctx.context_hub_client()?;
 
     let mut plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
+    update_facts(|facts| facts.deployment.deployment_id = plan.deployment_id.clone());
     if let Some(deployment_id) = plan.deployment_id.clone() {
         resolve_channel_connections(&mut plan, &client, &env_vars, &deployment_id);
     }
-    update_facts(|facts| facts.deployment.deployment_id = plan.deployment_id.clone());
     if plan.is_empty() {
         // Everything else is gone, but an unreadable sandbox list means we
         // cannot claim teardown is complete — sandboxes may still be running.

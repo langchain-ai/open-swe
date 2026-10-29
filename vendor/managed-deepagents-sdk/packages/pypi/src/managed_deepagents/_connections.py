@@ -46,6 +46,11 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
+from managed_deepagents._langsmith_env import (
+    resolve_langsmith_endpoint,
+    resolve_server_api_key,
+    resolve_workspace_id,
+)
 from managed_deepagents._managed_thread import on_channel_thread
 
 if TYPE_CHECKING:
@@ -127,16 +132,9 @@ TRUSTED_BACKEND_PROVIDER = "trusted_backend"
 
 #: Env var naming the LangSmith platform API that serves Agent Auth.
 PLATFORM_API_URL_ENV = "LANGSMITH_ENDPOINT"
-_DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 
 #: Env var holding the deployment id, which is the agent owner's ``owner_id``.
 DEPLOYMENT_ID_ENV = "LANGSMITH_HOST_PROJECT_ID"
-_API_KEY_ENV = "LANGSMITH_API_KEY"
-_LANGCHAIN_API_KEY_ENV = "LANGCHAIN_API_KEY"
-_WORKSPACE_ID_ENV = "LANGSMITH_WORKSPACE_ID"
-#: The workspace a hosted LangSmith deployment runs in. The platform sets it on
-#: every revision; ``LANGSMITH_WORKSPACE_ID`` is what users should set.
-_TENANT_ID_ENV = "LANGSMITH_TENANT_ID"
 _LOCAL_DEV_USER = "mda:local-dev"
 _LOCAL_DEV_PRINCIPAL_ENV = "MDA_AGENT_AUTH_PRINCIPAL_ID"
 
@@ -658,11 +656,9 @@ def _external_identity_for_resolve(
 
 def _resolve_agent_auth_config(env: Mapping[str, str] | None) -> _AgentAuthConfig:
     resolved = os.environ if env is None else env
-    api_key = (resolved.get(_API_KEY_ENV) or "").strip() or (
-        resolved.get(_LANGCHAIN_API_KEY_ENV) or ""
-    ).strip()
+    api_key = resolve_server_api_key(resolved)
     if not api_key:
-        raise ConnectionsNotConfiguredError(f"{_API_KEY_ENV} or {_LANGCHAIN_API_KEY_ENV}")
+        raise ConnectionsNotConfiguredError("LANGSMITH_API_KEY or LANGCHAIN_API_KEY")
     workspace_id = resolve_workspace_id(resolved)
     if workspace_id is None:
         raise ConnectionsNotConfiguredError(WORKSPACE_SETTING)
@@ -679,34 +675,9 @@ def _resolve_agent_auth_config(env: Mapping[str, str] | None) -> _AgentAuthConfi
     )
 
 
-def resolve_workspace_id(env: Mapping[str, str] | None = None) -> str | None:
-    """The LangSmith workspace Agent Auth calls are scoped to.
-
-    Users set ``LANGSMITH_WORKSPACE_ID``, which wins. A hosted deployment
-    always runs with ``LANGSMITH_TENANT_ID``, which the platform sets, so a
-    deploy that never named a workspace still has one.
-    """
-    resolved = os.environ if env is None else env
-    for name in (_WORKSPACE_ID_ENV, _TENANT_ID_ENV):
-        value = (resolved.get(name) or "").strip()
-        if value:
-            return value
-    return None
-
-
 def resolve_agent_auth_base_url(env: Mapping[str, str] | None = None) -> str:
-    """Origin for Agent Auth HTTP calls from ``LANGSMITH_ENDPOINT``.
-
-    Cloud SaaS revisions omit that reserved name and inject
-    ``LANGCHAIN_ENDPOINT`` instead; read it as the same setting so we do not
-    default to production.
-    """
-    resolved = os.environ if env is None else env
-    raw = (
-        (resolved.get(PLATFORM_API_URL_ENV) or "").strip()
-        or (resolved.get("LANGCHAIN_ENDPOINT") or "").strip()
-        or _DEFAULT_LANGSMITH_ENDPOINT
-    )
+    """Origin for Agent Auth HTTP calls from the LangSmith endpoint."""
+    raw = resolve_langsmith_endpoint(env)
     try:
         parsed = urllib.parse.urlsplit(raw.rstrip("/"))
         _ = parsed.port

@@ -9,7 +9,6 @@ context, StateBackend scratch fallback, and managed memory/skills.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import inspect
 import json
@@ -23,13 +22,14 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import (
-    AsyncIterator,
+    AsyncGenerator,
     Awaitable,
     Callable,
+    Generator,
     Iterable,
-    Iterator,
     Mapping,
     Sequence,
+    Sized,
 )
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
@@ -95,6 +95,7 @@ from managed_deepagents._connector import (
     run_connector_sandbox_hooks,
 )
 from managed_deepagents._eval_filesystem import create_eval_trial_filesystem_backend
+from managed_deepagents._graph_build_timing import GraphBuildTiming
 from managed_deepagents._identity_auth import build_managed_auth
 from managed_deepagents._identity_http import build_managed_http_app
 from managed_deepagents._identity_runtime import (
@@ -102,6 +103,7 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
+from managed_deepagents._langsmith_env import resolve_server_api_key
 from managed_deepagents._log import logger
 from managed_deepagents._managed_composition import (
     assert_dynamic_memory_selection,
@@ -341,22 +343,25 @@ _SANDBOX_NAME_CONFLICT_RE = re.compile(
 class _ManagedSandboxEntry:
     """Cached sandbox plus per-thread connector sandbox sync state."""
 
-    __slots__ = ("backend", "host_name", "sandbox_id", "synced_threads")
+    __slots__ = ("backend", "host_name", "sandbox_id", "selection_fingerprint", "synced_threads")
 
     def __init__(
         self,
         backend: SandboxBackendProtocol,
         host_name: str | None = None,
         sandbox_id: str | None = None,
+        selection_fingerprint: str | None = None,
     ) -> None:
         self.backend = backend
         self.synced_threads: set[str] = set()
         #: LangSmith box name for this entry (deterministic or unique-suffixed).
         self.host_name = host_name
         self.sandbox_id = sandbox_id
+        #: Options fingerprint of the dynamic selection this process created or adopted it with.
+        self.selection_fingerprint = selection_fingerprint
 
 
-#: Created sandboxes, keyed by thread and any explicit dynamic selection,
+#: Created sandboxes, keyed by thread and any dynamic selection's mounts,
 #: reused for the lifetime of this runtime process. Storing the entry dedupes
 #: concurrent runs. Provisioning (``setup.sh``) happens at deploy bake, not on
 #: thread create.
@@ -441,7 +446,7 @@ def _inherit_setup_recipe(
 
 def _sandbox_create_kwargs(
     sandbox: SandboxDefinition,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> dict[str, object]:
     """Options for ``create_sandbox``."""
     from managed_deepagents.sandbox import SandboxDefinition  # noqa: PLC0415
@@ -466,9 +471,9 @@ def _sandbox_create_kwargs(
     recipe = _string_option(os.environ.get(RECIPE_SNAPSHOT_ENV))
     snapshot_id = sandbox.options.get("snapshot_id")
     snapshot_name = sandbox.options.get("snapshot_name")
-    if selection_fingerprint and snapshot_id:
+    if selection is not None and snapshot_id:
         create_kwargs["snapshot_id"] = snapshot_id
-    elif selection_fingerprint and snapshot_name:
+    elif selection is not None and snapshot_name:
         create_kwargs["snapshot_name"] = snapshot_name
     elif recipe:
         create_kwargs["snapshot_name"] = recipe
@@ -490,7 +495,7 @@ def _sandbox_client_kwargs(sandbox: SandboxDefinition) -> _SandboxClientKwargs:
     if api_endpoint:
         kwargs["api_endpoint"] = api_endpoint
     api_key = _string_option(sandbox.options.get("api_key")) or _string_option(
-        os.environ.get("LANGSMITH_API_KEY")
+        resolve_server_api_key()
     )
     if api_key:
         kwargs["api_key"] = api_key
@@ -576,7 +581,7 @@ class _ManagedCompileOptions(TypedDict):
     system_prompt: str | None
     has_skills: bool
     sandbox: SandboxDefinition | None
-    sandbox_selection_fingerprint: str | None
+    sandbox_selection: _SandboxSelection | None
     connectors: list[Connector] | None
     channels: list[Channel] | None
     identity: IdentityDefinitionLike | None
@@ -658,7 +663,7 @@ def compile_managed_agent(
 
 
 @asynccontextmanager
-async def parent_run(config: Mapping[str, object]) -> AsyncIterator[None]:
+async def parent_run(config: Mapping[str, object]) -> AsyncGenerator[None]:
     """Set up a run for async subagents: verify its lead, then nest its trace.
 
     The generated entry holds this open for the whole run. For a run that
@@ -684,7 +689,7 @@ async def parent_run(config: Mapping[str, object]) -> AsyncIterator[None]:
 
 
 @contextmanager
-def _parent_trace(config: Mapping[str, object]) -> Iterator[None]:
+def _parent_trace(config: Mapping[str, object]) -> Generator[None]:
     """Nest this run's trace under the async subagent call that launched it.
 
     Only acts on runs deepagents marked as launched by an async subagent tool,
@@ -779,6 +784,7 @@ async def compile_managed_agent_async(
     Generated entries pass `async_subagent_graphs` to the lead, and
     `async_subagent` to build that async subagent's own graph instead.
     """
+    timing = GraphBuildTiming()
     if runtime is not None:
         execution = runtime.execution_runtime
         is_run = execution is not None
@@ -799,14 +805,15 @@ async def compile_managed_agent_async(
     )
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
-    definition = await resolve_agent_definition(entry, factory_runtime)
+    with timing.phase("factory"):
+        definition = await resolve_agent_definition(entry, factory_runtime)
     if GENERAL_PURPOSE in (async_subagent_graphs or {}) or async_subagent == GENERAL_PURPOSE:
         definition = with_async_general_purpose(definition)
     if async_subagent is not None:
         definition = async_subagent_definition(definition, async_subagent)
     else:
         definition = route_async_subagents(definition, async_subagent_graphs or {})
-    return await _compile_resolved_managed_agent_async(
+    agent = await _compile_resolved_managed_agent_async(
         definition,
         config,
         context_root=context_root,
@@ -827,7 +834,10 @@ async def compile_managed_agent_async(
         skip_factory_inspection_tools=factory_inspection,
         factory_entry=factory_entry,
         shared_graph=async_subagent or "lead",
+        timing=timing,
     )
+    timing.log(kind="run" if is_run else "read", run_id=_platform_run_id(config))
+    return agent
 
 
 async def _compile_resolved_managed_agent_async(
@@ -852,6 +862,7 @@ async def _compile_resolved_managed_agent_async(
     skip_factory_inspection_tools: bool = False,
     factory_entry: bool = False,
     shared_graph: str | None = None,
+    timing: GraphBuildTiming,
 ) -> CompiledAgent:
     """Select native context schema and memory access for a resolved definition.
 
@@ -865,12 +876,12 @@ async def _compile_resolved_managed_agent_async(
     run_sandbox = (
         None if trial_root_dir is not None else _select_run_sandbox(definition.config, sandbox)
     )
-    sandbox_selection_fingerprint = (
-        _sandbox_selection_fingerprint(run_sandbox)
+    sandbox_selection = (
+        _sandbox_selection(run_sandbox)
         if factory_entry and run_sandbox is not None and "sandbox" in definition.config
         else None
     )
-    if run_sandbox is not None and sandbox_selection_fingerprint and is_run and sandbox_setup:
+    if run_sandbox is not None and sandbox_selection is not None and is_run and sandbox_setup:
         run_sandbox = _inherit_setup_recipe(run_sandbox, sandbox)
     # Eval builds ship no browser, like no nested sandbox.
     run_browser = (
@@ -893,7 +904,7 @@ async def _compile_resolved_managed_agent_async(
         "system_prompt": system_prompt,
         "has_skills": has_skills,
         "sandbox": run_sandbox,
-        "sandbox_selection_fingerprint": sandbox_selection_fingerprint,
+        "sandbox_selection": sandbox_selection,
         "connectors": run_connectors,
         "channels": channels,
         "identity": identity,
@@ -954,6 +965,7 @@ async def _compile_resolved_managed_agent_async(
             inspection=not is_run,
             skip_factory_inspection_tools=skip_factory_inspection_tools,
             context_schema=context_schema,
+            timing=timing,
         )
         if isinstance(agent, CompiledAgent):
             agent.__class__ = (
@@ -1121,7 +1133,7 @@ def _compile_managed_agent(
     system_prompt: str | None = None,
     has_skills: bool = False,
     sandbox: SandboxDefinition | None = None,
-    sandbox_selection_fingerprint: str | None = None,
+    sandbox_selection: _SandboxSelection | None = None,
     connectors: list[Connector] | None = None,
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
@@ -1134,6 +1146,7 @@ def _compile_managed_agent(
     inspection: bool = False,
     skip_factory_inspection_tools: bool = False,
     context_schema: object = None,
+    timing: GraphBuildTiming,
 ) -> tuple[CompiledAgent, RunConfiguration]:
     """Compile the definition; ``_for_call`` adds each call's telemetry and config."""
     allowed_user_id = user_access.user_id
@@ -1159,7 +1172,7 @@ def _compile_managed_agent(
             config,
             connectors=connectors,
             identity=identity,
-            selection_fingerprint=sandbox_selection_fingerprint,
+            selection=sandbox_selection,
         )
         if sandbox is not None
         else None
@@ -1171,17 +1184,23 @@ def _compile_managed_agent(
     context = (
         None
         if inspection
-        else _open_context_backend(context_repo=context_repo, context_root=context_root)
+        else timing.measure(
+            "context",
+            lambda: _open_context_backend(context_repo=context_repo, context_root=context_root),
+        )
     )
     selected_skills_backend = (
         None
         if skip_factory_inspection_tools
-        else _resolve_run_skills(
-            authored_skills,
-            context,
-            context_repo=context_repo,
-            context_root=context_root,
-            trial_root_dir=trial_root_dir,
+        else timing.measure(
+            "skills",
+            lambda: _resolve_run_skills(
+                authored_skills,
+                context,
+                context_repo=context_repo,
+                context_root=context_root,
+                trial_root_dir=trial_root_dir,
+            ),
         )
     )
     mounted_memory: MemoryLayers = []
@@ -1208,10 +1227,13 @@ def _compile_managed_agent(
             sandbox_backend=sandbox_backend,
         )
 
-    merged["system_prompt"] = _select_system_prompt(
-        authored_instructions,
-        context.backend if context is not None else None,
-        system_prompt,
+    merged["system_prompt"] = timing.measure(
+        "instructions",
+        lambda: _select_system_prompt(
+            authored_instructions,
+            context.backend if context is not None else None,
+            system_prompt,
+        ),
     )
 
     # Mounted the same way in every mode, but resolved against different roots:
@@ -1247,7 +1269,7 @@ def _compile_managed_agent(
         authored_tools = (
             list(cast("Iterable[object]", tools_value)) if tools_value is not None else []
         )
-        connector_tools = load_connector_tools(connectors)
+        connector_tools = timing.measure("connectors", lambda: load_connector_tools(connectors))
         if identity is not None:
             connector_tools = wrap_tools_with_managed_runtime(connector_tools)
         merged["tools"] = authored_tools + connector_tools
@@ -1267,9 +1289,14 @@ def _compile_managed_agent(
     # Author ``metadata`` is not a create_deep_agent kwarg — apply it on the
     # compiled runnable so LangSmith root runs carry prompt provenance, etc.
     metadata = merged.pop("metadata", None)
+    timing.set_sizes(
+        tools=_count(merged.get("tools")),
+        middleware=_count(merged.get("middleware")),
+        subagents=_count(merged.get("subagents")),
+    )
     # The definition and managed adapters are validated at their own boundaries.
     # This heterogeneous argument map cannot express each native keyword type.
-    agent = create_deep_agent(**cast("Any", merged))
+    agent = timing.measure("create_deep_agent", lambda: create_deep_agent(**cast("Any", merged)))
     compiled = (
         agent.with_config({"metadata": dict(metadata)})
         if isinstance(metadata, Mapping) and metadata
@@ -1291,6 +1318,10 @@ def _compile_managed_agent(
             user_denied_reason=user_access.denied_reason,
         ),
     )
+
+
+def _count(value: object) -> int:
+    return len(value) if isinstance(value, Sized) else 0
 
 
 def _platform_run_id(config: Mapping[str, object] | None) -> str | None:
@@ -1602,12 +1633,14 @@ async def compile_agent_factory_for_eval_async(
     # Harbor calls this helper only to execute a scored trial. Missing context
     # means the run has empty authored context; it is not graph inspection.
     context = config.get("context") if config is not None else None
-    definition = await resolve_agent_definition(
-        entry, _internal_server_runtime(config, context, is_run=True)
-    )
+    timing = GraphBuildTiming()
+    with timing.phase("factory"):
+        definition = await resolve_agent_definition(
+            entry, _internal_server_runtime(config, context, is_run=True)
+        )
     reject_async_subagents(definition)
     eval_definition = _prepare_eval_definition(definition, config, model_override)
-    return await _compile_resolved_managed_agent_async(
+    agent = await _compile_resolved_managed_agent_async(
         eval_definition,
         config,
         run_context=context,
@@ -1619,7 +1652,10 @@ async def compile_agent_factory_for_eval_async(
         trial_root_dir=_eval_app_dir(config),
         report_telemetry=False,
         skip_factory_inspection_tools=False,
+        timing=timing,
     )
+    timing.log(kind="run", run_id=_platform_run_id(config))
+    return agent
 
 
 def _prepare_eval_definition(
@@ -1874,7 +1910,7 @@ class _LazySandboxSource:
         "proxy_config_sync",
         "run_config",
         "sandbox",
-        "selection_fingerprint",
+        "selection",
     )
 
     def __init__(
@@ -1884,14 +1920,14 @@ class _LazySandboxSource:
         *,
         connectors: list[Connector] | None,
         identity: IdentityDefinitionLike | None,
-        selection_fingerprint: str | None,
+        selection: _SandboxSelection | None,
         proxy_config_sync: SandboxProxyConfigSync,
     ) -> None:
         self.sandbox = sandbox
         self.run_config = run_config
         self.connectors = connectors
         self.identity = identity
-        self.selection_fingerprint = selection_fingerprint
+        self.selection = selection
         self.proxy_config_sync = proxy_config_sync
 
 
@@ -1973,7 +2009,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if self._resolved_backend is not None:
             return self._resolved_backend
         try:
-            key = _thread_scope_key(self._config(), self._source.selection_fingerprint)
+            key = _thread_scope_key(self._config(), self._source.selection)
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
         with _managed_sandbox_lock:
@@ -1992,7 +2028,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return str(resolved)
         try:
             scope = _sandbox_scope_key(
-                self._sandbox(), self._config(), self._source.selection_fingerprint
+                self._sandbox(), self._config(), self._source.selection
             )
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
@@ -2138,7 +2174,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             self._config(),
             source.connectors,
             source.identity,
-            source.selection_fingerprint,
+            source.selection,
         )
         source.proxy_config_sync.invalidate(replacement.new_name)
         self._keep(backend)
@@ -2156,7 +2192,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if not manages_proxy(sandbox.options):
             return
         config = self._config()
-        key = _sandbox_scope_key(sandbox, config, self._source.selection_fingerprint)
+        key = _sandbox_scope_key(sandbox, config, self._source.selection)
         await self._source.proxy_config_sync.sync(
             sandbox,
             _peek_managed_host_name(key),
@@ -2172,7 +2208,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             self._config(),
             connectors=source.connectors,
             identity=source.identity,
-            selection_fingerprint=source.selection_fingerprint,
+            selection=source.selection,
         )
         self._keep(backend)
         return backend
@@ -2187,7 +2223,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             self._config(),
             source.connectors,
             source.identity,
-            source.selection_fingerprint,
+            source.selection,
         )
         self._keep(backend)
         return backend
@@ -2197,12 +2233,12 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return
         source = self._source
         config = self._config()
-        if _parent_sandbox_scope(config, source.selection_fingerprint) is not None:
+        if _parent_sandbox_scope(config, source.selection) is not None:
             # The lead recovers its own sandbox; helpers must not recreate it.
             return
         sandbox = self._sandbox()
         previous_name = _peek_managed_host_name(
-            _sandbox_scope_key(sandbox, config, source.selection_fingerprint)
+            _sandbox_scope_key(sandbox, config, source.selection)
         )
         try:
             recovered = _recover_managed_sandbox(
@@ -2211,7 +2247,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
                 backend,
                 source.connectors,
                 source.identity,
-                source.selection_fingerprint,
+                source.selection,
             )
         except Exception:  # noqa: BLE001
             return
@@ -2272,7 +2308,7 @@ def _managed_sandbox_backend(
     *,
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> _LazyManagedSandboxBackend:
     from managed_deepagents._sandbox_proxy import SandboxProxyConfigSync  # noqa: PLC0415
 
@@ -2282,7 +2318,7 @@ def _managed_sandbox_backend(
             run_config,
             connectors=connectors,
             identity=identity,
-            selection_fingerprint=selection_fingerprint,
+            selection=selection,
             proxy_config_sync=SandboxProxyConfigSync(),
         ),
         None,
@@ -2340,7 +2376,7 @@ def _resolve_managed_sandbox(
     config: ManagedRunConfig | None,
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> SandboxBackendProtocol:
     """Resolve (and cache) the per-thread sandbox backend.
 
@@ -2350,7 +2386,7 @@ def _resolve_managed_sandbox(
     CLI wiring can refresh without re-cloning. Provisioning (``setup.sh``)
     happens at deploy bake, not here.
     """
-    key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
+    key = _sandbox_scope_key(sandbox, config, selection)
     thread_key = _thread_sync_key(config)
     has_sandbox = has_sandbox_connectors(connectors)
 
@@ -2361,9 +2397,10 @@ def _resolve_managed_sandbox(
             entry = _managed_sandboxes.get(key)
 
         if entry is not None:
+            _warn_selection_changed(entry, selection, config)
             # A helper sharing its lead's sandbox only refreshes credentials: the
             # lead's workspace is already set up.
-            helper = _parent_sandbox_scope(config, selection_fingerprint) is not None
+            helper = _parent_sandbox_scope(config, selection) is not None
             if has_sandbox and (thread_key in entry.synced_threads or helper):
                 # Same thread: refresh credentials / CLI wiring without re-cloning.
                 run_connector_sandbox_hooks(
@@ -2389,7 +2426,7 @@ def _resolve_managed_sandbox(
         # seconds and would wedge every other Host worker. A helper adopting its
         # lead's sandbox only refreshes credentials; one whose lead hasn't
         # created it yet creates it under the lead's scope for the lead to adopt.
-        helper = _parent_sandbox_scope(config, selection_fingerprint) is not None
+        helper = _parent_sandbox_scope(config, selection) is not None
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             sandbox,
             config=config,
@@ -2398,9 +2435,14 @@ def _resolve_managed_sandbox(
             sandbox_mode="create",
             adopted_mode="credentials" if helper else "reuse",
             scope_key=key,
-            selection_fingerprint=selection_fingerprint,
+            selection=selection,
         )
-        entry = _ManagedSandboxEntry(backend, host_name=host_name, sandbox_id=sandbox_id)
+        entry = _ManagedSandboxEntry(
+            backend,
+            host_name=host_name,
+            sandbox_id=sandbox_id,
+            selection_fingerprint=selection.fingerprint if selection is not None else None,
+        )
         entry.synced_threads.add(thread_key)
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = entry
@@ -2424,11 +2466,11 @@ def _recover_managed_sandbox(
     failed_backend: SandboxBackendProtocol,
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> SandboxBackendProtocol:
     from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
 
-    key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
+    key = _sandbox_scope_key(sandbox, config, selection)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2450,11 +2492,16 @@ def _recover_managed_sandbox(
             connectors=connectors,
             identity=identity,
             scope_key=key,
-            selection_fingerprint=selection_fingerprint,
+            selection=selection,
             recovery_name=entry.host_name,
             existing_sandbox=existing,
         )
-        replacement = _ManagedSandboxEntry(backend, host_name=host_name, sandbox_id=sandbox_id)
+        replacement = _ManagedSandboxEntry(
+            backend,
+            host_name=host_name,
+            sandbox_id=sandbox_id,
+            selection_fingerprint=selection.fingerprint if selection is not None else None,
+        )
         replacement.synced_threads.add(_thread_sync_key(config))
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = replacement
@@ -2467,7 +2514,7 @@ def _replace_managed_sandbox(
     config: ManagedRunConfig | None,
     connectors: list[Connector] | None = None,
     identity: IdentityDefinitionLike | None = None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> tuple[SandboxBackendProtocol, SandboxReplacement]:
     """Create a fresh box under the thread's box name; keep the old one, stopped and renamed.
 
@@ -2476,7 +2523,7 @@ def _replace_managed_sandbox(
     """
     from managed_deepagents.sandbox import SandboxReplacement  # noqa: PLC0415
 
-    key = _sandbox_scope_key(sandbox, config, selection_fingerprint)
+    key = _sandbox_scope_key(sandbox, config, selection)
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
@@ -2487,6 +2534,7 @@ def _replace_managed_sandbox(
         suffix = f"-old-{secrets.token_hex(2)}"
         retired = f"{name[: _MAX_SANDBOX_NAME_LENGTH - len(suffix)]}{suffix}"
         _await_if_needed(client.update_sandbox(name, new_name=retired))
+        fresh_selection = _sandbox_selection(replacement)
         stop_error: str | None = None
         try:
             _await_if_needed(client.stop_sandbox(retired))
@@ -2498,10 +2546,15 @@ def _replace_managed_sandbox(
             connectors=connectors,
             identity=identity,
             scope_key=key,
-            selection_fingerprint=_sandbox_selection_fingerprint(replacement),
+            selection=fresh_selection,
             recovery_name=name,
         )
-        fresh = _ManagedSandboxEntry(backend, host_name=host_name, sandbox_id=sandbox_id)
+        fresh = _ManagedSandboxEntry(
+            backend,
+            host_name=host_name,
+            sandbox_id=sandbox_id,
+            selection_fingerprint=fresh_selection.fingerprint,
+        )
         fresh.synced_threads.add(_thread_sync_key(config))
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = fresh
@@ -2529,6 +2582,54 @@ def _thread_sync_key(
     return _thread_scope_key(config)
 
 
+@dataclass(frozen=True, slots=True)
+class _SandboxSelection:
+    """Digests of a dynamic sandbox selection's identity options and of its mounts alone."""
+
+    fingerprint: str
+    mounts_fingerprint: str | None
+
+
+def _sandbox_selection(sandbox: SandboxDefinition) -> _SandboxSelection:
+    """Fingerprint a dynamic selection: its options for create, its mounts for the box key."""
+    mount_config = sandbox.options.get("mount_config")
+    mounts = mount_config.get("mounts") if isinstance(mount_config, Mapping) else None
+    return _SandboxSelection(
+        fingerprint=_sandbox_selection_fingerprint(sandbox),
+        mounts_fingerprint=_sandbox_value_digest(mounts) if mounts else None,
+    )
+
+
+def _with_selection_mounts(scope: str, selection: _SandboxSelection | None) -> str:
+    """Add a selection's mounts to a thread scope, so per-user mounts never share a box."""
+    mounts = selection.mounts_fingerprint if selection is not None else None
+    return f"{scope}:mounts:{mounts}" if mounts else scope
+
+
+def _warn_selection_changed(
+    entry: _ManagedSandboxEntry,
+    selection: _SandboxSelection | None,
+    config: ManagedRunConfig | None,
+) -> None:
+    """Warn when a run's selection options differ from those the live box was created with."""
+    if (
+        selection is None
+        or entry.selection_fingerprint is None
+        or entry.selection_fingerprint == selection.fingerprint
+    ):
+        return
+    logger.warning(
+        "sandbox options changed on thread %s; they apply only when a new sandbox is created",
+        _thread_id_from_config(config),
+    )
+
+
+def _sandbox_value_digest(value: object) -> str:
+    canonical = _canonical_sandbox_value(value, set())
+    encoded = json.dumps(canonical, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def _sandbox_selection_fingerprint(sandbox: SandboxDefinition) -> str:
     """Return a stable digest of only the sandbox identity options, without exposing them."""
     options = sandbox.options
@@ -2544,22 +2645,9 @@ def _sandbox_selection_fingerprint(sandbox: SandboxDefinition) -> str:
         "fs_capacity_bytes": options.get("fs_capacity_bytes"),
         "mounts": mount_config.get("mounts") if isinstance(mount_config, Mapping) else None,
     }
-    identity = {key: value for key, value in identity.items() if value is not None}
-    canonical = _canonical_sandbox_value(identity, set())
-    encoded = json.dumps(canonical, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(encoded.encode()).hexdigest()
-
-
-def _legacy_sandbox_selection_fingerprint(sandbox: SandboxDefinition) -> str:
-    """Reconstruct the 0.9.0 selection fingerprint, which hashed every option.
-
-    Used only to reconnect a live 0.9.0 box — new boxes are created under
-    :func:`_sandbox_selection_fingerprint`. Remove in 0.10 once 0.9.0 sandboxes
-    have idled out.
-    """
-    canonical = _canonical_sandbox_value(sandbox.options, set())
-    encoded = json.dumps(canonical, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(encoded.encode()).hexdigest()
+    return _sandbox_value_digest(
+        {key: value for key, value in identity.items() if value is not None}
+    )
 
 
 def _canonical_sandbox_value(  # noqa: C901, PLR0911, PLR0912 - exhaustive type boundary
@@ -2628,32 +2716,33 @@ def _canonical_sandbox_value(  # noqa: C901, PLR0911, PLR0912 - exhaustive type 
 def _sandbox_scope_key(
     sandbox: SandboxDefinition,
     config: ManagedRunConfig | None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> str:
-    """The process-level reuse key: the owning thread's, and the selection's unless per thread."""
-    from managed_deepagents.sandbox import is_per_thread, owning_thread  # noqa: PLC0415
+    """The process-level reuse key: the owning thread's when the box names one."""
+    from managed_deepagents.sandbox import owning_thread  # noqa: PLC0415
 
     thread_id = owning_thread(sandbox.options)
     scope_config: ManagedRunConfig | None = (
         {"configurable": {"thread_id": thread_id}} if thread_id else config
     )
-    fingerprint = None if is_per_thread(sandbox.options) else selection_fingerprint
-    return _thread_scope_key(scope_config, fingerprint)
+    return _thread_scope_key(scope_config, selection)
 
 
 def _thread_scope_key(
     config: ManagedRunConfig | None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> str:
-    """Derive the process-level reuse key for a thread and optional selection.
+    """Derive the process-level reuse key for a thread and any dynamic selection's mounts.
 
-    An async subagent sharing its lead's sandbox uses the lead's sandbox scope,
-    so both resolve, sync, and never invalidate the same sandbox.
+    A dynamic selection's other options never change the key, so a live thread
+    keeps its box when they change. An async subagent sharing its lead's sandbox
+    uses the lead's sandbox scope, so both resolve, sync, and never invalidate the
+    same sandbox.
     """
-    if (shared := _parent_sandbox_scope(config, selection_fingerprint)) is not None:
+    if (shared := _parent_sandbox_scope(config, selection)) is not None:
         return shared
     thread_key = f"thread:{_thread_id_from_config(config)}"
-    return f"{thread_key}:sandbox:{selection_fingerprint}" if selection_fingerprint else thread_key
+    return _with_selection_mounts(thread_key, selection)
 
 
 #: ``configurable`` key where deepagents puts an async subagent run's parent reference.
@@ -2686,7 +2775,7 @@ def _lead_thread(config: ManagedRunConfig | Mapping[str, object] | None) -> str 
 
 def _parent_sandbox_scope(
     config: ManagedRunConfig | Mapping[str, object] | None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> str | None:
     """Return the lead's sandbox scope when this run may share the lead's sandbox.
 
@@ -2700,7 +2789,7 @@ def _parent_sandbox_scope(
     if lead_thread is None or _VERIFIED_LEAD_THREAD.get() != lead_thread:
         return None
     scope = f"thread:{lead_thread}"
-    return f"{scope}:sandbox:{selection_fingerprint}" if selection_fingerprint else scope
+    return _with_selection_mounts(scope, selection)
 
 
 def _thread_id_from_config(config: ManagedRunConfig | None) -> str:
@@ -2729,14 +2818,13 @@ def _managed_deployment_name(env: Mapping[str, str] | None = None) -> str | None
 
     ``MDA_DEPLOYMENT_NAME`` is injected by ``mda deploy``;
     ``LANGSMITH_DEPLOYMENT_NAME`` is the platform's own value and is preferred
-    when present. ``None`` under local ``mda dev``, where sandboxes stay unnamed
-    and LangSmith generates a name.
+    when present. Under ``mda dev`` sandboxes fall back to
+    :func:`_local_dev_deployment_name`, but a given ``env`` never does.
     """
     values = os.environ if env is None else env
     return (
         _string_option(values.get("LANGSMITH_DEPLOYMENT_NAME"))
         or _string_option(values.get("MDA_DEPLOYMENT_NAME"))
-        # Sandboxes only: a link built from a given env (Studio's) names the deployment.
         or (_local_dev_deployment_name() if env is None else None)
     )
 
@@ -2824,16 +2912,13 @@ def _managed_sandbox_lookup_names(
     scope_key: str,
     sandbox: SandboxDefinition,
     config: ManagedRunConfig | None = None,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
 ) -> list[str]:
-    """Create name, then 0.9.0 and 0.5.x names that only reconnect a live box."""
+    """Create name, then 0.9.x and 0.5.x names that only reconnect a live box."""
     names = [_managed_sandbox_name(deployment, scope_key)]
-    if selection_fingerprint:
-        with contextlib.suppress(TypeError):
-            legacy_fingerprint = _legacy_sandbox_selection_fingerprint(sandbox)
-            names.append(
-                _managed_sandbox_name(deployment, _thread_scope_key(config, legacy_fingerprint))
-            )
+    if selection is not None:
+        options_key = f"{_thread_scope_key(config)}:sandbox:{selection.fingerprint}"
+        names.append(_managed_sandbox_name(deployment, options_key))
     names.append(
         _legacy_managed_sandbox_name(
             deployment,
@@ -3018,29 +3103,28 @@ def _create_langsmith_sandbox(
     sandbox_mode: Literal["create", "reuse"] = "create",
     adopted_mode: SandboxMode = "reuse",
     scope_key: str,
-    selection_fingerprint: str | None = None,
+    selection: _SandboxSelection | None = None,
     recovery_name: str | None = None,
     existing_sandbox: Sandbox | None = None,
 ) -> tuple[SandboxBackendProtocol, str | None, str | None]:
     """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it."""
     from managed_deepagents.sandbox import (  # noqa: PLC0415
         declared_create_fields,
-        is_per_thread,
         owning_thread,
     )
 
-    create_kwargs = _sandbox_create_kwargs(sandbox, selection_fingerprint)
+    create_kwargs = _sandbox_create_kwargs(sandbox, selection)
     client = _sandbox_client_for(sandbox)
     _send_create_fields(client, declared_create_fields(sandbox.options))
     deployment = _managed_deployment_name()
     if not deployment:
         lookup_names = []
-    elif is_per_thread(sandbox.options) or owning_thread(sandbox.options):
-        # Names from before these options never named a box kept this way.
+    elif owning_thread(sandbox.options):
+        # Names from before this option never named a box kept this way.
         lookup_names = [_managed_sandbox_name(deployment, scope_key)]
     else:
         lookup_names = _managed_sandbox_lookup_names(
-            deployment, scope_key, sandbox, config, selection_fingerprint
+            deployment, scope_key, sandbox, config, selection
         )
     sandbox_name = recovery_name or (lookup_names[0] if lookup_names else None)
     fallback_name: Callable[[], str] | None = None

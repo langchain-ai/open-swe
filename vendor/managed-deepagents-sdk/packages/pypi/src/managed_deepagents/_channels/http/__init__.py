@@ -175,6 +175,11 @@ def http_channel(
     for ``error`` and ``timeout``), or no ``run`` when it started none, and the
     interrupts the thread waits on. A ``parse`` result of type ``cancel``
     cancels the thread's runs and finishes without a ``run``.
+
+    !!! warning "Experimental"
+
+        ``input``, ``multitask_strategy``, ``reply``, ``on_received``,
+        ``on_finish`` and ``cancel`` results may change in a minor release.
     """
     return HttpChannel(
         provider=provider,

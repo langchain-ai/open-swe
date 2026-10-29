@@ -41,7 +41,10 @@ class ResolveUserChannel(TypedDict):
 
 
 class ResolveUserRequest(TypedDict):
-    """What ``resolve_user`` gets: the verified sender of a channel delivery."""
+    """What ``resolve_user`` gets: the verified sender of a channel delivery.
+
+    Experimental: this may change in a minor release.
+    """
 
     actor: ChannelActor | None
     """``None`` when the channel could not verify who sent the delivery."""
@@ -81,12 +84,18 @@ class ResolvedIgnore(TypedDict):
 ResolveUserResult: TypeAlias = (
     ResolvedAppUser | ResolvedIdentity | ResolvedReply | ResolvedIgnore | None
 )
-"""Who a channel delivery runs as; ``None`` keeps the channel's own principal."""
+"""Who a channel delivery runs as; ``None`` keeps the channel's own principal.
+
+Experimental: this may change in a minor release.
+"""
 
 ResolveUser: TypeAlias = Callable[
     [ResolveUserRequest], ResolveUserResult | Awaitable[ResolveUserResult]
 ]
-"""Map a channel's verified sender to one of your users."""
+"""Map a channel's verified sender to one of your users.
+
+Experimental: this may change in a minor release.
+"""
 
 
 class ResolveUserEndpointRequest(TypedDict):
@@ -145,7 +154,10 @@ class ChannelPrincipal(TypedDict):
 
 
 ChannelUser: TypeAlias = ChannelPrincipal | ResolvedReply | ResolvedIgnore
-"""What a delivery does after ``resolve_user``."""
+"""What a delivery does after ``resolve_user``.
+
+Experimental: this may change in a minor release.
+"""
 
 _RESULT_SHAPE = (
     'resolve_user must return {"type": "user", "id"}, {"type": "identity", "provider", '
