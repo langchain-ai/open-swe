@@ -674,7 +674,9 @@ class RunSession:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        await post_sandbox_unreachable_notification(
+            self.config, sandbox_id=request.sandbox_id, reason=request.reason
+        )
         return Done()
 
     def _offered(self) -> list[BaseTool]:
@@ -1080,7 +1082,9 @@ class TokenRun:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        await post_sandbox_unreachable_notification(
+            self.config, sandbox_id=request.sandbox_id, reason=request.reason
+        )
         return Done()
 
     async def route_model(self, request: Routed) -> Route:

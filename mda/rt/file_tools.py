@@ -253,11 +253,13 @@ class FileToolsMiddleware(AgentMiddleware):
         return request.override(tool_call={**request.tool_call, "args": arguments})
 
     async def _observed(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
-        """``handler``, once the box is ready and the turn's starting fingerprint taken, when the
-        call may change a checkout."""
+        """``handler`` once the box has booted; when the call may change a checkout, once the
+        box is ready and the turn's starting fingerprint taken."""
+        setup = box_setup(self._backend.run)
         if request.tool_call["name"] not in OBSERVED_TOOLS:
+            await setup.booted()
             return await handler(request)
-        await box_setup(self._backend.run).done()
+        await setup.done()
         git = turn_git(self._backend.run)
         await git.changing()
         started = time.time_ns()

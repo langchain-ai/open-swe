@@ -56,6 +56,9 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+# How long connecting to a box still booting waits for it: as long as MDA's own first use
+# waits, retries included.
+SANDBOX_BOOT_TIMEOUT_SECONDS = 90
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
 # The API cannot push a proxy config while the host suspends an idle box, which
 # takes up to about three minutes; outlast that rather than fail the run.
@@ -301,9 +304,19 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     }
 
 
+async def _booted_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
+    """The sandbox once it has booted: MDA asks for a thread's box without waiting for it."""
+    sandbox = await client.get_sandbox(name=sandbox_id)
+    if sandbox.status != "provisioning":
+        return sandbox
+    return await client.wait_for_sandbox(
+        sandbox_id, timeout=SANDBOX_BOOT_TIMEOUT_SECONDS, poll_interval=0.5
+    )
+
+
 async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
     try:
-        return await client.get_sandbox(name=sandbox_id)
+        return await _booted_sandbox(client, sandbox_id)
     except ResourceNotFoundError as e:
         msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
         raise SandboxGoneError(msg) from e
@@ -525,7 +538,7 @@ async def sandbox_exists(sandbox_id: str) -> bool:
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
     client = get_async_sandbox_client()
     try:
-        return client, await client.get_sandbox(name=sandbox_id)
+        return client, await _booted_sandbox(client, sandbox_id)
     except Exception:
         await client.aclose()
         raise

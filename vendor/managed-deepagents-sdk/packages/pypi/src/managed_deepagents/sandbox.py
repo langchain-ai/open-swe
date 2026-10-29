@@ -168,14 +168,16 @@ class SandboxReplacement:
     stop_error: str | None = None
 
 
-async def open_sandbox(backend: object) -> str:
+async def open_sandbox(backend: object, *, wait: bool = True) -> str:
     """Adopt or create the run's managed sandbox now and return its name.
 
     ``backend`` is ``runtime.backend``. The box is otherwise opened on first use.
+    Without ``wait`` this returns as soon as the box is asked for, while it boots;
+    its first use waits for it to be ready and runs the connectors' hooks.
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).aopen()
+    return await _managed_sandbox_of(backend).aopen(wait=wait)
 
 
 async def replace_sandbox(

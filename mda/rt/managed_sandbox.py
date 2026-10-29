@@ -1,13 +1,15 @@
-"""The thread's box as MDA's own sandbox: declared, opened before the run, replaced on request.
+"""The thread's box as MDA's own sandbox: declared, opened as the run starts, replaced on request.
 
 The graph declares one box (``box``) for every run; each run's catalog says which
 box it uses and the options MDA creates it with (``SandboxSpec``), or that it has
 none, when what the graph keeps itself, such as large tool results, goes to the
 backend's files instead. MDA keeps one box per thread whatever the backend's options
 become, which apply only when MDA creates it, and leaves its proxy config to the
-backend. Before the run prepares, the box is opened and its name reported, so the
-backend binds the thread to it; opening is retried while the sandbox service fails
-transiently, and otherwise the backend hears why it failed. ``recreate_sandbox`` on
+backend. Before the run prepares, the box is asked for and its name reported, so the
+backend binds the thread to it; it boots while the run prepares and calls the model,
+and the first call that needs it waits for it. Opening and booting are retried while
+the sandbox service fails transiently; otherwise the backend hears why, from preparing
+or from the call that needed the box. ``recreate_sandbox`` on
 such a box comes back from the backend as what to replace it with; MDA replaces it,
 the backend reconnects, and the call answers as it does in-process.
 """
@@ -152,15 +154,26 @@ def _not_opened(exc: Exception) -> OpenedSandbox:
 
 
 async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
-    """Adopt or create the thread's box now, retrying while the sandbox service fails transiently.
+    """Adopt the thread's box or ask for it now, without waiting for it to boot.
 
-    The backend reports a box MDA could not open as unreachable when it prepares, with the cause.
+    The backend reports a box MDA could not open as unreachable when it prepares, with the
+    cause; one that cannot boot is reported by the first call that needs it (``booted_sandbox``).
     """
     backend = getattr(runtime, "backend", None)
+    return await _opening(lambda: open_sandbox(backend, wait=False))
+
+
+async def booted_sandbox(files: object) -> OpenedSandbox:
+    """The box ``files`` reaches once it has booted, or why it could not."""
+    return await _opening(lambda: open_sandbox(files))
+
+
+async def _opening(open_: Callable[[], Awaitable[str]]) -> OpenedSandbox:
+    """``open_``'s box, retried while the sandbox service fails transiently."""
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
-            return OpenedSandbox(sandbox_id=await open_sandbox(backend))
+            return OpenedSandbox(sandbox_id=await open_())
         except Exception as exc:
             delay = backoff * random.uniform(0.8, 1.2)
             if not _transient(exc) or time.monotonic() + delay > deadline:
@@ -172,7 +185,7 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
             )
             await asyncio.sleep(delay)
     try:
-        return OpenedSandbox(sandbox_id=await open_sandbox(backend))
+        return OpenedSandbox(sandbox_id=await open_())
     except Exception as exc:
         return _not_opened(exc)
 

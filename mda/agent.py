@@ -49,6 +49,7 @@ from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ReplaceSandboxMiddleware,
+    booted_sandbox,
     box,
     opened_sandbox,
 )
@@ -258,7 +259,7 @@ def _parts(graph: Graph) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, opened_sandbox),
+            BackendRunMiddleware(backend, opened_sandbox, booted_sandbox),
             replace_sandbox,
             *reports,
             skills,
