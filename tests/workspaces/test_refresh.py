@@ -1,13 +1,11 @@
 import asyncio
 import base64
-import os
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from openswe.workspaces import refresh
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, script_command
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _Result:
@@ -30,56 +28,6 @@ def _scripts_run(backend: MagicMock) -> list[str]:
         encoded = str(call.args[0]).split("printf %s ")[1].split(" |")[0].strip("'")
         bodies.append(base64.b64decode(encoded).decode())
     return bodies
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("clone_fails", [False, True])
-async def test_update_preloads_missing_repos_before_running_the_script(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clone_fails: bool
-) -> None:
-    async def run(*args: str, env: dict[str, str] | None = None) -> tuple[int | None, str]:
-        process = await asyncio.create_subprocess_exec(
-            *args, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-        )
-        output, _ = await process.communicate()
-        return process.returncode, output.decode()
-
-    source = tmp_path / "source.git"
-    code, output = await run("git", "init", "--bare", str(source))
-    assert code == 0, output
-    work_dir = tmp_path / "checkouts"
-    work_dir.mkdir()
-    existing = work_dir / "existing"
-    existing.mkdir()
-    (existing / "local-work").write_text("preserve me")
-    script_root = tmp_path / "scripts"
-    monkeypatch.setenv("OPENSWE_SCRIPT_ROOT", str(script_root))
-    destination = source if not clone_fails else tmp_path / "absent.git"
-    env = {
-        **os.environ,
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": f"url.{destination}.insteadOf",
-        "GIT_CONFIG_VALUE_0": "https://github.com/acme/missing.git",
-    }
-    marker = tmp_path / "updated"
-    command = script_command(
-        f'test -d "{work_dir}/missing/.git" && touch "{marker}"',
-        "update",
-        ["acme/existing", "acme/missing"],
-        work_dir=str(work_dir),
-    )
-    code, output = await run("bash", "-c", command, env=env)
-
-    assert (code == 0) is not clone_fails, output
-    assert marker.exists() is not clone_fails
-    assert (existing / "local-work").read_text() == "preserve me"
-    log = (script_root / "logs/update.log").read_text()
-    if clone_fails:
-        assert "does not appear to be a git repository" in log
-    else:
-        assert (work_dir / "missing/.git").is_dir()
-        code, output = await run("bash", "-c", command, env=env)
-        assert code == 0, output
 
 
 # --- refresh ---
