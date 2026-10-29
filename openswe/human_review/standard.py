@@ -74,6 +74,8 @@ from openswe.slack.client import (
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
+from openswe.threads import index
+from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
@@ -1006,6 +1008,33 @@ async def settle(request: HumanReviewRequest) -> bool:
         return False
 
 
+async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
+    thread_ids = set(request.pull_request.thread_ids)
+    if request.thread_id:
+        thread_ids.add(request.thread_id)
+    try:
+        for thread_id in sorted(thread_ids):
+            thread = await index.get(thread_id)
+            if thread is None:
+                continue
+            if thread.status not in {"idle", "interrupted", "error", "busy"}:
+                return "auto-merge paused — could not verify PR thread activity"
+            if thread.status == "busy":
+                return "auto-merge paused — a PR thread has an active run"
+            client = RUNTIMES.runs_on(thread.runtime).client
+            for run_status in ("pending", "running"):
+                if await client.runs.list(thread_id, status=run_status, limit=1):
+                    return "auto-merge paused — a PR thread has an active run"
+    except Exception:
+        logger.warning(
+            "Could not check PR thread activity before auto-merge",
+            extra={"request_id": str(request.id)},
+            exc_info=True,
+        )
+        return "auto-merge paused — could not verify PR thread activity"
+    return None
+
+
 async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     readiness = await Readiness.assess(pull)
     if readiness is None:
@@ -1065,6 +1094,11 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
             return True
         if not row.auto_merge:
             row.detail = "approved — awaiting manual merge"
+            await ReviewCard(row).refresh()
+            return True
+        if hold := await _auto_merge_hold(row):
+            row.detail = hold
+            await _schedule(row, "auto_merge", _DEADLINE_RETRY)
             await ReviewCard(row).refresh()
             return True
         result = await merge_pull_request(
