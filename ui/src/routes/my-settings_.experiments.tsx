@@ -50,11 +50,6 @@ function ExperimentsPage() {
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
         <ProfileSwitchRow
-          field="experimental_monitor"
-          label="Monitors"
-          description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
-        />
-        <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"
           description={

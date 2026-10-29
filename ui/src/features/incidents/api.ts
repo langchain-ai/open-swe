@@ -82,7 +82,6 @@ export interface IncidentPolicy {
 export interface IncidentSettingsPayload {
   policy: IncidentPolicy
   connection: {
-    slack_configured: boolean
     workspace_id: string
     slack_app_id: string
     required_scopes_present?: boolean | null

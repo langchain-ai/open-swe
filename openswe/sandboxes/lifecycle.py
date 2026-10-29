@@ -33,6 +33,7 @@ from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
+    TimeoutLangSmithSandbox,
     configure_sandbox_proxy,
     get_sandbox_proxy_config,
 )
@@ -271,24 +272,24 @@ _WORK_DIR_READY = "__open_swe_work_dir_ready__"
 
 
 async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    """Write the bot identity, and ready the provider's work dir in the same round trip.
-
-    Creating the work dir and proving it writable is the check the work-dir probe
-    makes, so every connection that runs this spares the run that probe.
-    """
+    """Write the bot identity and ready the provider's work dir in one command."""
     identity = (
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
     work_dir = declared_work_dir(sandbox_backend)
-    if work_dir is None:
-        await sandbox_backend.aexecute(identity)
-        return
-    quoted = shlex.quote(work_dir)
-    result = await sandbox_backend.aexecute(
-        f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
-    )
-    if _WORK_DIR_READY in result.output:
+    command = identity
+    if work_dir is not None:
+        quoted = shlex.quote(work_dir)
+        command = (
+            f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
+        )
+    result = await sandbox_backend.aexecute(command)
+    if result.exit_code != 0:
+        raise RuntimeError(
+            f"Failed to configure sandbox Git identity (exit code {result.exit_code}): {result.output}"
+        )
+    if work_dir is not None and _WORK_DIR_READY in result.output:
         remember_work_dir(sandbox_backend, work_dir)
 
 
@@ -296,17 +297,22 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> Non
 async def git_identity(
     thread_id: str | None, sandbox_backend: SandboxBackendProtocol
 ) -> AsyncIterator[None]:
-    """Write the bot identity while the body configures the proxy.
-
-    The identity needs the box, not the proxy, and the cost is the round trip
-    rather than the two `git config` calls — on a cold sandbox that round trip
-    is over a second of the critical path before the first model call. A body
-    that raises has lost the sandbox, so the write is dropped rather than joined.
-    """
+    """Reset identity with the next LangSmith command, or alongside proxy setup elsewhere."""
+    if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
+        sandbox_backend.reset_git_identity()
+        yield
+        return
 
     async def run() -> None:
-        async with aphase(thread_id, "sandbox.git_identity"):
-            await configure_git_identity(sandbox_backend)
+        try:
+            async with aphase(thread_id, "sandbox.git_identity"):
+                await configure_git_identity(sandbox_backend)
+        except Exception:
+            logger.warning(
+                "Failed to write the bot Git identity",
+                extra={"thread_id": thread_id, "sandbox_id": sandbox_backend.id},
+                exc_info=True,
+            )
 
     task = asyncio.create_task(run())
     try:
@@ -499,10 +505,9 @@ async def ensure_sandbox_for_thread(
     ``require_existing`` is for a task worker attaching to its coordinator's box,
     which it must never hand over.
 
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth, and
-    re-applies git identity every run because reused/reconnected sandboxes can
-    lose their ``--global`` config, and Vercel preview deploys reject commits
-    whose author email can't be resolved to a GitHub account.
+    For LangSmith sandboxes, also refreshes the GitHub App proxy auth and schedules
+    a git identity reset before the next command. Reused boxes can lose their global
+    config, and Vercel rejects commits whose email cannot resolve to a GitHub account.
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
@@ -605,6 +610,17 @@ async def bind_mda_sandbox(
     metadata = ThreadMetadata.model_validate(raw)
     if metadata.task_id is not None:
         return
+    if (
+        metadata.sandbox_owner == "mda"
+        and metadata.sandbox_id is not None
+        and sandbox_id not in (None, metadata.sandbox_id)
+    ):
+        raise SandboxUnreachableError(
+            thread_id,
+            metadata.sandbox_id,
+            "Managed Deep Agents opened a different sandbox than this thread is bound to",
+            reason=f"Expected {metadata.sandbox_id}; opened {sandbox_id}. The binding was preserved.",
+        )
     if not (metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id)):
         await _bind_mda_sandbox(thread_id, sandbox_id, raw, workspace_slug)
     if sandbox_id is None and metadata.sandbox_id is None:
@@ -676,12 +692,16 @@ async def reconnect_replaced_sandbox(
     sandbox_id = metadata.get("sandbox_id")
     if isinstance(sandbox_id, str):
         SANDBOX_CONNECTIONS.pop(sandbox_id, None)
-    return await ensure_sandbox_for_thread(
+    backend = await ensure_sandbox_for_thread(
         thread_id,
         workspace_slug=workspace_slug,
         github_proxy_repositories=github_proxy_repositories,
         github_proxy_permissions=github_proxy_permissions,
     )
+    current = unwrap_sandbox_backend(backend)
+    if isinstance(current, TimeoutLangSmithSandbox):
+        await current.ensure_git_identity()
+    return backend
 
 
 async def hand_gone_sandbox_to_mda(thread_id: str, sandbox_id: str) -> bool:

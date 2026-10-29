@@ -43,6 +43,7 @@ What a deployment needs:
 | `LANGGRAPH_URL` | The deployment's own public URL |
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on.
+The backend refuses to start if any of the five required Slack app variables above are missing or blank.
 Every variable Open SWE reads is declared in `openswe/config.py` with its description and default; that file is the complete reference.
 
 ### Optional PostHog usage tracking
@@ -424,6 +425,7 @@ Admins turn kitchen mode on per channel in the workspace editor (**Workspaces â†
 In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run.
 Other channels still require mentions.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
+
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
 
 **Native Stop.**

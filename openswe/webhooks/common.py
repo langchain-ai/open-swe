@@ -464,7 +464,7 @@ async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
 
     sender = payload.get("sender") or {}
     sender_login = sender.get("login", "") or ""
-    if sender_login in INTERNAL_BOT_LOGINS:
+    if sender_login.lower() in INTERNAL_BOT_LOGINS:
         return True
 
     if not sender_login:

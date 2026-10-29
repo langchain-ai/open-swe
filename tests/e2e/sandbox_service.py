@@ -43,9 +43,19 @@ class StandInSandbox(LocalShellBackend):
             root_dir=root,
             virtual_mode=True,
             inherit_env=False,
-            env={key: value for key, value in os.environ.items() if key not in _EXCLUDED_ENV},
+            env={
+                **{key: value for key, value in os.environ.items() if key not in _EXCLUDED_ENV},
+                "GIT_CONFIG_COUNT": "2",
+                "GIT_CONFIG_KEY_0": f"url.{os.environ['E2E_REMOTE']}.insteadOf",
+                "GIT_CONFIG_VALUE_0": "https://github.com/fakeorg/demo.git",
+                "GIT_CONFIG_KEY_1": f"url.{os.environ['E2E_REMOTE']}.insteadOf",
+                "GIT_CONFIG_VALUE_1": "https://github.com/e2e/initial-build.git",
+            },
         )
         self._stand_in_id = sandbox_id
+
+    def get_work_dir(self) -> str:
+        return str(self.cwd)
 
     @property
     def id(self) -> str:
