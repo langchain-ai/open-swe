@@ -352,8 +352,7 @@ def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
     return SLACK_ASK_EXCLUDED_TOOLS
 
 
-# Reading a Slack channel takes an explicit channel id and nothing from the run's
-# source context, so it survives every gate the thread-bound Slack tools do not.
+# Channel history also serves source-free requests; its own policy gates access.
 SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
 
 
@@ -1405,6 +1404,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
+            persist_route = False
             if self._model_selection is not None:
                 routing_state = cast(ModelSelectionState, state).copy()
                 if (
@@ -1414,11 +1414,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 ):
                     routing_state.pop("model_route", None)
                     routing_state.pop("requested_model", None)
-                attribution_route = (
-                    "default"
-                    if requested_model
-                    else await self._model_selection.select_route(routing_state)
-                )
+                if requested_model:
+                    attribution_route = "default"
+                    persist_route = True
+                else:
+                    selection = await self._model_selection.select_route(routing_state)
+                    attribution_route = selection.route
+                    persist_route = selection.persist
                 if attribution_route != "default":
                     attribution_model_id, attribution_effort = self._routing_defaults[
                         attribution_route
@@ -1495,7 +1497,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": added} if added else {}),
-            **({"model_route": attribution_route} if attribution_route is not None else {}),
+            **({"model_route": attribution_route} if persist_route else {}),
             **system_prompt,
         }
 

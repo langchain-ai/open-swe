@@ -1,6 +1,5 @@
 import http from "node:http"
 import { execSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
@@ -279,15 +278,16 @@ function buildInfoStamp(): Plugin {
   return {
     name: "build-info-stamp",
     apply: "build",
-    closeBundle() {
+    applyToEnvironment: (environment) => environment.name === "client",
+    generateBundle() {
       const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
       const commit = sourceCommit()
       if (commit) info.commit = commit
-      mkdirSync(".output/public", { recursive: true })
-      writeFileSync(
-        ".output/public/open-swe-build-info.json",
-        JSON.stringify(info)
-      )
+      this.emitFile({
+        type: "asset",
+        fileName: "open-swe-build-info.json",
+        source: JSON.stringify(info),
+      })
     },
   }
 }

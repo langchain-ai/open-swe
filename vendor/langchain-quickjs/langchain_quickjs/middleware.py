@@ -38,6 +38,7 @@ from langchain_quickjs._prompt import (
 )
 from langchain_quickjs._ptc import (
     PTCOption,
+    ToolResolver,
     filter_tools_for_ptc,
     render_ptc_prompt,
 )
@@ -197,6 +198,13 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
 
             The REPL's own tool is always excluded; a model asking for
             `tools.eval("...")` would recurse pointlessly.
+        resolve_tool: Finds the tool a `tools.<camelCaseName>` call names
+            when `ptc` installed none by that name, so code can call tools
+            the agent never lists, such as those a tool search found. It
+            gets the camelCase name and returns the tool, or `None`, which
+            the call raises as a `TypeError`; a tool that only finds out once
+            called raises `UnresolvedToolError` for the same. The prompt's API
+            reference still lists only the installed tools.
         mode: REPL state persistence mode.
             - `"thread"`: state persists across calls and across turns.
             - `"turn"`: state persists across calls within a turn only.
@@ -249,6 +257,7 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
         subagents: bool = True,
         max_subagent_concurrency: int = _DEFAULT_MAX_SUBAGENT_CONCURRENCY,
         ptc: PTCOption | None = None,
+        resolve_tool: ToolResolver | None = None,
         mode: PersistenceMode | None = None,
         max_snapshot_bytes: int | None = None,
         snapshot_signing_key: str | bytes | None = None,
@@ -290,6 +299,7 @@ class CodeInterpreterMiddleware(AgentMiddleware[REPLState, ContextT, ResponseT])
             max_ptc_calls=max_ptc_calls,
             subagents_enabled=subagents,
             max_subagent_concurrency=max_subagent_concurrency,
+            resolve_tool=resolve_tool,
         )
         self._memory_limit_mb = memory_limit // (1024 * 1024)
         self._base_prompt_cache: dict[bool, str] = {}

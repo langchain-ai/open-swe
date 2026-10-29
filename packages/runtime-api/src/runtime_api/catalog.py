@@ -37,7 +37,7 @@ class RunModels(BaseModel):
     vision: ModelSpec | None = None
 
 
-class OperationSpec(BaseModel):
+class ToolSpec(BaseModel):
     """One operation the run may call, as the model sees the tool that calls it."""
 
     name: str
@@ -179,7 +179,12 @@ class LoopRules(BaseModel):
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
-    operations: list[OperationSpec] = []
+    # The run's tools: all but its integrations, which stay on the backend, found with
+    # ``search_tools`` and called from code mode (``runtime_api.tool_search``).
+    operations: list[ToolSpec] = []
+    # The same tools by name alone, as the run's context carries them (``names_only``):
+    # the run reads their specs as it starts (``runtime_api.tool_search.TOOL_SPECS``).
+    tool_names: list[str] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
@@ -208,6 +213,22 @@ class Catalog(BaseModel):
     # What the runtime's middleware does around each model call; None leaves it to the
     # backend's phase calls, for the runs still answered from their plan.
     loop: LoopRules | None = None
-    # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
+    # Whether the run offers ``search_tools`` over all its tools and calls those its
+    # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
+
+    def names_only(self) -> Catalog:
+        """This catalog as a run's context carries it: its tools by name alone.
+
+        The Agent Server copies the context into every checkpoint and every read of
+        the run, so the specs stay with the backend, which the run reads them from.
+        """
+        return self.model_copy(
+            update={"operations": [], "tool_names": [tool.name for tool in self.operations]}
+        )
+
+    @property
+    def needs_tool_specs(self) -> bool:
+        """Whether it names tools whose specs the run has yet to read."""
+        return bool(self.tool_names) and not self.operations

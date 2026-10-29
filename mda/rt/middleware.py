@@ -437,6 +437,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
+        await self._backend.run.load_tool_specs(run_id())
         # What an earlier run left unsent goes out before anything this one does.
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
@@ -583,6 +584,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if own is not None:
             # The run's own model, unless the loop names another for this call.
             request = request.override(model=own)
+            models = self._backend.run.catalog.models
+            if models is not None:
+                turn_trace(self._backend.run).record_model(models.model.model_id)
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
             return await handler(request)
@@ -593,6 +597,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
+            turn_trace(self._backend.run).record_model(model.model_id)
         try:
             return await handler(
                 request.override(
@@ -605,6 +610,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
             fallback = build_model(planned.fallback, use_gateway=planned.use_gateway)
+            turn_trace(self._backend.run).record_model(planned.fallback.model_id)
             return await handler(
                 request.override(
                     model=fallback,
@@ -928,7 +934,7 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                             reply.grant,
                             # A worker runs on its coordinator's catalog until it adopts its own.
                             _json_object.validate_python(
-                                self._backend.run.catalog.model_dump(mode="json")
+                                self._backend.run.catalog.names_only().model_dump(mode="json")
                             ),
                         ),
                     )

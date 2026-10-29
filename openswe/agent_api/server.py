@@ -12,6 +12,7 @@ An async subagent's first run carries a worker grant instead: it may read its
 coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
@@ -19,6 +20,7 @@ from typing import Final
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
+from runtime_api.loop import PREPARE
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -43,6 +45,10 @@ Api = Callable[[RemoteRun, str, JsonValue], Awaitable[JsonValue]]
 
 class RefusedCallError(PermissionError):
     """The run's token does not allow this call."""
+
+
+class CallerHungUpError(ConnectionError):
+    """The caller disconnected before the call answered, so the call was cancelled."""
 
 
 def _graphs() -> Mapping[str, Api]:
@@ -79,6 +85,39 @@ def _graph(run: RemoteRun) -> Api:
     return graph
 
 
+async def _unless_disconnected(receive: Receive, call: Awaitable[JsonValue]) -> JsonValue:
+    """What ``call`` answers; a caller that hangs up first cancels it."""
+
+    async def disconnected() -> None:
+        while (await receive())["type"] != "http.disconnect":
+            pass
+
+    answer = asyncio.ensure_future(call)
+    hangup = asyncio.create_task(disconnected())
+    done: set[asyncio.Task[JsonValue]] = set()
+    try:
+        done, _ = await asyncio.wait({answer, hangup}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (answer, hangup):
+            task.cancel()
+        # Teardown finishes even when this request is cancelled while it runs.
+        cleanup = asyncio.gather(answer, hangup, return_exceptions=True)
+        cancelled: asyncio.CancelledError | None = None
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        if cancelled is not None:
+            raise cancelled
+    if answer in done:
+        return answer.result()
+    for task in (answer, hangup):
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error("Agent API call failed after its caller hung up", exc_info=error)
+    raise CallerHungUpError
+
+
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     from langgraph_api.logging import set_logging_context
 
@@ -99,7 +138,15 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     set_logging_context(context)
     try:
         with traced_under(Request(scope).headers):
-            result = await _answer(principal, endpoint, body)
+            call = _answer(principal, endpoint, body)
+            result = (
+                await _unless_disconnected(receive, call)
+                if endpoint == PREPARE.name
+                else await call
+            )
+    except CallerHungUpError:
+        logger.info("Agent API caller hung up before the call answered")
+        return
     except RefusedCallError as exc:
         await JSONResponse({"detail": str(exc)}, 403)(scope, receive, send)
         return

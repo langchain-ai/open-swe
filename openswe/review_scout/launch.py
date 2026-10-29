@@ -24,6 +24,7 @@ SCOUT_WAIT_SECONDS = 600
 # The reviewer resumes up to one interval after the scout finishes; a poll is one run read.
 _POLL_SECONDS = 1
 _ACTIVE_STATUSES = frozenset({"pending", "running"})
+_FAILED_STATUSES = frozenset({"error", "timeout"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
 
@@ -178,8 +179,13 @@ class ReviewScoutTarget(BaseModel):
         if not runs:
             return None
         run = _ScoutRun.model_validate(runs[0])
-        if run.status != "error" or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha:
+        if (
+            run.status not in _FAILED_STATUSES
+            or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha
+        ):
             return None
+        if run.status == "timeout":
+            return "The review scout run timed out."
         return await thread_run_error(thread_id) or "The review scout run ended with an error."
 
     async def start(self) -> str:

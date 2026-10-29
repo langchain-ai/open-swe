@@ -1,12 +1,12 @@
 A {{ summary.source }} `{{ summary.event_type }}` event arrived.
+{% if instructions %}
+
+Subscription task and reporting destination:
+{{ instructions }}
+{% endif %}
 {% if details %}
 
 {{ details }}
-{% endif %}
-{% if instructions %}
-
-When you subscribed you asked to be told:
-{{ instructions }}
 {% endif %}
 
 {% if one_shot %}

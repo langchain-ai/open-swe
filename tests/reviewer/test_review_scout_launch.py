@@ -64,7 +64,11 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     from openswe.walkthrough.plan import PlanStatus
 
     monkeypatch.setattr(graph, "_ensure_scout_sandbox", AsyncMock(return_value=MagicMock()))
-    monkeypatch.setattr(graph, "prepare_review_repo", AsyncMock(return_value=True))
+    monkeypatch.setattr(graph, "prepare_review_repo_or_raise", AsyncMock(return_value=None))
+    pull = MagicMock(head_sha=AsyncMock(side_effect=["initial", "carried"]))
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=pull)
+    monkeypatch.setattr(graph.PullRequestClient, "as_app", lambda *args: client)
     monkeypatch.setattr(PinnedCheckout, "pin", AsyncMock())
     workspace = MagicMock(complete=False)
     monkeypatch.setattr(graph, "_workspace", AsyncMock(return_value=workspace))

@@ -99,6 +99,9 @@ class RunSettings(BaseModel):
     effort: str | None = None
     # What preparing an agent run's turn reads; None for the other graphs.
     agent: AgentTurnSettings | None = None
+    # The digest of every tool the run started with, kept in ``run_tool_sets``;
+    # its catalog lists only those the model is offered.
+    tools: str | None = None
 
     def configurable(self) -> dict[str, JsonValue]:
         """The run config keys these settings fill."""
