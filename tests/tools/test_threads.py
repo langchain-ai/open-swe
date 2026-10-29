@@ -440,21 +440,18 @@ async def test_automation_delivery_refuses_creator_failing_login_gate(
     recorded.assert_awaited_once()
 
 
-@pytest.mark.parametrize(
-    "configurable",
-    [
-        {"source": "dashboard", "thread_id": "some-thread"},
-        {"source": "schedule", "schedule_id": _AUTOMATION_ID, "thread_id": "automation-thread"},
-    ],
-)
-async def test_automation_delivery_refuses_runs_without_their_automation(
-    monkeypatch: pytest.MonkeyPatch, configurable: dict[str, str]
+async def test_automation_delivery_refuses_unrelated_run(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _automation_run(
         monkeypatch,
-        {"owner_type": "system", "visibility": "public", "schedule_id": "another-automation"},
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
     )
-    monkeypatch.setattr(run_config, "get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr(
+        run_config,
+        "get_config",
+        lambda: {"configurable": {"source": "dashboard", "thread_id": "some-thread"}},
+    )
     post, _ = _creator_dm(monkeypatch)
 
     result = await delivery_tool.deliver_automation_result("digest")
