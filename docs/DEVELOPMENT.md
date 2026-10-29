@@ -3,6 +3,22 @@
 Run Open SWE on your machine: the backend and the dashboard on `http://localhost:2024`, with GitHub and Slack webhooks arriving through a tunnel.
 Deploying it for a team is the [installation guide](INSTALLATION.md).
 
+## Production releases
+
+Production is released by merging a release PR, not on a schedule.
+The **Prepare production release PR** workflow opens one after main changes, or can be run manually from Actions.
+It updates `.github/production-release` with a full main commit SHA and leaves an existing release PR unchanged, so its candidate stays pinned while main moves on.
+
+Review the linked changes since production before merging.
+The PR is created with `GITHUB_TOKEN`, so GitHub does not automatically start pull-request workflows: close and reopen it as a human to start CI.
+To choose a newer candidate, close the old PR without merging and run **Prepare production release PR** again.
+GitHub Actions must be allowed to create pull requests in the repository's Actions settings.
+
+Merging the pin into main runs **Release to prod**: it typechecks the pinned commit, fast-forwards prod to it, deploys the production MDA runtime, and publishes the desktop nightly.
+Only commits already in main and containing the current prod commit can be released; an unchanged pin is a no-op.
+Later commits on main are not included, and a failed workflow can be rerun from Actions.
+The initial pin records the existing prod commit without requesting a new release.
+
 ## Prerequisites
 
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
