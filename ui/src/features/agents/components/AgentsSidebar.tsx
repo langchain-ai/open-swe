@@ -7,7 +7,9 @@ import {
   PushPinRegularIcon,
   StackRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { getLastSectionLocation, useHrefLinkOptions } from "@/lib/appLocation"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
@@ -26,7 +28,8 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
@@ -45,8 +48,18 @@ import type {
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { useLangSmithConnection } from "@/features/settings/components/ConnectionsSection"
+import {
+  fleetClient,
+  FLEET_ASSISTANT_ID,
+  FLEET_THREADS_KEY,
+  type Thread,
+} from "@/features/agents/lib/fleetChat"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
-import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarThreadRow,
+  SidebarConversationRow,
+} from "@/features/agents/components/SidebarThreadRow"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -184,8 +197,14 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
-  const newThreadShortcut = useShortcutLabel("mod+n")
   const profile = useProfile()
+  const fleetEnabled = profile.data?.experimental_fleet === true
+  const onFleetRoute = useRouterState({
+    select: (state) => state.location.pathname === "/agents/chat",
+  })
+  const fleetSelected = fleetEnabled && onFleetRoute
+  const linkOptions = useHrefLinkOptions()
+  const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
     queryFn: api.concierge,
@@ -666,7 +685,50 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
+      {fleetEnabled && (
+        <div className="px-space-2 pb-space-4">
+          <GroupedTabs
+            size="md"
+            className="w-full"
+            value={fleetSelected ? "fleet" : "openswe"}
+            options={[
+              {
+                value: "openswe",
+                display: "Open SWE",
+                className: "flex-1",
+              },
+              {
+                value: "fleet",
+                display: "Fleet",
+                className: "flex-1",
+              },
+            ]}
+            onChange={(value) => {
+              void navigate(
+                linkOptions(
+                  value === "fleet"
+                    ? getLastSectionLocation("/agents/chat")
+                    : "/agents"
+                )
+              )
+              layout.closeOnMobile()
+            }}
+          />
+        </div>
+      )}
+      {fleetSelected && (
+        <FleetThreadList
+          compact={prefs.compact}
+          onNavigate={layout.closeOnMobile}
+        />
+      )}
+
+      <div
+        className={cn(
+          "flex flex-col gap-0.5 px-space-2 pb-space-1",
+          fleetSelected && "hidden"
+        )}
+      >
         <Link
           to="/agents"
           onClick={layout.closeOnMobile}
@@ -713,7 +775,12 @@ export function AgentsSidebar({
         )}
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col",
+          fleetSelected && "hidden"
+        )}
+      >
         {scrollEdges.top && (
           <>
             <div className="pointer-events-none absolute inset-x-0 top-0 z-floating-bar border-t border-default" />
@@ -894,7 +961,6 @@ export function AgentsSidebar({
           )}
         </div>
       </div>
-
       <div className="flex items-center gap-space-2 p-space-2">
         <div className="min-w-0 flex-1">
           {user ? (
@@ -1396,5 +1462,157 @@ export function AgentsShell({
         </div>
       </TooltipProvider>
     </SidebarLayoutProvider>
+  )
+}
+
+const FLEET_SECTIONS = ["Pinned", "Recents", "Archived"] as const
+
+function fleetSection(thread: Thread): (typeof FLEET_SECTIONS)[number] {
+  if (thread.metadata?.openswe_archived === true) return "Archived"
+  return thread.metadata?.is_pinned === true ? "Pinned" : "Recents"
+}
+
+/** The caller's Fleet chats, most recently active first. */
+function FleetThreadList({
+  compact,
+  onNavigate,
+}: {
+  compact: boolean
+  onNavigate: () => void
+}) {
+  const activeThread = useRouterState({
+    select: ({ location: { search } }) =>
+      "chat" in search && typeof search.chat === "string"
+        ? search.chat
+        : undefined,
+  })
+  const connected = useLangSmithConnection().data?.connected === true
+  const queryClient = useQueryClient()
+  const [archivedOpen, setArchivedOpen] = useState(false)
+  const threads = useQuery({
+    queryKey: FLEET_THREADS_KEY,
+    queryFn: () =>
+      fleetClient().threads.search({
+        metadata: { assistant_id: FLEET_ASSISTANT_ID },
+        sortBy: "updated_at",
+        sortOrder: "desc",
+        limit: 50,
+      }) as Promise<Thread[]>,
+    enabled: connected,
+    retry: false,
+  })
+  const update = useMutation({
+    mutationFn: ({
+      thread,
+      metadata,
+    }: {
+      thread: Thread
+      metadata: Record<string, boolean>
+    }) => fleetClient().threads.update(thread.thread_id, { metadata }),
+    onMutate: async ({ thread, metadata }) => {
+      await queryClient.cancelQueries({ queryKey: FLEET_THREADS_KEY })
+      queryClient.setQueryData<Thread[]>(FLEET_THREADS_KEY, (current) =>
+        current?.map((item) =>
+          item.thread_id === thread.thread_id
+            ? { ...item, metadata: { ...item.metadata, ...metadata } }
+            : item
+        )
+      )
+    },
+    onError: (error, { thread }) => {
+      queryClient.setQueryData<Thread[]>(FLEET_THREADS_KEY, (current) =>
+        current?.map((item) =>
+          item.thread_id === thread.thread_id ? thread : item
+        )
+      )
+      toast.error("Could not update chat", { description: error.message })
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: FLEET_THREADS_KEY }),
+  })
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col px-space-2 pb-space-2">
+      <Link
+        to="/agents/chat"
+        onClick={onNavigate}
+        className={cn(
+          NAV_ROW_CLASS,
+          "group mb-space-3 bg-surface-level-3 hover:bg-surface-level-4"
+        )}
+      >
+        <PlusIcon size={20} className="-mx-0.5" />
+        New chat
+      </Link>
+      {threads.error && (
+        <ThreadSourceError
+          label={threads.error.message}
+          onRetry={() => void threads.refetch()}
+        />
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {threads.isLoading && <ThreadListSkeleton compact={compact} />}
+        {FLEET_SECTIONS.map((label) => {
+          const rows = (threads.data ?? []).filter(
+            (thread) => fleetSection(thread) === label
+          )
+          if (!rows.length) return null
+          const collapsible = label === "Archived"
+          return (
+            <div key={label}>
+              <SidebarSectionHeader
+                label={label}
+                collapsed={collapsible ? !archivedOpen : undefined}
+                onToggleCollapsed={
+                  collapsible ? () => setArchivedOpen(!archivedOpen) : undefined
+                }
+              />
+              {(!collapsible || archivedOpen) &&
+                rows.map((thread) => {
+                  const pinned = thread.metadata?.is_pinned === true
+                  const archived = thread.metadata?.openswe_archived === true
+                  return (
+                    <SidebarConversationRow
+                      key={thread.thread_id}
+                      title={String(
+                        thread.metadata?.thread_title ??
+                          thread.metadata?.first_message_preview ??
+                          "New chat"
+                      )}
+                      threadId={thread.thread_id}
+                      active={thread.thread_id === activeThread}
+                      compact={compact}
+                      onNavigate={onNavigate}
+                      pinned={pinned}
+                      archived={archived}
+                      pending={
+                        update.isPending &&
+                        update.variables.thread.thread_id === thread.thread_id
+                      }
+                      onPin={() =>
+                        update.mutate({
+                          thread,
+                          metadata: { is_pinned: !pinned },
+                        })
+                      }
+                      onArchive={() =>
+                        update.mutate({
+                          thread,
+                          metadata: { openswe_archived: !archived },
+                        })
+                      }
+                    />
+                  )
+                })}
+            </div>
+          )
+        })}
+        {threads.data?.length === 0 && (
+          <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
+            No chats yet.
+          </p>
+        )}
+      </div>
+    </div>
   )
 }

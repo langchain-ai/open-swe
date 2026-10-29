@@ -4,6 +4,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import httpx2
 import jwt
 import pytest
@@ -240,3 +241,31 @@ def test_agent_factory_is_accepted_by_langgraph() -> None:
         classify_factory(traced_agent, graph_id)
     finally:
         FACTORY_KWARGS.pop(graph_id, None)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", ""), ("GET", "/list"), ("GET", "/search"), ("POST", "/invoke/slack_reply")],
+)
+@pytest.mark.parametrize("token", [None, "invalid-capability"])
+async def test_removed_tool_endpoints_are_gone_without_tool_access(
+    method: str,
+    path: str,
+    token: str | None,
+) -> None:
+    from openswe.api.app import app
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://test"
+    ) as client:
+        response = await client.request(
+            method,
+            tool_access.TOOLS_PATH + path,
+            headers={tool_access.TOOLS_HEADER: token} if token else {},
+        )
+
+    assert response.status_code == 410
+    assert response.json() == {
+        "detail": "The sandbox tool endpoint was removed. Call the tool directly, "
+        "or find it with search_tools and call it from eval."
+    }

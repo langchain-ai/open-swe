@@ -64,6 +64,7 @@ from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
 from rt.run_tools import (
+    BackendTools,
     RunCodeInterpreter,
     RunModelCallLimit,
     RunSubagentMiddleware,
@@ -84,7 +85,7 @@ if TYPE_CHECKING:
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # The in-process graphs' cap on model calls per run, for a catalog that sets none.
 _MODEL_CALL_LIMIT: Final = 5_000
-# A worker's system prompt starts as this agent's; the backend's prepends the rest.
+# A worker's system prompt starts as this agent's; each run's follows it.
 _INSTRUCTIONS: Final = Path(__file__).with_name("instructions.md").read_text()
 _WORKER_DESCRIPTION: Final = (
     "An Open SWE task worker: a full agent of its own, sharing this thread's sandbox, "
@@ -182,9 +183,10 @@ class _Parts:
 
 
 def _code_mode(
-    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware
+    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware, backend_tools: BackendTools
 ) -> RunCodeInterpreter:
-    """The graph's code mode, with every tool the run's catalog offers from code callable from it."""
+    """The graph's code mode, with every tool the run offers from code callable from it:
+    those its catalog lists, and those ``search_tools`` finds on the backend."""
     if graph == "reviewer":
         return RunCodeInterpreter(
             toolsets,
@@ -196,7 +198,12 @@ def _code_mode(
     # As the in-process agent's code mode: state per turn, subagents through `task`,
     # for a run that offers tools from code.
     return RunCodeInterpreter(
-        toolsets, active=lambda tools: bool(tools.from_code), subagents=False, mode="turn"
+        toolsets,
+        # Also for a run whose catalog leaves tools out: code mode calls those.
+        active=lambda tools: bool(tools.from_code) or tools.catalog.search_tools,
+        subagents=False,
+        mode="turn",
+        backend_tools=backend_tools,
     )
 
 
@@ -215,6 +222,8 @@ def _parts(graph: Graph) -> _Parts:
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     toolsets = RunToolsets(backend, files)
+    # What the run calls that its catalog leaves out, as the backend names it.
+    backend_tools = BackendTools(backend)
     skills = RunSkillsMiddleware(backend, skill_files)
     replace_sandbox = ReplaceSandboxMiddleware(backend)
     # The backend's transcript and usage see every reply and every tool call.
@@ -249,14 +258,14 @@ def _parts(graph: Graph) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, opened_sandbox),
+            BackendRunMiddleware(backend, opened_sandbox, read_ahead=[skill_files.list_ahead]),
             replace_sandbox,
             *reports,
             skills,
             files,
             task_retry(),
-            RunToolsMiddleware(toolsets),
-            _code_mode(graph, toolsets, files),
+            RunToolsMiddleware(toolsets, backend_tools=backend_tools),
+            _code_mode(graph, toolsets, files, backend_tools),
             DescribedToolsMiddleware(backend),
             # The coding agent's browser, a LangSmith browser per thread the dashboard
             # shows; the deployment's workspace needs the LangSmith browser beta.

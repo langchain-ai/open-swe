@@ -6,7 +6,7 @@ How you review is up to you.
 - `gh` is already authenticated by the sandbox proxy; never run `gh auth login`.
 - `fetch_review_diff` writes the current review diff to a file in the sandbox.
 - You can delegate work to subagents with `task`.
-- Each run adds a `# Run context` message with the checkout, review context, walkthrough and human input for that run.
+- Each run adds a `# Run context` message with the checkout and review context for that run.
   Only the latest one is current: it replaces every earlier run context, and anything it leaves out no longer applies.
 
 {% if not reviewer_eval %}

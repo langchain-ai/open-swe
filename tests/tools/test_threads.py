@@ -1,14 +1,21 @@
 import importlib
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Literal, get_args
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
+from openswe import run_config
+from openswe.input_messages import human_input, person_introduction
 from openswe.message_queue import QueuedMessage
+from openswe.slack import allowed_bots
 
 threads_tool = importlib.import_module("openswe.tools.threads")
+slack_channels = importlib.import_module("openswe.slack.tools.channels")
+delivery = importlib.import_module("openswe.schedules.delivery")
 
 
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:
@@ -20,11 +27,44 @@ def _actor(*, login: str = "octocat", admin: bool = False) -> object:
             name=actor.name,
             session=actor.session,
             admin=True,
+            automation=actor.automation,
         )
     return actor
 
 
-async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    (
+        "sender",
+        "surface",
+        "context_id",
+        "context_login",
+        "stored_login",
+        "lookup_fails",
+        "expected",
+    ),
+    [
+        ("github:123", "github", "github:123", "reviewer", None, False, "reviewer"),
+        ("github:123", "github", "github:456", "other", None, False, None),
+        ("github:123", "github", "github:123", None, "reviewer", False, "reviewer"),
+        ("github:123", "github", "github:123", None, None, False, None),
+        ("github:123", "github", "github:123", None, None, True, None),
+        ("github:123", "web", "github:456", "other", None, False, "123"),
+        ("github:123", "web", "github:456", "other", "different-user", False, "123"),
+        ("github:123", "automation", "github:456", "other", None, False, "123"),
+        ("github:reviewer", "github", "github:456", "other", None, False, "reviewer"),
+        ("slack:U123", "github", "github:123", "reviewer", None, False, "thread-owner"),
+    ],
+)
+async def test_actor_uses_latest_resolvable_github_sender(
+    monkeypatch: pytest.MonkeyPatch,
+    sender: str,
+    surface: Literal["github", "web", "automation"],
+    context_id: str,
+    context_login: str | None,
+    stored_login: str | None,
+    lookup_fails: bool,
+    expected: str | None,
+) -> None:
     monkeypatch.setattr(
         threads_tool,
         "get_config",
@@ -35,21 +75,113 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
             }
         },
     )
+    monkeypatch.setattr(
+        threads_tool.User,
+        "for_identity",
+        AsyncMock(
+            return_value=SimpleNamespace(github_login=stored_login) if stored_login else None,
+            side_effect=RuntimeError("store unavailable") if lookup_fails else None,
+        ),
+    )
+
+    async def gate(login: str) -> None:
+        if login not in {"thread-owner", expected}:
+            raise HTTPException(403, "not authorized")
+
+    monkeypatch.setattr(threads_tool, "enforce_github_login_gate", gate)
+    person = person_introduction({"id": context_id, "github_login": context_login or ""})
     state = {
         "messages": [
-            {
-                "type": "human",
-                "content": (
-                    '<input-message sender="github:reviewer" surface="web" kind="human">\n'
-                    "Delete the thread\n</input-message>"
-                ),
-            }
+            human_input(
+                "Earlier request",
+                {"sender_id": "github:earlier", "surface": "github", "kind": "human"},
+            ),
+            person,
+            human_input(
+                "Delete the thread",
+                {"sender_id": sender, "surface": surface, "kind": "human"},
+            ),
+            person,
         ]
     }
 
-    actor = await threads_tool._actor(state)
+    actor = await threads_tool.resolve_thread_actor(state)
 
-    assert actor == threads_tool._Actor(login="reviewer", email=None, name="reviewer")
+    if expected is None:
+        assert actor is None
+        return
+    assert actor == threads_tool._Actor(
+        login=expected,
+        email="owner@example.com" if expected == "thread-owner" else None,
+        name=expected,
+    )
+
+
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_github_sender_can_use_thread_tools_only_when_authorized(
+    monkeypatch: pytest.MonkeyPatch, authorized: bool
+) -> None:
+    monkeypatch.setenv(
+        "ALLOWED_GITHUB_USERS", "thread-owner,reviewer" if authorized else "thread-owner"
+    )
+    monkeypatch.setattr(
+        threads_tool, "get_config", lambda: {"configurable": {"github_login": "thread-owner"}}
+    )
+    state = {
+        "messages": [
+            person_introduction({"id": "github:123", "github_login": "reviewer"}),
+            human_input(
+                "Send the author a confirmation",
+                {
+                    "sender_id": "github:123",
+                    "surface": "github",
+                    "kind": "human",
+                },
+            ),
+        ]
+    }
+    monkeypatch.setattr(
+        threads_tool,
+        "list_dashboard_threads_page",
+        AsyncMock(return_value={"items": [{"id": "thread-1"}]}),
+    )
+    monkeypatch.setattr(
+        threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", _DetailClient)
+    for name, value in (
+        ("get_plan_content", {}),
+        ("list_plan_comments", []),
+        ("get_workflow_push_approvals", {}),
+        ("_queued_message_count", 0),
+        ("get_langsmith_thread_cost", None),
+    ):
+        monkeypatch.setattr(threads_tool, name, AsyncMock(return_value=value))
+    monkeypatch.setattr(
+        threads_tool,
+        "proxy_dashboard_thread_commands",
+        AsyncMock(
+            return_value=(
+                200,
+                b'{"id": 1, "type": "success", "result": {"run_id": "run-2"}}',
+                "application/json",
+            )
+        ),
+    )
+
+    listed = await threads_tool.list_threads(state=state)
+    detail = await threads_tool.get_thread("thread-1", state=state)
+    sent = await threads_tool.manage_thread(
+        "thread-1", "send_message", message="Please confirm", state=state
+    )
+
+    assert listed["success"] is authorized
+    assert detail["success"] is authorized
+    assert sent["success"] is authorized
+    if authorized:
+        assert listed["items"][0]["id"] == "thread-1"
+        assert detail["thread"]["id"] == "thread-1"
+        assert sent["run_id"] == "run-2"
 
 
 async def test_list_threads_denies_actor_outside_allowed_org(
@@ -70,7 +202,10 @@ async def test_list_threads_denies_actor_outside_allowed_org(
 
     result = await threads_tool.list_threads()
 
-    assert result == {"success": False, "error": "No verified triggering user is available"}
+    assert result == {
+        "success": False,
+        "error": "Thread lookup was unavailable. No verified triggering user is available",
+    }
     page.assert_not_awaited()
 
 
@@ -199,30 +334,24 @@ _AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
 def _automation_run(
     monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, object]
 ) -> AsyncMock:
+    config = {
+        "configurable": {
+            "source": "schedule",
+            "schedule_id": _AUTOMATION_ID,
+            "thread_id": "automation-thread",
+        }
+    }
+    monkeypatch.setattr(threads_tool, "get_config", lambda: config)
+    monkeypatch.setattr(run_config, "get_config", lambda: config)
     monkeypatch.setattr(
-        threads_tool,
-        "get_config",
-        lambda: {
-            "configurable": {
-                "source": "schedule",
-                "schedule_id": _AUTOMATION_ID,
-                "thread_id": "automation-thread",
-            }
-        },
+        threads_tool.schedules.THREADS,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(metadata=thread_metadata)),
     )
-    client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(
-                return_value={"thread_id": "automation-thread", "metadata": thread_metadata}
-            )
-        )
-    )
-    monkeypatch.setattr(threads_tool.schedules, "langgraph_client", lambda: client)
-    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         threads_tool.schedules,
         "get_agent_schedule",
-        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch"}),
+        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch", "created_by": "octocat"}),
     )
     page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
@@ -241,14 +370,96 @@ async def test_automation_run_reads_public_threads_but_cannot_write(
     sent = await threads_tool.manage_thread(
         action="send_message", thread_id="dm-thread", message="digest"
     )
+    started = await threads_tool.start_thread(title="Digest", instructions="digest")
 
     assert listed["success"] is True
     awaited = page.await_args
     assert awaited is not None
     assert awaited.kwargs["include_all"] is True
     assert awaited.kwargs["include_private"] is False
-    assert sent["success"] is False
-    assert "cannot message" in sent["error"]
+    for refused in (sent, started):
+        assert refused["success"] is False
+        assert "cannot message" in refused["error"]
+
+
+def _creator_dm(
+    monkeypatch: pytest.MonkeyPatch, *, gate: HTTPException | None = None
+) -> tuple[AsyncMock, AsyncMock]:
+    monkeypatch.setattr(delivery, "enforce_github_login_gate", AsyncMock(side_effect=gate))
+    monkeypatch.setattr(
+        delivery.User,
+        "for_login",
+        AsyncMock(return_value=SimpleNamespace(slack_user_id="U_CREATOR")),
+    )
+    recorded = AsyncMock()
+    monkeypatch.setattr(delivery, "record_run_error", recorded)
+    post = AsyncMock(return_value=("D_CREATOR", "1.2"))
+    monkeypatch.setattr(delivery, "post_dm", post)
+    return post, recorded
+
+
+async def test_automation_run_delivers_only_to_its_creator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    post, _ = _creator_dm(monkeypatch)
+
+    other = await slack_channels.slack_post_message("U_OTHER", "digest")
+    post.assert_not_awaited()
+    result = await slack_channels.slack_post_message("U_CREATOR", "**12** PRs need review")
+
+    assert other == {
+        "success": False,
+        "error": "An automation run can DM only the automation's creator.",
+    }
+    assert result == {"success": True, "channel_id": "D_CREATOR", "message_ts": "1.2"}
+    awaited = post.await_args
+    assert awaited is not None
+    assert awaited.args[0] == "U_CREATOR"
+    assert "12" in awaited.args[1]
+
+
+async def test_automation_delivery_refuses_creator_failing_login_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    post, recorded = _creator_dm(
+        monkeypatch, gate=HTTPException(403, "your GitHub account is not authorized")
+    )
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result["success"] is False
+    assert "octocat is no longer authorized" in result["error"]
+    post.assert_not_awaited()
+    recorded.assert_awaited_once()
+
+
+async def test_automation_delivery_refuses_unrelated_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    monkeypatch.setattr(
+        run_config,
+        "get_config",
+        lambda: {"configurable": {"source": "dashboard", "thread_id": "some-thread"}},
+    )
+    post, _ = _creator_dm(monkeypatch)
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result["success"] is False
+    assert "Only an automation run" in result["error"]
+    post.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -266,7 +477,155 @@ async def test_automation_reader_requires_the_automations_own_thread(
 
     result = await threads_tool.list_threads(scope="automation")
 
-    assert result == {"success": False, "error": "No verified triggering user is available"}
+    assert result == {
+        "success": False,
+        "error": "Thread lookup was unavailable. No verified triggering user is available",
+    }
+    page.assert_not_awaited()
+
+
+_SLACK_BOT = {
+    "channel_id": "C123",
+    "thread_ts": "123.456",
+    "team_id": "T123",
+    "triggering_bot_id": "B123",
+    "triggering_bot_app_id": "A123",
+    "triggering_user_id": "U123",
+}
+
+
+def _slack_bot_run(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    metadata_override: dict[str, object] | None = None,
+    config_override: dict[str, object] | None = None,
+) -> tuple[dict[str, object], AsyncMock, AsyncMock]:
+    metadata = {
+        "owner_type": "system",
+        "visibility": "public",
+        "trigger_kind": "slack_bot",
+        "triggering_bot": "T123:B123",
+        "source_context": {"slack_thread": _SLACK_BOT},
+        **(metadata_override or {}),
+    }
+    page = _automation_run(monkeypatch, metadata)
+    monkeypatch.setattr(
+        allowed_bots.THREADS,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(metadata=metadata)),
+    )
+    allowed = AsyncMock(
+        return_value=allowed_bots.AllowedSlackBot(
+            team_id="T123",
+            bot_id="B123",
+            user_id="U123",
+            app_id="A123",
+            name="Engine",
+            created_at=datetime(2026, 9, 9, tzinfo=UTC),
+        )
+    )
+    monkeypatch.setattr(allowed_bots.AllowedSlackBot, "get", allowed)
+    configurable: dict[str, object] = {
+        "source": "slack",
+        "thread_id": "automation-thread",
+        "slack_thread": _SLACK_BOT,
+        **(config_override or {}),
+    }
+    monkeypatch.setattr(threads_tool, "get_config", lambda: {"configurable": configurable})
+    return configurable, page, allowed
+
+
+_SLACK_BOT_READER = "system:slack-bot:T123:B123"
+
+
+@pytest.mark.parametrize("wakeup", [False, True])
+async def test_allowed_slack_bot_finds_pr_work_without_write_privileges(
+    monkeypatch: pytest.MonkeyPatch, wakeup: bool
+) -> None:
+    configurable, page, _ = _slack_bot_run(monkeypatch)
+    if wakeup:
+        wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
+        monkeypatch.setattr(
+            wakeup_tool.RunConfig,
+            "from_runtime",
+            lambda: threads_tool.RunConfig.parse(configurable),
+        )
+        monkeypatch.setattr(wakeup_tool, "get_client", lambda **kwargs: object())
+        monkeypatch.setattr(
+            wakeup_tool,
+            "get_active_slack_thread",
+            AsyncMock(return_value=configurable["slack_thread"]),
+        )
+        monkeypatch.setattr(wakeup_tool, "_purge_expired_wakeups_best_effort", AsyncMock())
+        monkeypatch.setattr(wakeup_tool.THREAD_WAKEUPS, "used", AsyncMock(return_value=("g", 0)))
+        monkeypatch.setattr(wakeup_tool.THREAD_WAKEUPS, "record", AsyncMock())
+        scheduled = AsyncMock(return_value={"success": True})
+        monkeypatch.setattr(wakeup_tool, "_schedule_wakeup", scheduled)
+        await wakeup_tool.schedule_thread_wakeup(1)
+        assert scheduled.await_args is not None
+        configurable = scheduled.await_args.kwargs["configurable"]
+        monkeypatch.setattr(threads_tool, "get_config", lambda: {"configurable": configurable})
+    pr = "https://github.com/org/repo/pull/42"
+    page.return_value = {
+        "items": [{"id": "implementation", "pr": {"url": pr}}],
+        "hasMore": False,
+    }
+
+    result = await threads_tool.list_threads(query=pr)
+
+    assert result["success"] is True
+    assert result["items"][0]["id"] == "implementation"
+    assert page.await_args is not None
+    assert page.await_args.args == (_SLACK_BOT_READER,)
+    assert page.await_args.kwargs["include_all"] is True
+    assert page.await_args.kwargs["include_private"] is False
+    actor = await threads_tool._reader()
+    assert actor == threads_tool._Actor(
+        login=_SLACK_BOT_READER, email=None, name="Engine", automation=True
+    )
+    assert actor.admin is False
+    for action in get_args(threads_tool.ThreadAction):
+        denied = await threads_tool.manage_thread("implementation", action, message="fix")
+        assert denied == {"success": False, "error": threads_tool._NO_WRITER}
+    started = await threads_tool.start_thread(title="Fix", instructions="fix", repos=["org/repo"])
+    assert started == {"success": False, "error": threads_tool._NO_WRITER}
+
+
+@pytest.mark.parametrize(
+    ("metadata_override", "config_override", "allowlisted"),
+    [
+        ({"owner_type": "user"}, {}, True),
+        ({"visibility": "private"}, {}, True),
+        ({"trigger_kind": "user"}, {}, True),
+        ({"triggering_bot": "T123:B999"}, {}, True),
+        ({"source_context": {}}, {}, True),
+        ({}, {"slack_thread": {**_SLACK_BOT, "channel_id": "C999"}}, True),
+        ({}, {"slack_thread": {**_SLACK_BOT, "triggering_bot_app_id": "A999"}}, True),
+        ({}, {"slack_thread": {**_SLACK_BOT, "triggering_user_id": "U999"}}, True),
+        ({}, {"github_login": "rejected-user"}, True),
+        ({}, {"thread_id": None}, True),
+        ({}, {}, False),
+    ],
+)
+async def test_slack_bot_reader_requires_allowed_bot_on_its_own_public_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_override: dict[str, object],
+    config_override: dict[str, object],
+    allowlisted: bool,
+) -> None:
+    _, page, allowed = _slack_bot_run(
+        monkeypatch, metadata_override=metadata_override, config_override=config_override
+    )
+    if not allowlisted:
+        allowed.return_value = None
+    monkeypatch.setattr(
+        threads_tool,
+        "enforce_github_login_gate",
+        AsyncMock(side_effect=HTTPException(403, "denied")),
+    )
+
+    for result in (await threads_tool.list_threads(), await threads_tool.get_thread("target")):
+        assert result == {"success": False, "error": threads_tool._NO_READER}
     page.assert_not_awaited()
 
 
@@ -314,6 +673,47 @@ class _DetailClient:
             ]
 
         self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
+
+
+@pytest.mark.parametrize("visibility", ["public", "private"])
+async def test_allowed_slack_bot_inspects_only_public_threads(
+    monkeypatch: pytest.MonkeyPatch, visibility: str
+) -> None:
+    _slack_bot_run(monkeypatch)
+    original_get = threads_tool.langgraph_client().threads.get
+    client = _DetailClient()
+
+    async def get(thread_id: str) -> dict[str, object]:
+        if thread_id == "automation-thread":
+            return await original_get(thread_id)
+        return {"thread_id": thread_id, "metadata": {"visibility": visibility}}
+
+    client.threads.get = get
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "visibility": visibility, "status": "finished"}),
+    )
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "_queued_message_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(threads_tool, "_thread_cost", AsyncMock(return_value=None))
+
+    result = await threads_tool.get_thread("thread-1")
+
+    if visibility == "public":
+        assert result["success"] is True
+        assert result["transcript"]["messages"][0]["text"] == "Fix the race"
+        assert result["available_actions"] == []
+    else:
+        assert result == {
+            "success": False,
+            "error": "this private thread can only be reached from its owner's private conversation",
+            "status_code": 403,
+        }
+        client.threads.get_state.assert_not_awaited()
 
 
 async def test_get_thread_counts_pending_run_outside_history_window(
@@ -676,3 +1076,75 @@ async def test_manage_thread_rejects_plan_format_conversion(
 
     assert result == {"success": False, "error": "existing plan format is html"}
     update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("login", "relayed_from", "action", "queued_run_id", "allowed"),
+    [
+        ("octocat", "coordinator", "send_message", None, True),
+        ("other-user", "coordinator", "send_message", None, False),
+        ("octocat", "unrelated", "send_message", None, False),
+        ("octocat", "coordinator", "cancel", None, False),
+        ("octocat", "coordinator", "send_message", "worker-run", True),
+        ("octocat", "coordinator", "send_message", "previous-run", False),
+        ("octocat", None, "send_message", "worker-run", False),
+    ],
+)
+async def test_public_worker_can_only_reply_to_its_owners_relaying_private_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    login: str,
+    relayed_from: str | None,
+    action: str,
+    queued_run_id: str | None,
+    allowed: bool,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor(login=login)))
+    monkeypatch.setattr(
+        threads_tool,
+        "_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "worker",
+                "run_id": "worker-run",
+                "relayed_from_thread_id": relayed_from if queued_run_id is None else None,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "langgraph_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}}))
+        ),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(
+            return_value={"id": "coordinator", "visibility": "private", "ownerLogin": "octocat"}
+        ),
+    )
+    proxy = AsyncMock(return_value=(200, b'{"result":{"run_id":"report-run"}}', "application/json"))
+    monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    state = (
+        {"relay_run_id": queued_run_id, "relayed_from_thread_id": relayed_from}
+        if queued_run_id is not None
+        else None
+    )
+
+    result = await threads_tool.manage_thread(
+        "coordinator",
+        action,
+        message="Pushed the fix" if action == "send_message" else None,
+        state=state,
+    )
+
+    if allowed:
+        assert result == {"success": True, "mode": "started", "run_id": "report-run"}
+    else:
+        assert result == {
+            "success": False,
+            "error": "this private thread can only be reached from its owner's private conversation",
+            "status_code": 403,
+        }
+        proxy.assert_not_awaited()

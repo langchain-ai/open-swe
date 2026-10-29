@@ -41,6 +41,40 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("renders queued passage replies even without plain text", () => {
+    render(
+      <Messages
+        messages={[]}
+        isStreaming={false}
+        queuedMessages={[
+          {
+            id: "quoted-follow-up",
+            content: "",
+            createdAt: 2000,
+            replies: [
+              {
+                source: "conversation",
+                before: "",
+                selection: "The selected passage <example>",
+                after: "",
+                comment: "Please explain this & its tradeoffs.",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const queued = screen.getByTestId("queued-message")
+    expect(queued.querySelector("blockquote")?.textContent).toBe(
+      "The selected passage <example>"
+    )
+    expect(queued.textContent).toContain("Please explain this & its tradeoffs.")
+    expect(queued.textContent).toContain("Queued")
+    expect(queued.querySelector("example")).toBeNull()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,

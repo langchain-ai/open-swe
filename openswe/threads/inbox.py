@@ -8,10 +8,11 @@ the conversation stays with the run.
 
 Reading takes nothing, and asks the run for nothing but who it is and how its plan
 reads the inbox (``InboxSpec``): the backend keeps what each thread is owed. All of it stays owed until the run says the model
-call it read it for goes ahead (``receive``), so a run that ends first leaves it
-for the next. A run started to carry events receives them as it is prepared.
+call it read it for goes ahead (``receive``), or names it received on its next
+read, so a run that ends first leaves it for the next. A run started to carry events receives them as it is prepared.
 """
 
+import asyncio
 import logging
 from collections.abc import Collection
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from uuid import UUID
 
 import httpx2
 from langgraph_sdk import get_client
+from pydantic import JsonValue
 from runtime_api.catalog import InboxSpec
 
 from openswe.dashboard.options import model_supports_images
@@ -40,6 +42,7 @@ from openswe.tasks.messages import TaskMessage
 from openswe.users import User
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
+    RELAY_RUN_ID_KEY,
     RELAYED_FROM_KEY,
     REPLIES_KEY,
     dashboard_input_context,
@@ -161,6 +164,23 @@ class Taken:
     queued: list[int] = field(default_factory=list)
     # The event matches and task messages among ``messages``.
     events: list[UUID] = field(default_factory=list)
+    # The agent thread that relayed the latest follow-up, if one did.
+    relayed_from: str | None = None
+    relay_updated: bool = False
+
+    def state_update(self, run_id: str | None) -> dict[str, JsonValue]:
+        """The run state these follow-ups set.
+
+        The relay source is stamped with the run that read it: state is
+        checkpointed, so a later run must not inherit an earlier run's relay.
+        """
+        update: dict[str, JsonValue] = {}
+        if self.reply_surface is not None:
+            update["reply_surface"] = self.reply_surface
+        if self.relay_updated:
+            update[RELAYED_FROM_KEY] = self.relayed_from
+            update[RELAY_RUN_ID_KEY] = run_id
+        return update
 
 
 class ThreadInbox:
@@ -176,37 +196,52 @@ class ThreadInbox:
     async def read(self, run_id: str, spec: InboxSpec) -> Taken:
         """Everything the thread is owed, for ``run_id``'s next model call."""
         taken = Taken()
-        if spec.events and postgres.configured():
-            try:
-                owed = await TaskMessage.owed(self.thread_id)
-            except Exception:
-                logger.warning(
-                    "Loading owed task messages failed",
-                    extra={"agent_thread_id": self.thread_id},
-                    exc_info=True,
-                )
-            else:
-                taken.messages.extend(TaskMessage.messages(owed))
-                taken.events.extend(message.id for message in owed)
+        # Each read takes a connection of its own.
+        messages, matches, _ = await asyncio.gather(
+            self._task_messages(spec),
+            self._event_matches(spec),
+            self._follow_ups(taken, run_id, spec),
+        )
+        taken.messages[:0] = TaskMessage.messages(messages)
+        taken.messages.extend(EventMatch.messages(matches))
+        taken.events.extend(
+            [*(message.id for message in messages), *(match.id for match in matches)]
+        )
+        return taken
+
+    async def _task_messages(self, spec: InboxSpec) -> list[TaskMessage]:
+        if not spec.events or not postgres.configured():
+            return []
+        try:
+            return await TaskMessage.owed(self.thread_id)
+        except Exception:
+            logger.warning(
+                "Loading owed task messages failed",
+                extra={"agent_thread_id": self.thread_id},
+                exc_info=True,
+            )
+            return []
+
+    async def _event_matches(self, spec: InboxSpec) -> list[EventMatch]:
+        if not spec.events or not postgres.configured():
+            return []
+        try:
+            return await EventMatch.owed(self.thread_id)
+        except Exception:
+            logger.warning(
+                "Loading owed event matches failed",
+                extra={"agent_thread_id": self.thread_id},
+                exc_info=True,
+            )
+            return []
+
+    async def _follow_ups(self, taken: Taken, run_id: str, spec: InboxSpec) -> None:
         try:
             await self._read_follow_ups(taken, run_id, spec)
         except Exception:
             logger.exception(
                 "Reading queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
             )
-        if spec.events and postgres.configured():
-            try:
-                matches = await EventMatch.owed(self.thread_id)
-            except Exception:
-                logger.warning(
-                    "Loading owed event matches failed",
-                    extra={"agent_thread_id": self.thread_id},
-                    exc_info=True,
-                )
-            else:
-                taken.messages.extend(EventMatch.messages(matches))
-                taken.events.extend(match.id for match in matches)
-        return taken
 
     async def receive(self, queued: Collection[int] = (), events: Collection[UUID] = ()) -> None:
         """A run holds ``queued`` follow-ups and ``events``: none is owed again."""
@@ -253,6 +288,9 @@ class ThreadInbox:
                 _flush_blocks(queued_updates, content_blocks, injected)
                 queued_updates.append(cast(dict[str, Any], message))
                 continue
+            relayed_from = content.get(RELAYED_FROM_KEY) if isinstance(content, dict) else None
+            taken.relayed_from = relayed_from if isinstance(relayed_from, str) else None
+            taken.relay_updated = True
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on

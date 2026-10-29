@@ -141,7 +141,7 @@ from openswe.slack.records import (  # noqa: F401
     resolve_slack_thread_id,
     store_slack_run_mapping,
 )
-from openswe.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
+from openswe.slack.stop import process_agent_session_stopped
 from openswe.source_context import SourceContext
 from openswe.threads.creation import create_thread, ensure_titled_thread
 from openswe.threads.summary import (
@@ -282,7 +282,6 @@ __all__ = [
     "process_agent_session_stopped",
     "process_slack_reaction_added",
     "process_slack_reaction_removed",
-    "process_slack_stop_reaction",
     "queue_message_for_thread",
     "react_to_github_comment",
     "reconcile_findings_with_review_threads",
@@ -1135,19 +1134,23 @@ async def trigger_or_queue_run(
             extra={"agent_thread_id": thread_id},
         )
         return False
+    configurable: dict[str, object] = {
+        "source": "github",
+        "github_login": github_login,
+        "github_user_id": github_user_id,
+        "repo": repo_config,
+        "pr_number": pr_number,
+        "workspace": workspace,
+        "environment": workspace,
+    }
+    slack_thread = SourceContext.from_metadata(record.metadata).slack_thread
+    if slack_thread is not None:
+        configurable["slack_thread"] = slack_thread.dump()
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
         None if input is not None else prompt,
-        {
-            "source": "github",
-            "github_login": github_login,
-            "github_user_id": github_user_id,
-            "repo": repo_config,
-            "pr_number": pr_number,
-            "workspace": workspace,
-            "environment": workspace,
-        },
+        configurable,
         source="github",
         thread_title=None,
         input=input,
