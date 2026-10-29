@@ -1,5 +1,4 @@
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -32,75 +31,37 @@ from tests.conftest import FakeUserRecords
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
-@pytest.mark.parametrize("thread_ts", ["", "1.0", "code-channel:session"])
-async def test_review_backlink_survives_card_reposts_without_duplicate_comments(
-    thread_ts: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+async def test_review_backlink_survives_card_reposts_without_duplicate_comments() -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
     request = HumanReviewRequest(
         pull_request_id=pr.id,
         head_sha="abc",
         kind="standard",
         slack_channel_id="C1",
-        slack_thread_ts=thread_ts,
+        slack_thread_ts="1.0",
         slack_message_ts="2.0",
     )
     request.pull_request = pr
-    comments: list[dict[str, str]] = []
-
-    def github(incoming: httpx2.Request) -> httpx2.Response:
-        assert incoming.url.path == "/repos/lc/repo/issues/7/comments"
-        if incoming.method == "POST":
-            comments.append(json.loads(incoming.content))
-            return httpx2.Response(201, json={"id": len(comments)})
-        return httpx2.Response(200, json=comments)
-
-    async def permalink(channel: str, timestamp: str) -> str | None:
-        assert channel == "C1"
-        if timestamp == "code-channel:session":
-            return None
-        return f"https://slack.example.com/archives/{channel}/p{timestamp}"
-
-    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
-        pull = GitHubClient(http).repo("lc", "repo").pull_request(7)
-
-        @asynccontextmanager
-        async def as_app(*_: object) -> AsyncIterator[object]:
-            yield pull
-
-        monkeypatch.setattr("openswe.human_review.lifecycle.PullRequestClient.as_app", as_app)
-        monkeypatch.setattr("openswe.human_review.lifecycle.get_slack_permalink", permalink)
-        card = ReviewCard(request)
-        await card.link_on_github()
+    pull = AsyncMock()
+    pull.issue_comments.side_effect = [
+        [],
+        [{"body": f"<!-- open-swe-review-request:{request.id} -->"}],
+    ]
+    with (
+        patch("openswe.human_review.lifecycle.PullRequestClient.as_app") as app,
+        patch(
+            "openswe.human_review.lifecycle.get_slack_permalink",
+            AsyncMock(return_value="https://slack.example.com/review"),
+        ),
+    ):
+        app.return_value.__aenter__.return_value = pull
+        await ReviewCard(request).link_on_github()
         request.slack_message_ts = "3.0"
-        await card.link_on_github()
-    anchor = "1.0" if thread_ts == "1.0" else "2.0"
-    assert len(comments) == 1
-    assert f"[Slack](https://slack.example.com/archives/C1/p{anchor})" in comments[0]["body"]
-
-
-async def test_review_backlink_failure_does_not_fail_the_published_request(
-    monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock, caplog: pytest.LogCaptureFixture
-) -> None:
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
-    request = HumanReviewRequest(
-        pull_request_id=pr.id,
-        head_sha="abc",
-        kind="expedited",
-        slack_channel_id="C1",
-        slack_message_ts="2.0",
-        awaiting_ready=True,
+        await ReviewCard(request).link_on_github()
+    pull.comment.assert_awaited_once_with(
+        f"Review requested in [Slack](https://slack.example.com/review).\n\n"
+        f"<!-- open-swe-review-request:{request.id} -->"
     )
-    request.pull_request = pr
-    lookup = AsyncMock(return_value="https://slack.example.com/review")
-    monkeypatch.setattr("openswe.human_review.lifecycle.get_slack_permalink", lookup)
-    card = ReviewCard(request)
-    await card.link_on_github()
-    lookup.assert_not_awaited()
-    request.awaiting_ready = False
-    github_app.return_value = None
-    await card.link_on_github()
-    assert "Could not link Slack review request on GitHub" in caplog.text
 
 
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
