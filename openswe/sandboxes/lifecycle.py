@@ -287,14 +287,18 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> str
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'"
     )
     work_dir = declared_work_dir(sandbox_backend)
-    if work_dir is None:
-        await sandbox_backend.aexecute(identity)
-        return None
-    quoted = shlex.quote(work_dir)
-    result = await sandbox_backend.aexecute(
-        f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
-    )
-    if _WORK_DIR_READY not in result.output:
+    command = identity
+    if work_dir is not None:
+        quoted = shlex.quote(work_dir)
+        command = (
+            f"{{ mkdir -p {quoted} && test -w {quoted} && echo {_WORK_DIR_READY}; }}; {identity}"
+        )
+    result = await sandbox_backend.aexecute(command)
+    if result.exit_code != 0:
+        raise RuntimeError(
+            f"Failed to configure sandbox Git identity (exit code {result.exit_code}): {result.output}"
+        )
+    if work_dir is None or _WORK_DIR_READY not in result.output:
         return None
     remember_work_dir(sandbox_backend, work_dir)
     return work_dir
