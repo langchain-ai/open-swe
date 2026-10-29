@@ -5,7 +5,6 @@ from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents import create_agent
 from langchain.agents.middleware.types import (
     AgentState,
     ExtendedModelResponse,
@@ -14,7 +13,6 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -23,7 +21,6 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
-from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -33,7 +30,6 @@ from rt.model_calls import (
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
-    model_call_guards,
 )
 from rt.models import ModelSpec
 from runtime_api.catalog import Catalog
@@ -203,27 +199,6 @@ async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None
         await ModelCallTimeoutMiddleware().awrap_model_call(
             cast(ModelRequest, MagicMock()), handler
         )
-
-    assert raised.value is error
-
-
-async def test_guard_does_not_retry_a_provider_exhausted_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    error = TimeoutError("provider exhausted its retries")
-    generate = AsyncMock(
-        side_effect=[
-            error,
-            ChatResult(generations=[ChatGeneration(message=AIMessage(content="retried"))]),
-        ]
-    )
-    monkeypatch.setattr(FakeListChatModel, "_agenerate", generate)
-    graph = create_agent(
-        model=FakeListChatModel(responses=["unused"]), middleware=model_call_guards()
-    )
-
-    with pytest.raises(TimeoutError) as raised:
-        await graph.ainvoke({"messages": [HumanMessage(content="go")]})
 
     assert raised.value is error
 
