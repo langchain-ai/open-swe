@@ -1,5 +1,6 @@
 """A `/btw` question it can't answer in one go continues in the asker's DM."""
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -18,25 +19,23 @@ _ASKED_IN = {
 
 
 class _Threads:
-    """One thread's metadata, as LangGraph keeps it."""
+    """One thread's metadata, as the thread index keeps it."""
 
     def __init__(self) -> None:
         self.metadata: dict[str, Any] = {"source_context": dict(_ASKED_IN)}
 
-    async def get(self, _thread_id: str) -> dict[str, Any]:
-        return {"metadata": self.metadata}
+    async def get(self, _thread_id: str) -> SimpleNamespace:
+        return SimpleNamespace(metadata=self.metadata)
 
-    async def update(self, _thread_id: str, *, metadata: dict[str, Any]) -> None:
+    async def update(self, _thread_id: str, metadata: dict[str, Any]) -> None:
         self.metadata = {**self.metadata, **metadata}
 
 
 @pytest.fixture
 def threads(monkeypatch: pytest.MonkeyPatch) -> _Threads:
     store = _Threads()
-    client = AsyncMock()
-    client.threads = store
-    for module in (by_the_way, btw_tools):
-        monkeypatch.setattr(module, "langgraph_client", lambda: client)
+    monkeypatch.setattr(by_the_way, "THREADS", store)
+    monkeypatch.setattr(by_the_way.index, "get", store.get)
     return store
 
 

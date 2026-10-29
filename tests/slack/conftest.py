@@ -1,5 +1,6 @@
 """Shared fixtures for the Slack tests."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,3 +27,6 @@ def _backend_keeps_conversations(
 def _no_btw_dm_threads(monkeypatch: pytest.MonkeyPatch) -> None:
     """No DM thread continues a `/btw` question unless a test says one does."""
     monkeypatch.setattr("openswe.slack.routes.continues_in_dm", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "openswe.slack.webhook.ByTheWayFollowUp", SimpleNamespace(at=AsyncMock(return_value=None))
+    )

@@ -13,14 +13,15 @@ keeps where the question was asked, which no later turn repoints.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Self
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, JsonValue, ValidationError
 
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.source_context import SourceContext
-from openswe.utils.json_types import JsonObject, thread_metadata
-from openswe.utils.thread_ops import langgraph_client
+from openswe.threads import index
+from openswe.threads.store import THREADS
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class ByTheWayDm(BaseModel):
     answered: bool = False
 
     @classmethod
-    def of(cls, metadata: JsonObject) -> Self | None:
+    def of(cls, metadata: Mapping[str, JsonValue]) -> Self | None:
         raw = metadata.get(METADATA_KEY)
         if not isinstance(raw, dict):
             return None
@@ -52,9 +53,16 @@ class ByTheWayDm(BaseModel):
         return (self.channel_id, self.thread_ts) == (channel_id, thread_ts)
 
     async def save(self, thread_id: str) -> None:
-        await langgraph_client().threads.update(
-            thread_id, metadata={METADATA_KEY: self.model_dump(mode="json")}
-        )
+        await THREADS.update(thread_id, {METADATA_KEY: self.model_dump(mode="json")})
+
+
+async def thread_metadata(thread_id: str) -> dict[str, JsonValue]:
+    """The thread's metadata as the thread index keeps it; empty for an unknown thread.
+
+    A `/btw` thread is always indexed, so a DM thread new to the index is none.
+    """
+    thread = await index.get(thread_id)
+    return {} if thread is None else thread.metadata
 
 
 class ByTheWayFollowUp(BaseModel):
@@ -69,11 +77,7 @@ class ByTheWayFollowUp(BaseModel):
 
         Only the asker's own messages count: the DM is theirs, and so is the agent thread.
         """
-        try:
-            metadata = thread_metadata(await langgraph_client().threads.get(thread_id))
-        except Exception:
-            logger.debug("No thread to continue a /btw question on", exc_info=True)
-            return None
+        metadata = await thread_metadata(thread_id)
         dm = ByTheWayDm.of(metadata)
         asked_in = SourceContext.from_metadata(metadata)
         asker = asked_in.slack_thread.triggering_user_id if asked_in.slack_thread else ""
@@ -91,10 +95,5 @@ async def continues_in_dm(channel_id: str, thread_ts: str) -> bool:
     thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     if thread_id is None:
         return False
-    try:
-        metadata = thread_metadata(await langgraph_client().threads.get(thread_id))
-    except Exception:
-        logger.debug("No thread to continue a /btw question on", exc_info=True)
-        return False
-    dm = ByTheWayDm.of(metadata)
+    dm = ByTheWayDm.of(await thread_metadata(thread_id))
     return dm is not None and not dm.answered and dm.is_at(channel_id, thread_ts)

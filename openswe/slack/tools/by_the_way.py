@@ -5,15 +5,13 @@ from typing import Any
 
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
-from openswe.slack.by_the_way import ByTheWayDm
+from openswe.slack.by_the_way import ByTheWayDm, thread_metadata
 from openswe.slack.client import SlackThreadMappingError, get_slack_permalink
 from openswe.slack.dm import post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id
 from openswe.slack.tools.reply import post_by_the_way_answer
 from openswe.source_context import SourceContext
-from openswe.utils.json_types import thread_metadata
-from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +32,7 @@ async def slack_btw_ask_in_dm(message: str) -> dict[str, Any]:
         return {"success": False, "error": "message is required"}
     if len(question) > _QUESTION_MAX_CHARS:
         return {"success": False, "error": "message is too long", "max_chars": _QUESTION_MAX_CHARS}
-    client = langgraph_client()
-    if ByTheWayDm.of(thread_metadata(await client.threads.get(thread_id))) is not None:
+    if ByTheWayDm.of(await thread_metadata(thread_id)) is not None:
         return {
             "success": False,
             "error": "This question already continues in a DM",
@@ -76,8 +73,7 @@ async def slack_btw_answer(message: str) -> dict[str, Any]:
     """Implement the `slack_btw_answer` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id or ""
-    client = langgraph_client()
-    metadata = thread_metadata(await client.threads.get(thread_id)) if thread_id else {}
+    metadata = await thread_metadata(thread_id) if thread_id else {}
     dm = ByTheWayDm.of(metadata)
     here = cfg.slack_thread
     if dm is None or dm.answered or here is None or not dm.is_at(here.channel_id, here.thread_ts):
