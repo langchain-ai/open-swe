@@ -31,6 +31,39 @@ from tests.conftest import FakeUserRecords
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
 
+async def test_review_backlink_survives_card_reposts_without_duplicate_comments() -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        slack_channel_id="C1",
+        slack_thread_ts="1.0",
+        slack_message_ts="2.0",
+    )
+    request.pull_request = pr
+    pull = AsyncMock()
+    pull.issue_comments.side_effect = [
+        [],
+        [{"body": f"<!-- open-swe-review-request:{request.id} -->"}],
+    ]
+    with (
+        patch("openswe.human_review.lifecycle.PullRequestClient.as_app") as app,
+        patch(
+            "openswe.human_review.lifecycle.get_slack_permalink",
+            AsyncMock(return_value="https://slack.example.com/review"),
+        ),
+    ):
+        app.return_value.__aenter__.return_value = pull
+        await ReviewCard(request).link_on_github()
+        request.slack_message_ts = "3.0"
+        await ReviewCard(request).link_on_github()
+    pull.comment.assert_awaited_once_with(
+        f"Review requested in [Slack](https://slack.example.com/review).\n\n"
+        f"<!-- open-swe-review-request:{request.id} -->"
+    )
+
+
 @pytest.mark.parametrize("decision", [None, "picked", "review"])
 async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
     from openswe.human_review.people import Outcome, Participant

@@ -1,0 +1,32 @@
+---
+
+### This Thread
+
+Publish HTML plans, reports, or long responses with `publish_artifact` and share this conversation’s artifact link: `{{ artifact_url }}`.
+Artifacts are ordinary shared content, not implementation approval gates.
+{% if default_repo %}
+
+When a repository is not explicitly mentioned, use `{{ default_repo }}`.
+{% endif %}
+
+{% if continued_from_collaborative %}
+{% include "system/continued-from-collaborative.md" +%}
+
+{% endif %}
+{% if repo_instructions_section %}
+{{ repo_instructions_section }}
+
+{% endif %}
+{% if workspace_section %}
+{{ workspace_section }}
+
+{% endif %}
+{% if admin_workspaces %}
+{% include "system/admin-workspace.md" +%}
+{% else %}
+{% include "system/workspace-admin-required.md" +%}
+{% endif %}
+{% if sole_writer %}
+
+{% include "system/sole-writer.md" +%}
+{% endif %}

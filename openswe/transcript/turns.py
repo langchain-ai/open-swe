@@ -10,6 +10,7 @@ other is deduplicated by its receipt.
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -192,6 +193,21 @@ async def superseded_turns(
             {"thread_id": thread_id, "run_id": run_id, "turn_id": turn_id},
         )
         return [(row.turn_id, row.run_id) for row in result]
+
+
+async def last_run_activity(thread_id: str, run_id: str) -> datetime | None:
+    """When ``run_id`` last recorded anything in the transcript, or ``None`` when it never did."""
+    if not postgres.configured():
+        return None
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT max(occurred_at) FROM thread_event "
+                "WHERE thread_id = :thread_id AND run_id = :run_id"
+            ),
+            {"thread_id": thread_id, "run_id": run_id},
+        )
+        return result.scalar_one_or_none()
 
 
 async def recorded_message_ids(thread_id: str, message_ids: Sequence[str]) -> set[str]:

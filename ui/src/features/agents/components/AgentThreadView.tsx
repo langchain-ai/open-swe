@@ -835,8 +835,7 @@ export function AgentThreadView({
                 />
               }
             >
-              Every pull request from this thread is merged or closed. Resolve
-              the thread if the work is done, or send a follow-up to keep going.
+              Every pull request from this thread is merged or closed.
             </Banner>
           </div>
         )}
