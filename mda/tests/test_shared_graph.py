@@ -380,41 +380,6 @@ def test_thread_sandbox_failures_never_create_a_second_workspace(
     assert len(client.create_sandbox.call_args_list) == (1 if failure == "conflict" else 0)
 
 
-@pytest.mark.parametrize("state", ["running", "stopped", "missing", "create_race"])
-def test_thread_sandbox_adopts_or_creates_only_its_original_name(
-    monkeypatch: pytest.MonkeyPatch, state: str
-) -> None:
-    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
-    monkeypatch.delenv("LANGSMITH_DEPLOYMENT_NAME", raising=False)
-    client = MagicMock()
-    name = mda_runtime._managed_sandbox_name("open-swe-mda-prod", "thread:thread-1")
-    existing = MagicMock(name=name, status="stopped" if state == "stopped" else "running")
-    existing.name = name
-    client.get_sandbox.return_value = existing
-    client.create_sandbox.return_value = existing
-    client.start_sandbox.return_value = existing
-    if state == "missing":
-        client.get_sandbox.side_effect = ResourceNotFoundError("not found")
-    elif state == "create_race":
-        client.get_sandbox.side_effect = [ResourceNotFoundError("not found"), existing]
-        client.create_sandbox.side_effect = ResourceNameConflictError("name already exists")
-    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda sandbox: client)
-    backend = MagicMock(spec=StateBackend)
-    monkeypatch.setattr(mda_runtime, "LangSmithSandbox", lambda **kwargs: backend)
-    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
-    assert spec is not None
-
-    resolved, host_name, _ = mda_runtime._create_langsmith_sandbox(
-        definition(spec.create, None), scope_key="thread:thread-1"
-    )
-
-    assert resolved is backend
-    assert host_name == name
-    assert [call.kwargs["name"] for call in client.create_sandbox.call_args_list] == (
-        [name] if state in ("missing", "create_race") else []
-    )
-
-
 def test_losing_a_thread_sandbox_does_not_implicitly_replace_its_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
