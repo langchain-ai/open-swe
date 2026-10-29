@@ -484,8 +484,21 @@ fields and your declared context type.
 ## Slack channels
 
 `channels.slack(...)` receives Slack messages through Trigger Server. Each
-Slack thread is one conversation, and the run's reply is posted in it. By
-default every message that reaches the app starts a run with the message.
+Slack thread is one conversation, and the run's reply is posted in it.
+`trigger_mode` decides which channel messages reach the app; direct messages
+always do:
+
+- `"mention"`: only messages that @-mention the agent. New Slack apps use this.
+- `"thread"`: one @-mention, then every later reply in that thread, so people
+  mention the agent once.
+- `"all"`: every message in the channels the agent is in.
+
+When `trigger_mode` is unset, a deployed agent keeps its current mode, except
+that an agent that drops `"all"` moves to `"mention"`. Redeploying with a new
+mode updates the existing Slack app. `trigger_on_all_messages` is deprecated;
+`True` is `trigger_mode="all"`.
+
+By default every message that reaches the app starts a run with the message.
 `on_event` decides what each kind of message starts instead:
 
 ```python
