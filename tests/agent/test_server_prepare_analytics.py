@@ -6,6 +6,7 @@ lookup hit / null-name / failure / cache paths, and the system prompt a thread
 keeps from one turn to the next.
 """
 
+import asyncio
 import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -16,7 +17,8 @@ from langgraph.runtime import Runtime
 
 import openswe.server as server
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.prompt import construct_system_prompt
+from openswe.prompt import SystemPrompt, construct_system_prompt
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
@@ -118,7 +120,9 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
     monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
-    monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
+    monkeypatch.setattr(
+        server, "construct_system_prompt", lambda *args, **kwargs: SystemPrompt("system prompt", "")
+    )
 
     class _Threads:
         async def get(self, thread_id: str) -> dict[str, Any]:
@@ -160,6 +164,47 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     return await middleware._prepare(
         cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
     )
+
+
+async def test_prepare_records_start_before_return_even_when_metadata_is_slow_and_fails(
+    prepare_harness: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage_started = asyncio.Event()
+    release_usage = asyncio.Event()
+    metadata_started = asyncio.Event()
+    release_metadata = asyncio.Event()
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
+
+    async def record_usage(**kwargs: object) -> None:
+        usage_started.set()
+        await release_usage.wait()
+        prepare_harness["recorded"] = kwargs
+
+    async def update_metadata(**kwargs: object) -> None:
+        metadata_started.set()
+        await release_metadata.wait()
+        raise RuntimeError("metadata update failed")
+
+    monkeypatch.setattr(server, "record_agent_invocation_usage", record_usage)
+    monkeypatch.setattr(server.client.threads, "update", update_metadata)
+    preparing = asyncio.create_task(_prepare(_middleware(_slack_config())))
+    try:
+        await asyncio.wait_for(usage_started.wait(), timeout=1)
+        assert not preparing.done()
+        release_usage.set()
+        await asyncio.wait_for(asyncio.shield(preparing), timeout=1)
+        assert prepare_harness["recorded"] is not None
+        await asyncio.wait_for(metadata_started.wait(), timeout=1)
+    finally:
+        release_usage.set()
+        release_metadata.set()
+        await preparing
+        await asyncio.gather(*tuple(server._DETACHED))
+
+    assert "metadata update failed" in caplog.text
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
@@ -231,12 +276,18 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     monkeypatch.setattr(server, "construct_system_prompt", construct_system_prompt)
     monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
     prepare_harness["thread_metadata"] = {}
+    backend = TimeoutLangSmithSandbox(MagicMock(name="sandbox-test"))
+    proxy = _ReadyProxy()
+    monkeypatch.setattr(proxy, "ready", AsyncMock(return_value=backend))
+    monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", lambda _: proxy)
     runtime = cast(Runtime[Any], MagicMock())
     asked = HumanMessage(content="Fix the login", id="human-1")
 
     from_slack = await _middleware(_slack_config())._prepare(
         cast(PrepareRunState, {"messages": [asked]}), runtime
     )
+    first_reset = backend._git_identity_pending
+    assert first_reset is not None
     told = [HumanMessage(content=message["content"]) for message in from_slack["messages"]]
     later = cast(
         PrepareRunState,
@@ -247,6 +298,8 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     )
     dashboard = {"thread_id": "thread-1", "source": "dashboard", "invocation_id": "inv-2"}
     from_dashboard = await _middleware({"configurable": dashboard})._prepare(later, runtime)
+    assert backend._git_identity_pending is not None
+    assert backend._git_identity_pending != first_reset
 
     system_prompt = from_slack["rendered_system_prompt"]
     assert "triggered from Slack" not in system_prompt and "/workspace" not in system_prompt
@@ -266,6 +319,29 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
         cast(PrepareRunState, legacy), runtime
     )
     assert rerendered["rendered_system_prompt"] == system_prompt
+
+
+def test_threads_share_their_system_prompt_up_to_what_only_each_says() -> None:
+    """A new thread's first call reads the shared part from the cache another wrote."""
+    first = construct_system_prompt(
+        dashboard_base_url="https://dashboard.invalid",
+        artifact_url="https://dashboard.invalid/threads/1/plan",
+        default_repo={"owner": "acme", "name": "api"},
+        repo_custom_instructions="Run make test.",
+        workspace_name="Backend",
+        workspace_instructions="Use uv.",
+        workspace_repos=["acme/api"],
+        admin_workspaces=True,
+        sole_writer=True,
+        continued_from_collaborative=True,
+    )
+    second = construct_system_prompt(
+        dashboard_base_url="https://dashboard.invalid",
+        artifact_url="https://dashboard.invalid/threads/2/plan",
+    )
+
+    assert first.shared == second.shared
+    assert "https://dashboard.invalid/threads/1/plan" in first.thread
 
 
 class AnyContext:

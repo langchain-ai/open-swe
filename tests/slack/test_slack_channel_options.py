@@ -58,7 +58,6 @@ def _install(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> list[float
         yield client
 
     monkeypatch.setattr(channels.SlackClient, "bot", fake_slack_client)
-    monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "xoxb-test")
     slept: list[float] = []
 
     async def fake_sleep(seconds: float) -> None:

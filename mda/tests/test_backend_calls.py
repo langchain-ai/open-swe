@@ -70,6 +70,7 @@ from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import box
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
+from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
@@ -996,6 +997,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
         return BeforeModel(
             call=ModelCall(
                 system_prompt="You are Open SWE.",
+                thread_prompt="This thread is yours.",
                 model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
             )
         )
@@ -1004,9 +1006,18 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     # deepagents installs its own 5m cache; the guards' must take its place.
     middleware = cast(
         list[AgentMiddleware],
-        [BackendRunMiddleware(backend), *model_call_guards()],
+        [
+            BackendRunMiddleware(backend),
+            RunPromptMiddleware(),
+            ThreadPromptMiddleware(),
+            *model_call_guards(),
+        ],
     )
-    graph = create_deep_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+    graph = create_deep_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        system_prompt="The graph's own instructions.",
+        middleware=middleware,
+    )
 
     await graph.ainvoke({"messages": [HumanMessage("hi")]})
 
@@ -1014,9 +1025,12 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     hour = {"type": "ephemeral", "ttl": "1h"}
     system = cast(list[dict[str, object]], payload["system"])
     tools = cast(list[dict[str, object]], payload["tools"])
-    assert system[-1]["cache_control"] == hour
-    assert tools[-1]["cache_control"] == hour
+    # The graph's prompt, the run's, the thread's and the conversation's end: Anthropic
+    # rejects a request with more than four breakpoints.
+    assert [block.get("cache_control") for block in system] == [hour, hour, hour]
     assert payload["cache_control"] == hour
+    assert all("cache_control" not in tool for tool in tools)
+    assert json.dumps(payload).count('"cache_control"') == 4
     assert '"5m"' not in json.dumps(payload)
 
 

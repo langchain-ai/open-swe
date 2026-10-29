@@ -94,6 +94,14 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert not set(surface.skill_sources) & set(surface.backend_paths)
 
 
+@pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])
+async def test_monitor_is_available_without_opt_in(profile: dict[str, object] | None) -> None:
+    captured = await _plan_agent(profile=profile)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert "monitor" in {_registered_tool_name(tool) for tool in tools}
+
+
 async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
     from deepagents.backends.store import StoreBackend
 
@@ -186,10 +194,11 @@ async def _plan_agent(
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
     make_model: Callable[..., BaseChatModel] | None = None,
+    surface: ToolSurface | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
 
-    surface = ToolSurface()
+    surface = surface or ToolSurface()
     make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = str((config.get("configurable") or {}).get("thread_id"))
@@ -855,3 +864,95 @@ async def test_anthropic_title_model_omits_thinking_without_affecting_agent() ->
     assert title_kwargs["max_tokens"] == 1024
     agent_kwargs = next(kwargs for model, kwargs in calls if model == "anthropic:claude-opus-5-5")
     assert agent_kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
+
+
+@pytest.mark.parametrize("mode", ["modern", "oversized", "grantless"])
+async def test_remote_preparation_reuses_signed_inputs_but_rechecks_access(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    from langchain.agents.middleware.types import AgentState
+    from langgraph.runtime import Runtime
+    from runtime_api.loop import PhaseResult, Prepare
+
+    import openswe.server as server
+    from openswe.agent_api.agent import AgentParts
+    from openswe.agent_api.graph import RemoteGraph, RunSession
+    from openswe.agent_api.tokens import (
+        RemoteRun,
+        sign_runtime_token,
+        verify_runtime_token,
+    )
+    from openswe.tools.access import Access
+
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "preparation-regression-secret-0123456789")
+    monkeypatch.setattr("openswe.agent_api.graph.ToolSet.keep", AsyncMock(return_value="tools"))
+    monkeypatch.setattr(
+        "openswe.agent_api.graph.ManagedSandbox.for_thread", AsyncMock(return_value=None)
+    )
+    oversized = mode == "oversized"
+    instructions = "repository rules" if not oversized else "x" * 8192
+    pinned = {
+        "model_id": "openai:gpt-6.1-sol",
+        "effort": "medium",
+        "model_handoff_complete": True,
+        "repo_instructions": instructions,
+    }
+    planned = 0
+
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        nonlocal planned
+        planned += 1
+        await _plan_agent(config, thread_settings=pinned, surface=surface)
+
+    parts = AgentParts()
+    dispatch = RemoteGraph("agent", build, parts)
+    run = RemoteRun(
+        thread_id="thread-ctx", assistant_id="agent", configurable={"github_login": "octocat"}
+    ).granting()
+    started = await dispatch.start_run(run)
+    if mode == "grantless":
+        run = run.model_copy(update={"grant_id": None})
+    run = verify_runtime_token(
+        sign_runtime_token(run.model_copy(update={"settings": started.settings}))
+    )
+    assert (run.settings.preparation is None) is oversized
+    assert "ghp" not in run.settings.model_dump_json()
+    if not oversized:
+        assert run.settings.preparation is not None
+        assert run.settings.preparation.repo_instructions == instructions
+
+    async def elsewhere(config: RunnableConfig, surface: ToolSurface) -> None:
+        if mode == "modern":
+            pytest.fail("A replica repeated immutable startup planning")
+        await build(config, surface)
+
+    prepared: list[tuple[str | None, bool, str | None]] = []
+
+    async def per_turn(
+        self: server.PrepareAgentRunMiddleware, state: AgentState, runtime: Runtime
+    ) -> dict[str, object]:
+        prepared.append((self._credential_login, self._sole_writer, self._repo_instructions))
+        return {"rendered_system_prompt": self._model_id}
+
+    monkeypatch.setattr(server.PrepareAgentRunMiddleware, "_prepare", per_turn)
+    monkeypatch.setattr(server, "make_model", MagicMock())
+    monkeypatch.setattr(server, "private_credential_login", AsyncMock(return_value="live-owner"))
+    monkeypatch.setattr(server, "_admin_thread", AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "resolve_access", AsyncMock(return_value=Access(sole=False)))
+    bound = AsyncMock()
+    monkeypatch.setattr(RunSession, "bind_sandbox", bound)
+    monkeypatch.setattr("openswe.agent_api.graph.TurnGitMetadata.begin", AsyncMock(return_value={}))
+    replica = RemoteGraph("agent", elsewhere, parts)
+    for turn in range(2):
+        result = PhaseResult.model_validate(
+            await replica.api(
+                run, "prepare", Prepare(run_id=f"run-{turn}", sandbox_id="mda-box").model_dump()
+            )
+        )
+        assert result.update["rendered_system_prompt"] == "openai:gpt-6.1-sol"
+        assert result.update["run_prepared"] is True
+        assert result.update["reply_surface"] == "web"
+    assert prepared == [("live-owner", False, instructions)] * 2
+    assert bound.await_count == 2
+    assert all(call.args[0].sandbox_id == "mda-box" for call in bound.await_args_list)
+    assert planned == (1 if mode == "modern" else 3)

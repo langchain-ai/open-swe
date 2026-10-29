@@ -6,10 +6,6 @@
 {{ default_prompt_section }}
 
 {% endif %}
-{% if default_repo %}
-When a repository is not explicitly mentioned, use `{{ default_repo }}`.
-
-{% endif %}
 {% include "system/repository-setup.md.jinja" +%}
 
 {{ collaboration_section }}
@@ -20,28 +16,6 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 
 {{ external_untrusted_comments_section }}
 
-{% if continued_from_collaborative %}
-{% include "system/continued-from-collaborative.md" +%}
-
-{% endif %}
 {% include "system/commit-pr.md" +%}
-
-{% if repo_instructions_section %}
-{{ repo_instructions_section }}
-
-{% endif %}
-{% if workspace_section %}
-{{ workspace_section }}
-
-{% endif %}
-{% if admin_workspaces %}
-{% include "system/admin-workspace.md" +%}
-{% else %}
-{% include "system/workspace-admin-required.md" +%}
-{% endif %}
-{% if sole_writer %}
-
-{% include "system/sole-writer.md" +%}
-{% endif %}
 
 {% include "system/shared-base.md" +%}
