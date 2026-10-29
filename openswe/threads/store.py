@@ -30,8 +30,11 @@ READ_ONLY: Final = (
 
 
 def for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    """Trace metadata for MDA; source payloads stay in the backend's thread index."""
-    copied = {key: value for key, value in metadata.items() if key != "source_context"}
+    """Keep trace context, omitting a repo object only when flat fields fully represent it."""
+    copied = dict(metadata)
+    if isinstance(copied.get("repo_owner"), str) and isinstance(copied.get("repo_name"), str):
+        if copied.get("repo") == {"owner": copied["repo_owner"], "name": copied["repo_name"]}:
+            copied.pop("repo")
     if "graph_id" in copied:
         copied["graph_id"] = MDA_GRAPH_ID
     return copied

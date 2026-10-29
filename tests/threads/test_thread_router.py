@@ -172,14 +172,25 @@ def secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
 
 
+@pytest.mark.parametrize(
+    "repo",
+    [
+        {"owner": "org", "name": "repo"},
+        {"owner": "org", "name": "other"},
+        {"owner": "org", "name": "repo", "branch": "main"},
+    ],
+)
 async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, repo: dict[str, JsonValue]
 ) -> None:
     harness = _Harness(monkeypatch)
 
     metadata: dict[str, JsonValue] = {
         "owner_login": "ada",
         "source_context": {"slack_thread": {"channel_id": "C123"}},
+        "repo": repo,
+        "repo_owner": "org",
+        "repo_name": "repo",
     }
     status, created = await harness.request(
         "POST", "/threads", {"thread_id": THREAD, "metadata": metadata}
@@ -210,7 +221,11 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     await store.THREADS.copies.settled(THREAD)
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == {
-        "owner_login": "ada",
+        **{
+            key: value
+            for key, value in metadata.items()
+            if key != "repo" or repo != {"owner": "org", "name": "repo"}
+        },
         "title": "Fix it",
         "runtime": "mda",
     }
