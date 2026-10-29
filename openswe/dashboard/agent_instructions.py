@@ -38,6 +38,15 @@ class AgentInstructionsCreate(BaseModel):
 class AgentInstructionsUpdate(BaseModel):
     instructions: str = Field(default="")
 
+    @field_validator("instructions")
+    @classmethod
+    def _limit_instructions(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 32 * 1024:
+            raise ValueError(
+                "Repository custom instructions must not exceed 32 KiB (32,768 UTF-8 bytes)"
+            )
+        return value
+
 
 class AgentInstructions(BaseModel):
     model_config = ConfigDict(extra="ignore")
