@@ -393,11 +393,8 @@ async def test_retry_is_requester_scoped_and_dispatches_only_once(
     request = process.await_args.args[0]
     assert request.user_id == "U1"
     assert request.thread_ts == thread_ts
-    assert request.text == (
-        "Fix the bug"
-        if message_ts
-        else "Retry the work that failed in the previous run and continue from where it stopped."
-    )
+    assert request.text == ("Fix the bug" if message_ts else "Retry")
+    assert request.turn_context == ("" if message_ts else retry.prompt("runs/slack-retry").strip())
     assert request.event_ts != message_ts
     assert request.original_message_ts == message_ts
     assert request.explicit_request

@@ -119,7 +119,7 @@ class SlackRetry(BaseModel):
                 channel_context=channel_context,
                 thread_id=thread_id,
             )
-            text = prompt("runs/slack-retry").strip()
+            text = "Retry"
             attachments = []
             if self.message_ts:
                 raw = (
@@ -146,6 +146,7 @@ class SlackRetry(BaseModel):
                 retry_message_ts=self.message_ts,
                 user_id=self.user_id,
                 text=text,
+                turn_context=prompt("runs/slack-retry").strip() if not self.message_ts else "",
                 attachments=attachments,
                 bot_user_id=common.SLACK_BOT_USER_ID,
                 thread_id=thread_id,
