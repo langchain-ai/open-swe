@@ -94,6 +94,7 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
+from rt.git_baseline import TurnBaseline
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
 from rt.model_calls import PROMPT_CACHE_TTL
@@ -130,7 +131,8 @@ def _merge(
     left: dict[str, JsonValue] | None, right: dict[str, JsonValue] | None
 ) -> dict[str, JsonValue]:
     held = left or {}
-    if right is not None and "git_trace_baseline" in right:
+    # A cleared baseline starts the turn's git trace afresh; the baseline itself joins it.
+    if right is not None and "git_trace_baseline" in right and right["git_trace_baseline"] is None:
         held = {key: value for key, value in held.items() if not key.startswith("git_trace_")}
     return {**held, **(right or {})}
 
@@ -183,6 +185,12 @@ def _decode(value: object) -> object:
     if isinstance(value, list):
         return [_decode(v) for v in value]
     return value
+
+
+def _holding(values: Mapping[str, object], held: Mapping[str, JsonValue]) -> dict[str, object]:
+    """``values``, with ``held`` added to the graph state the backend keeps."""
+    prior = values.get(STATE_KEY)
+    return {**values, STATE_KEY: {**(prior if isinstance(prior, Mapping) else {}), **held}}
 
 
 def _apply(reply: PhaseResult) -> dict[str, object]:
@@ -327,14 +335,18 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
+        read_ahead: Sequence[Callable[[], None]] = (),
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
+        self._baselines = RunLocal(TurnBaseline)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
+        # What later hooks read from the backend, started while the run prepares.
+        self._read_ahead = read_ahead
 
     @property
     def _inbox(self) -> InboxSpec | None:
@@ -400,18 +412,25 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
-        await self._backend.run.load_tool_specs(run_id())
+        for read in self._read_ahead:
+            read()
         # What an earlier run left unsent goes out before anything this one does.
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
+            await self._backend.run.load_tool_specs(run_id())
             trace.record_evidence(state.get(STATE_KEY, {}))
             return None
-        opened = (
-            await self._open_sandbox(runtime)
-            if self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
-            else OpenedSandbox()
-        )
+        # The box takes seconds to open; reading the tool specs and sending what the
+        # outbox holds need none of it.
+        opening = asyncio.create_task(self._opened(runtime))
+        try:
+            await asyncio.gather(
+                self._backend.run.load_tool_specs(run_id()), self._backend.outbox.drain()
+            )
+            opened = await opening
+        finally:
+            opening.cancel()
         prepared = await self._phase(
             PREPARE,
             run_call(
@@ -422,7 +441,28 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 sandbox_error=opened.error,
             ),
         )
-        return {**_apply(prepared), "open_swe_prepared_for": invocation}
+        if self._loop is not None:
+            prepared.update.update(self._loop.prepared(prepared))
+        self._baselines.get(self._backend.run).start(self._backend, run_id())
+        update = {**_apply(prepared), "open_swe_prepared_for": invocation}
+        if opened.workspace_lost:
+            messages = update.get("messages", [])
+            update["messages"] = [
+                *(messages if isinstance(messages, list) else []),
+                HumanMessage(
+                    id=f"run-guidance:workspace-lost:{invocation}",
+                    content="The sandbox provider confirmed that this thread's bound workspace "
+                    "was deleted. A fresh workspace was created under the same name. "
+                    "Tell the user that local files and unpushed work from the deleted "
+                    "workspace are unavailable; do not claim they were recovered.",
+                ),
+            ]
+        return update
+
+    async def _opened(self, runtime: Runtime) -> OpenedSandbox:
+        if self._open_sandbox is None or self._backend.run.planned.sandbox is None:
+            return OpenedSandbox()
+        return await self._open_sandbox(runtime)
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
@@ -430,18 +470,24 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return self._carrying(state, await self._before_model(state))
 
     async def _before_model(self, state: RunState) -> dict[str, object] | None:
-        inbox = await self._read_inbox()
-        # The phase sees what the inbox brought, as the model will.
-        with_inbox = {
-            **state,
-            "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
-            STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
-        }
-        planned = (
-            await self._loop.before_model(with_inbox)
-            if self._loop is not None
-            else await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
-        )
+        # What the loop asks the backend that the inbox does not change goes alongside it.
+        asked = self._loop.ask(state) if self._loop is not None else None
+        try:
+            inbox = await self._read_inbox()
+            # The phase sees what the inbox brought, as the model will.
+            with_inbox = {
+                **state,
+                "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
+                STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
+            }
+            planned = (
+                await self._loop.before_model(with_inbox, asked)
+                if self._loop is not None
+                else await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
+            )
+        finally:
+            if asked is not None:
+                await asked.close()
         if planned.jump_to is not None:
             # No model call answers the inbox now: it stays for the run that comes next.
             return _apply(planned)
@@ -463,9 +509,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def _read_inbox(self) -> Inbox:
         if self._inbox is None:
             return Inbox()
-        # After the last call's receipt, so nothing it received comes again.
-        await self._backend.outbox.receipts()
-        return await call(self._backend, INBOX, InboxRead(run_id=run_id(), spec=self._inbox))
+        # With what earlier calls received, so none of it comes again.
+        read = InboxRead(
+            run_id=run_id(), spec=self._inbox, received=self._backend.outbox.receiving()
+        )
+        return await call(self._backend, INBOX, read)
 
     async def _phase[Call: RunCall, Result: PhaseResult](
         self, endpoint: Endpoint[Call, Result], request: Call
@@ -560,7 +608,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         self._backend.outbox.adopt(state)
-        return self._carrying(state, await self._after_model(state))
+        # Before any tool the model called runs.
+        baseline = await self._baselines.get(self._backend.run).taken()
+        update = await self._after_model(state)
+        return self._carrying(state, _holding(update or {}, baseline) if baseline else update)
 
     async def _after_model(self, state: RunState) -> dict[str, object] | None:
         if self._loop is None:
@@ -576,9 +627,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # What the backend has not taken by now waits in the thread's state for its next run.
         return self._carrying(state, await self._after_agent(state))
 
-    async def _after_agent(self, state: RunState) -> dict[str, object] | None:
+    async def _after_agent(self, run_state: RunState) -> dict[str, object] | None:
         metadata = self._trace_metadata()
         trace = self._traces.get(self._backend.run)
+        # A run that ended before its first model call answered reconciles against it too.
+        state = _holding(run_state, await self._baselines.get(self._backend.run).taken())
         try:
             if self._loop is not None:
                 ended = await self._loop.after_agent(state, trace.evidence)
