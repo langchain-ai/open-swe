@@ -36,7 +36,6 @@ from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
-_TRUSTED_GITHUB_BOTS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
 # CI results describe a commit, so they matter even when Open SWE pushed it.
 _CI_EVENT_TYPES = frozenset({"check_run", "check_suite", "workflow_run"})
 _MAX_BODY_CHARS = 8_000
@@ -194,7 +193,7 @@ class EventSummary(BaseModel):
             link=link,
             status=status,
             body=body or "",
-            trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
+            trusted=event.user_id is not None or sender in INTERNAL_BOT_LOGINS,
             from_open_swe=(
                 sender in OPEN_SWE_GITHUB_LOGINS
                 or (commented is not None and commented.authored_by_app(ENV.GITHUB_APP_ID.get()))
