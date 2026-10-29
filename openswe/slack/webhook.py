@@ -1130,9 +1130,6 @@ async def _process_slack_mention_impl(
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
             request.turn_context,
-            prompt("slack/command-handoff", commands=parsed.handoff_commands)
-            if parsed.handoff_commands
-            else "",
             prompt("runs/slack-review-request", pull_request=review_card.pull_request)
             if review_card is not None
             else "",
