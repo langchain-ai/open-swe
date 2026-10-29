@@ -47,6 +47,7 @@ from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.threads.index_import import import_agent_server_threads
+from openswe.threads.stalls import fail_stalled_runs
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
@@ -175,7 +176,10 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return {"threads_settled": await reconcile_busy_threads()}
+    return {
+        "threads_settled": await reconcile_busy_threads(),
+        "stalled_runs_failed": await fail_stalled_runs(),
+    }
 
 
 @WORKER.register(SLACK_CHANNEL_DIRECTORY)

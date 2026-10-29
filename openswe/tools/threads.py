@@ -94,7 +94,8 @@ _NO_ACTOR = "No verified triggering user is available"
 _NO_READER = f"Thread lookup was unavailable. {_NO_ACTOR}"
 _NO_WRITER = (
     f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
-    "but cannot message, manage, or start them."
+    "but cannot message, manage, or start them; to send a result to the automation's "
+    "creator, DM them with slack_post_message."
 )
 
 

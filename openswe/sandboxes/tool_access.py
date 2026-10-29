@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 from openswe.config import ENV
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.thread_reads import read_thread
 
 # Under /dashboard/api so a dashboard deployment that fronts the backend forwards it.
 TOOLS_PATH = "/dashboard/api/sandbox-tools"
@@ -45,7 +46,7 @@ def tools_base_url() -> str | None:
 
 async def sandbox_host_thread_id(thread_id: str) -> str:
     """The thread whose capability a shared sandbox carries: its creator, not a guest."""
-    thread = await get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id, get_client())
     host = (thread.get("metadata") or {}).get(SANDBOX_HOST_THREAD_KEY)
     return host if isinstance(host, str) and host else thread_id
 
@@ -91,7 +92,7 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     if access is None:
         return None
     url, token = access
-    host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
+    host = await read_thread(await sandbox_host_thread_id(thread_id), get_client())
     workspace = (host.get("metadata") or {}).get("workspace")
     settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
     env_vars = {TOOLS_URL_ENV: url}

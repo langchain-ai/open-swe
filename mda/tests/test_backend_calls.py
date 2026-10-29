@@ -17,7 +17,7 @@ import pytest
 from deepagents import create_deep_agent
 from deepagents.backends.local_shell import LocalShellBackend
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
@@ -70,6 +70,7 @@ from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import box
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
+from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
@@ -90,8 +91,10 @@ from runtime_api.loop import (
     PREPARE,
     AfterAgent,
     BeforeModel,
+    GitBaseline,
     Inbox,
     InboxItems,
+    InboxRead,
     InboxReceipt,
     ModelCall,
     PhaseResult,
@@ -566,19 +569,23 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    # Nothing waits long for the receipt, which the backend takes only after the next read.
+    monkeypatch.setattr("rt.outbox.DRAIN_SECONDS", 0.05)
     backend = _run_backend(invocation_id="invocation-1", catalog=Catalog(inbox=_INBOX))
     report = HumanMessage(content="The worker finished", id="event-match:report-1")
     items = InboxItems(queued=[7], events=[UUID("0199a1b2-0000-7000-8000-000000000001")])
-    called: list[str] = []
-    reads: list[dict[str, JsonValue]] = []
+    reads: list[InboxRead] = []
+    read_again, took = asyncio.Event(), asyncio.Event()
     received: list[InboxReceipt] = []
     planned: list[RunCall] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        called.append(name)
         if name == "inbox":
-            reads.append(body)
-            if received:
+            reads.append(InboxRead.model_validate(body))
+            if len(reads) > 1:
+                read_again.set()
+            # What a receipt or the read itself names as received is owed no more.
+            if received or reads[-1].received == items:
                 return Inbox()
             return Inbox.model_validate(
                 {
@@ -588,7 +595,9 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
                 }
             )
         if name == "inbox_received":
+            await read_again.wait()
             received.append(InboxReceipt.model_validate(body))
+            took.set()
         if name == "before_model":
             planned.append(RunCall.model_validate(body))
         if name == "after_model" and len(planned) == 1:
@@ -602,15 +611,16 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
+    await asyncio.wait_for(took.wait(), 5)
 
     # The run and how its catalog reads the inbox; never its conversation or state.
-    assert reads == [{"run_id": "run-1", "spec": _INBOX.model_dump(mode="json")}] * 2
+    assert [(read.run_id, read.spec) for read in reads] == [("run-1", _INBOX)] * 2
     assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
     assert planned[0].state["reply_surface"] == "web"
     assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
     assert [receipt.items for receipt in received] == [items]
-    # The next read waits for the receipt, so it cannot hand the same items back.
-    assert called.index("inbox_received") < len(called) - called[::-1].index("inbox") - 1
+    # The next read names what the unsent receipt holds, so it cannot hand it back.
+    assert reads[1].received == items
 
 
 async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
@@ -704,6 +714,67 @@ async def test_a_moved_scout_stops_before_another_model_or_tool_call(
     assert operations == ["walkthrough_describe_other"]
     assert isinstance(result["messages"][-1], ToolMessage)
     assert result["messages"][-1].tool_call_id == "call-1"
+
+
+async def test_the_git_baseline_runs_alongside_the_first_model_call_and_before_its_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    backend = _run_backend(invocation_id="turn")
+    baseline = {"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
+    model_called = asyncio.Event()
+    order: list[str] = []
+    reported_git: list[dict[str, JsonValue]] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "git_baseline":
+            # Only the model call lets the snapshot finish: preparation must not wait on it.
+            await asyncio.wait_for(model_called.wait(), 5)
+            order.append("baseline")
+            return GitBaseline(update=baseline)
+        if name == "operation":
+            order.append("tool")
+            return OperationResult(content="ran")
+        if name == "tool_started":
+            reported_git.append(ToolCallReport.model_validate(body).git)
+        return PhaseResult()
+
+    class Model(AgentMiddleware):
+        async def awrap_model_call(
+            self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+        ) -> ModelResponse:
+            order.append("model")
+            model_called.set()
+            return await handler(request)
+
+    _answering(monkeypatch, backend, phase)
+    run = ToolSpec(name="run", description="run", parameters={"type": "object"})
+    middleware = cast(
+        list[AgentMiddleware],
+        [BackendRunMiddleware(backend), RuntimeToolsMiddleware(backend, ()), Model()],
+    )
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(content="", tool_calls=[ToolCall(name="run", args={}, id="call-1")]),
+                    AIMessage(content="done"),
+                ]
+            )
+        ),
+        tools=[operation_tool(run, backend)],
+        middleware=middleware,
+    )
+
+    await graph.ainvoke({"messages": [("user", "Change something")]})
+    await backend.outbox.drain()
+
+    assert order[:3] == ["model", "baseline", "tool"]
+    # What the backend measures the call's changes against.
+    assert reported_git == [baseline]
 
 
 async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpoint(
@@ -926,6 +997,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
         return BeforeModel(
             call=ModelCall(
                 system_prompt="You are Open SWE.",
+                thread_prompt="This thread is yours.",
                 model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
             )
         )
@@ -934,9 +1006,18 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     # deepagents installs its own 5m cache; the guards' must take its place.
     middleware = cast(
         list[AgentMiddleware],
-        [BackendRunMiddleware(backend), *model_call_guards()],
+        [
+            BackendRunMiddleware(backend),
+            RunPromptMiddleware(),
+            ThreadPromptMiddleware(),
+            *model_call_guards(),
+        ],
     )
-    graph = create_deep_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+    graph = create_deep_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        system_prompt="The graph's own instructions.",
+        middleware=middleware,
+    )
 
     await graph.ainvoke({"messages": [HumanMessage("hi")]})
 
@@ -944,9 +1025,12 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     hour = {"type": "ephemeral", "ttl": "1h"}
     system = cast(list[dict[str, object]], payload["system"])
     tools = cast(list[dict[str, object]], payload["tools"])
-    assert system[-1]["cache_control"] == hour
-    assert tools[-1]["cache_control"] == hour
+    # The graph's prompt, the run's, the thread's and the conversation's end: Anthropic
+    # rejects a request with more than four breakpoints.
+    assert [block.get("cache_control") for block in system] == [hour, hour, hour]
     assert payload["cache_control"] == hour
+    assert all("cache_control" not in tool for tool in tools)
+    assert json.dumps(payload).count('"cache_control"') == 4
     assert '"5m"' not in json.dumps(payload)
 
 
@@ -1208,7 +1292,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == "prepare":
-            return PhaseResult(
+            return PhaseResult(update={"git_trace_baseline": None})
+        if name == "git_baseline":
+            return GitBaseline(
                 update={"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
             )
         if name == "before_model":

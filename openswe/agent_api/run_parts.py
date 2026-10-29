@@ -14,7 +14,9 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
+from openswe.agent_api.preparation import AgentPreparation
 from openswe.run_config import RunConfig
+from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.skill_store.run_skills import RunSkillStores
 
 
@@ -26,6 +28,14 @@ class RunParts:
     reporters: Sequence[AgentMiddleware] = ()
     # The guards on the shell commands the run's tools run.
     shell_guards: Sequence[AgentMiddleware] = ()
+
+    def preparation_plan(self, surface: ToolSurface) -> AgentPreparation | None:  # noqa: ARG002
+        return None
+
+    async def preparation(
+        self, config: RunnableConfig, plan: AgentPreparation
+    ) -> ToolSurface | None:
+        return None
 
     def legacy(self, cfg: RunConfig) -> bool:  # noqa: ARG002
         """Whether this run's phases and tool calls are still answered from its plan."""

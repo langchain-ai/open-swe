@@ -36,6 +36,7 @@ import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { isLive } from "./pullRequestStanding"
+import { RecentReviewPagesMenu } from "./RecentReviewPagesMenu"
 import { RelativeTimestamp } from "./RelativeTimestamp"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
@@ -154,22 +155,20 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <h1 className="min-w-0 truncate text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-sm max-sm:leading-5 max-sm:whitespace-normal">
+          <h1 className="flex min-w-0 items-center gap-space-1 text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:text-sm max-sm:leading-5">
             <a
               href={githubUrl}
               target="_blank"
               rel="noreferrer"
-              className="hover:underline"
+              aria-label="Open on GitHub"
+              className="shrink-0 text-icon-secondary hover:text-icon-primary max-sm:hidden"
             >
-              <GithubLogoIcon
-                aria-label="GitHub"
-                size={16}
-                weight="regular"
-                className="mr-space-1 inline align-[-3px] text-icon-secondary max-sm:hidden"
-              />
+              <GithubLogoIcon aria-hidden size={16} weight="regular" />
+            </a>
+            <RecentReviewPagesMenu pr={pr}>
               {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
               <span className="font-normal text-secondary"> #{pr.number}</span>
-            </a>
+            </RecentReviewPagesMenu>
           </h1>
         </div>
         {detail ? (

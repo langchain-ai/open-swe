@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -175,6 +176,54 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+
+
+async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    history_started, profile_started = asyncio.Event(), asyncio.Event()
+    history_finished, profile_finished = asyncio.Event(), asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def read_history(thread_id: str) -> dict[str, object]:
+        history_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            history_finished.set()
+
+    async def read_profile(login: str) -> dict[str, object]:
+        profile_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            profile_finished.set()
+
+    error = HTTPException(401)
+
+    async def reject_start(login: str) -> None:
+        await profile_started.wait()
+        await history_started.wait()
+        raise error
+
+    monkeypatch.setattr(thread_runs.THREADS, "state", read_history)
+    monkeypatch.setattr(thread_runs, "get_profile", read_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", reject_start)
+
+    try:
+        with pytest.raises(HTTPException) as raised:
+            await thread_runs._enrich_run_start_command(
+                "tid", "octocat", {"method": "run.start"}, metadata={}
+            )
+        assert raised.value is error
+        assert profile_finished.is_set()
+        assert history_finished.is_set()
+    finally:
+        blocked.set()
+        await profile_finished.wait()
+        await history_finished.wait()
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -656,12 +705,11 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
 
-    _, injected, _ = await thread_runs._attributed_run_messages(
-        "tid",
+    _, injected = await thread_runs._attributed_run_messages(
         "octocat",
         metadata={"injected_dynamic_context_hashes": [linked_hash, unlinked_hash]},
+        history=await thread_runs._ThreadHistory.of("tid"),
         content="Continue",
-        creating=False,
         email=None,
     )
 
