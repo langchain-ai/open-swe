@@ -73,7 +73,8 @@ Every call is authenticated with the run token.
   Backoff uses jitter and honors `Retry-After`, with at most 60 seconds of total retry sleep per provider call; an excessive hint fails rather than retrying before the provider permits it.
   Structured logs and `model_retry` custom events report retry counts and waits without including provider error text.
   An agent's primary call, retries and fallback share one 15-minute elapsed budget, reasoning included, enforced by `BackendRunMiddleware` with `ModelCallTimeoutError`.
-  With a fallback available, primary attempts have 10 minutes to start streaming, leaving at least five minutes for the backup after a silent stall; once output starts, the primary keeps the remaining overall budget rather than interrupting ongoing reasoning.
+  With a fallback available, the entire primary call—all attempts and retry waits combined—shares one 10-minute window to start streaming; retries do not reset that window, leaving at least five minutes for the backup after a silent stall.
+  Once any primary attempt starts streaming, that window is lifted for the rest of the primary call, including later retries, while the overall 15-minute limit still applies.
   Without a fallback the primary keeps all 15 minutes.
   Transient failures can retry even after streaming: each accepted retry or fallback marks that attempt's streamed message ids superseded, so the dashboard discards its partial text and unexecuted tool calls.
   Failed attempts never enter graph history, and completed tools are never replayed by model retries.
