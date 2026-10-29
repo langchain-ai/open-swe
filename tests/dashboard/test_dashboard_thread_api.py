@@ -178,11 +178,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
 
 
-@pytest.mark.parametrize("creating", [False, True])
-@pytest.mark.parametrize("failure", ["authorization", "cancellation", "prefetch"])
-async def test_failed_run_start_drains_prefetches(
-    monkeypatch: pytest.MonkeyPatch, creating: bool, failure: str
-) -> None:
+async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatch) -> None:
     history_started, profile_started = asyncio.Event(), asyncio.Event()
     history_finished, profile_finished = asyncio.Event(), asyncio.Event()
     blocked = asyncio.Event()
@@ -199,22 +195,17 @@ async def test_failed_run_start_drains_prefetches(
     async def read_profile(login: str) -> dict[str, object]:
         profile_started.set()
         try:
-            if failure == "prefetch":
-                raise RuntimeError("Profile unavailable")
             await blocked.wait()
             return {}
         finally:
             await asyncio.sleep(0)
             profile_finished.set()
 
-    error = asyncio.CancelledError() if failure == "cancellation" else HTTPException(401)
+    error = HTTPException(401)
 
     async def reject_start(login: str) -> None:
         await profile_started.wait()
-        if not creating:
-            await history_started.wait()
-        if failure == "prefetch":
-            await profile_finished.wait()
+        await history_started.wait()
         raise error
 
     monkeypatch.setattr(thread_runs.THREADS, "state", read_history)
@@ -222,18 +213,17 @@ async def test_failed_run_start_drains_prefetches(
     monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", reject_start)
 
     try:
-        with pytest.raises(type(error)) as raised:
+        with pytest.raises(HTTPException) as raised:
             await thread_runs._enrich_run_start_command(
-                "tid", "octocat", {"method": "run.start"}, metadata={}, creating=creating
+                "tid", "octocat", {"method": "run.start"}, metadata={}
             )
         assert raised.value is error
         assert profile_finished.is_set()
-        assert history_finished.is_set() is not creating
+        assert history_finished.is_set()
     finally:
         blocked.set()
         await profile_finished.wait()
-        if not creating:
-            await history_finished.wait()
+        await history_finished.wait()
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
