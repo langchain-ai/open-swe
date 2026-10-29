@@ -623,6 +623,12 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     def sandbox(self) -> Any:
         return self._sandbox
 
+    @property
+    def box_uid(self) -> str | None:
+        """The box itself, where ``id`` is its name: a box recreated under that name has a new one."""
+        uid = self._sandbox.id
+        return uid if isinstance(uid, str) and uid else None
+
     def get_work_dir(self) -> str:
         """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
         return WORKSPACE_DIR

@@ -9,9 +9,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 
 from openswe.github.sandbox_access import SandboxGitHubAccess
-from openswe.sandboxes.lifecycle import _connect_existing_sandbox
+from openswe.sandboxes.lifecycle import BoxSetup, _connect_existing_sandbox
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import SandboxUnreachableError
 
 
@@ -98,3 +100,44 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
     # Cancelled with the sandbox, rather than left behind to report into a run
     # that has already given up on the box.
     assert not release.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_box_is_set_up_once_and_again_when_recreated_under_its_name() -> None:
+    sandbox = MagicMock(id="box-1")
+    sandbox.name = "sandbox-mda"
+    backend = TimeoutLangSmithSandbox(sandbox)
+    execute = AsyncMock(
+        return_value=ExecuteResponse(output="__open_swe_work_dir_ready__\n", exit_code=0)
+    )
+    records: list[dict[str, object]] = []
+
+    async def record(_thread_id: str, metadata: dict[str, object]) -> None:
+        records.append(metadata)
+
+    async def connect(setup: BoxSetup | None) -> None:
+        await _connect_existing_sandbox(
+            "thread-setup", cached=backend, sandbox_id="sandbox-mda", setup=setup
+        )
+
+    with (
+        patch.object(backend, "aexecute", execute),
+        patch(
+            "openswe.sandboxes.lifecycle.workspace_token",
+            new_callable=AsyncMock,
+            return_value=SandboxGitHubAccess("token"),
+        ),
+        patch("openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.record_proxy_token_expiry"),
+        patch("openswe.sandboxes.lifecycle.THREADS.update", side_effect=record),
+    ):
+        await connect(None)
+        setup = BoxSetup.recorded(records[-1])
+        assert setup is not None
+        await connect(setup)
+        assert execute.await_count == 1
+
+        sandbox.id = "box-2"
+        await connect(setup)
+
+    assert execute.await_count == 2
