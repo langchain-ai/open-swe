@@ -68,9 +68,13 @@ Every call is authenticated with the run token.
   Custom stream events the backend emits are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
   Innermost around every model call, subagents' included, `rt/model_calls.py` sends a history the provider accepts on replay (parallel tool results in call order, no empty Anthropic thinking blocks, no unresolvable OpenAI reasoning ids, no legacy Fireworks `function_call`).
-  Provider SDKs alone own same-model retries, with the settings from `rt/models.py`; no middleware retry loop multiplies their attempts.
-  An agent's primary call, its SDK retries and any fallback share one 15-minute elapsed budget, reasoning included, enforced by `BackendRunMiddleware` with `ModelCallTimeoutError`.
-  An early primary failure can use the fallback for the remaining time; exhausting the budget ends the call without starting a new fallback budget.
+  `rt/model_retries.py` owns up to five transient-error retries for OpenAI, Anthropic, Fireworks and Google GenAI; `rt/models.py` disables their SDK retries (Google counts total attempts, so receives one).
+  Other integrations keep SDK ownership and receive no extra middleware retries.
+  Backoff uses jitter and honors `Retry-After`, with at most 60 seconds of total retry sleep per provider call; an excessive hint fails rather than retrying before the provider permits it.
+  Structured logs and `model_retry` custom events report retry counts and waits without including provider error text.
+  An agent's primary call, retries and fallback share one 15-minute elapsed budget, reasoning included, enforced by `BackendRunMiddleware` with `ModelCallTimeoutError`.
+  With a fallback available, primary attempts have 10 minutes to start streaming, leaving at least five minutes for the backup after a silent stall; once output starts, the primary keeps the remaining overall budget rather than interrupting ongoing reasoning. Without a fallback the primary keeps all 15 minutes.
+  A failed call that has already streamed output is not retried or sent to the fallback: it raises `PartialModelOutputError` instead of duplicating partial text or tool calls. Completed tools are never replayed by model retries.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 

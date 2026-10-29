@@ -21,6 +21,7 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 
+from rt.model_retries import ModelRetriesMiddleware
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
@@ -154,12 +155,12 @@ class ModelCallTimeoutMiddleware(_ModelCallGuard):
             return await handler(request)
 
     @asynccontextmanager
-    async def deadline(self) -> AsyncIterator[None]:
+    async def deadline(self) -> AsyncIterator[asyncio.Timeout]:
         """Bound model attempts together without reclassifying provider timeouts."""
         timeout = asyncio.timeout(self._timeout_seconds)
         try:
             async with timeout:
-                yield
+                yield timeout
         except TimeoutError as exc:
             if not timeout.expired():
                 raise
@@ -198,15 +199,16 @@ def model_call_guards(
 ) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
-    They see the model the call really goes to, the fallback included. Provider SDKs
-    own same-model retries; the guard bounds them. BackendRunMiddleware also bounds
-    the primary/fallback pair together. A subagent's timeout becomes its answer.
+    They see the model the call really goes to, the fallback included. Middleware
+    owns retries for providers whose SDK retries are disabled. BackendRunMiddleware
+    bounds primary and fallback together. A subagent's timeout becomes its answer.
     The prompt cache replaces deepagents' own 5m one by name, in place.
     """
     return [
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
+        ModelRetriesMiddleware(),
         # With BackendRunMiddleware's static-prompt breakpoint this fills all four of a
         # request's cache breakpoints (static prompt, last system block, last tool, automatic);
         # Anthropic rejects a fifth, so anything adding one must give one up.
