@@ -150,6 +150,10 @@ typing = [
     # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
     "stagehand-middleware==0.1.0",
+    # The browser's `record` tool runs its recorder in the browser's sandbox and installs
+    # these there (browser._RECORDER_PACKAGES); here they type-check and test it.
+    "av>=15,<20",
+    "pillow>=11",
 ]
 
 # Dead-code pass. ``ruff`` (F841/F401) catches unused variables and imports and

@@ -162,7 +162,7 @@ pub(crate) struct SlackChannelOptions {
     pub(crate) trigger_on_all_messages: bool,
     /// Only sent when the channel sets it, so default payloads stay identical
     /// for consumers that predate the option. Unset lets Trigger Server keep an
-    /// existing app's mode or default a new one to `thread`.
+    /// existing app's mode or default a new one to `mention`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) trigger_mode: Option<SlackTriggerMode>,
     pub(crate) allow_bot_triggers: bool,

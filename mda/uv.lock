@@ -1393,10 +1393,12 @@ provides-extras = ["test"]
 [package.metadata.requires-dev]
 lint = [{ name = "ruff", specifier = ">=0.16.7,<0.18.0" }]
 typing = [
+    { name = "av", specifier = ">=15,<20" },
     { name = "basedpyright", specifier = ">=1.40.1,<2.0.0" },
     { name = "fastmcp", specifier = ">=4.0.10,<5" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
+    { name = "pillow", specifier = ">=11" },
     { name = "stagehand", specifier = "==4.3.0" },
     { name = "stagehand-middleware", specifier = "==0.1.0" },
     { name = "ty", specifier = ">=0.0.80,<0.0.88" },
