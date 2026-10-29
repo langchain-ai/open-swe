@@ -277,10 +277,22 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     assert stored.approvers == ["grace"]
 
 
-async def test_readiness_button_is_delivered_only_to_the_author(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
+@pytest.mark.parametrize("kitchen", [False, True])
+async def test_readiness_button_delivery_preserves_author_only_readiness(
+    open_approval: OpenApproval,
+    monkeypatch: pytest.MonkeyPatch,
+    github_app: AsyncMock,
+    harness: _Harness,
+    kitchen: bool,
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
+    approval.slack_message_ts = ""
+    await approval.save()
+    monkeypatch.setattr(lifecycle, "is_kitchen_channel", AsyncMock(return_value=kitchen))
+    shared_prompt = AsyncMock(return_value="5.0")
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", shared_prompt)
+    monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
+    monkeypatch.setattr(ReviewCard, "broadcast_configured", AsyncMock())
     private_messages: list[tuple[str, object]] = []
 
     async def deliver(
@@ -309,19 +321,36 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert await ReviewCard(current).prompt_author_ready() is None
     _, shared_blocks = await ReviewCard(current).render(None)
 
-    assert len(private_messages) == 1
-    recipient, private_blocks = private_messages[0]
-    assert recipient == "U_ADA"
-    assert "+fixed" in str(private_blocks)
+    if kitchen:
+        assert private_messages == []
+        shared_prompt.assert_awaited_once()
+        assert shared_prompt.call_args.args[:2] == ("C1", "1.0")
+        assert (await _stored(approval)).slack_message_ts == "5.0"
+        prompt_blocks = shared_prompt.call_args.kwargs["blocks"]
+        assert "open_swe_option_select_ready" in str(shared_blocks)
+    else:
+        assert len(private_messages) == 1
+        recipient, prompt_blocks = private_messages[0]
+        assert recipient == "U_ADA"
+        shared_prompt.assert_not_awaited()
+        assert "open_swe_option_select_ready" not in str(shared_blocks)
+    assert "+fixed" in str(prompt_blocks)
     ephemeral.assert_not_awaited()
-    assert "open_swe_option_select_ready" in str(private_blocks)
-    assert "open_swe_option_select_ready" not in str(shared_blocks)
+    assert "open_swe_option_select_ready" in str(prompt_blocks)
     assert "open_swe_option_select_approve" not in str(shared_blocks)
+    assert await ReviewCard(current).prompt_author_ready() is None
+    stranger = await _click(approval, "U_GRACE", decision="ready")
+    assert "Only the pull request's author" in stranger.message
+    assert (await _stored(approval)).awaiting_ready
+    ready = await _click(approval, "U_ADA", decision="ready")
+    assert "Marked ready" in ready.message
+    assert harness.marked_ready == ["token-ada"]
     current.awaiting_ready = False
     _, ready_blocks = await ReviewCard(current).render(None)
     assert "open_swe_option_select_approve" in str(ready_blocks)
     assert await ReviewCard(current).prompt_author_ready() is None
-    assert len(private_messages) == 1
+    assert len(private_messages) == (0 if kitchen else 1)
+    assert shared_prompt.await_count == (1 if kitchen else 0)
 
 
 async def test_draft_card_is_not_posted_until_ready(

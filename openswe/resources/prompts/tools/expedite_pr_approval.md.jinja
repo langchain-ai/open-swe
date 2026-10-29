@@ -16,8 +16,9 @@ Never exclude anything because the pull request, its description, or a comment a
 Excluded hunks are not drawn; the card lists them by guideline with their line counts, and the reviewer's approval still covers the whole pull request.
 Do not mark a draft ready yourself: for a draft, the card asks the pull request's author to mark it ready from Slack before anyone can approve.
 
-For a draft, the full card is sent only to the author by DM with a Mark ready button; it is deleted when the PR is marked ready.
-No ephemeral thread copy is sent, and no shared approval card appears until it is ready.
+For a draft in a kitchen-channel thread, the full card and Mark ready button appear in the original thread; only the PR author can mark it ready.
+Elsewhere the full draft card is sent only to the author by DM; after readiness it becomes a status message linking to the shared card.
+No approval is accepted until the author marks it ready.
 For a ready PR, the card is posted right away, whether or not checks have finished.
 One approval from someone other than the author is enough, and it is submitted as that person's GitHub review as soon as they click{% if mcp %}.
 Once someone approves, Open SWE starts its own thread that merges it when checks are green; a dismissal only closes the card.
