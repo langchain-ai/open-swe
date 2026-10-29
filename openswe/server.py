@@ -1454,6 +1454,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
+            quiet_until_ready=bool(self._profile_login)
+            and (await User.preferences_for_login(self._profile_login)).quiet_until_ready,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",

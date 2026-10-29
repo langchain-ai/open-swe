@@ -4727,6 +4727,17 @@
             ],
             "title": "Pr Review Links"
           },
+          "quiet_until_ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiet Until Ready"
+          },
           "review_draft_prs": {
             "anyOf": [
               {
