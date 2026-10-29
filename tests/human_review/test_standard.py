@@ -862,15 +862,20 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
 async def test_review_blockers_require_an_account_or_an_open_swe_bot(
     author: str, user: User | None, draft: bool, expected: list[str]
 ) -> None:
-    from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
 
-    readiness = Readiness(snapshot=_snapshot(author=author, draft=draft), blockers=[])
-    with (
-        patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
-        patch.object(User, "for_login", AsyncMock(return_value=user)),
-    ):
-        blockers = await review_blockers(MagicMock())
+    pull = MagicMock(
+        pull=AsyncMock(
+            return_value={
+                "state": "open",
+                "head": {"sha": "abc"},
+                "user": {"login": author},
+                "draft": draft,
+            }
+        )
+    )
+    with patch.object(User, "for_login", AsyncMock(return_value=user)):
+        blockers = await review_blockers(pull)
     assert blockers == expected
 
 

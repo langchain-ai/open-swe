@@ -191,7 +191,7 @@ def summary_line(text: str) -> str:
     return flat[: SUMMARY_MAX_CHARS - 1].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
 
 
-def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
+def request_blockers(snapshot: PullRequestSnapshot | PullRequestPayload) -> list[str]:
     """Why a pull request may not be put up for review yet."""
     blockers: list[str] = []
     if snapshot.merged:
@@ -212,11 +212,14 @@ async def _review_author_allowed(author: str) -> bool:
 
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
-    readiness = await Readiness.assess(pull)
-    if readiness is None:
+    payload = await or_none(pull.pull())
+    if payload is None:
         return None
-    blockers = request_blockers(readiness.snapshot)
-    if not await _review_author_allowed(readiness.snapshot.author):
+    snapshot = PullRequestPayload.model_validate(payload)
+    if not snapshot.head_sha:
+        return None
+    blockers = request_blockers(snapshot)
+    if not await _review_author_allowed(snapshot.author):
         blockers.append("its author is not an Open SWE user")
     return blockers
 
