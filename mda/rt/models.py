@@ -6,11 +6,16 @@ from this deployment's environment, and gateway routing mirrors the backend's.
 
 import json
 import os
+from collections.abc import AsyncIterator
 from functools import lru_cache
-from typing import Final
+from typing import Final, override
 
 from langchain.chat_models import init_chat_model
+from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ModelSpec
 
@@ -25,6 +30,32 @@ _GATEWAY_PROVIDER_PATHS: Final = {
 _DEFAULT_MAX_RETRIES: Final = 6
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 600.0
 _kwargs = TypeAdapter(dict[str, JsonValue])
+
+
+class _ChatAnthropic(ChatAnthropic):
+    """``ChatAnthropic`` that reports every streamed chunk to callbacks.
+
+    On v2 message streaming core leaves ``on_llm_new_token`` to the model's own
+    ``_astream``, which skips chunks whose content is a block list: every call with
+    tools or thinking. LangSmith then never sees a first token for Claude.
+    """
+
+    @override
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        *,
+        stream_usage: bool | None = None,
+        **kwargs: object,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        async for chunk in super()._astream(
+            messages, stop, run_manager, stream_usage=stream_usage, **kwargs
+        ):
+            if run_manager and not isinstance(chunk.message.content, str):
+                await run_manager.on_llm_new_token(chunk.text, chunk=chunk)
+            yield chunk
 
 
 def _gateway_overrides(provider: str) -> dict[str, JsonValue]:
@@ -51,6 +82,8 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
         kwargs.setdefault("include", ["reasoning.encrypted_content"])
     if use_gateway:
         kwargs.update(_gateway_overrides(provider))
+    if provider == "anthropic":
+        return _ChatAnthropic.model_validate({**kwargs, "model": model_id.split(":", 1)[1]})
     return init_chat_model(
         model_id, model_provider=None, configurable_fields=None, config_prefix=None, **kwargs
     )
