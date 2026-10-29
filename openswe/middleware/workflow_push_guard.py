@@ -514,18 +514,22 @@ async def _new_branch_base(backend: SandboxBackendProtocol, root: str, head: str
         if merge_base.ok and merge_base.output:
             return _first_line(merge_base.output)
 
-    git = _git_command(root, "")
     candidates = await _run_git(
-        backend,
-        root,
-        "for-each-ref --format='%(refname)' refs/remotes/origin/ | "
-        "while IFS= read -r branch; do "
-        '[ "$branch" = refs/remotes/origin/HEAD ] && continue; '
-        f'base=$({git}merge-base {shlex.quote(head)} "$branch") || continue; '
-        f'{git}show -s --format="%ct %H" "$base" || continue; '
-        "done | sort -s -k1,1nr | awk 'NR == 1 {print $2}'",
+        backend, root, f"rev-list --boundary --timestamp {shlex.quote(head)} --not --remotes=origin"
     )
-    return _first_line(candidates.output) if candidates.ok else ""
+    if not candidates.ok:
+        return ""
+    if not candidates.output:
+        return head
+    boundaries: list[tuple[int, str]] = []
+    for line in candidates.output.splitlines():
+        parts = line.split()
+        if len(parts) != 2 or not parts[0].isdigit():
+            return ""
+        timestamp, commit = parts
+        if commit.startswith("-") and _GIT_OBJECT_ID.fullmatch(commit[1:]):
+            boundaries.append((int(timestamp), commit[1:]))
+    return max(boundaries, key=lambda boundary: boundary[0])[1] if boundaries else ""
 
 
 async def _workflow_change_for_push(
