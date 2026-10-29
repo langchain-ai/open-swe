@@ -358,7 +358,8 @@ async def run_event_handler(
             logger.safe_error_label(error),
         )
         return EventHandlerOutcome("failed")
-    if content is None:
+    # An empty list of runs starts nothing, as ``None`` does.
+    if content is None or (isinstance(content, list) and not content):
         return EventHandlerOutcome("skipped")
     if isinstance(content, EndpointDeclined):
         logger.info("%s endpoint declined %s", provider, receipt)
