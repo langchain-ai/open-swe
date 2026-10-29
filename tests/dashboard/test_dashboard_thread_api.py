@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -175,6 +176,64 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+
+
+@pytest.mark.parametrize("creating", [False, True])
+@pytest.mark.parametrize("failure", ["authorization", "cancellation", "prefetch"])
+async def test_failed_run_start_drains_prefetches(
+    monkeypatch: pytest.MonkeyPatch, creating: bool, failure: str
+) -> None:
+    history_started, profile_started = asyncio.Event(), asyncio.Event()
+    history_finished, profile_finished = asyncio.Event(), asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def read_history(thread_id: str) -> dict[str, object]:
+        history_started.set()
+        try:
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            history_finished.set()
+
+    async def read_profile(login: str) -> dict[str, object]:
+        profile_started.set()
+        try:
+            if failure == "prefetch":
+                raise RuntimeError("Profile unavailable")
+            await blocked.wait()
+            return {}
+        finally:
+            await asyncio.sleep(0)
+            profile_finished.set()
+
+    error = asyncio.CancelledError() if failure == "cancellation" else HTTPException(401)
+
+    async def reject_start(login: str) -> None:
+        await profile_started.wait()
+        if not creating:
+            await history_started.wait()
+        if failure == "prefetch":
+            await profile_finished.wait()
+        raise error
+
+    monkeypatch.setattr(thread_runs.THREADS, "state", read_history)
+    monkeypatch.setattr(thread_runs, "get_profile", read_profile)
+    monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", reject_start)
+
+    try:
+        with pytest.raises(type(error)) as raised:
+            await thread_runs._enrich_run_start_command(
+                "tid", "octocat", {"method": "run.start"}, metadata={}, creating=creating
+            )
+        assert raised.value is error
+        assert profile_finished.is_set()
+        assert history_finished.is_set() is not creating
+    finally:
+        blocked.set()
+        await profile_finished.wait()
+        if not creating:
+            await history_finished.wait()
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(

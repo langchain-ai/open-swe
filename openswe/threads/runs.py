@@ -871,116 +871,126 @@ async def _enrich_run_start_command(
     # and any sandbox move.
     history = None if creating else asyncio.ensure_future(_ThreadHistory.of(thread_id))
     profile_read = asyncio.ensure_future(get_profile(login))
-    await _ensure_dashboard_github_token(login)
+    try:
+        await _ensure_dashboard_github_token(login)
 
-    client_config = params.get("config")
-    if not isinstance(client_config, dict):
-        client_config = {}
-    client_configurable = client_config.get("configurable")
-    if not isinstance(client_configurable, dict):
-        client_configurable = {}
+        client_config = params.get("config")
+        if not isinstance(client_config, dict):
+            client_config = {}
+        client_configurable = client_config.get("configurable")
+        if not isinstance(client_configurable, dict):
+            client_configurable = {}
 
-    chosen_model, chosen_effort = normalize_model_choice(
-        client_configurable.get("agent_model_id"),
-        client_configurable.get("agent_effort"),
-    )
-    model_selection = client_configurable.get("model_selection")
-    if model_selection not in {"auto", "explicit"}:
-        if client_configurable.get("agent_model_id"):
-            model_selection = "explicit"
+        chosen_model, chosen_effort = normalize_model_choice(
+            client_configurable.get("agent_model_id"),
+            client_configurable.get("agent_effort"),
+        )
+        model_selection = client_configurable.get("model_selection")
+        if model_selection not in {"auto", "explicit"}:
+            if client_configurable.get("agent_model_id"):
+                model_selection = "explicit"
+            else:
+                model_selection = "auto" if creating else metadata.get("model_selection")
+        offloading = offload_requested(params)
+        sandbox_bridge = await _resolve_sandbox_bridge(
+            client_configurable.get("sandbox_bridge_id"),
+            owner_id=Principal.of_login(login, email).sender_id,
+        )
+        move = (
+            None
+            if creating
+            else await SandboxMove.requested(
+                thread_id,
+                metadata,
+                login=login,
+                bridge=sandbox_bridge,
+                target=client_configurable.get("sandbox_target"),
+            )
+        )
+        if move is not None:
+            # A client that still moves a thread with its next message gets the same
+            # move, finished before the run starts.
+            try:
+                await move.carry_out()
+            except Exception as exc:
+                raise HTTPException(502, f"could not move this thread: {exc}") from exc
+            metadata = {**metadata, **move.update}
+        content = _command_message_content(params)
+        replies = _command_message_replies(params)
+        relayed_from = _relayed_from(params)
+        if offloading and creating:
+            raise HTTPException(400, "offloading requires an existing conversation")
+        command_images = _dashboard_images_from_content(content)
+        invocation_id = new_invocation_id()
+        invocation_started_at = datetime.now(UTC).isoformat()
+        overrides = with_invocation_id(None, invocation_id)
+        overrides["invocation_started_at"] = invocation_started_at
+        overrides[RELAYED_FROM_KEY] = relayed_from
+        run_model: str | None = None
+        run_effort: str | None = None
+
+        if creating:
+            # First ``run.start`` for a client-minted thread id: stamp the full
+            # dashboard thread record (owner, title, repo, model) and validate any
+            # attached images against the resolved model before the run is
+            # forwarded to LangGraph. The repo hint rides in the client
+            # configurable; it never reaches the run config (which is rebuilt from
+            # the stamped metadata below).
+            visibility = await _requested_visibility(client_configurable, login=login)
+            if sandbox_bridge is not None:
+                # Whoever can prompt a thread runs commands on its machine.
+                visibility = "private"
+            repo_config = _parse_repo(client_configurable.get("repo")) or {}
+            workspace = await _resolve_requested_workspace(
+                client_configurable.get("workspace") or client_configurable.get("environment"),
+                repo_config,
+                login=login,
+            )
+            thread = await create_dashboard_thread_record(
+                thread_id,
+                login=login,
+                email=email,
+                repo_config=repo_config,
+                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
+                visibility=visibility,
+                prompt=_command_prompt_text(content),
+                images=command_images,
+                model_id=client_configurable.get("agent_model_id"),
+                effort=client_configurable.get("agent_effort"),
+                model_selection=model_selection or "auto",
+                workspace=workspace,
+                profile=await profile_read or {},
+            )
+            metadata = thread_metadata(thread)
+            if sandbox_bridge is not None:
+                metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
+            run_model, run_effort = normalize_model_choice(
+                metadata.get("resolved_model"), metadata.get("resolved_effort")
+            )
+            if command_images and run_model and run_effort:
+                overrides["agent_model_id"] = run_model
+                overrides["agent_effort"] = run_effort
+            elif chosen_model and chosen_effort:
+                overrides["agent_model_id"] = chosen_model
+                overrides["agent_effort"] = chosen_effort
         else:
-            model_selection = "auto" if creating else metadata.get("model_selection")
-    offloading = offload_requested(params)
-    sandbox_bridge = await _resolve_sandbox_bridge(
-        client_configurable.get("sandbox_bridge_id"),
-        owner_id=Principal.of_login(login, email).sender_id,
-    )
-    move = (
-        None
-        if creating
-        else await SandboxMove.requested(
-            thread_id,
-            metadata,
-            login=login,
-            bridge=sandbox_bridge,
-            target=client_configurable.get("sandbox_target"),
-        )
-    )
-    if move is not None:
-        # A client that still moves a thread with its next message gets the same
-        # move, finished before the run starts.
-        try:
-            await move.carry_out()
-        except Exception as exc:
-            raise HTTPException(502, f"could not move this thread: {exc}") from exc
-        metadata = {**metadata, **move.update}
-    content = _command_message_content(params)
-    replies = _command_message_replies(params)
-    relayed_from = _relayed_from(params)
-    if offloading and creating:
-        raise HTTPException(400, "offloading requires an existing conversation")
-    command_images = _dashboard_images_from_content(content)
-    invocation_id = new_invocation_id()
-    invocation_started_at = datetime.now(UTC).isoformat()
-    overrides = with_invocation_id(None, invocation_id)
-    overrides["invocation_started_at"] = invocation_started_at
-    overrides[RELAYED_FROM_KEY] = relayed_from
-    run_model: str | None = None
-    run_effort: str | None = None
+            run_model, run_effort = (
+                (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
+            )
+            if command_images and run_model and run_effort:
+                run_model, run_effort = _with_vision_fallback(
+                    run_model, run_effort, has_images=True
+                )
+            _validate_command_images(content, model_id=run_model)
 
-    if creating:
-        # First ``run.start`` for a client-minted thread id: stamp the full
-        # dashboard thread record (owner, title, repo, model) and validate any
-        # attached images against the resolved model before the run is
-        # forwarded to LangGraph. The repo hint rides in the client
-        # configurable; it never reaches the run config (which is rebuilt from
-        # the stamped metadata below).
-        visibility = await _requested_visibility(client_configurable, login=login)
-        if sandbox_bridge is not None:
-            # Whoever can prompt a thread runs commands on its machine.
-            visibility = "private"
-        repo_config = _parse_repo(client_configurable.get("repo")) or {}
-        workspace = await _resolve_requested_workspace(
-            client_configurable.get("workspace") or client_configurable.get("environment"),
-            repo_config,
-            login=login,
-        )
-        thread = await create_dashboard_thread_record(
-            thread_id,
-            login=login,
-            email=email,
-            repo_config=repo_config,
-            repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
-            visibility=visibility,
-            prompt=_command_prompt_text(content),
-            images=command_images,
-            model_id=client_configurable.get("agent_model_id"),
-            effort=client_configurable.get("agent_effort"),
-            model_selection=model_selection or "auto",
-            workspace=workspace,
-            profile=await profile_read or {},
-        )
-        metadata = thread_metadata(thread)
-        if sandbox_bridge is not None:
-            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
-        run_model, run_effort = normalize_model_choice(
-            metadata.get("resolved_model"), metadata.get("resolved_effort")
-        )
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-        elif chosen_model and chosen_effort:
-            overrides["agent_model_id"] = chosen_model
-            overrides["agent_effort"] = chosen_effort
-    else:
-        run_model, run_effort = (
-            (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
-        )
-        if command_images and run_model and run_effort:
-            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
-        _validate_command_images(content, model_id=run_model)
+        prior = await history if history is not None else _ThreadHistory()
+        profile = await profile_read or {}
+    finally:
+        reads = (profile_read,) if history is None else (history, profile_read)
+        for read in reads:
+            read.cancel()
+        await asyncio.gather(*reads, return_exceptions=True)
 
-    prior = await history if history is not None else _ThreadHistory()
     structured, injected = await _attributed_run_messages(
         login,
         metadata=metadata,
@@ -1104,7 +1114,7 @@ async def _enrich_run_start_command(
         thread_id,
         login,
         metadata,
-        profile=await profile_read or {},
+        profile=profile,
         overrides=overrides,
     )
 
