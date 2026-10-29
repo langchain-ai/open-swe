@@ -12,7 +12,7 @@ import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Self
+from typing import NamedTuple, Self
 
 import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -31,10 +31,23 @@ HEAD_REF = "refs/walkthrough/head"
 MERGE_BASE_REF = "refs/walkthrough/merge-base"
 _DIFF = "git -c core.quotePath=false diff --no-color --no-ext-diff --no-renames --full-index"
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_ALREADY_PINNED = "__open_swe_already_pinned__"
 
 
 class CheckoutError(RuntimeError):
     """A git step in the walkthrough checkout failed."""
+
+
+class Pin(NamedTuple):
+    """The merge base and head a checkout is pinned to, and whether pinning moved it there."""
+
+    merge_base_sha: str
+    head_sha: str
+    moved: bool
+
+    @property
+    def refs(self) -> tuple[str, str]:
+        return self.merge_base_sha, self.head_sha
 
 
 @dataclass(frozen=True)
@@ -49,10 +62,15 @@ class PinnedCheckout:
         work_dir = await resolve_sandbox_work_dir(backend)
         return cls(backend, await resolve_checkout_dir(backend, work_dir, repo))
 
-    async def _run(self, script: str, *, cwd: str = "") -> str:
+    async def _run(self, script: str, *, workdir: str | None = None) -> str:
+        """Run ``script`` in the checkout, or in ``workdir``, which it creates if missing."""
+        enter = (
+            f"cd {shlex.quote(self.repo_dir)}"
+            if workdir is None
+            else f"mkdir -p {shlex.quote(workdir)}\ncd {shlex.quote(workdir)}"
+        )
         result = await self.backend.aexecute(
-            f"set -e\ncd {shlex.quote(cwd or self.repo_dir)}\n{script}",
-            timeout=GIT_TIMEOUT_SECONDS,
+            f"set -e\n{enter}\n{script}", timeout=GIT_TIMEOUT_SECONDS
         )
         if result.exit_code not in (0, None):
             raise CheckoutError(result.output.strip()[-2000:])
@@ -78,12 +96,12 @@ class PinnedCheckout:
             return None
         return lines[0], lines[1]
 
-    async def pin(self, *, full_name: str, pr_number: int, head_sha: str) -> bool:
+    async def pin(self, *, full_name: str, pr_number: int, head_sha: str) -> Pin:
         """Fetch and pin the PR's head and its merge base, cloning the repository if it is missing.
 
         The merge base is GitHub's, against the base branch as it is now, so a
         stale ``base.sha`` cannot pull the base branch's own commits into the diff.
-        Returns whether anything changed; a checkout already pinned there is left alone.
+        A checkout already pinned there is left alone. One sandbox round trip.
         """
         owner, _, repo = full_name.partition("/")
         try:
@@ -91,18 +109,20 @@ class PinnedCheckout:
                 merge_base_sha = await pull.merge_base(head_sha)
         except (GitHubAppUnavailable, httpx2.HTTPError, ValueError) as exc:
             raise CheckoutError(f"could not find the pull request's merge base: {exc}") from exc
-        if await self.pinned(allow_missing=True) == (merge_base_sha, head_sha):
-            return False
         work_dir, _, name = self.repo_dir.rpartition("/")
         merge_base, head = shlex.quote(merge_base_sha), shlex.quote(head_sha)
+        q_name = shlex.quote(name)
         pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
-        await self.backend.aexecute(
-            f"mkdir -p {shlex.quote(work_dir)}", timeout=GIT_TIMEOUT_SECONDS
-        )
-        await self._run(
-            f"[ -d {shlex.quote(name)}/.git ] || gh repo clone {shlex.quote(full_name)} "
-            f"{shlex.quote(name)} -- --quiet {BLOBLESS_CLONE_ARGS}\n"
-            f"cd {shlex.quote(name)}\n"
+        output = await self._run(
+            f'if [ -d {q_name}/.git ] && [ "$(git -C {q_name} rev-parse -q --verify '
+            f'{MERGE_BASE_REF}) $(git -C {q_name} rev-parse -q --verify {HEAD_REF})" '
+            f"= {shlex.quote(f'{merge_base_sha} {head_sha}')} ]; then\n"
+            f"  echo {_ALREADY_PINNED}\n"
+            "  exit 0\n"
+            "fi\n"
+            f"[ -d {q_name}/.git ] || gh repo clone {shlex.quote(full_name)} "
+            f"{q_name} -- --quiet {BLOBLESS_CLONE_ARGS}\n"
+            f"cd {q_name}\n"
             # The scout's repo prep has usually fetched both already; each fetch is a GitHub round trip.
             f"for sha in {head} {merge_base}; do\n"
             '  git cat-file -e "$sha^{commit}" 2>/dev/null'
@@ -114,9 +134,9 @@ class PinnedCheckout:
             f"git cat-file -e {head}^{{commit}}\n"
             f"git update-ref {MERGE_BASE_REF} {merge_base}\n"
             f"git update-ref {HEAD_REF} {head}",
-            cwd=work_dir,
+            workdir=work_dir,
         )
-        return True
+        return Pin(merge_base_sha, head_sha, moved=_ALREADY_PINNED not in output.split())
 
     async def diff(self) -> str:
         """The PR's diff from its merge base, with git's default context."""

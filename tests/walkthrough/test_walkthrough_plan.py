@@ -496,6 +496,28 @@ async def test_a_missing_checkout_is_reported_unless_allowed(tmp_path: Path) -> 
     assert await missing.pinned(allow_missing=True) is None
 
 
+async def test_pinning_moves_the_refs_once_and_then_leaves_them(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    first = _commit(repo, {"cli.py": "print(1)\n"}, "first")
+    second = _commit(repo, {"cli.py": "print(2)\n"}, "second")
+    pull = AsyncMock()
+    pull.merge_base.return_value = base
+    client = AsyncMock()
+    client.__aenter__.return_value = pull
+    monkeypatch.setattr("openswe.walkthrough.checkout.PullRequestClient.as_app", lambda *_: client)
+
+    async def pin(head: str) -> bool:
+        pinned = await checkout.pin(full_name="o/repo", pr_number=1, head_sha=head)
+        assert await checkout.pinned() == pinned.refs == (base, head)
+        return pinned.moved
+
+    assert await pin(first)
+    assert not await pin(first)
+    assert await pin(second)
+
+
 async def test_a_head_change_during_planning_ends_the_scout(
     repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
 ) -> None:

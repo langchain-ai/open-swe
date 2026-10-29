@@ -22,7 +22,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
-from openswe.walkthrough.checkout import PinnedCheckout
+from openswe.walkthrough.checkout import Pin, PinnedCheckout
 from openswe.walkthrough.diff import DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
@@ -71,8 +71,11 @@ class PlanWorkspace:
     _hunks: dict[tuple[LinePoint, ...], Hunks] = field(default_factory=dict, repr=False)
 
     @classmethod
-    async def open(cls, pull_request: PullRequest, checkout: PinnedCheckout) -> Self:
-        pinned = await checkout.pinned()
+    async def open(
+        cls, pull_request: PullRequest, checkout: PinnedCheckout, pin: Pin | None = None
+    ) -> Self:
+        """The workspace at the refs ``checkout`` is pinned to; ``pin`` when the caller just pinned them."""
+        pinned = pin.refs if pin is not None else await checkout.pinned()
         if pinned is None:
             raise PlannerUnavailableError("the checkout is not ready; try again next turn")
         merge_base_sha, head_sha = pinned

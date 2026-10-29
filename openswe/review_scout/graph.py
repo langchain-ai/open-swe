@@ -35,6 +35,7 @@ from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -67,7 +68,7 @@ from openswe.tools.record_human_input import record_human_input
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
+from openswe.walkthrough.checkout import CheckoutError, Pin, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
@@ -84,12 +85,16 @@ class ReviewScoutState(PrepareRunState):
     has_human_input: NotRequired[bool]
 
 
-async def _workspace(backend: SandboxBackendProtocol, cfg: RunConfig) -> PlanWorkspace:
+async def _workspace(
+    cfg: RunConfig, checkout: PinnedCheckout, pin: Pin | None = None
+) -> PlanWorkspace:
+    """The plan workspace on the scout's checkout; ``pin`` when the scout just pinned it."""
     if cfg.repo is None or cfg.pr_number is None:
         raise PlannerUnavailableError("review scout run is missing its pull request")
-    return await PlanWorkspace.locate(
-        backend, owner=cfg.repo.owner, repo=cfg.repo.name, number=cfg.pr_number
-    )
+    pull_request = await PullRequest(
+        owner=cfg.repo.owner, repo=cfg.repo.name, number=cfg.pr_number
+    ).ensure()
+    return await PlanWorkspace.open(pull_request, checkout, pin)
 
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
@@ -188,13 +193,13 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
                     f"review scout could not check out the pull request: {failure}"
                 ) from failure
             await asyncio.sleep(3)
-        await checkout.pin(
+        pin = await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
             head_sha=cfg.head_sha,
         )
         try:
-            workspace = await _workspace(backend, cfg)
+            workspace = await _workspace(cfg, checkout, pin)
         except PlanMovedError:
             # A newer head's scout owns the plan now.
             logger.info(
@@ -271,7 +276,8 @@ async def finish_scout_plan(
         "scout_head_sha": cfg.head_sha,
     }
     try:
-        workspace = await _workspace(get_cached_sandbox_backend(thread_id), cfg)
+        checkout = await PinnedCheckout.locate(get_cached_sandbox_backend(thread_id), cfg.repo.name)
+        workspace = await _workspace(cfg, checkout)
         settled = await workspace.settle()
     except PlanMovedError:
         logger.info("Review scout head is stale; leaving the plan to the newer head", extra=extra)

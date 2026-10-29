@@ -74,11 +74,10 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
             draft=head.draft,
             human_input=(await Walkthrough.human_input_for(pr.id) or "") if author else "",
         )
-        if await checkout.pin(
-            full_name=pr.repo_full_name,
-            pr_number=pr.number,
-            head_sha=head.head.sha,
-        ):
+        pin = await checkout.pin(
+            full_name=pr.repo_full_name, pr_number=pr.number, head_sha=head.head.sha
+        )
+        if pin.moved:
             try:
                 await set_view(
                     session.slack_channel_id,
