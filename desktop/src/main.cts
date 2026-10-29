@@ -27,6 +27,7 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
+const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
@@ -65,26 +66,27 @@ const {
   readWorkspacePath,
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { DesktopLinks } = require("./desktop-links.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
   SESSION_COOKIE_NAME,
   appRedirectUrl,
   backendRequestUrl,
+  desktopEnvironmentsUrl,
   desktopExchangeUrl,
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
-  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  parseDesktopEnvironments,
   resolveBackendUrl,
   resolveAppRuntime,
-  staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
 const {
@@ -124,6 +126,11 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendUrl = null;
+// The backend the app started on; `backendUrl` differs only while switched to
+// one of its alternate environments, which lasts until the app restarts.
+let primaryBackendUrl = null;
+let alternativeEnvironments = [];
+let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
@@ -609,6 +616,16 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     if (typeof value === "string") clipboard.writeText(value);
   });
+  ipcMain.handle("desktop:copy-page-link", (event) => {
+    requireTrustedDesktopIpc(event);
+    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    const source = new URL(event.sender.getURL());
+    const target = new URL(backendUrl);
+    target.pathname = source.pathname;
+    target.search = source.search;
+    target.hash = source.hash;
+    clipboard.writeText(target.toString());
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
@@ -1058,16 +1075,63 @@ function storeBackendUrl(value) {
   return url;
 }
 
+/** Ask the backend the app started on which others it offers to switch to. */
+async function loadAlternativeEnvironments() {
+  const url = primaryBackendUrl;
+  if (!url) return;
+  let environments = [];
+  try {
+    const response = await fetch(desktopEnvironmentsUrl(url), {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.ok)
+      environments = parseDesktopEnvironments(await response.json());
+  } catch (error) {
+    console.warn("Could not read the alternate environments", error);
+  }
+  if (url !== primaryBackendUrl) return;
+  alternativeEnvironments = environments;
+  createMenu();
+}
+
+/** Point the app at `url` and reload it there, dropping the last backend's page state. */
+async function connectToBackend(url) {
+  const previousUrl = backendUrl;
+  backendUrl = url;
+  if (previousUrl && previousUrl !== url)
+    await session.defaultSession.clearStorageData({ origin: APP_URL });
+  createMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
+  else createWindow();
+}
+
+function environmentMenuItem() {
+  if (
+    !primaryBackendUrl ||
+    (!alternativeEnvironments.length && backendUrl === primaryBackendUrl)
+  )
+    return null;
+  const environments = [
+    { name: "Main", url: primaryBackendUrl },
+    ...alternativeEnvironments,
+  ];
+  return {
+    label: "Environment",
+    submenu: environments.map(({ name, url }) => ({
+      label: `${name} (${new URL(url).host})`,
+      type: "radio",
+      checked: url === backendUrl,
+      click: () => {
+        if (url !== backendUrl) void connectToBackend(url);
+      },
+    })),
+  };
+}
+
 function iconPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
     : path.resolve(__dirname, "../resources/icon.png");
-}
-
-function bundledUiPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "ui")
-    : path.resolve(__dirname, "../../ui/.output/public");
 }
 
 function errorPage(error) {
@@ -1204,7 +1268,7 @@ async function clearBackendCookies(url) {
   }
 }
 
-async function serveBundledUi(request) {
+async function serveDesktopUi(request: Request) {
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);
@@ -1213,24 +1277,23 @@ async function serveBundledUi(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
-
-  const root = bundledUiPath();
-  let filePath = staticFilePath(root, request.url);
-  if (
-    !filePath ||
-    !fs.existsSync(filePath) ||
-    !fs.statSync(filePath).isFile()
-  ) {
-    if (path.extname(url.pathname))
-      return new Response("Not found", { status: 404 });
-    filePath = path.join(root, "_shell.html");
+  if (desktopUi?.backendUrl !== backendUrl) {
+    desktopUi = new DesktopUi(
+      backendUrl,
+      fetch,
+      path.join(app.getPath("userData"), "ui-cache"),
+      (filename: string) => net.fetch(pathToFileURL(filename).toString()),
+      process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
+      () =>
+        void dialog.showMessageBox({
+          type: "warning",
+          message: "Open SWE needs an update",
+          detail:
+            "Your backend has a newer UI than this version of Open SWE can run. You are still on the previous UI; update the desktop app to get the new one.",
+        }),
+    );
   }
-  if (!fs.existsSync(filePath)) {
-    return new Response("Bundled UI is missing. Run pnpm run build:ui.", {
-      status: 500,
-    });
-  }
-  return net.fetch(pathToFileURL(filePath).toString());
+  return desktopUi.serve(request);
 }
 
 const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
@@ -1267,6 +1330,10 @@ function createMenu() {
     label: "Backend URL…",
     click: () => createSetupWindow(),
   };
+  const environmentItem = environmentMenuItem();
+  const backendItems = environmentItem
+    ? [backendSettingsItem, environmentItem]
+    : [backendSettingsItem];
   const settingsItem = {
     id: "open-settings",
     label: "Settings…",
@@ -1287,7 +1354,7 @@ function createMenu() {
               { role: "about" },
               settingsItem,
               checkForUpdatesItem,
-              backendSettingsItem,
+              ...backendItems,
               { type: "separator" },
               { role: "services" },
               { type: "separator" },
@@ -1316,7 +1383,7 @@ function createMenu() {
         },
         ...(process.platform === "darwin"
           ? []
-          : [{ type: "separator" }, settingsItem, backendSettingsItem]),
+          : [{ type: "separator" }, settingsItem, ...backendItems]),
         { type: "separator" },
         { role: process.platform === "darwin" ? "close" : "quit" },
       ],
@@ -1710,17 +1777,13 @@ function createSetupWindow() {
     try {
       const value = new URL(targetUrl).searchParams.get("url");
       if (!value) throw new Error("Enter a backend URL");
-      const previousUrl = backendUrl;
-      backendUrl = storeBackendUrl(value);
-      if (previousUrl && previousUrl !== backendUrl) {
-        await clearBackendCookies(previousUrl);
-        await session.defaultSession.clearStorageData({ origin: APP_URL });
-      }
-      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-        pendingDeepLink = null;
-      else if (mainWindow && !mainWindow.isDestroyed())
-        await loadApp(mainWindow);
-      else createWindow();
+      const url = storeBackendUrl(value);
+      if (primaryBackendUrl && primaryBackendUrl !== url)
+        await clearBackendCookies(primaryBackendUrl);
+      primaryBackendUrl = url;
+      alternativeEnvironments = [];
+      await connectToBackend(url);
+      void loadAlternativeEnvironments();
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1752,11 +1815,13 @@ function configurePermissions() {
   );
 }
 
-let pendingDeepLink = null;
+const desktopLinks = new DesktopLinks({
+  backendUrl: () => backendUrl,
+  openApp: openDesktopLink,
+  openExternal: (url: string) => shell.openExternal(url),
+});
 
-function openDesktopLink(url) {
-  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-  if (!target) return false;
+function openDesktopLink(target: string) {
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const window = existingWindow || createWindow(target);
@@ -1773,10 +1838,8 @@ app.on("will-continue-activity", (event, type) => {
 
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
-  if (!backendUrl) pendingDeepLink = details.webpageURL;
-  else if (!desktopDeepLinkUrl(details.webpageURL, backendUrl)) return;
   event.preventDefault();
-  if (backendUrl) openDesktopLink(details.webpageURL);
+  desktopLinks.receive(details.webpageURL);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1813,6 +1876,7 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
+    primaryBackendUrl = backendUrl;
     void shareBackendSession();
 
     localThreadStore = new LocalThreadStore(
@@ -1834,13 +1898,12 @@ if (!hasSingleInstanceLock) {
           ? console.warn(message)
           : console.warn(message, error),
     });
-    protocol.handle("open-swe", serveBundledUi);
+    protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-      pendingDeepLink = null;
-    else createWindow();
+    void loadAlternativeEnvironments();
+    if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

@@ -52,13 +52,11 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             ".env".to_string(),
             "API keys (LangSmith + model providers); never commit".to_string(),
         ),
-    ];
-    if blueprint.identity {
-        entries.push((
+        (
             identity_entry.to_string(),
             "managed authentication".to_string(),
-        ));
-    }
+        ),
+    ];
     if let Some(choice) = blueprint.memory {
         entries.push((
             memory_entry.to_string(),
@@ -80,6 +78,12 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             "Slack messaging channel".to_string(),
         ));
     }
+    if blueprint.channels.contains(&InitChannel::GitHub) {
+        entries.push((
+            format!("channels/github.{ext}"),
+            "GitHub channel (GitHub App set up on deploy)".to_string(),
+        ));
+    }
     entries.extend(
         [
             ("tools/", "optional custom tools"),
@@ -93,7 +97,7 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
 
     let evaluate = evaluate();
     let sandbox = sandbox_section(sandbox_entry, blueprint);
-    let identity = identity_section(identity_entry, blueprint);
+    let identity = identity_section(identity_entry);
     let memory = memory_section(memory_entry, blueprint, language);
 
     format!(
@@ -296,15 +300,8 @@ fn memory_section(memory_entry: &str, blueprint: &Blueprint, language: Language)
     )
 }
 
-/// The identity section, or a warning that the deployment is open.
-fn identity_section(identity_entry: &str, blueprint: &Blueprint) -> String {
-    if !blueprint.identity {
-        return format!(
-            "## Identity\n\n\
-             This project declares no identity, so the deployment is open to any caller.\n\
-             Add `{identity_entry}` to say who may call it and how runs are scoped.\n"
-        );
-    }
+/// The identity section.
+fn identity_section(identity_entry: &str) -> String {
     format!(
         "## Identity\n\n\
          `{identity_entry}` enables managed authentication: threads are owned\n\

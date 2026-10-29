@@ -23,14 +23,27 @@ import zipfile
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, urlparse
 
 import httpx2
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from openswe.github.queue import Artifact, CommitComparison, GitReference, WorkflowRun
+from openswe.github.queue import (
+    Artifact,
+    CommitComparison,
+    GitReference,
+    NativeQueueSnapshot,
+    ValidationArtifacts,
+    ValidationJob,
+    ValidationJobs,
+    ValidationRun,
+    ValidationRuns,
+    WorkflowRun,
+)
+from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -47,6 +60,7 @@ GITHUB_HEADERS_VERSION = "2022-11-28"
 DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 _PAGE_SIZE = 100
+_PAGE_CONCURRENCY = 10
 _FILES_PER_QUERY = 100
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
@@ -209,16 +223,29 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+def github_reauth_message(login: str | None = None) -> str:
+    person = f" for {login}" if login else ""
+    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
+    return (
+        f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
+        "Then retry the action."
+    )
+
+
 class GitHubSignInRequired(Exception):
     """The person has no usable GitHub authorization and must sign in again."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"GitHub sign-in required for {login}")
+        super().__init__(github_reauth_message(login))
         self.login = login
 
 
 class GitHubAppUnavailable(Exception):
     """No GitHub App installation token can be minted for the request."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class RepoFileUnreadableError(RuntimeError):
@@ -312,6 +339,7 @@ class GitHubClient:
             installation_id=installation_id,
             repositories=[repo] if permissions is not None and repo is not None else None,
             permissions=permissions,
+            raise_errors=True,
         )
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
@@ -353,11 +381,15 @@ class GitHubClient:
         key: str | None = None,
         params: Mapping[str, str] | None = None,
         max_pages: int | None = None,
+        total: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Every item of a paginated list; ``key`` names the list inside each page's object."""
-        items: list[dict[str, Any]] = []
-        page = 1
-        while True:
+        """Every item of a paginated list; ``key`` names the list inside each page's object.
+
+        ``total`` is how many items the list should hold: the pages that many fill
+        are read concurrently, and reading goes on while the last one comes back full.
+        """
+
+        async def read(page: int) -> list[object]:
             payload = await self.get(
                 path, {**(params or {}), "per_page": str(_PAGE_SIZE), "page": str(page)}
             )
@@ -366,10 +398,23 @@ class GitHubClient:
             )
             if not isinstance(batch, list):
                 raise ValueError(f"GitHub answered {path} without a list")
-            items.extend(item for item in batch if isinstance(item, dict))
-            if len(batch) < _PAGE_SIZE or page == max_pages:
-                return items
+            return batch
+
+        semaphore = asyncio.Semaphore(_PAGE_CONCURRENCY)
+
+        async def bounded(page: int) -> list[object]:
+            async with semaphore:
+                return await read(page)
+
+        known = max(1, -(-(total or 0) // _PAGE_SIZE))
+        if max_pages is not None:
+            known = min(known, max_pages)
+        batches = await asyncio.gather(*(bounded(page) for page in range(1, known + 1)))
+        page = known
+        while len(batches[-1]) == _PAGE_SIZE and page != max_pages:
             page += 1
+            batches.append(await read(page))
+        return [item for batch in batches for item in batch if isinstance(item, dict)]
 
     async def graphql(
         self, query: str, variables: Mapping[str, object], *, partial: bool = False
@@ -391,6 +436,14 @@ class GitHubClient:
         if not isinstance(data, Mapping):
             raise ValueError("GitHub answered GraphQL without data")
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class Comparison:
+    """A three-dot ``base...head`` comparison."""
+
+    merge_base: str
+    files: list[dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,9 +486,14 @@ class RepoClient:
         key: str | None = None,
         params: Mapping[str, str] | None = None,
         max_pages: int | None = None,
+        total: int | None = None,
     ) -> list[dict[str, Any]]:
         return await self.github.pages(
-            f"repos/{self.full_name}/{path}", key=key, params=params, max_pages=max_pages
+            f"repos/{self.full_name}/{path}",
+            key=key,
+            params=params,
+            max_pages=max_pages,
+            total=total,
         )
 
     async def graphql(
@@ -489,6 +547,21 @@ class RepoClient:
                 raise RepoFileUnreadableError(f"Repository file {path} exceeds the size cap")
             return None
         return content if strict else content or None
+
+    async def raw_file(self, path: str, ref: str) -> bytes | None:
+        """``path``'s bytes at ``ref``, unaltered; ``None`` when it is absent there."""
+        try:
+            response = await self.github.request(
+                "GET",
+                f"repos/{self.full_name}/contents/{quote(path, safe='/')}",
+                params={"ref": ref},
+                headers={"Accept": "application/vnd.github.raw+json"},
+            )
+        except GitHubError as refused:
+            if refused.response.status_code == 404:
+                return None
+            raise
+        return response.content
 
     async def read_files(self, paths: Sequence[str], ref: str) -> dict[str, str]:
         """Text of each of ``paths`` present at ``ref``, read in batched GraphQL queries."""
@@ -549,8 +622,54 @@ class RepoClient:
             raise ValueError("GitHub answered the repository without an object")
         return payload
 
+    async def native_queue(self, branch: str) -> NativeQueueSnapshot:
+        """Read a bounded, complete queue view; candidate ancestry determines membership."""
+        data = await self.graphql(
+            """query($owner:String!,$repo:String!,$branch:String!,$ref:String!) {
+              repository(owner:$owner,name:$repo) {
+                databaseId nameWithOwner
+                ref(qualifiedName:$ref) { name target { oid } }
+                mergeQueue(branch:$branch) {
+                  id
+                  entries(first:100) {
+                    totalCount pageInfo { hasNextPage }
+                    nodes {
+                      id position state enqueuedAt
+                      baseCommit { oid }
+                      headCommit { oid parents(first:2) { totalCount nodes { oid } } }
+                      pullRequest {
+                        number headRefOid state reviewDecision isDraft baseRefName
+                        headRepository { nameWithOwner }
+                      }
+                    }
+                  }
+                }
+              }
+            }""",
+            {"branch": branch, "ref": f"refs/heads/{branch}"},
+        )
+        snapshot = NativeQueueSnapshot.model_validate(data.get("repository"))
+        if snapshot.repository.lower() != self.full_name.lower() or snapshot.branch != branch:
+            raise ValueError("Native queue repository or target changed")
+        return snapshot
+
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
+
+    async def compare(self, base: str, head: str) -> Comparison:
+        """``base...head``, with at most GitHub's 300 changed files; refs are fully escaped."""
+        # The paginated commit list is never read, so only one commit comes back.
+        payload = await self.get(
+            f"compare/{quote(base, safe='')}...{quote(head, safe='')}", {"per_page": "1"}
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the comparison without an object")
+        merge_base = payload.get("merge_base_commit")
+        sha = merge_base.get("sha") if isinstance(merge_base, dict) else None
+        files = payload.get("files") or []
+        if not isinstance(sha, str) or not isinstance(files, list):
+            raise ValueError("GitHub answered the comparison without a merge base and files")
+        return Comparison(sha, [file for file in files if isinstance(file, dict)])
 
     async def branch(self, name: str) -> dict[str, Any]:
         payload = await self.get(f"branches/{quote(name, safe='')}")
@@ -663,13 +782,16 @@ class RepoClient:
         matches = [item for item in artifacts if item.name == name and not item.expired]
         if len(matches) != 1:
             raise ValueError("Admission evidence is missing or ambiguous")
+        return await self.artifact_json(matches[0].id, "admission.json")
+
+    async def artifact_json(self, artifact_id: int, filename: str) -> dict[str, JsonValue]:
         # GitHub redirects to a signed blob URL. Never forward authorization to it.
         response = await self.github.http.get(
-            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{matches[0].id}/zip",
+            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{artifact_id}/zip",
             follow_redirects=False,
         )
         if response.status_code != 302:
-            raise ValueError("Admission artifact download unavailable")
+            raise ValueError("Artifact download unavailable")
         location = response.headers.get("location", "")
         try:
             async with github_client() as anonymous:
@@ -682,21 +804,59 @@ class RepoClient:
                     async for chunk in download.aiter_bytes():
                         content.extend(chunk)
                         if len(content) > 1_000_000:
-                            raise ValueError("Admission artifact is too large")
+                            raise ValueError("Artifact is too large")
                 finally:
                     await download.aclose()
         except httpx2.HTTPError:
             # Signed artifact URLs must not appear in controller exception logs.
-            raise ValueError("Admission artifact download failed") from None
+            raise ValueError("Artifact download failed") from None
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             files = archive.infolist()
-            if (
-                len(files) != 1
-                or files[0].filename != "admission.json"
-                or files[0].file_size > 100_000
-            ):
-                raise ValueError("Unexpected admission artifact contents")
+            if len(files) != 1 or files[0].filename != filename or files[0].file_size > 100_000:
+                raise ValueError("Unexpected artifact contents")
             return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
+
+    async def validation_runs(self, workflow: str, since: datetime) -> tuple[ValidationRun, ...]:
+        runs: list[ValidationRun] = []
+        for page in range(1, 11):
+            result = ValidationRuns.model_validate(
+                await self.get(
+                    f"actions/workflows/{quote(workflow, safe='')}/runs",
+                    {
+                        "event": "workflow_dispatch",
+                        "created": since.strftime(">=%Y-%m-%dT%H:%M:%SZ"),
+                        "per_page": "100",
+                        "page": str(page),
+                    },
+                )
+            )
+            runs.extend(result.workflow_runs)
+            if len(runs) >= result.total_count:
+                if len({run.id for run in runs}) != len(runs) or len(runs) != result.total_count:
+                    raise ValueError("Workflow discovery changed during pagination")
+                return tuple(runs)
+            if not result.workflow_runs:
+                break
+        raise ValueError("Workflow discovery exceeds the bounded search window")
+
+    async def validation_run(self, run_id: int) -> ValidationRun:
+        return ValidationRun.model_validate(await self.get(f"actions/runs/{run_id}"))
+
+    async def validation_jobs(self, run_id: int) -> tuple[ValidationJob, ...]:
+        result = ValidationJobs.model_validate(
+            await self.get(f"actions/runs/{run_id}/jobs", {"per_page": "100", "filter": "latest"})
+        )
+        if result.total_count != len(result.jobs):
+            raise ValueError("Validation job listing is incomplete")
+        return result.jobs
+
+    async def validation_artifacts(self, run_id: int) -> tuple[Artifact, ...]:
+        result = ValidationArtifacts.model_validate(
+            await self.get(f"actions/runs/{run_id}/artifacts", {"per_page": "100"})
+        )
+        if result.total_count != len(result.artifacts):
+            raise ValueError("Validation artifact listing is incomplete")
+        return result.artifacts
 
     @asynccontextmanager
     async def candidate_git(self) -> AsyncIterator[CandidateGit]:
@@ -764,6 +924,45 @@ def _artifact_destination(location: str) -> None:
         or url.port not in (None, 443)
     ):
         raise ValueError("Untrusted artifact download destination")
+
+
+type ReadStatus = Literal["ok", "transient", "missing", "forbidden", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadResult[T]:
+    """A GitHub read and the reason it could not be completed."""
+
+    value: T | None
+    status: ReadStatus
+
+
+async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
+    """Preserve retryable failures separately from missing or inaccessible resources."""
+    try:
+        return ReadResult(await read, "ok")
+    except httpx2.HTTPStatusError as exc:
+        response = exc.response
+        status: ReadStatus = "unavailable"
+        if (
+            response.status_code == 429
+            or 500 <= response.status_code < 600
+            or _is_secondary_rate_limit(response)
+            or (response.status_code == 403 and "Retry-After" in response.headers)
+        ):
+            status = "transient"
+        elif response.status_code == 404:
+            status = "missing"
+        elif response.status_code in {401, 403}:
+            status = "forbidden"
+        logger.warning("GitHub read failed", extra={"read_status": status}, exc_info=True)
+        return ReadResult(None, status)
+    except httpx2.TransportError:
+        logger.warning("GitHub read transport failed", exc_info=True)
+        return ReadResult(None, "transient")
+    except httpx2.HTTPError, ValueError:
+        logger.warning("GitHub read unavailable", exc_info=True)
+        return ReadResult(None, "unavailable")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:

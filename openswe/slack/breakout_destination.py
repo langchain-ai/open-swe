@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from openswe.slack.channels import SlackChannel
 from openswe.workspaces.routing import resolve_workspace
 
 
@@ -9,6 +10,15 @@ from openswe.workspaces.routing import resolve_workspace
 class BreakoutDestination:
     channel_id: str
     workspace: str
+
+    async def channel_error(self, source_channel: str) -> str | None:
+        for channel_id in dict.fromkeys((source_channel, self.channel_id)):
+            channel = await SlackChannel.load(channel_id, use_cache=False)
+            if channel is None:
+                return f"Could not verify access to <#{channel_id}>."
+            if self.channel_id != source_channel and not channel.public:
+                return "Breakouts between channels require a public source channel and destination."
+        return None
 
 
 async def resolve_breakout_destination(

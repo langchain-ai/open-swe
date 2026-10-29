@@ -6,9 +6,13 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 
+use crate::agent_config::AsyncSubagentGraph;
 use crate::project::Language;
 
-use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
+use super::{
+    BROWSER_EXPORT, BROWSER_HANDOFF_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION,
+    RUNTIME_DIR,
+};
 
 /// Encode `value` as a string literal valid in both TypeScript and Python.
 ///
@@ -60,8 +64,10 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `memory` declaration, if the project opts
     /// into durable memory. Absent means the runtime mounts nothing.
     pub(super) memory_import: Option<&'a str>,
-    /// Module specifier for the root `browser` declaration (Python only), if
-    /// the project opts into browser use.
+    /// Async subagents that get their own graph factory (served builds only).
+    pub(super) async_subagents: &'a [AsyncSubagentGraph],
+    /// Module specifier for the root `browser` declaration, if the project
+    /// opts into browser use.
     pub(super) browser_import: Option<&'a str>,
 }
 
@@ -156,6 +162,15 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
             "import {{ {MEMORY_EXPORT} }} from \"{memory_import}\";\n"
         ));
     }
+    if let Some(browser_import) = inputs.browser_import {
+        out.push_str(&format!(
+            "import {{ {BROWSER_EXPORT} }} from \"{browser_import}\";\n"
+        ));
+        // The graph whose run waits out a browser handoff.
+        out.push_str(&format!(
+            "export {{ browserHandoffWatcher as {BROWSER_HANDOFF_EXPORT} }} from \"managed-deepagents/runtime\";\n"
+        ));
+    }
     out.push('\n');
 
     // Managed options handed to the runtime, in shorthand object form.
@@ -227,6 +242,20 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
     if inputs.memory_import.is_some() {
         option_keys.push("memory");
     }
+    if inputs.browser_import.is_some() {
+        option_keys.push("browser");
+    }
+    // Async subagents run with the lead's managed options. They keep `channels` so
+    // a paused subagent can find the lead's channel thread to show its approval.
+    let subagent_options = option_keys.clone();
+    let subagents = inputs.async_subagents;
+    if !subagents.is_empty() {
+        out.push_str(&format!(
+            "const asyncSubagentGraphs = {{ {} }};\n",
+            async_subagent_graph_entries(subagents)
+        ));
+        option_keys.push("asyncSubagentGraphs");
+    }
     if !option_keys.is_empty() {
         out.push('\n');
     }
@@ -254,7 +283,34 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
         ));
     }
     out.push_str("}\n");
+    for subagent in subagents {
+        let mut options: Vec<String> = subagent_options.iter().map(|key| key.to_string()).collect();
+        options.push(format!(
+            "asyncSubagent: {}",
+            encode_string_literal(&subagent.name)
+        ));
+        out.push_str(&format!(
+            "\nexport function {}(config: ManagedRunConfig, runtime: ManagedServerRuntime) {{\n  return {compile_fn}(definition, config, {{ {} }}, runtime);\n}}\n",
+            subagent.export,
+            options.join(", ")
+        ));
+    }
     out
+}
+
+/// `"name": "graph id"` pairs for each async subagent, as an object or dict body.
+fn async_subagent_graph_entries(subagents: &[AsyncSubagentGraph]) -> String {
+    subagents
+        .iter()
+        .map(|subagent| {
+            format!(
+                "{}: {}",
+                encode_string_literal(&subagent.name),
+                encode_string_literal(&subagent.graph_id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
@@ -279,8 +335,18 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
             "compile_managed_agent_async"
         }
     };
+    let is_eval = matches!(inputs.context, RuntimeContext::Eval { .. });
+    // Served entries hold `parent_run` open for the whole run: an async
+    // subagent's run is checked against the agent that launched it, and nests
+    // under that agent's trace.
+    let runtime_imports = if is_eval {
+        compile_fn.to_string()
+    } else {
+        out.push_str("from contextlib import asynccontextmanager\n\n");
+        format!("{compile_fn}, parent_run")
+    };
     out.push_str(&format!(
-        "from managed_deepagents.runtime import {compile_fn}\n"
+        "from managed_deepagents.runtime import {runtime_imports}\n"
     ));
     if !inputs.factory {
         out.push_str(
@@ -324,6 +390,10 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         out.push_str(&format!(
             "from {browser_import} import {BROWSER_EXPORT} as _browser\n"
         ));
+        // The graph whose run waits out a browser handoff.
+        out.push_str(
+            "from managed_deepagents.browser import handoff_watcher as _handoff_watcher\n",
+        );
     }
     out.push('\n');
 
@@ -400,7 +470,20 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     }
     out.push('\n');
 
-    let await_prefix = if matches!(inputs.context, RuntimeContext::Eval { .. }) {
+    let subagents = inputs.async_subagents;
+    // Async subagents run with the lead's managed kwargs. They keep `channels` so
+    // a paused subagent can find the lead's channel thread to show its approval.
+    let mut subagent_kwargs = kwargs.clone();
+    subagent_kwargs.push("runtime=runtime".to_string());
+    if !subagents.is_empty() {
+        out.push_str(&format!(
+            "_async_subagent_graphs = {{{}}}\n",
+            async_subagent_graph_entries(subagents)
+        ));
+        kwargs.push("async_subagent_graphs=_async_subagent_graphs".to_string());
+    }
+
+    let await_prefix = if is_eval {
         if inputs.factory {
             out.push_str("\nasync def agent(config):\n");
             "await "
@@ -410,20 +493,40 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         }
     } else {
         kwargs.push("runtime=runtime".to_string());
-        out.push_str("\nasync def agent(config, runtime: ServerRuntime):\n");
+        out.push_str("\n@asynccontextmanager\n");
+        out.push_str("async def agent(config, runtime: ServerRuntime):\n");
         "await "
     };
     if !inputs.factory {
         out.push_str("    assert_static_agent_definition(_definition)\n");
     }
-    if kwargs.is_empty() {
-        out.push_str(&format!(
-            "    return {await_prefix}{compile_fn}(_definition, config)\n"
-        ));
+    let call = if kwargs.is_empty() {
+        format!("{await_prefix}{compile_fn}(_definition, config)")
     } else {
-        out.push_str(&format!(
-            "    return {await_prefix}{compile_fn}(_definition, config, {})\n",
+        format!(
+            "{await_prefix}{compile_fn}(_definition, config, {})",
             kwargs.join(", ")
+        )
+    };
+    if is_eval {
+        out.push_str(&format!("    return {call}\n"));
+    } else {
+        out.push_str("    async with parent_run(config):\n");
+        out.push_str(&format!("        yield {call}\n"));
+    }
+    for subagent in subagents {
+        out.push_str(&format!(
+            "\n\n@asynccontextmanager\nasync def {}(config, runtime: ServerRuntime):\n    async with parent_run(config):\n        yield await {compile_fn}(_definition, config, {}, async_subagent={})\n",
+            subagent.export,
+            subagent_kwargs.join(", "),
+            encode_string_literal(&subagent.name)
+        ));
+    }
+    // The browser handoff's watcher runs like an async subagent: under its agent's
+    // trace, once its caller may access the agent's thread.
+    if inputs.browser_import.is_some() {
+        out.push_str(&format!(
+            "\n\n@asynccontextmanager\nasync def {BROWSER_HANDOFF_EXPORT}(config, runtime: ServerRuntime):\n    async with parent_run(config):\n        yield _handoff_watcher\n"
         ));
     }
     out
@@ -585,6 +688,8 @@ pub(super) fn generate_managed_http_module(
                 out.push_str(&format!(
                     "import {{ channels }} from \"{channels_import}\";\n"
                 ));
+                // Channels read project files (an app icon) relative to the build.
+                out.push_str("import { fileURLToPath } from \"node:url\";\n");
             }
             let mut fields: Vec<&str> = Vec::new();
             if identity_import.is_some() {
@@ -595,6 +700,7 @@ pub(super) fn generate_managed_http_module(
             }
             if channels_import.is_some() {
                 fields.push("channels");
+                fields.push("root: fileURLToPath(new URL(\".\", import.meta.url))");
             }
             out.push_str(&format!(
                 "\nexport const app = buildManagedHttpApp({{ {} }});\n",
@@ -624,6 +730,8 @@ pub(super) fn generate_managed_http_module(
                 out.push_str(&format!(
                     "from {channels_import} import channels as _channels\n"
                 ));
+                // Channels read project files (an app icon) relative to the build.
+                out.push_str("from pathlib import Path as _Path\n");
             }
             let mut args: Vec<&str> = Vec::new();
             if identity_import.is_some() {
@@ -634,6 +742,7 @@ pub(super) fn generate_managed_http_module(
             }
             if channels_import.is_some() {
                 args.push("channels=_channels");
+                args.push("root=str(_Path(__file__).resolve().parent)");
             }
             out.push_str(&format!(
                 "\napp = build_managed_http_app({})\n",
@@ -738,6 +847,8 @@ pub(super) struct LanggraphManifestInputs<'a> {
     /// Local package directories that Python deploys install separately.
     pub(super) local_packages: &'a [String],
     pub(super) disable_studio_auth: bool,
+    /// Extra `(graph key, export specifier)` pairs, one per async subagent.
+    pub(super) extra_graphs: &'a [(String, String)],
 }
 
 pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> Result<String> {
@@ -752,6 +863,7 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
         include_vendored_runtime,
         local_packages,
         disable_studio_auth,
+        extra_graphs,
     } = *inputs;
     // The LangGraph manifest keys the runtime on `node_version` (LangGraph.js)
     // or `python_version` (LangGraph Python); the rest of the shape is shared.
@@ -760,6 +872,9 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
     // binding.
     let mut graphs = serde_json::Map::new();
     graphs.insert(assistant_id.to_string(), json!(graph));
+    for (key, export) in extra_graphs {
+        graphs.insert(key.clone(), json!(export));
+    }
 
     // Prefer `_INTERNAL_docker_tag` over `api_version`: Cloud SaaS has been
     // observed to ignore rc `api_version` pins and keep the newest stable
@@ -866,6 +981,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                async_subagents: &[],
                 browser_import: None,
             };
             for (language, check) in [
@@ -880,7 +996,11 @@ mod tests {
             ] {
                 let entry = generate_entry(language, &inputs);
                 let check_position = entry.find(check).unwrap();
-                let compile_position = entry.rfind("return ").unwrap();
+                // Served Python entries yield the graph instead of returning it.
+                let compile_position = entry
+                    .rfind("return ")
+                    .or_else(|| entry.rfind("yield "))
+                    .unwrap();
                 assert!(check_position < compile_position, "{entry}");
             }
         }
@@ -913,6 +1033,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                async_subagents: &[],
                 browser_import: None,
             };
             for language in [Language::TypeScript, Language::Python] {
@@ -941,6 +1062,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                async_subagents: &[],
                 browser_import: None,
             },
         );
@@ -954,6 +1076,41 @@ mod tests {
         assert!(entry.contains("async def agent(config):"), "{entry}");
         assert!(
             entry.contains("return await compile_agent_factory_for_eval_async(_definition, config"),
+            "{entry}"
+        );
+    }
+
+    #[test]
+    fn python_served_entry_holds_parent_run_for_the_run() {
+        let entry = generate_entry(
+            Language::Python,
+            &EntryInputs {
+                agent_import: "agent",
+                factory: false,
+                context: RuntimeContext::Local {
+                    context_root: "/tmp/context",
+                    has_skills: false,
+                },
+                sandbox_import: None,
+                connectors_import: None,
+                channels_import: None,
+                identity_import: None,
+                memory_import: None,
+                sandbox_setup: false,
+                async_subagents: &[],
+                browser_import: None,
+            },
+        );
+
+        assert!(
+            entry
+                .contains("@asynccontextmanager\nasync def agent(config, runtime: ServerRuntime):"),
+            "{entry}"
+        );
+        assert!(
+            entry.contains(
+                "    async with parent_run(config):\n        yield await compile_managed_agent_async("
+            ),
             "{entry}"
         );
     }
@@ -976,6 +1133,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                async_subagents: &[],
                 browser_import: None,
             },
         );
@@ -1030,6 +1188,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1068,6 +1227,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1096,6 +1256,7 @@ mod tests {
             include_vendored_runtime: true,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1120,6 +1281,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1145,6 +1307,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1173,6 +1336,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: true,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1194,6 +1358,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 

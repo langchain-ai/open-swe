@@ -9,7 +9,7 @@
 //! `langgraph.json` points at that generated entry.
 
 use anyhow::{bail, Context, Result};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -18,7 +18,7 @@ use walkdir::WalkDir;
 
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
-use crate::error::{categorized, category_of, ErrorCategory};
+use crate::error::{categorize_unclassified, ErrorCategory};
 use crate::path_util::to_unix_path;
 use crate::project::{Language, Project};
 use crate::text_module;
@@ -45,28 +45,34 @@ pub(crate) mod test_support;
 mod tests;
 
 pub(crate) use discovery::{find_sandbox_entry, read_setup_script};
+pub use identity::IdentitySummary;
 pub(crate) use identity::{
     identity_requires_ingress_secret, read_identity_summary, INGRESS_SECRET_ENV,
 };
-pub use identity::{IdentityAuthMode, IdentityScopeAxes, IdentitySummary};
+#[cfg(test)]
+pub(crate) use identity::{IdentityAuthMode, IdentityScopeAxes};
 pub(crate) use local_packages::{find_local_packages, is_vendored_path, vendored_manifests};
+pub use memory::MemoryDecision;
 pub(crate) use memory::{declare_memory_snippet, resolve_memory};
-pub use memory::{MemoryDecision, MemoryLayers, MemorySummary};
+#[cfg(test)]
+pub(crate) use memory::{MemoryLayers, MemorySummary};
 pub(crate) use model::read_agent_model;
 pub(crate) use requirements::{
-    agent_connections_from_connector_requirements, connection_owner_policy_for_slug,
-    emit_channel_requirements_for_entries, emit_connector_requirements_for_entries,
-    emit_mcp_connection_entries_for_entries, referenced_connection_slugs,
-    required_env_from_connector_requirements, user_connections_from_connector_requirements,
-    ChannelRequirements, ConnectorRequirements, McpConnectionEntry,
+    agent_connections_from_connector_requirements, channel_provided_connections,
+    connection_owner_policy_for_slug, emit_channel_requirements_for_entries,
+    emit_connector_requirements_for_entries, emit_mcp_connection_entries_for_entries,
+    referenced_connection_slugs, required_env_from_connector_requirements,
+    reserved_user_connection_error, unprovided_reserved_connections,
+    user_connections_from_connector_requirements, ChannelRequirements, ConnectorRequirements,
+    McpConnectionEntry,
 };
 pub(crate) use sandbox_recipe::{
     load_sandbox_recipe_manifest, project_uses_sandbox, SandboxRegistryManifest,
 };
 
 use discovery::{
-    agent_import_specifier, find_browser_entry, find_identity_entry, find_memory_entry,
-    misspelled_channel_directory_warning, project_has_skills, read_instructions,
+    agent_import_specifier, entry_stem_name, find_browser_entry, find_identity_entry,
+    find_memory_entry, misspelled_channel_directory_warning, project_has_skills, read_instructions,
     sandbox_import_specifier,
 };
 use entry::{
@@ -74,7 +80,7 @@ use entry::{
     generate_langgraph_json, generate_managed_http_module, EntryInputs, LanggraphManifestInputs,
     RuntimeContext,
 };
-pub(crate) use exports::{project_needs_events_public_url, read_connector_factory};
+pub(crate) use exports::project_needs_events_public_url;
 use exports::{scan_exported_channels, scan_exported_connectors};
 use local_packages::vendor_local_packages;
 use manifest::{
@@ -83,7 +89,7 @@ use manifest::{
     strip_package_json_dev_dependencies, RuntimePathMode, LOCK_INPUT_MARKER,
 };
 use runtime::vendor_runtime;
-use sandbox_recipe::write_sandbox_recipe_manifest;
+use sandbox_recipe::{reject_removed_sandbox_scope, write_sandbox_recipe_manifest};
 use schedules::{read_schedule_crons, ScheduleReadContext};
 
 /// The LangGraph Node.js runtime version targeted by compiled TypeScript apps.
@@ -120,12 +126,12 @@ pub(crate) const LANGGRAPH_API_VERSION_ENV: &str = "MDA_LANGGRAPH_API_VERSION";
 
 /// Default langgraph-api version stem forced into compiled `langgraph.json`
 /// image pins. Override with [`LANGGRAPH_API_VERSION_ENV`].
-pub(crate) const LANGGRAPH_API_VERSION: &str = "0.16.0rc5";
+pub(crate) const LANGGRAPH_API_VERSION: &str = "0.18.0.dev12";
 
 /// In-memory runtime `mda dev` pairs with [`LANGGRAPH_API_VERSION`]. A pre-release
 /// Agent Server pulls a pre-release runtime, which uv only accepts when pinned
 /// explicitly, so this moves together with the version above.
-pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.36.0rc9";
+pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.38.0.dev12";
 
 /// Resolve the langgraph-api version stem for `_INTERNAL_docker_tag`.
 ///
@@ -366,6 +372,11 @@ const IDENTITY_EXPORT: &str = "identity";
 /// Canonical export name for the root memory declaration, in both languages.
 const MEMORY_EXPORT: &str = "memory";
 const BROWSER_EXPORT: &str = "browser";
+/// Graph key of the browser handoff watcher, whose run waits out a handoff; the
+/// runtime's `HANDOFF_WATCHER_GRAPH` names it too.
+const BROWSER_HANDOFF_GRAPH: &str = "mda-browser-handoff";
+/// The generated entry's export of that graph, in both languages.
+const BROWSER_HANDOFF_EXPORT: &str = "browser_handoff_watcher";
 
 /// Basename (without extension) of the generated managed custom-auth module.
 const AUTH_STEM: &str = "_mda_auth";
@@ -429,7 +440,7 @@ pub(crate) fn has_current_build_marker(out_dir: &Path) -> Result<bool> {
 }
 
 pub(crate) fn eval_graph_export(language: Language) -> String {
-    format!("./{EVAL_ENTRY_STEM}.{}:agent", entry_extension(language))
+    format!("./{EVAL_ENTRY_STEM}.{}:agent", language.extension())
 }
 
 /// Subdirectory of the build that holds the vendored runtime.
@@ -442,19 +453,17 @@ const RUNTIME_PACKAGE: &str = crate::dependencies::USER_RUNTIME_PACKAGE;
 #[derive(Debug)]
 pub struct CompileSummary {
     pub out_dir: PathBuf,
-    /// Generated managed entry module, relative to `out_dir`.
-    pub entry_file: PathBuf,
     /// User files carried into the build verbatim, relative to the root.
     pub copied: Vec<PathBuf>,
-    /// LangGraph graph export path (e.g. `./_mda_entry.ts:agent`).
-    pub langgraph_graph: String,
     /// LangGraph `graphs` key / assistant id from the authored name.
     pub assistant_id: String,
-    /// Connector modules discovered under `connectors/`, relative to the root.
+    /// Connector modules (the `tools/mcp.{ts,py}` declaration), relative to the root.
     /// Their HTTP routes are enumerated at runtime, not here.
     pub connectors: Vec<PathBuf>,
     /// Channel modules discovered under `channels/`, relative to the root.
     pub channels: Vec<PathBuf>,
+    /// First-party ingress channel providers (`slack`, `github`) those modules declare.
+    pub channel_providers: BTreeSet<String>,
     /// Root `identity.{ts,py}` declaration, when present (with static scope when known).
     pub identity: Option<IdentitySummary>,
     /// What durable memory this project declares. Reports scope and file only —
@@ -531,11 +540,11 @@ pub fn compile(project: &Project, out_dir: &Path, runtime_source: &Path) -> Resu
     compile_local(project, out_dir, runtime_source, CompileMode::Full)
 }
 
+/// Report an unclassified compile failure as `compilation`, keeping its causes
+/// so a child's stderr still reaches the error record. A cancellation passes
+/// through unchanged.
 pub fn compilation(err: anyhow::Error) -> anyhow::Error {
-    if category_of(&err) != ErrorCategory::Unclassified {
-        return err;
-    }
-    categorized(ErrorCategory::Compilation, format!("{err:#}"))
+    categorize_unclassified(ErrorCategory::Compilation, err)
 }
 
 /// Like [`compile`], but keeps `node_modules`, staged env, and LangGraph state
@@ -612,15 +621,6 @@ pub fn compile_for_deploy(
 /// Eval artifacts keep the authored definition intact but point `langgraph.json`
 /// at an eval-specific entry that suppresses nested sandbox provisioning and
 /// allows the runner to apply an explicit model override.
-pub fn compile_for_eval(
-    project: &Project,
-    out_dir: &Path,
-    runtime_source: &Path,
-) -> Result<CompileSummary> {
-    let api_version = resolved_langgraph_api_version()?;
-    compile_for_eval_with_api_version(project, out_dir, runtime_source, &api_version, None)
-}
-
 pub(crate) fn compile_for_eval_with_api_version(
     project: &Project,
     out_dir: &Path,
@@ -682,6 +682,18 @@ fn compile_inner(
 ) -> Result<CompileSummary> {
     // Validate first: prepare_out_dir clears existing files during a full build.
     let agent = agent_config::read_agent_static_config(project)?;
+    if matches!(context, RuntimeContext::Eval { .. }) && !agent.async_subagents.is_empty() {
+        bail!(
+            "async subagents are not supported in eval: there is no Agent Server to launch them on"
+        );
+    }
+    // Served agents also get an async general-purpose subagent; eval has no
+    // Agent Server to launch it on.
+    let async_subagents = if matches!(context, RuntimeContext::Eval { .. }) {
+        Vec::new()
+    } else {
+        agent.served_async_subagents()
+    };
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
 
@@ -740,10 +752,7 @@ fn compile_inner(
     } else {
         ENTRY_STEM
     };
-    let entry_file = PathBuf::from(format!(
-        "{entry_stem}.{}",
-        entry_extension(project.language)
-    ));
+    let entry_file = PathBuf::from(format!("{entry_stem}.{}", project.language.extension()));
     let agent_import = agent_import_specifier(&project.agent_file, project.language);
     let sandbox_entry = find_sandbox_entry(project);
     let sandbox_import = sandbox_entry
@@ -756,14 +765,13 @@ fn compile_inner(
     // ingress heuristic share one parse per connector file. This release's
     // public authoring surface is MCP-only (`defineMcp` / `define_mcp`); product
     // toolserver / marketplace factories are not exported.
-    let connector_scan = scan_exported_connectors(project)?;
-    let connector_entries = connector_scan.entries;
+    let connector_entries = scan_exported_connectors(project)?;
     let connectors_import = if connector_entries.is_empty() {
         None
     } else {
         let connectors_file = PathBuf::from(format!(
             "{CONNECTORS_STEM}.{}",
-            entry_extension(project.language)
+            project.language.extension()
         ));
         let modules: Vec<(String, String)> = connector_entries
             .iter()
@@ -795,28 +803,35 @@ fn compile_inner(
         context,
         agent.is_factory,
     )?);
-    if connector_entries
-        .iter()
-        .any(|entry| entry.starts_with("connectors"))
-    {
-        warnings.push(
-            "MCP declarations under `connectors/` are deprecated. Move the declaration to `tools/mcp.ts` or `tools/mcp.py` and export `mcp`. Support for the old connector file API will be removed in 0.8.0."
-                .to_string(),
+    if agent.unreadable_subagents > 0 {
+        let rule = project.language.ident(
+            "An async subagent (`async: true`) must be an object literal, or a name \
+             bound to one, in `subagents: [...]`.",
+            "An async subagent (`\"async\": True`) must be a dict literal, or a name \
+             bound to one, in `subagents=[...]`. Annotate a name spread there that holds \
+             only sync subagents as `list[SubAgent]`.",
         );
+        warnings.push(format!(
+            "{} subagent entr{} in {} could not be read without running it. {rule}",
+            agent.unreadable_subagents,
+            if agent.unreadable_subagents == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            project.agent_file.display()
+        ));
     }
-    if let Some(warning) = sandbox_recipe::legacy_thread_scope_warning(project)? {
-        warnings.push(warning);
-    }
+    reject_removed_sandbox_scope(project)?;
 
     let channel_scan = scan_exported_channels(project)?;
     let channel_entries = channel_scan.entries;
+    let channel_providers = channel_scan.providers;
     let channels_import = if channel_entries.is_empty() {
         None
     } else {
-        let channels_file = PathBuf::from(format!(
-            "{CHANNELS_STEM}.{}",
-            entry_extension(project.language)
-        ));
+        let channels_file =
+            PathBuf::from(format!("{CHANNELS_STEM}.{}", project.language.extension()));
         let modules: Vec<(String, String)> = channel_entries
             .iter()
             .map(|entry| {
@@ -854,7 +869,7 @@ fn compile_inner(
         }
     };
 
-    // Browser use is opt-in (Python only). Eval trials never get a browser.
+    // Browser use is opt-in. Eval trials never get a browser.
     let browser_import = match context {
         RuntimeContext::Eval { .. } => None,
         RuntimeContext::Local { .. } | RuntimeContext::ContextHub { .. } => {
@@ -863,13 +878,11 @@ fn compile_inner(
         }
     };
 
-    // Ingress channels (Slack `on:`) and connectors (GitHub `events:`) cannot fall back to a
-    // deployment service principal: require a root identity declaration.
-    if identity_import.is_none()
-        && (connector_scan.requires_identity || channel_scan.requires_identity)
-    {
+    // Ingress channels (`channels.slack(...)`, `channels.github(...)`) cannot fall back
+    // to a deployment service principal: require a root identity declaration.
+    if identity_import.is_none() && channel_scan.requires_identity {
         anyhow::bail!(
-            "channels/ or connectors/ with an ingress trigger (e.g. Slack `on:`/GitHub `events:`) \
+            "channels/ with an ingress trigger (e.g. Slack or GitHub channels) \
              require a root identity.{{ts,py}} declaration; ingress triggers cannot \
              fall back to a deployment service principal"
         );
@@ -900,6 +913,7 @@ fn compile_inner(
             channels_import: channels_import.as_deref(),
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
+            async_subagents: &async_subagents,
             browser_import: browser_import.as_deref(),
         },
     );
@@ -911,7 +925,7 @@ fn compile_inner(
     // and point `langgraph.json` at it. Identity is opt-in: with no
     // `identity.{ts,py}` there is no auth block and behavior is unchanged.
     let auth_path = if let Some(identity_import) = identity_import.as_deref() {
-        let auth_file = PathBuf::from(format!("{AUTH_STEM}.{}", entry_extension(project.language)));
+        let auth_file = PathBuf::from(format!("{AUTH_STEM}.{}", project.language.extension()));
         let auth_source = generate_auth_module(
             project.language,
             identity_import,
@@ -933,7 +947,7 @@ fn compile_inner(
         if identity_import.is_some() || connectors_import.is_some() || channels_import.is_some() {
             let http_file = PathBuf::from(format!(
                 "{MANAGED_HTTP_STEM}.{}",
-                entry_extension(project.language)
+                project.language.extension()
             ));
             let http_source = generate_managed_http_module(
                 project.language,
@@ -950,11 +964,37 @@ fn compile_inner(
         };
 
     let graph = format!("./{}:agent", to_unix_path(&entry_file));
+    let mut extra_graphs: Vec<(String, String)> = async_subagents
+        .iter()
+        .map(|subagent| {
+            let export = &subagent.export;
+            (
+                subagent.graph_id.clone(),
+                format!("./{}:{export}", to_unix_path(&entry_file)),
+            )
+        })
+        .collect();
+    // `browser_handoff` starts a run of this graph to wait for the user to hand
+    // the browser back, then wake the agent.
+    if browser_import.is_some() {
+        if assistant_id == BROWSER_HANDOFF_GRAPH {
+            bail!("agent name `{BROWSER_HANDOFF_GRAPH}` is reserved for browser use");
+        }
+        extra_graphs.push((
+            BROWSER_HANDOFF_GRAPH.to_string(),
+            format!("./{}:{BROWSER_HANDOFF_EXPORT}", to_unix_path(&entry_file)),
+        ));
+    }
+    let channel_names = channel_entries
+        .iter()
+        .map(|rel| entry_stem_name(rel, "channel"))
+        .collect::<Result<Vec<_>>>()?;
     let schedule_crons = read_schedule_crons(
         project,
         ScheduleReadContext {
             source_root: out_dir,
             assistant_id: &assistant_id,
+            channels: &channel_names,
         },
     )?;
     if identity_import.is_none() && !schedule_crons.is_empty() {
@@ -1005,6 +1045,7 @@ fn compile_inner(
             context,
             RuntimeContext::Local { .. } | RuntimeContext::Eval { .. }
         ),
+        extra_graphs: &extra_graphs,
     })?;
     // Avoid bumping mtime when the manifest is unchanged so `mda dev` watch
     // does not restart LangGraph on every source-only refresh.
@@ -1111,12 +1152,11 @@ fn compile_inner(
 
     Ok(CompileSummary {
         out_dir: out_dir.to_path_buf(),
-        entry_file,
         copied,
-        langgraph_graph: graph,
         assistant_id,
         connectors: connector_entries,
         channels: channel_entries,
+        channel_providers,
         identity,
         memory,
         sandbox: sandbox_entry.is_some() || recipe.is_some(),
@@ -1434,7 +1474,7 @@ fn record_python_lock_input(project: &Project, out_dir: &Path) -> Result<()> {
 /// after a hub-only update (e.g. `instructions.md`) that does not rewrite the
 /// entry contents.
 pub fn poke_dev_reload_signal(out_dir: &Path, language: Language) -> Result<()> {
-    let entry = out_dir.join(format!("{ENTRY_STEM}.{}", entry_extension(language)));
+    let entry = out_dir.join(format!("{ENTRY_STEM}.{}", language.extension()));
     if !entry.is_file() {
         bail!(
             "cannot poke reload signal: missing managed entry {}",
@@ -1463,20 +1503,13 @@ fn is_typescript_source(rel: &Path) -> bool {
     )
 }
 
-fn entry_extension(language: Language) -> &'static str {
-    match language {
-        Language::TypeScript => "ts",
-        Language::Python => "py",
-    }
-}
-
 #[cfg(test)]
 mod api_version_tests {
     use super::*;
 
     #[test]
-    fn default_is_0_16_0_rc5() {
-        assert_eq!(LANGGRAPH_API_VERSION, "0.16.0rc5");
+    fn default_is_0_18_0_dev12() {
+        assert_eq!(LANGGRAPH_API_VERSION, "0.18.0.dev12");
     }
 
     #[test]

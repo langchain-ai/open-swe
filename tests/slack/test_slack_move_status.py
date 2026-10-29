@@ -269,7 +269,9 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     monkeypatch.setattr(move_thread, "get_config", lambda: config)
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
-    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=True)))
+    monkeypatch.setattr(
+        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != "C1"))
+    )
     root = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)
     await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")

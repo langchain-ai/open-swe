@@ -4,7 +4,11 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from openswe.linear import webhook as linear_webhook
+
+pytestmark = pytest.mark.usefixtures("no_local_threads")
 
 
 def _full_issue(*, user_email: str | None = "zhen@example.com", user_name: str = "Zhen") -> dict:

@@ -14,7 +14,13 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from openswe.github.pull_request_diff import build_pr_diff_files, fetch_file_versions
+from openswe.github.http import GitHubClient
+from openswe.github.pull_request_diff import (
+    build_pr_diff_files,
+    fetch_file_versions,
+    pull_request_patches,
+    resolve_merge_base,
+)
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
@@ -114,7 +120,7 @@ async def test_before_is_the_merge_base_so_the_diff_matches_git(
     github = _GitBackedGitHub(repo, base_tip, head)
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
-        diff = await build_pr_diff_files(client, "acme/app", 7)
+        diff = await build_pr_diff_files(GitHubClient(client).repo("acme", "app").pull_request(7))
 
     [file] = diff["files"]
     assert diff["base_sha"] == merge_base
@@ -127,13 +133,37 @@ async def test_before_is_the_merge_base_so_the_diff_matches_git(
     )
 
 
-async def test_every_page_of_a_large_pr_is_loaded() -> None:
-    names = [f"src/file_{index:03}.py" for index in range(150)]
+async def test_patches_name_the_base_tip_and_contents_read_its_merge_base(
+    forked_repo: tuple[Path, str, str, str],
+) -> None:
+    repo, merge_base, base_tip, head = forked_repo
+    github = _GitBackedGitHub(repo, base_tip, head)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
+        repository = GitHubClient(client).repo("acme", "app")
+        diff = await pull_request_patches(repository.pull_request(7))
+        contents = await fetch_file_versions(
+            repository,
+            "config.py",
+            "config.py",
+            await resolve_merge_base(repository, diff["base_sha"], diff["head_sha"]),
+            diff["head_sha"],
+        )
+
+    assert diff["base_sha"] == base_tip
+    assert contents["originalContent"] == _git(repo, "show", f"{merge_base}:config.py")
+
+
+async def test_every_page_of_a_large_pr_is_loaded_even_past_a_stale_count() -> None:
+    names = [f"src/file_{index:03}.py" for index in range(250)]
 
     def github(request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         if path.endswith("/pulls/7"):
-            return httpx2.Response(200, json={"base": {"sha": "b"}, "head": {"sha": "h"}})
+            return httpx2.Response(
+                200,
+                json={"base": {"sha": "b" * 40}, "head": {"sha": "a" * 40}, "changed_files": 150},
+            )
         if path.endswith("/pulls/7/files"):
             page = int(request.url.params.get("page", "1"))
             size = int(request.url.params["per_page"])
@@ -146,11 +176,11 @@ async def test_every_page_of_a_large_pr_is_loaded() -> None:
                 ],
             )
         if "/compare/" in path:
-            return httpx2.Response(200, json={"merge_base_commit": {"sha": "b"}})
+            return httpx2.Response(200, json={"merge_base_commit": {"sha": "b" * 40}})
         return httpx2.Response(200, content=b"x = 1\n")
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
-        diff = await build_pr_diff_files(client, "acme/app", 7)
+        diff = await build_pr_diff_files(GitHubClient(client).repo("acme", "app").pull_request(7))
 
     assert [file["path"] for file in diff["files"]] == names
     assert diff["truncated"] is False
@@ -165,7 +195,9 @@ async def test_hydration_rejects_traversal_before_network(malicious: str) -> Non
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         for path, original in [(malicious, "safe.py"), ("safe.py", malicious)]:
             with pytest.raises(HTTPException) as exc:
-                await fetch_file_versions(client, "acme/app", path, original, "a" * 40, "b" * 40)
+                await fetch_file_versions(
+                    GitHubClient(client).repo("acme", "app"), path, original, "a" * 40, "b" * 40
+                )
             assert exc.value.status_code == 400
 
 
@@ -174,10 +206,10 @@ async def test_hydration_reads_snapshot_and_keeps_unavailable_blob_null() -> Non
     def handler(request: httpx2.Request) -> httpx2.Response:
         ref = request.url.params["ref"]
         assert ref in ("a" * 40, "b" * 40)
-        return httpx2.Response(200, text="before") if ref == "a" * 40 else httpx2.Response(503)
+        return httpx2.Response(200, text="before") if ref == "a" * 40 else httpx2.Response(500)
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         contents = await fetch_file_versions(
-            client, "acme/app", "safe.py", "safe.py", "a" * 40, "b" * 40
+            GitHubClient(client).repo("acme", "app"), "safe.py", "safe.py", "a" * 40, "b" * 40
         )
     assert contents == {"originalContent": "before", "modifiedContent": None}

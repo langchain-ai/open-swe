@@ -510,6 +510,51 @@
         "title": "AssessmentFeedback",
         "type": "object"
       },
+      "AttemptView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "timed_out",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AttemptView",
+        "type": "object"
+      },
       "AuditLog": {
         "properties": {
           "api_key_id": {
@@ -830,6 +875,20 @@
         "title": "BackgroundCommand",
         "type": "object"
       },
+      "BackgroundOutput": {
+        "description": "The last lines a command or monitor wrote.",
+        "properties": {
+          "output": {
+            "title": "Output",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output"
+        ],
+        "title": "BackgroundOutput",
+        "type": "object"
+      },
       "BackgroundWork": {
         "properties": {
           "commands": {
@@ -839,16 +898,6 @@
             },
             "title": "Commands",
             "type": "array"
-          },
-          "monitor_budget": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MonitorBudgetUse"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "monitors": {
             "default": [],
@@ -860,6 +909,48 @@
           }
         },
         "title": "BackgroundWork",
+        "type": "object"
+      },
+      "BatchView": {
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptView"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "candidate",
+          "attempts"
+        ],
+        "title": "BatchView",
         "type": "object"
       },
       "BlockSuggestionResponse": {
@@ -1351,6 +1442,15 @@
       "ConnectedService": {
         "description": "A service in the gateway this person has connected.",
         "properties": {
+          "disconnectable": {
+            "default": false,
+            "title": "Disconnectable",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1361,6 +1461,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "tool_count"
         ],
@@ -1608,6 +1709,48 @@
         "title": "ConversationReview",
         "type": "object"
       },
+      "CoordinatorActivity": {
+        "description": "A thread's runs since the one a client last followed, and the workers it coordinates.",
+        "properties": {
+          "awaiting_delivery": {
+            "title": "Awaiting Delivery",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "runs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "settled": {
+            "description": "Nothing more will run on the thread unless someone prompts it.",
+            "readOnly": true,
+            "title": "Settled",
+            "type": "boolean"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerActivity"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "running",
+          "awaiting_delivery",
+          "workers",
+          "settled"
+        ],
+        "title": "CoordinatorActivity",
+        "type": "object"
+      },
       "CreateResponseRequest": {
         "properties": {
           "background": {
@@ -1768,6 +1911,40 @@
         "title": "DesktopConnectExchange",
         "type": "object"
       },
+      "DesktopEnvironment": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "DesktopEnvironment",
+        "type": "object"
+      },
+      "DesktopEnvironments": {
+        "properties": {
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopEnvironment"
+            },
+            "title": "Environments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "environments"
+        ],
+        "title": "DesktopEnvironments",
+        "type": "object"
+      },
       "DesktopHandoffExchange": {
         "properties": {
           "code": {
@@ -1816,6 +1993,23 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
+        "type": "object"
+      },
+      "EntryView": {
+        "properties": {
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestView"
+          }
+        },
+        "required": [
+          "number",
+          "request"
+        ],
+        "title": "EntryView",
         "type": "object"
       },
       "ExcludedHunk": {
@@ -2012,19 +2206,10 @@
             "const": "fix",
             "title": "Intent",
             "type": "string"
-          },
-          "scope": {
-            "enum": [
-              "conflicts",
-              "checks"
-            ],
-            "title": "Scope",
-            "type": "string"
           }
         },
         "required": [
-          "intent",
-          "scope"
+          "intent"
         ],
         "title": "FixIntent",
         "type": "object"
@@ -3037,6 +3222,43 @@
         "title": "MergeAction",
         "type": "object"
       },
+      "MergeIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "dependencies": {
+            "default": [],
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "head_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "number": {
+            "exclusiveMinimum": 0.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "request_key": {
+            "format": "uuid",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "head_sha",
+          "request_key"
+        ],
+        "title": "MergeIntent",
+        "type": "object"
+      },
       "MessageIntent": {
         "properties": {
           "intent": {
@@ -3309,6 +3531,63 @@
         "title": "MintedApiKey",
         "type": "object"
       },
+      "MintedSyncToken": {
+        "description": "The creation response: the only place the secret appears, ready to paste into Claude Code.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "secret",
+          "settings"
+        ],
+        "title": "MintedSyncToken",
+        "type": "object"
+      },
       "MissingCredential": {
         "description": "A service in the gateway this person has not connected yet.",
         "properties": {
@@ -3381,40 +3660,6 @@
           "id"
         ],
         "title": "ModelObject",
-        "type": "object"
-      },
-      "MonitorBudgetUse": {
-        "description": "What the thread's monitors used of the allowance the last human message opened.",
-        "properties": {
-          "events": {
-            "title": "Events",
-            "type": "integer"
-          },
-          "max_events": {
-            "title": "Max Events",
-            "type": "integer"
-          },
-          "max_starts": {
-            "title": "Max Starts",
-            "type": "integer"
-          },
-          "starts": {
-            "title": "Starts",
-            "type": "integer"
-          },
-          "window_ends_at": {
-            "title": "Window Ends At",
-            "type": "number"
-          }
-        },
-        "required": [
-          "events",
-          "max_events",
-          "starts",
-          "max_starts",
-          "window_ends_at"
-        ],
-        "title": "MonitorBudgetUse",
         "type": "object"
       },
       "MonitorState": {
@@ -3912,6 +4157,20 @@
         "title": "PageView",
         "type": "object"
       },
+      "PauseChange": {
+        "additionalProperties": false,
+        "properties": {
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "PauseChange",
+        "type": "object"
+      },
       "PendingReview": {
         "description": "The viewer's unsubmitted GitHub review on a PR, with its line comments.",
         "properties": {
@@ -4328,6 +4587,22 @@
         "title": "PreviewThread",
         "type": "object"
       },
+      "PriorityChange": {
+        "additionalProperties": false,
+        "properties": {
+          "priority": {
+            "maximum": 100.0,
+            "minimum": -100.0,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "priority"
+        ],
+        "title": "PriorityChange",
+        "type": "object"
+      },
       "ProfileUpdate": {
         "properties": {
           "auto_fix_ci": {
@@ -4406,18 +4681,6 @@
             ],
             "title": "Experimental Act As Approval"
           },
-          "experimental_assistant_ui": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Assistant Ui"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -4441,17 +4704,6 @@
               }
             ],
             "title": "Experimental Monitor"
-          },
-          "experimental_task_coordination": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Task Coordination"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -5055,6 +5307,68 @@
         "title": "PullRequestThreadStatus",
         "type": "object"
       },
+      "QueueStatus": {
+        "properties": {
+          "active_batch_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Batch Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EntryView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "operator": {
+            "title": "Operator",
+            "type": "boolean"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "queue_id": {
+            "format": "uuid",
+            "title": "Queue Id",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue_id",
+          "repository",
+          "paused",
+          "operator",
+          "items",
+          "next_cursor",
+          "active_batch_id"
+        ],
+        "title": "QueueStatus",
+        "type": "object"
+      },
       "QueuedPreview": {
         "properties": {
           "id": {
@@ -5259,6 +5573,16 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_mismatch": {
+            "default": false,
+            "title": "Channel Mismatch",
+            "type": "boolean"
+          },
+          "channel_name": {
+            "default": "",
+            "title": "Channel Name",
+            "type": "string"
+          },
           "claimed": {
             "default": false,
             "title": "Claimed",
@@ -5277,6 +5601,11 @@
           "request_id": {
             "default": "",
             "title": "Request Id",
+            "type": "string"
+          },
+          "requested_channel": {
+            "default": "",
+            "title": "Requested Channel",
             "type": "string"
           },
           "reused": {
@@ -5361,6 +5690,81 @@
           "type"
         ],
         "title": "RequestTool",
+        "type": "object"
+      },
+      "RequestView": {
+        "properties": {
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "dependencies": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "waiting_for_review",
+              "queued",
+              "batched",
+              "merged",
+              "withdrawn"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "head_sha",
+          "state",
+          "priority",
+          "dependencies",
+          "blocked_reason",
+          "created_by",
+          "created_at"
+        ],
+        "title": "RequestView",
         "type": "object"
       },
       "ResolveReviewThreads": {
@@ -6766,9 +7170,9 @@
             "title": "Channels",
             "type": "array"
           },
-          "partial": {
+          "refreshing": {
             "default": false,
-            "title": "Partial",
+            "title": "Refreshing",
             "type": "boolean"
           }
         },
@@ -6937,6 +7341,65 @@
           "state"
         ],
         "title": "SubmittedReview",
+        "type": "object"
+      },
+      "SyncTokenCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SyncTokenCreate",
+        "type": "object"
+      },
+      "SyncTokenView": {
+        "description": "A stored token as its owner sees it. Has no field for the secret.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "SyncTokenView",
         "type": "object"
       },
       "TelemetryConfig": {
@@ -7645,6 +8108,79 @@
         ],
         "title": "WebhookResponse",
         "type": "object"
+      },
+      "WorkerActivity": {
+        "properties": {
+          "active": {
+            "readOnly": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "thread_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Url"
+          },
+          "worker_thread_id": {
+            "title": "Worker Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_thread_id",
+          "thread_url",
+          "instructions",
+          "state",
+          "active"
+        ],
+        "title": "WorkerActivity",
+        "type": "object"
+      },
+      "WorkerState": {
+        "enum": [
+          "starting",
+          "running",
+          "reporting",
+          "done",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
       },
       "Workspace": {
         "properties": {
@@ -10366,6 +10902,150 @@
         ]
       }
     },
+    "/dashboard/api/claude-code/hooks": {
+      "post": {
+        "operationId": "api_claude_code_hook_dashboard_api_claude_code_hooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "A Claude Code hook event, as Claude Code posts it. Authorized by a Claude Code sync token as a bearer token.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Claude Code Hook",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens": {
+      "get": {
+        "operationId": "api_list_claude_code_tokens_dashboard_api_claude_code_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncTokenView"
+                  },
+                  "title": "Response Api List Claude Code Tokens Dashboard Api Claude Code Tokens Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Claude Code Tokens",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_claude_code_token_dashboard_api_claude_code_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens/{token_id}": {
+      "delete": {
+        "operationId": "api_revoke_claude_code_token_dashboard_api_claude_code_tokens__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Revoke Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
     "/dashboard/api/client-errors": {
       "post": {
         "operationId": "api_report_client_error_dashboard_api_client_errors_post",
@@ -10400,6 +11080,27 @@
           }
         ],
         "summary": "Api Report Client Error",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/desktop/environments": {
+      "get": {
+        "operationId": "api_desktop_environments_dashboard_api_desktop_environments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopEnvironments"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Desktop Environments",
         "tags": [
           "dashboard"
         ]
@@ -11619,6 +12320,368 @@
         ]
       }
     },
+    "/dashboard/api/merge-queue/{workspace_id}": {
+      "get": {
+        "operationId": "queue_status_dashboard_api_merge_queue__workspace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Queue Status",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/batches/{batch_id}": {
+      "get": {
+        "operationId": "batch_status_dashboard_api_merge_queue__workspace_id__batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Batch Status",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/pause": {
+      "patch": {
+        "operationId": "set_paused_dashboard_api_merge_queue__workspace_id__pause_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Set Paused",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/requests": {
+      "post": {
+        "operationId": "request_merge_dashboard_api_merge_queue__workspace_id__requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeIntent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Request Merge",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/requests/{request_id}": {
+      "delete": {
+        "operationId": "withdraw_request_dashboard_api_merge_queue__workspace_id__requests__request_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Withdraw Request",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/requests/{request_id}/priority": {
+      "patch": {
+        "operationId": "set_priority_dashboard_api_merge_queue__workspace_id__requests__request_id__priority_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriorityChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Set Priority",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
     "/dashboard/api/my-credentials/langsmith": {
       "delete": {
         "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
@@ -11856,6 +12919,56 @@
           }
         ],
         "summary": "Api Connect Managed Tool",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/{gateway}/services/{service}": {
+      "delete": {
+        "description": "Remove the caller's own LangSmith connection to one service in the tool kit.",
+        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools__gateway__services__service__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Disconnect Managed Tool",
         "tags": [
           "dashboard"
         ]
@@ -17450,18 +18563,6 @@
       "get": {
         "description": "Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.\n\nPrivate channels are listed for admins only.",
         "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "refresh",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Refresh",
-              "type": "boolean"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -17472,16 +18573,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "security": [
@@ -17490,6 +18581,34 @@
           }
         ],
         "summary": "Api List Slack Channels",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/channels/refresh": {
+      "post": {
+        "description": "Walk Slack's channels again now; the directory reloads when the walk ends.",
+        "operationId": "api_refresh_slack_channels_dashboard_api_slack_channels_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackChannelDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Refresh Slack Channels",
         "tags": [
           "dashboard",
           "slack"
@@ -18037,6 +19156,25 @@
           },
           {
             "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -18221,6 +19359,25 @@
               "default": false,
               "title": "All",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
             }
           }
         ],
@@ -18526,6 +19683,63 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/background-work/{task_id}/output": {
+      "get": {
+        "operationId": "api_get_thread_background_output_dashboard_api_threads__thread_id__background_work__task_id__output_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Background Output",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/branch-diff": {
       "get": {
         "operationId": "api_get_thread_branch_diff_dashboard_api_threads__thread_id__branch_diff_get",
@@ -18618,6 +19832,54 @@
           }
         ],
         "summary": "Api Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      },
+      "post": {
+        "description": "Open the thread's browser for a person, before or after the agent has.",
+        "operationId": "api_open_thread_browser_dashboard_api_threads__thread_id__browser_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Thread Browser",
         "tags": [
           "dashboard",
           "threads",
@@ -19156,8 +20418,7 @@
             "required": true,
             "schema": {
               "enum": [
-                "conflicts",
-                "checks",
+                "repair",
                 "comments"
               ],
               "title": "Scope",
@@ -20114,6 +21375,108 @@
         "tags": [
           "dashboard",
           "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/workers": {
+      "get": {
+        "description": "The thread's workers, and its runs created after the run ``after``.",
+        "operationId": "api_thread_workers_dashboard_api_threads__thread_id__workers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Thread Workers",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/workers/cancel": {
+      "post": {
+        "description": "Stop every worker of the thread's task that is still running, without it reporting back.",
+        "operationId": "api_cancel_thread_workers_dashboard_api_threads__thread_id__workers_cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Cancel Thread Workers",
+        "tags": [
+          "dashboard"
         ]
       }
     },

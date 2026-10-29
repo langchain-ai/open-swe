@@ -4,7 +4,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
-from openswe.sandboxes.providers.registry import create_sandbox
+from openswe.sandboxes.providers.registry import connect_existing_sandbox
 
 
 async def connect_sandbox(
@@ -12,10 +12,10 @@ async def connect_sandbox(
 ) -> SandboxBackendProtocol:
     """The sandbox a thread's ``sandbox_id`` names.
 
-    A ``bridge:`` id is the user's own machine, which the deployment's sandbox
-    provider has never heard of; handing it one would fail as a missing box.
+    A ``bridge:`` id is the user's own machine, which LangSmith has never heard
+    of; handing it one would fail as a missing box.
     """
     bridge_id = Bridge.bridge_id_of(sandbox_id)
     if bridge_id is not None:
         return await BridgeSandboxBackend.connect(thread_id, bridge_id)
-    return await create_sandbox(sandbox_id)
+    return await connect_existing_sandbox(sandbox_id)

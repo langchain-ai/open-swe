@@ -6,7 +6,8 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.server import get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import plan_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -28,12 +29,6 @@ def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureR
     monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
 
 
-class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
-        self.config = config
-        return self
-
-
 @pytest.mark.asyncio
 async def test_agent_subagent_uses_workspace_defaults_despite_profile_override() -> None:
     config: RunnableConfig = {
@@ -44,13 +39,7 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
         },
         "metadata": {},
     }
-    main_model = MagicMock(name="main_model")
-    subagent_model = MagicMock(name="subagent_model")
-    captured: dict[str, object] = {}
-
-    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
-        captured.update(kwargs)
-        return _DummyAgent()
+    surface = ToolSurface()
 
     with (
         patch(
@@ -83,15 +72,13 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
             },
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        await plan_agent(config, surface)
 
-    subagents = captured["subagents"]
-    assert isinstance(subagents, list)
-    assert subagents[0]["model"] is main_model
+    assert surface.models is not None
+    assert surface.models.subagent == surface.models.main
     assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
     assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
 
@@ -106,13 +93,7 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
         },
         "metadata": {},
     }
-    main_model = MagicMock(name="main_model")
-    subagent_model = MagicMock(name="subagent_model")
-    captured: dict[str, object] = {}
-
-    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
-        captured.update(kwargs)
-        return _DummyAgent()
+    surface = ToolSurface()
 
     with (
         patch(
@@ -146,12 +127,12 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
             },
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        await plan_agent(config, surface)
 
     assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
     assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
-    assert captured["subagents"][0]["model"] is main_model
+    assert surface.models is not None
+    assert surface.models.subagent == surface.models.main

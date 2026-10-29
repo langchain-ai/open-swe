@@ -27,6 +27,7 @@ from openswe.slack.client import (
     slack_message_bot_id,
     slack_message_bot_name,
 )
+from openswe.threads import succession
 from openswe.ui_invalidations import Topic
 from openswe.utils.thread_ops import queue_message_for_thread
 
@@ -98,7 +99,16 @@ def context_block(channel_id: str, message: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+async def _move_to_live_thread(record: Incident) -> None:
+    """Carry the incident over to its thread's successor when the thread takes no new work."""
+    live = await succession.succeed(record.thread_id)
+    if live != record.thread_id:
+        record.thread_id = live
+        await service.save(record)
+
+
 async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
+    await _move_to_live_thread(record)
     return await queue_message_for_thread(
         record.thread_id, context_block(record.channel_id, message)
     )
@@ -241,6 +251,7 @@ async def dispatch_turn(
     an automatic turn queues behind it.
     """
     explicit = request is not None
+    await _move_to_live_thread(record)
     run = await create_durable_run(
         record.thread_id,
         "agent",
