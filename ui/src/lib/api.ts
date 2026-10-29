@@ -1018,6 +1018,16 @@ export interface ReviewCounts {
   flags: number
 }
 
+export interface RecentReviewPage {
+  owner: string
+  repo: string
+  number: number
+  title: string
+  author: string
+  state: "open" | "draft" | "merged" | "closed"
+  opened_at: string
+}
+
 export interface ReviewSummary {
   thread_id: string
   owner: string
@@ -1839,6 +1849,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, test }),
     }),
+  recentReviewPages: () =>
+    request<{ reviews: Array<RecentReviewPage> }>("/reviews/recent"),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   searchPullRequests: (query: string, offset = 0) =>

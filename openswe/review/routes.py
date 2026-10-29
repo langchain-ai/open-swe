@@ -1,5 +1,6 @@
 """HTTP API for the PR review feature: reviews, review chat, and review styles."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Self
@@ -68,13 +69,18 @@ from openswe.review.styles import (
     ReviewStyleCreate,
     ReviewStylePromptUpdate,
 )
+from openswe.review.visits import RecentReviewPage, ReviewPageVisit
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.users.models import User
 from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["review"])
 
 REVIEWS_PAGE_SIZE = 20
+RECENT_REVIEW_PAGES_LIMIT = 50
 
 
 class EnabledReviewRepoUpdate(BaseModel):
@@ -201,6 +207,23 @@ async def api_list_reviews(
         is_accessible=is_accessible,
     )
     return {"reviews": reviews, "page": page, "has_more": has_more}
+
+
+class RecentReviewPages(BaseModel):
+    reviews: list[RecentReviewPage]
+
+
+@router.get("/reviews/recent")
+async def api_recent_review_pages(session: dict[str, Any] = SESSION_DEP) -> RecentReviewPages:
+    user = await User.for_session(session_user_id(session), session["sub"])
+    if user is None:
+        return RecentReviewPages(reviews=[])
+    repositories = await accessible_repo_full_names(session["sub"])
+    return RecentReviewPages(
+        reviews=await ReviewPageVisit.recent(
+            user, repositories=repositories, limit=RECENT_REVIEW_PAGES_LIMIT
+        )
+    )
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")
@@ -348,6 +371,17 @@ async def api_mark_review_viewed(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
+    async with _as_viewer(session, owner, repo) as repository:
+        user = await User.for_session(session_user_id(session), session["sub"])
+        if user is not None:
+            try:
+                await ReviewPageVisit.record(user, repository.pull_request(pr_number))
+            except Exception:
+                logger.warning(
+                    "Could not record the review page visit",
+                    exc_info=True,
+                    extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                )
     await mark_review_session_viewed(
         ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session["sub"])
     )

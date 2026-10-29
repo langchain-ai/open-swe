@@ -12,7 +12,7 @@ export const reviewStatuses = [
 ] as const
 export type ReviewStatus = (typeof reviewStatuses)[number]
 export interface ReviewsSearch {
-  tab?: "mine" | "to-review" | "all"
+  tab?: "mine" | "to-review" | "recent" | "all"
   github?: boolean
   repo?: string[]
   q?: string
@@ -82,7 +82,9 @@ export function validateReviewsSearch(
     .slice(0, 100)
   return {
     tab:
-      search.tab === "all" || search.tab === "to-review"
+      search.tab === "all" ||
+      search.tab === "to-review" ||
+      search.tab === "recent"
         ? search.tab
         : undefined,
     github:
