@@ -4,7 +4,6 @@ import {
   SAME_USER,
   composerFor,
   dismissOnboardingIfShown,
-  enableMonitors,
   loginAs,
   setFollowUpBehavior,
   typeIntoComposer,
@@ -29,7 +28,6 @@ test("a busy run takes a queued follow-up and a monitor event before its next mo
   page,
 }) => {
   await loginAs(page, SAME_USER);
-  await enableMonitors(page);
   // The follow-up steers the live run; an earlier spec may have left queueing on.
   await setFollowUpBehavior(page, "steer");
   await page.goto("/mock/slack");

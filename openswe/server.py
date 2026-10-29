@@ -1865,7 +1865,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    monitors_enabled = bool(sender_profile and sender_profile.get("experimental_monitor") is True)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1986,7 +1985,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_start_review_channel,
     ]
     withheld = [
-        *(() if monitors_enabled else (monitor,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools,)),
