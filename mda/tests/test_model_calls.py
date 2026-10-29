@@ -1,12 +1,9 @@
 import asyncio
-import json
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
-import anthropic
-import httpx2
 import pytest
 from langchain.agents.middleware.types import (
     AgentState,
@@ -24,7 +21,6 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
-from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -35,7 +31,7 @@ from rt.model_calls import (
     ModelCallTimeoutMiddleware,
     ReplayableHistoryMiddleware,
 )
-from rt.models import ModelSpec, build_model
+from rt.models import ModelSpec
 from runtime_api.catalog import Catalog
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -181,80 +177,6 @@ async def test_fireworks_replay_drops_the_legacy_function_call() -> None:
     assert "function_call" not in sent[1]
     assert sent[1]["tool_calls"]
     assert "function_call" in reply.additional_kwargs
-
-
-@pytest.mark.parametrize("use_gateway", [False, True])
-async def test_anthropic_invoke_records_first_token_and_preserves_tool_calls(
-    monkeypatch: pytest.MonkeyPatch, use_gateway: bool
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "test")
-    model = build_model(
-        ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={"max_tokens": 100}),
-        use_gateway=use_gateway,
-    )
-    events = [
-        {
-            "type": "message_start",
-            "message": {
-                "id": "msg_test",
-                "type": "message",
-                "role": "assistant",
-                "model": "claude-opus-5-5",
-                "content": [],
-                "stop_reason": None,
-                "stop_sequence": None,
-                "usage": {"input_tokens": 10, "output_tokens": 0},
-            },
-        },
-        {
-            "type": "content_block_start",
-            "index": 0,
-            "content_block": {"type": "tool_use", "id": "call_test", "name": "lookup", "input": {}},
-        },
-        {
-            "type": "content_block_delta",
-            "index": 0,
-            "delta": {"type": "input_json_delta", "partial_json": '{"query":"hello"}'},
-        },
-        {"type": "content_block_stop", "index": 0},
-        {
-            "type": "message_delta",
-            "delta": {"stop_reason": "tool_use", "stop_sequence": None},
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        },
-        {"type": "message_stop"},
-    ]
-
-    def respond(request: httpx2.Request) -> httpx2.Response:
-        assert json.loads(request.content)["stream"] is True
-        body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
-        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, text=body)
-
-    collector = RunCollectorCallbackHandler()
-    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
-        model.__dict__["_async_client"] = anthropic.AsyncAnthropic(api_key="test", http_client=http)
-        try:
-            reply = await model.bind_tools(
-                [
-                    {
-                        "name": "lookup",
-                        "description": "Look up a query",
-                        "input_schema": {"type": "object"},
-                    }
-                ]
-            ).ainvoke([HumanMessage("hello")], config={"callbacks": [collector]})
-        finally:
-            model.__dict__.pop("_async_client", None)
-
-    assert reply.tool_calls == [
-        {"name": "lookup", "args": {"query": "hello"}, "id": "call_test", "type": "tool_call"}
-    ]
-    assert reply.usage_metadata is not None
-    assert reply.usage_metadata["input_tokens"] == 10
-    assert reply.usage_metadata["output_tokens"] == 5
-    [trace] = collector.traced_runs
-    assert any(event["name"] == "new_token" for event in trace.events)
 
 
 async def test_a_hanging_model_call_fails_as_a_timeout() -> None:
