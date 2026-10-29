@@ -242,6 +242,7 @@ from openswe.server import (
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
+from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
 
@@ -1230,6 +1231,13 @@ class RemoteGraph:
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), without its plan when it can."""
+        if endpoint != PREPARE.name:
+            return await self._answer(run, endpoint, raw)
+        # Planning and preparing read the same thread from many places; one read serves them.
+        async with shared_thread_reads():
+            return await self._answer(run, endpoint, raw)
+
+    async def _answer(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
         run_id = raw_id if isinstance(raw_id, str) else None
         if RUN_CALLS.serves(endpoint):

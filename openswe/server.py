@@ -12,7 +12,7 @@ import hashlib
 import logging
 import time
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from functools import cache, partial
 from typing import Any, Final, Self, cast
 from uuid import UUID
@@ -291,7 +291,7 @@ from openswe.utils.model import (
     make_model,
     provider_model_kwargs,
 )
-from openswe.utils.startup_trace import aphase
+from openswe.utils.startup_trace import aphase, apm_span
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread
 from openswe.utils.thread_settings import (
@@ -1063,6 +1063,16 @@ def _make_model_or_defer(
         return make_deferred_error_model(e, model_id=model_id)
 
 
+_DETACHED: set[asyncio.Task[None]] = set()
+
+
+def _detach(work: Coroutine[object, object, None]) -> None:
+    """Run ``work`` past the request that started it; ``work`` logs its own failures."""
+    task = asyncio.create_task(work)
+    _DETACHED.add(task)
+    task.add_done_callback(_DETACHED.discard)
+
+
 class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     def __init__(
         self,
@@ -1381,6 +1391,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
+        # Reads only who the run is for, so it runs alongside routing and participants.
+        recent_threads = asyncio.create_task(self._recent_threads(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
             attribution_model_id = self._model_id
             attribution_effort = self._effort
@@ -1434,19 +1446,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
-        audience = self._recent_context_audience(cfg)
-        recent_threads = (
-            await recent_thread_context_section(
-                audience=audience,
-                login=self._profile_login,
-                email=self._user_email or None,
-                exclude_thread_id=self._thread_id,
-                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
-                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
-            )
-            if audience is not None
-            else ""
-        )
         turn = TurnContext(
             working_dir=work_dir,
             source="background_task" if cfg.background_task_completion else self._source,
@@ -1463,7 +1462,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
             tool_catalog_note=self._tool_catalog_note,
-            recent_threads=recent_threads,
+            recent_threads=await recent_threads,
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
         system_prompt = (
@@ -1471,54 +1470,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             if rendered_prompt is not None
             else {}
         )
-        try:
-            async with aphase(self._thread_id, "prepare.record_run"):
-                await client.threads.update(
-                    thread_id=self._thread_id,
-                    metadata={
-                        "agent_kind": "agent",
-                        "model": attribution_model_id,
-                        "effort": attribution_effort,
-                        "source": self._source,
-                        **(
-                            {"model_route": attribution_route}
-                            if attribution_route is not None
-                            else {}
-                        ),
-                    },
-                )
-                if cfg.invocation_id:
-                    await record_agent_invocation_usage(
-                        invocation_id=cfg.invocation_id,
-                        thread_id=self._thread_id,
-                        github_login=self._profile_login,
-                        github_user_id=(
-                            triggering_user_identity.github_user_id
-                            if triggering_user_identity
-                            and triggering_user_identity.github_user_id is not None
-                            else cfg.github_user_id
-                        ),
-                        user_email=self._user_email,
-                        display_name=(
-                            triggering_user_identity.analytics_display_name
-                            if triggering_user_identity
-                            and triggering_user_identity.analytics_display_name
-                            else None
-                        ),
-                        display_name_source=(
-                            triggering_user_identity.display_name_source
-                            if triggering_user_identity
-                            else None
-                        ),
-                        model_id=attribution_model_id,
-                        effort=attribution_effort,
-                        source=self._source,
-                        repository=cfg.repo_full_name or None,
-                    )
-        except Exception:
-            logger.debug(
-                "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
+        _detach(
+            self._record_run(
+                cfg,
+                triggering_user_identity,
+                model_id=attribution_model_id,
+                effort=attribution_effort,
+                route=attribution_route,
             )
+        )
 
         return {
             "work_dir": work_dir,
@@ -1530,6 +1490,74 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             **({"model_route": attribution_route} if persist_route else {}),
             **system_prompt,
         }
+
+    async def _recent_threads(self, cfg: RunConfig) -> str:
+        audience = self._recent_context_audience(cfg)
+        if audience is None:
+            return ""
+        async with aphase(self._thread_id, "prepare.recent_threads"):
+            return await recent_thread_context_section(
+                audience=audience,
+                login=self._profile_login,
+                email=self._user_email or None,
+                exclude_thread_id=self._thread_id,
+                slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
+                slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
+            )
+
+    async def _record_run(
+        self,
+        cfg: RunConfig,
+        sender: CollaboratorIdentity | None,
+        *,
+        model_id: str,
+        effort: str | None,
+        route: str | None,
+    ) -> None:
+        """Record who ran the turn on what model, for the thread list and usage.
+
+        Nothing in the run reads it back, so the run does not wait for it.
+        """
+        try:
+            with apm_span("agent.record_run", {"thread_id": self._thread_id}):
+                await client.threads.update(
+                    thread_id=self._thread_id,
+                    metadata={
+                        "agent_kind": "agent",
+                        "model": model_id,
+                        "effort": effort,
+                        "source": self._source,
+                        **({"model_route": route} if route is not None else {}),
+                    },
+                )
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
+                        thread_id=self._thread_id,
+                        github_login=self._profile_login,
+                        github_user_id=(
+                            sender.github_user_id
+                            if sender and sender.github_user_id is not None
+                            else cfg.github_user_id
+                        ),
+                        user_email=self._user_email,
+                        display_name=(
+                            sender.analytics_display_name
+                            if sender and sender.analytics_display_name
+                            else None
+                        ),
+                        display_name_source=sender.display_name_source if sender else None,
+                        model_id=model_id,
+                        effort=effort,
+                        source=self._source,
+                        repository=cfg.repo_full_name or None,
+                    )
+        except Exception:
+            logger.warning(
+                "Failed to record the agent run",
+                extra={"thread_id": self._thread_id},
+                exc_info=True,
+            )
 
     async def _render_system_prompt(self, cfg: RunConfig) -> str:
         """The thread's system prompt, from what holds for it as its first run starts."""
