@@ -33,7 +33,6 @@ from typing import Any
 
 from openswe.config import ENV, EnvVar
 from openswe.jobs import queue
-from openswe.sandboxes.paths import declared_work_dir
 from openswe.utils.time import parse_iso
 from openswe.workspaces.store import (
     WORKSPACES,
@@ -275,6 +274,8 @@ async def refresh_workspace(
     background run, and none of them should surface a traceback. The same detail
     lands on the workspace record.
     """
+    from openswe.sandboxes.paths import declared_work_dir
+
     record = await WORKSPACES.get(slug)
     if record is None:
         return {"status": "unknown_workspace", "slug": slug}
