@@ -1015,7 +1015,9 @@ async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
     try:
         for thread_id in sorted(thread_ids):
             thread = await index.get(thread_id)
-            if thread is None or thread.status not in {"idle", "interrupted", "error", "busy"}:
+            if thread is None:
+                continue
+            if thread.status not in {"idle", "interrupted", "error", "busy"}:
                 return "auto-merge paused — could not verify PR thread activity"
             if thread.status == "busy":
                 return "auto-merge paused — a PR thread has an active run"

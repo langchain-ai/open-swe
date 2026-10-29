@@ -928,7 +928,9 @@ async def test_only_auto_merge_requests_merge_when_approved(
 
     client = MagicMock()
 
-    async def thread(thread_id: str) -> MagicMock:
+    async def thread(thread_id: str) -> MagicMock | None:
+        if thread_id == "deleted":
+            return None
         if thread_id == "review-request":
             if activity == "unavailable":
                 raise httpx2.ConnectError("Runtime unavailable")
@@ -941,7 +943,10 @@ async def test_only_auto_merge_requests_merge_when_approved(
 
     client.runs.list = AsyncMock(side_effect=runs)
     pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
-    pr.threads = [ThreadLink(thread_id="implementation", role="primary")]
+    pr.threads = [
+        ThreadLink(thread_id="implementation", role="primary"),
+        ThreadLink(thread_id="deleted"),
+    ]
     request = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
     )
