@@ -3259,21 +3259,6 @@
         "title": "MergeIntent",
         "type": "object"
       },
-      "Message": {
-        "properties": {
-          "text": {
-            "maxLength": 32000,
-            "minLength": 1,
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ],
-        "title": "Message",
-        "type": "object"
-      },
       "MessageIntent": {
         "properties": {
           "intent": {
@@ -11215,7 +11200,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "items": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "title": "Response Workspaces Dashboard Api Fleet Chat Workspaces Get",
+                  "type": "array"
                 }
               }
             },
@@ -11229,9 +11221,9 @@
         ]
       }
     },
-    "/dashboard/api/fleet-chat/{workspace_id}/threads": {
+    "/dashboard/api/fleet-chat/{workspace_id}/{path}": {
       "get": {
-        "operationId": "threads_dashboard_api_fleet_chat__workspace_id__threads_get",
+        "operationId": "proxy_dashboard_api_fleet_chat__workspace_id___path__get",
         "parameters": [
           {
             "in": "path",
@@ -11242,228 +11234,13 @@
               "title": "Workspace Id",
               "type": "string"
             }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JsonValue"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Threads",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      },
-      "post": {
-        "operationId": "create_thread_dashboard_api_fleet_chat__workspace_id__threads_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JsonValue"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Thread",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      }
-    },
-    "/dashboard/api/fleet-chat/{workspace_id}/threads/{thread_id}": {
-      "get": {
-        "operationId": "thread_dashboard_api_fleet_chat__workspace_id__threads__thread_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Thread Id",
-              "type": "string"
-            }
           },
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "path",
             "required": true,
             "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JsonValue"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Thread",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      }
-    },
-    "/dashboard/api/fleet-chat/{workspace_id}/threads/{thread_id}/messages": {
-      "post": {
-        "operationId": "send_message_dashboard_api_fleet_chat__workspace_id__threads__thread_id__messages_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Thread Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Message"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JsonValue"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Send Message",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      }
-    },
-    "/dashboard/api/fleet-chat/{workspace_id}/threads/{thread_id}/runs/{run_id}/stream": {
-      "get": {
-        "operationId": "stream_run_dashboard_api_fleet_chat__workspace_id__threads__thread_id__runs__run_id__stream_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Thread Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "workspace_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Path",
               "type": "string"
             }
           }
@@ -11488,47 +11265,15 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Stream Run",
+        "summary": "Proxy",
         "tags": [
           "dashboard",
           "fleet-chat"
         ]
-      }
-    },
-    "/dashboard/api/fleet-chat/{workspace_id}/threads/{thread_id}/runs/{run_id}/{action}": {
+      },
       "post": {
-        "operationId": "stop_run_dashboard_api_fleet_chat__workspace_id__threads__thread_id__runs__run_id___action__post",
+        "operationId": "proxy_dashboard_api_fleet_chat__workspace_id___path__post",
         "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Thread Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "action",
-            "required": true,
-            "schema": {
-              "const": "cancel",
-              "title": "Action",
-              "type": "string"
-            }
-          },
           {
             "in": "path",
             "name": "workspace_id",
@@ -11538,15 +11283,22 @@
               "title": "Workspace Id",
               "type": "string"
             }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JsonValue"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -11562,7 +11314,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Stop Run",
+        "summary": "Proxy",
         "tags": [
           "dashboard",
           "fleet-chat"

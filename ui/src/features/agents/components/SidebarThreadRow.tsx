@@ -253,6 +253,46 @@ function sidebarRowClassName({
   )
 }
 
+export function SidebarConversationRow({
+  title,
+  workspaceId,
+  threadId,
+  active,
+  compact,
+  onNavigate,
+}: {
+  title: string
+  workspaceId: string
+  threadId: string
+  active: boolean
+  compact: boolean
+  onNavigate: () => void
+}) {
+  const marquee = useTitleMarquee()
+  return (
+    <div
+      className="group/row relative mb-0.5"
+      onMouseEnter={marquee.measure}
+      onMouseLeave={marquee.reset}
+    >
+      <Link
+        to="/agents/chat"
+        search={{ workspace: workspaceId, chat: threadId }}
+        aria-current={active ? "page" : undefined}
+        onClick={onNavigate}
+        className={sidebarRowClassName({
+          compact,
+          active,
+          paddingLeft: "pl-space-2",
+          archived: false,
+        })}
+      >
+        <SidebarRowTitle title={title} marquee={marquee} />
+      </Link>
+    </div>
+  )
+}
+
 function RunningIndicator({ label }: { label: string }) {
   return (
     <span role="img" aria-label={label} className="flex shrink-0">

@@ -47,9 +47,18 @@ import type {
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
-import { FleetSidebar } from "@/features/agents/components/FleetSidebar"
+import { Select } from "@langchain/macaw-components/Select"
+import {
+  fleetClient,
+  fleetWorkspaces,
+  FLEET_ASSISTANT_ID,
+  type Thread,
+} from "@/features/agents/lib/fleetChat"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
-import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  SidebarThreadRow,
+  SidebarConversationRow,
+} from "@/features/agents/components/SidebarThreadRow"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -202,6 +211,24 @@ export function AgentsSidebar({
       ? fleetLocation.chat
       : undefined
   const linkOptions = useHrefLinkOptions()
+  const fleetWorkspaceQuery = useQuery({
+    queryKey: ["fleet-workspaces"],
+    queryFn: fleetWorkspaces,
+    enabled: fleetSelected,
+    retry: false,
+  })
+  const fleetThreads = useQuery({
+    queryKey: ["fleet-threads", fleetWorkspace],
+    queryFn: () =>
+      fleetClient(fleetWorkspace!).threads.search({
+        metadata: { assistant_id: FLEET_ASSISTANT_ID },
+        limit: 50,
+      }) as Promise<Thread[]>,
+    enabled: fleetSelected && Boolean(fleetWorkspace),
+    retry: false,
+  })
+  const fleetError =
+    fleetWorkspaceQuery.error?.message ?? fleetThreads.error?.message
   const newThreadShortcut = useShortcutLabel("mod+n")
   const profile = useProfile()
   const concierge = useQuery({
@@ -716,14 +743,85 @@ export function AgentsSidebar({
         />
       </div>
       {fleetSelected ? (
-        <FleetSidebar
-          workspaceId={fleetWorkspace}
-          threadId={fleetThread}
-          onSelect={(workspace, chat) => {
-            void navigate({ to: "/agents/chat", search: { workspace, chat } })
-            layout.closeOnMobile()
-          }}
-        />
+        <div className="flex min-h-0 flex-1 flex-col px-space-2 pb-space-2">
+          <Link
+            to="/agents/chat"
+            search={{ workspace: fleetWorkspace }}
+            onClick={layout.closeOnMobile}
+            className={cn(
+              NAV_ROW_CLASS,
+              "group bg-surface-level-3 hover:bg-surface-level-4"
+            )}
+          >
+            <PlusIcon size={20} className="-mx-0.5" />
+            New
+          </Link>
+          <div className="py-space-3">
+            <Select
+              aria-label="LangSmith workspace"
+              size="md"
+              placeholder="Select LangSmith workspace"
+              value={fleetWorkspace}
+              options={(fleetWorkspaceQuery.data ?? []).map((workspace) => ({
+                value: workspace.id,
+                label: workspace.name,
+              }))}
+              loading={fleetWorkspaceQuery.isPending}
+              onChange={(workspace) => {
+                void navigate({ to: "/agents/chat", search: { workspace } })
+              }}
+              triggerClassName="w-full"
+            />
+          </div>
+          {fleetError && (
+            <>
+              <ThreadSourceError
+                label={fleetError}
+                onRetry={() => {
+                  void fleetWorkspaceQuery.refetch()
+                  if (fleetWorkspace) void fleetThreads.refetch()
+                }}
+              />
+              <Link
+                to="/my-settings/connections"
+                className="px-space-2 text-xs text-secondary underline"
+              >
+                Connections
+              </Link>
+            </>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <SidebarSectionHeader
+              label="Recents"
+              collapsed={sectionCollapsed("recents")}
+              onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+            />
+            {fleetThreads.isLoading && (
+              <ThreadListSkeleton compact={prefs.compact} />
+            )}
+            {!sectionCollapsed("recents") &&
+              (fleetThreads.data ?? []).map((thread) => (
+                <SidebarConversationRow
+                  key={thread.thread_id}
+                  title={
+                    thread.metadata?.thread_title ??
+                    thread.metadata?.first_message_preview ??
+                    "New chat"
+                  }
+                  workspaceId={fleetWorkspace!}
+                  threadId={thread.thread_id}
+                  active={thread.thread_id === fleetThread}
+                  compact={prefs.compact}
+                  onNavigate={layout.closeOnMobile}
+                />
+              ))}
+            {fleetWorkspace && fleetThreads.data?.length === 0 && (
+              <p className="px-space-2 py-space-5 text-center text-xs text-tertiary">
+                No threads yet.
+              </p>
+            )}
+          </div>
+        </div>
       ) : (
         <>
           <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">

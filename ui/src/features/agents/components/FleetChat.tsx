@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react"
-import { Client } from "@langchain/langgraph-sdk"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { cn } from "@/lib/utils"
 
 import {
-  fleetRequest as request,
+  fleetClient,
+  FLEET_ASSISTANT_ID,
   type Thread,
 } from "@/features/agents/lib/fleetChat"
 
@@ -30,7 +29,8 @@ export function FleetChat({
   const [run, setRun] = useState<{ thread: string; id: string } | null>(null)
   const thread = useQuery({
     queryKey: ["fleet-thread", workspaceId, threadId],
-    queryFn: () => request<Thread>(`/${workspaceId}/threads/${threadId}`),
+    queryFn: () =>
+      fleetClient(workspaceId!).threads.get(threadId!) as Promise<Thread>,
     enabled: Boolean(workspaceId && threadId),
     retry: false,
   })
@@ -43,12 +43,7 @@ export function FleetChat({
     if (!workspaceId || !threadId || run?.thread !== threadId) return
     const controller = new AbortController()
     const runId = run.id
-    const client = new Client({
-      apiUrl: new URL(
-        dashboardApiUrl(`/fleet-chat/${workspaceId}`),
-        window.location.origin
-      ).href,
-    })
+    const client = fleetClient(workspaceId)
     async function subscribe() {
       try {
         for await (const event of client.runs.joinStream(threadId, runId, {
@@ -114,7 +109,9 @@ export function FleetChat({
     let id = threadId
     try {
       if (!id) {
-        const created = await request<Thread>(`/${workspace}/threads`, {})
+        const created = await fleetClient(workspace).threads.create({
+          metadata: { assistant_id: FLEET_ASSISTANT_ID },
+        })
         id = created.thread_id
         onSelect(workspace, id)
       }
@@ -132,9 +129,15 @@ export function FleetChat({
         },
       })
       try {
-        const started = await request<{ run_id: string }>(
-          `/${workspace}/threads/${id}/messages`,
-          { text }
+        const started = await fleetClient(workspace).runs.create(
+          id,
+          FLEET_ASSISTANT_ID,
+          {
+            input: { messages: [{ role: "user", content: text }] },
+            multitaskStrategy: "reject",
+            streamMode: ["values"],
+            streamResumable: true,
+          }
         )
         setRun({ thread: id, id: started.run_id })
       } catch (cause) {
@@ -158,10 +161,7 @@ export function FleetChat({
   async function stop() {
     if (!workspaceId || !run || run.thread !== threadId) return
     try {
-      await request(
-        `/${workspaceId}/threads/${threadId}/runs/${run.id}/cancel`,
-        {}
-      )
+      await fleetClient(workspaceId).runs.cancel(threadId!, run.id)
       await cache.invalidateQueries({
         queryKey: ["fleet-thread", workspaceId, threadId],
       })
