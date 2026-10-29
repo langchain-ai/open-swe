@@ -424,6 +424,7 @@ Admins turn kitchen mode on per channel in the workspace editor (**Workspaces â†
 In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run.
 Other channels still require mentions.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
+
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
 
 **Native Stop.**
