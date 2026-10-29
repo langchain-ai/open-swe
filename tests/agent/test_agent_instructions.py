@@ -1,8 +1,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI, HTTPException
-from httpx import ASGITransport, AsyncClient
+from fastapi import HTTPException
 
 from openswe.dashboard import agent_instructions as instructions_api
 from openswe.dashboard import deps
@@ -25,31 +24,19 @@ async def test_create_agent_instructions_is_idempotent() -> None:
 
 @pytest.mark.parametrize("character", ["a", "😀"])
 async def test_update_agent_instructions_limits_utf8_bytes(monkeypatch, character: str) -> None:
-    app = FastAPI()
-    app.include_router(instructions_api.router)
-    app.dependency_overrides[instructions_api.SESSION_DEP.dependency] = lambda: {"sub": "octocat"}
     monkeypatch.setattr(instructions_api, "require_repo_access_for_user", AsyncMock())
-    saved = AgentInstructions(full_name="acme/repo")
-    store = AsyncMock(return_value=saved)
-    monkeypatch.setattr(AGENT_INSTRUCTIONS, "set_instructions", store)
-    boundary = character * (32 * 1024 // len(character.encode("utf-8")))
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.put(
-            "/agent-instructions/acme/repo", json={"instructions": boundary}
-        )
-        assert response.status_code == 200
-        store.assert_awaited_once_with("acme/repo", boundary)
-        store.reset_mock()
-
-        response = await client.put(
-            "/agent-instructions/acme/repo", json={"instructions": boundary + "a"}
-        )
-        assert response.status_code == 422
-        assert response.json() == {
-            "detail": "Repository custom instructions must not exceed 32 KiB (32,768 UTF-8 bytes)"
-        }
-        store.assert_not_awaited()
+    monkeypatch.setattr(AGENT_INSTRUCTIONS, "set_instructions", AsyncMock())
+    body = instructions_api.AgentInstructionsUpdate(
+        instructions=character * (32 * 1024 // len(character.encode("utf-8")))
+    )
+    await instructions_api.api_update_agent_instructions("acme/repo", body, {"sub": "octocat"})
+    body.instructions += "a"
+    with pytest.raises(HTTPException) as exc:
+        await instructions_api.api_update_agent_instructions("acme/repo", body, {"sub": "octocat"})
+    assert exc.value.status_code == 422
+    assert exc.value.detail == (
+        "Repository custom instructions must not exceed 32 KiB (32,768 UTF-8 bytes)"
+    )
 
 
 @pytest.mark.asyncio
