@@ -633,9 +633,13 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
+    """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here.
+
+    Integrations stay out of the catalog: the backend keeps them and finds them for
+    the run's ``search_tools`` and code mode.
+    """
     from unittest.mock import AsyncMock
 
     from openswe.sandboxes.managed import ManagedSandbox
@@ -714,8 +718,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
-    assert {"mcp_search", "mcp.dotted", "web_search", "manage_thread", "slack_reply"} <= names
+    assert {"mcp.dotted", "web_search", "manage_thread", "slack_reply"} <= names
     assert "message_task_thread" in names
+    # An integration called only from code: kept on the backend.
+    assert "mcp_search" not in names
     assert "eval" not in names
     excluded = catalog["excluded"]
     assert isinstance(excluded, list) and "load_integration_tools" in excluded
@@ -725,18 +731,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     # And delegates only through them: no synchronous subagents, nor deepagents' default.
     assert catalog["subagents"] == []
     assert "task" in excluded
-    search = next(op for op in operations if isinstance(op, dict) and op["name"] == "mcp_search")
-    assert isinstance(search, dict)
-    expected = {
-        "connection_name": "lmt",
-        "scope": "managed",
-        "overridden_scopes": ["instance", "user"],
-    }
-    assert json.dumps(expected, separators=(",", ":")) in str(search["description"])
     assert "private-token" not in str(catalog)
     assert "private-owner" not in str(catalog)
     assert "private-gateway" not in str(catalog)
-    assert catalog["code_only"] == ["manage_thread", "mcp_search"]
+    assert catalog["code_only"] == ["manage_thread"]
     # MDA runs the graph's cap on model calls, such as an incident policy's.
     assert catalog["model_call_limit"] == 20
     # Code mode calls the file and shell tools too, through MDA's own with their checks,
@@ -762,6 +760,68 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert all(
         isinstance(op, dict) and run.granted(str(op["name"]), str(op["grant"])) for op in operations
     )
+
+    # The run's context names its operations; it reads their specs and grants by its token.
+    from runtime_api.tool_search import ResolvedTool, ToolMatches, ToolSpecs
+
+    started_run = run.model_copy(update={"settings": started.settings})
+    names = [str(op["name"]) for op in operations if isinstance(op, dict)]
+    listed = ToolSpecs.model_validate(await graph.api(started_run, "tool_specs", {"names": names}))
+    assert sorted(spec.name for spec in listed.tools) == sorted(names)
+    assert all(run.granted(spec.name, spec.grant) for spec in listed.tools)
+    # The run's search and code mode reach what its catalog leaves out, by its token.
+    found = ToolMatches.model_validate(
+        await graph.api(started_run, "search_tools", {"query": "mcp search", "limit": 1})
+    )
+    [match] = found.matches
+    assert (match.name, match.code_name) == ("mcp_search", "mcpSearch")
+    expected = {
+        "connection_name": "lmt",
+        "scope": "managed",
+        "overridden_scopes": ["instance", "user"],
+    }
+    assert json.dumps(expected, separators=(",", ":")) in match.description
+    looked_up = ResolvedTool.model_validate(
+        await graph.api(started_run, "resolve_tool", {"name": "mcpSearch"})
+    )
+    assert looked_up.tool is not None and looked_up.tool.name == "mcp_search"
+    assert run.granted("mcp_search", looked_up.tool.grant)
+    # Called directly, by its own name, it is the same operation.
+    by_name = ResolvedTool.model_validate(
+        await graph.api(started_run, "resolve_tool", {"name": "mcp_search"})
+    )
+    assert by_name.tool == looked_up.tool
+    unknown = await graph.api(started_run, "resolve_tool", {"name": "load_integration_tools"})
+    # What the graph excludes is never found, so the run cannot call it either.
+    assert ResolvedTool.model_validate(unknown).tool is None
+
+
+def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
+    from runtime_api.catalog import ToolSpec
+
+    from openswe.agent_api.tool_sets import ToolSet
+
+    def tool(name: str, description: str, code_name: str | None) -> ToolSpec:
+        return ToolSpec(
+            name=name,
+            description=description,
+            parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+            code_name=code_name,
+        )
+
+    tools = ToolSet(
+        [
+            tool("searchDatadogLogs", "Search raw Datadog log entries.", "searchDatadogLogs"),
+            tool("get_datadog_metric", "Query metrics from Datadog.", "getDatadogMetric"),
+            tool("save_issue", "Create or update a Linear issue.", "saveIssue"),
+            tool("slack_reply", "Reply in Slack.", None),
+        ]
+    )
+
+    matches = tools.search("datadog logs", 2)
+
+    assert [spec.name for spec in matches] == ["searchDatadogLogs", "get_datadog_metric"]
+    assert tools.search("kubernetes", 5) == []
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
