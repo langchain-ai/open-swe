@@ -92,6 +92,7 @@ const pull = (
   ci: "passing",
   failingChecks: [],
   pendingChecks: [],
+  requiredChecksPassing: true,
   missingChecks: [],
   unresolvedThreads: 0,
   ...fields,
@@ -607,13 +608,14 @@ describe("My PRs", () => {
     expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
   })
 
-  it("names a required check that never reported instead of offering the merge", async () => {
+  it("dims the merge and names a required check that never reported", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, {
           reviewDecision: "approved",
           missingChecks: ["Lint Final Results"],
+          requiredChecksPassing: false,
         }),
       ],
     })
@@ -622,7 +624,10 @@ describe("My PRs", () => {
     expect(
       within(card).getByText("Merge blocked: Lint Final Results never reported")
     ).toBeTruthy()
-    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
+    expect(within(card).getByRole("button", { name: MERGE })).toHaveProperty(
+      "disabled",
+      true
+    )
     expect(
       within(card).getByRole("button", { name: "Update branch" })
     ).toBeTruthy()
@@ -676,22 +681,36 @@ describe("My PRs", () => {
     expect(titles()).toEqual(["Change 1"])
   })
 
-  it("still offers a merge while the checks could not be read", async () => {
-    vi.mocked(api.openPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [
-        pull(1, {
-          reviewDecision: "approved",
-          ci: "unknown",
-          headSha: "b".repeat(40),
-        }),
-      ],
-    })
-    mount()
-    const card = (await screen.findByText("Change 1")).closest("li")!
-    expect(within(card).getByText("Approved")).toBeTruthy()
-    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
-  })
+  it.each([
+    ["pending", false],
+    ["failing", false],
+    ["unknown", null],
+    ["passing", true],
+    ["failing", true],
+    ["pending", true],
+    ["none", true],
+  ] as const)(
+    "gates merging on required checks (%s, %s), not optional CI",
+    async (ci, requiredChecksPassing) => {
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [pull(1, { ci, requiredChecksPassing })],
+      })
+      mount()
+      await screen.findByText("Change 1")
+      const button = await screen.findByRole("button", {
+        name: "Squash and merge",
+      })
+      await waitFor(() =>
+        expect(button).toHaveProperty(
+          "disabled",
+          requiredChecksPassing !== true
+        )
+      )
+      if (requiredChecksPassing !== true) fireEvent.click(button)
+      expect(api.mergePullRequest).not.toHaveBeenCalled()
+    }
+  )
 
   it("withholds the merge only where GitHub has already refused it", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({

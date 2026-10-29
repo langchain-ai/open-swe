@@ -115,15 +115,15 @@ async def test_repository_filter_cannot_change_query_or_path(repo):
 
 
 @pytest.mark.parametrize(
-    ("merge_state", "runs", "missing", "reads_rules"),
+    ("merge_state", "runs", "missing", "required_passing"),
     [
-        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], True),
-        ("blocked", [{"name": "unit", "status": "in_progress"}], [], False),
-        ("clean", [{"name": "unit", "status": "completed"}], [], False),
+        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], False),
+        ("blocked", [{"name": "unit", "status": "in_progress"}], ["lint"], False),
+        ("clean", [{"name": "unit", "status": "completed"}], [], True),
     ],
 )
 async def test_blocked_merge_names_required_checks_the_head_never_reported(
-    monkeypatch, merge_state, runs, missing, reads_rules
+    monkeypatch, merge_state, runs, missing, required_passing
 ):
     pull = {
         "state": "open",
@@ -150,29 +150,35 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
-    assert rules.await_count == int(reads_rules)
+    assert result.required_checks_passing is required_passing
 
 
 @pytest.mark.parametrize(
-    ("conclusion", "ci", "failures", "inconclusive"),
+    ("conclusion", "ci", "failures", "inconclusive", "required_passing"),
     [
-        ("cancelled", "unknown", [], 1),
-        ("stale", "unknown", [], 1),
-        ("failure", "failing", ["unit"], 0),
-        ("success", "passing", [], 0),
-        (None, "pending", [], 0),
+        ("cancelled", "unknown", [], 1, False),
+        ("stale", "unknown", [], 1, False),
+        ("failure", "failing", ["unit"], 0, False),
+        ("success", "passing", [], 0, True),
+        ("neutral", "passing", [], 1, True),
+        ("skipped", "passing", [], 1, True),
+        (None, "pending", [], 0, False),
     ],
 )
 async def test_review_and_thread_status_agree_on_check_outcomes(
-    monkeypatch, conclusion, ci, failures, inconclusive
+    monkeypatch, conclusion, ci, failures, inconclusive, required_passing
 ):
     pull = {
         "state": "open",
         "draft": False,
         "mergeable": True,
-        "mergeable_state": "clean",
+        "mergeable_state": "blocked",
         "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
     }
+    monkeypatch.setattr(
+        RequiredCheck, "for_branch", AsyncMock(return_value={RequiredCheck("unit")})
+    )
     runs = [
         {
             "name": "unit",
@@ -192,10 +198,43 @@ async def test_review_and_thread_status_agree_on_check_outcomes(
     thread = await _client(1).thread_status()
     assert review is not None
     assert review.ci == ci
+    assert review.required_checks_passing is required_passing
     assert review.failing_checks == failures
     assert [check["name"] for check in thread["failingChecks"]] == failures
     assert thread["inconclusiveCheckCount"] == inconclusive
     assert len(review.pending_checks) == thread["pendingCheckCount"] == int(conclusion is None)
+
+
+@pytest.mark.parametrize("merge_state", ["clean", "blocked"])
+@pytest.mark.parametrize("unavailable", ["rules", "runs", "statuses", "base"])
+async def test_clean_merge_confirms_required_checks_when_details_are_unavailable(
+    monkeypatch, merge_state, unavailable
+):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": merge_state,
+        "head": {"sha": "a" * 40},
+    }
+    if unavailable != "base":
+        pull["base"] = {"ref": "main"}
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    for method, source in [("check_runs", "runs"), ("commit_statuses", "statuses")]:
+        monkeypatch.setattr(
+            github_http.RepoClient,
+            method,
+            AsyncMock(side_effect=httpx2.HTTPError("Unavailable"))
+            if unavailable == source
+            else AsyncMock(return_value=[]),
+        )
+    monkeypatch.setattr(RequiredCheck, "for_branch", AsyncMock(return_value=None))
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
+    )
+    result = await _client(1).load()
+    assert result is not None
+    assert result.required_checks_passing is (True if merge_state == "clean" else None)
 
 
 async def test_mergeability_is_not_awaited_forever(monkeypatch):

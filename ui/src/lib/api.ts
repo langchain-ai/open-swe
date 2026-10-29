@@ -1065,6 +1065,7 @@ export interface OpenPullRequest {
   createdAt: string | null
   updatedAt: string | null
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  requiredChecksPassing: boolean | null
   failingChecks: string[]
   pendingChecks: string[]
   // Required by the base branch but never reported on the head, so GitHub
