@@ -518,18 +518,16 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
     run_input = _github_webhook_run_input(
         prompt, data=_pr_data(repo_config, pr_number, pr_url, base_sha, head_sha)
     )
-    run = await common.dispatch_agent_run(
+    await common.dispatch_checked_reviewer_run(
         thread_id,
-        None,
         configurable,
         source=source,
-        thread_title=None,
         input=run_input,
-        assistant_id="reviewer",
-        metadata=common.AGENT_VERSION_METADATA,
+        owner=repo_config.get("owner", ""),
+        repo=repo_config.get("name", ""),
+        token=app_token,
         client=langgraph_client,
     )
-    await common.store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
 
 
@@ -972,12 +970,10 @@ async def _process_github_head_update(
     )
 
     common.logger.info("Dispatching push re-review run for thread %s", thread_id)
-    run = await common.dispatch_agent_run(
+    await common.dispatch_checked_reviewer_run(
         thread_id,
-        None,
         configurable,
         source="github_push",
-        thread_title=None,
         input=_github_webhook_run_input(
             re_review_prompt,
             data={
@@ -985,11 +981,11 @@ async def _process_github_head_update(
                 "event": {"type": event_type, "actor": context.actor},
             },
         ),
-        assistant_id="reviewer",
-        metadata=common.AGENT_VERSION_METADATA,
+        owner=repo_config["owner"],
+        repo=repo_config["name"],
+        token=app_token,
         client=langgraph_client,
     )
-    await common.store_current_reviewer_run_id(thread_id, run)
 
 
 async def process_github_ci_event(
