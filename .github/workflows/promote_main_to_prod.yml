@@ -1,12 +1,12 @@
-name: Promote main to prod
+name: Release to prod
 
 permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: "0 8 * * *"
-  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/production-release]
 
 concurrency:
   group: promote-main-to-prod
@@ -18,21 +18,44 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
+      changed: ${{ steps.candidate.outputs.changed }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: main
-      - name: Record candidate commit
+          fetch-depth: 0
+      - name: Read the approved release commit
         id: candidate
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          candidate="$(cat .github/production-release)"
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::The release must pin a full commit SHA."
+            exit 1
+          }
+          git merge-base --is-ancestor "$candidate" "$GITHUB_SHA"
+          git merge-base --is-ancestor origin/prod "$candidate" || {
+            echo "::error::The release must include the current prod commit."
+            exit 1
+          }
+          echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+          if [[ "$candidate" == "$(git rev-parse origin/prod)" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          git checkout --detach "$candidate"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.candidate.outputs.changed == 'true'
       - name: Install dependencies
+        if: steps.candidate.outputs.changed == 'true'
         run: uv sync --locked --extra dev
       - name: Run typecheck
+        if: steps.candidate.outputs.changed == 'true'
         run: make typecheck
 
   promote:
     needs: typecheck
+    if: needs.typecheck.outputs.changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -42,7 +65,7 @@ jobs:
         with:
           ref: ${{ needs.typecheck.outputs.sha }}
           fetch-depth: 0
-      - name: Force-push the typechecked commit to prod and summarize released PRs
+      - name: Fast-forward prod to the approved commit and summarize released PRs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -50,7 +73,7 @@ jobs:
           PROMOTED_SHA="$(git rev-parse HEAD)"
           RELEASE_COMMITS="$(git log origin/prod..HEAD --format=%s)"
           export PREVIOUS_SHA PROMOTED_SHA RELEASE_COMMITS
-          git push --force origin HEAD:refs/heads/prod
+          git push origin HEAD:refs/heads/prod
           python3 - <<'PY'
           import os
           import re

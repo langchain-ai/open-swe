@@ -1,0 +1,58 @@
+name: Prepare production release PR
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: [.github/production-release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-production-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'langchain-ai/open-swe' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Open a pinned production release PR unless one is already waiting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          existing="$(gh pr list --base main --state open --json headRefName,url --jq '.[] | select(.headRefName | startswith("release/prod-")) | .url')"
+          if [[ -n "$existing" ]]; then
+            echo "A release is already waiting: $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          candidate="$(git rev-parse HEAD)"
+          previous="$(git rev-parse origin/prod)"
+          if [[ "$candidate" == "$previous" ]]; then
+            echo "Production is already current." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          branch="release/prod-${candidate:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git switch -c "$branch"
+          printf '%s\n' "$candidate" > .github/production-release
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/production-release
+          git commit -m "chore(release): pin production to ${candidate:0:12}"
+          git push origin "HEAD:refs/heads/$branch"
+          {
+            printf 'Merge this PR when ready to release production. It pins %s; later main commits are not included.\n\n' "$candidate"
+            printf '[Changes since production](https://github.com/%s/compare/%s...%s)\n\n' "$GH_REPO" "$previous" "$candidate"
+            printf 'Merging runs the Python typecheck, fast-forwards prod, deploys the production MDA runtime, and publishes the desktop nightly.\n\n'
+            printf 'Close and reopen this bot-created PR as a human to start pull-request CI, then review it before merging.\n\n'
+            printf 'Close this PR without merging to discard this candidate; run this workflow again to prepare a newer one.\n'
+          } > "$RUNNER_TEMP/release-body.md"
+          url="$(gh pr create --base main --head "$branch" --title "chore(release): deploy ${candidate:0:12} to production" --body-file "$RUNNER_TEMP/release-body.md")"
+          echo "Release PR: $url" >> "$GITHUB_STEP_SUMMARY"
