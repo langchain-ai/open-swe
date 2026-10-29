@@ -40,7 +40,12 @@ from langsmith.sandbox import (
     SandboxNotReadyError,
 )
 from managed_deepagents import define_sandbox
-from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
+from managed_deepagents.sandbox import (
+    BoundSandboxMissingError,
+    SandboxDefinition,
+    open_sandbox,
+    replace_sandbox,
+)
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import SandboxCreate
 from runtime_api.endpoint import call
@@ -80,14 +85,17 @@ def _selected(runtime: object) -> SandboxDefinition | None:
     except BackendCallError:
         # Not started yet, or not an Open SWE run, so nothing may open a box for it.
         return None
-    return None if spec is None else definition(spec.create, spec.thread_id)
+    return None if spec is None else definition(spec.create, spec.thread_id, spec.sandbox_id)
 
 
-def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
+def definition(
+    create: SandboxCreate, thread_id: str | None, sandbox_id: str | None = None
+) -> SandboxDefinition:
     """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``."""
     return define_sandbox(
         _openswe_per_thread=True,
         _openswe_thread_id=thread_id,
+        _openswe_sandbox_id=sandbox_id,
         _openswe_no_manage_proxy=True,
         _openswe_create_fields=dict(create.extra_fields),
         default_timeout=EXECUTE_TIMEOUT_SECONDS,
@@ -117,6 +125,7 @@ class OpenedSandbox:
 
     sandbox_id: str | None = None
     error: str | None = None
+    workspace_lost: bool = False
 
 
 def _transient(exc: BaseException) -> bool:
@@ -159,21 +168,31 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     The backend reports a box MDA could not open as unreachable when it prepares, with the
     cause; one that cannot boot is reported by the first call that needs it (``booted_sandbox``).
     """
-    backend = getattr(runtime, "backend", None)
-    return await _opening(lambda: open_sandbox(backend, wait=False))
+    return await _opening(getattr(runtime, "backend", None), wait=False)
 
 
 async def booted_sandbox(files: object) -> OpenedSandbox:
     """The box ``files`` reaches once it has booted, or why it could not."""
-    return await _opening(lambda: open_sandbox(files))
+    return await _opening(files, wait=True)
 
 
-async def _opening(open_: Callable[[], Awaitable[str]]) -> OpenedSandbox:
-    """``open_``'s box, retried while the sandbox service fails transiently."""
+async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
+    """``backend``'s box, retried while the sandbox service fails transiently.
+
+    A bound box that is gone is replaced, and the run told its workspace was lost.
+    """
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
-            return OpenedSandbox(sandbox_id=await open_())
+            return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
+        except BoundSandboxMissingError:
+            try:
+                await replace_sandbox(backend, missing_only=True)
+                return OpenedSandbox(
+                    sandbox_id=await open_sandbox(backend, wait=wait), workspace_lost=True
+                )
+            except Exception as exc:
+                return _not_opened(exc)
         except Exception as exc:
             delay = backoff * random.uniform(0.8, 1.2)
             if not _transient(exc) or time.monotonic() + delay > deadline:
@@ -185,7 +204,7 @@ async def _opening(open_: Callable[[], Awaitable[str]]) -> OpenedSandbox:
             )
             await asyncio.sleep(delay)
     try:
-        return OpenedSandbox(sandbox_id=await open_())
+        return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
     except Exception as exc:
         return _not_opened(exc)
 
