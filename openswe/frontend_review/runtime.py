@@ -55,6 +55,7 @@ async def catalog_for(run: RemoteRun) -> Catalog:
     return Catalog(
         system_prompt=prompt("frontend-review/system"),
         code_interpreter=False,
+        git_baseline=False,
         frontend_inspect_description=prompt("tools/read_frontend_review"),
         frontend_assessment_description=prompt("tools/submit_frontend_review"),
         models=RunModels(

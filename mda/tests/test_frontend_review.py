@@ -87,6 +87,7 @@ async def test_dedicated_review_reads_images_and_publishes_without_coding_hooks(
         frontend_inspect_description="Read the evidence.",
         frontend_assessment_description="Publish the assessment.",
         code_interpreter=False,
+        git_baseline=False,
         excluded=[
             *FILE_TOOLS,
             "write_todos",

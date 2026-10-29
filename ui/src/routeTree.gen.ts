@@ -30,6 +30,7 @@ import { Route as AdminOperationsRouteImport } from './routes/admin_.operations'
 import { Route as AdminUsersRouteImport } from './routes/admin_.users'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
+import { Route as AgentsChatRouteImport } from './routes/agents/chat'
 import { Route as AgentsQaRouteImport } from './routes/agents/qa'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
@@ -160,6 +161,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
 const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsChatRoute = AgentsChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsQaRoute = AgentsQaRouteImport.update({
@@ -316,6 +322,7 @@ export interface FileRoutesByFullPath {
   '/admin/operations': typeof AdminOperationsRoute
   '/admin/users': typeof AdminUsersRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/chat': typeof AgentsChatRoute
   '/agents/qa': typeof AgentsQaRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
@@ -362,6 +369,7 @@ export interface FileRoutesByTo {
   '/admin/operations': typeof AdminOperationsRoute
   '/admin/users': typeof AdminUsersRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/chat': typeof AgentsChatRoute
   '/agents/qa': typeof AgentsQaRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
@@ -412,6 +420,7 @@ export interface FileRoutesById {
   '/admin_/operations': typeof AdminOperationsRoute
   '/admin_/users': typeof AdminUsersRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/chat': typeof AgentsChatRoute
   '/agents/qa': typeof AgentsQaRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
@@ -463,6 +472,7 @@ export interface FileRouteTypes {
     | '/admin/operations'
     | '/admin/users'
     | '/agents/$threadId'
+    | '/agents/chat'
     | '/agents/qa'
     | '/agents/skills'
     | '/agents/instructions'
@@ -509,6 +519,7 @@ export interface FileRouteTypes {
     | '/admin/operations'
     | '/admin/users'
     | '/agents/$threadId'
+    | '/agents/chat'
     | '/agents/qa'
     | '/agents/skills'
     | '/agents/instructions'
@@ -558,6 +569,7 @@ export interface FileRouteTypes {
     | '/admin_/operations'
     | '/admin_/users'
     | '/agents/$threadId'
+    | '/agents/chat'
     | '/agents/qa'
     | '/agents/skills'
     | '/agents_/instructions'
@@ -771,6 +783,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/chat': {
+      id: '/agents/chat'
+      path: '/chat'
+      fullPath: '/agents/chat'
+      preLoaderRoute: typeof AgentsChatRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/qa': {
       id: '/agents/qa'
       path: '/qa'
@@ -958,6 +977,7 @@ declare module '@tanstack/react-router' {
 
 interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
+  AgentsChatRoute: typeof AgentsChatRoute
   AgentsQaRoute: typeof AgentsQaRoute
   AgentsSkillsRoute: typeof AgentsSkillsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
@@ -972,6 +992,7 @@ interface AgentsRouteChildren {
 
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
+  AgentsChatRoute: AgentsChatRoute,
   AgentsQaRoute: AgentsQaRoute,
   AgentsSkillsRoute: AgentsSkillsRoute,
   AgentsIndexRoute: AgentsIndexRoute,

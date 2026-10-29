@@ -193,6 +193,8 @@ class Catalog(BaseModel):
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
     trace_metadata: dict[str, JsonValue] = {}
+    # Whether tool changes are measured against a snapshot of the thread's checkouts.
+    git_baseline: bool = True
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.

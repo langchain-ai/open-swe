@@ -402,7 +402,7 @@ async def test_dedicated_assessment_never_prepares_the_regular_code_reviewer(
     async def forbidden_plan(_: RunnableConfig, _surface: ToolSurface) -> None:
         raise AssertionError("Must not prepare a code review, checkout, or GitHub check")
 
-    choice = ReviewerModelChoice("openai:gpt-6.1-sol", {})
+    choice = ReviewerModelChoice("openai:gpt-6.1-sol", {}, None)
     monkeypatch.setattr(
         runtime,
         "resolve_reviewer_models",
@@ -426,6 +426,7 @@ async def test_dedicated_assessment_never_prepares_the_regular_code_reviewer(
     assert started.catalog.sandbox is None
     assert started.catalog.loop is not None and started.catalog.loop.at_end == []
     assert started.catalog.code_interpreter is False
+    assert started.catalog.git_baseline is False
     assert started.catalog.frontend_review_description is None
     assert await graph.api(run, PREPARE.name, Prepare().model_dump(mode="json")) == {
         "update": {},

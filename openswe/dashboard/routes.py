@@ -19,6 +19,7 @@ from openswe.dashboard.profiles import router as profiles_router
 from openswe.dashboard.user_instructions import router as user_instructions_router
 from openswe.dashboard.user_preferences import router as user_preferences_router
 from openswe.dashboard.workspace_settings import router as workspace_settings_router
+from openswe.fleet_chat.routes import router as fleet_chat_router
 from openswe.frontend_review.routes import router as frontend_review_router
 from openswe.github.dashboard_routes import router as repos_router
 from openswe.github.pull_request_dashboard_routes import router as pull_requests_router
@@ -56,6 +57,7 @@ router.include_router(profiles_router)
 router.include_router(users_router)
 router.include_router(announcements_router)
 router.include_router(langsmith_router)
+router.include_router(fleet_chat_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)
 router.include_router(mcp_router)

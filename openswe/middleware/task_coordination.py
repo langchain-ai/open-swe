@@ -61,8 +61,6 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     async def context_message(self) -> str | None:
         """The task's context, as the model is told it; a worker's coordinator's proxy kept fresh."""
         if self.context is None:
-            self.context = await TaskMembership.context_for_thread(self.thread_id)
-        if self.context is None:
             return None
         if self.is_worker:
             try:
@@ -83,6 +81,8 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     async def abefore_model(
         self, state: AgentState, runtime: Runtime
     ) -> dict[str, list[RunMessage]] | None:
+        if self.context is None:
+            self.context = await TaskMembership.context_for_thread(self.thread_id)
         visible = visible_dynamic_context_hashes(state)
         added: list[RunMessage] = [
             {"role": "user", "id": f"{prefix}{uuid4()}", "content": content}
