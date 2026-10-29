@@ -58,6 +58,19 @@ class PhaseResult(BaseModel):
     events: list[JsonValue] = []
 
 
+class GitHubProxyRefreshed(BaseModel):
+    """The box's GitHub proxy was given a fresh token."""
+
+    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    expires_at: datetime | None = None
+
+
+class Prepared(PhaseResult):
+    # The token preparation put on the box, which the first model call then keeps; None
+    # when it put none there.
+    github_proxy: GitHubProxyRefreshed | None = None
+
+
 class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
@@ -181,13 +194,6 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
-class GitHubProxyRefreshed(BaseModel):
-    """The box's GitHub proxy was given a fresh token."""
-
-    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
-    expires_at: datetime | None = None
-
-
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
@@ -221,7 +227,7 @@ class ReplyOnBehalf(RunCall):
 
 # Preparation the runtime makes again on a restarted run anyway. It waits up to ten
 # minutes on the review scout's walkthrough.
-PREPARE = Endpoint("prepare", Prepare, PhaseResult, seconds=900.0, delivery="idempotent")
+PREPARE = Endpoint("prepare", Prepare, Prepared, seconds=900.0, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"

@@ -39,6 +39,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
@@ -133,6 +134,7 @@ from runtime_api.loop import (
     ModelResult,
     PhaseResult,
     Prepare,
+    Prepared,
     ReplyOnBehalf,
     Report,
     Route,
@@ -203,6 +205,7 @@ from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.github.proxy import proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -643,7 +646,8 @@ class RunSession:
         answered = await in_graph_context({**self.config, "run_name": phase}, run, events=events)
         return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
 
-    async def prepare(self, request: Prepare) -> PhaseResult:
+    async def prepare(self, request: Prepare) -> Prepared:
+        started = datetime.now(UTC)
         # MDA opened the box before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
@@ -651,10 +655,17 @@ class RunSession:
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(cfg.thread_id).receive(events=_carried_events(self.config))
 
-        async def begun(state: dict[str, object], runtime: Runtime) -> PhaseResult:
+        async def begun(state: dict[str, object], runtime: Runtime) -> Prepared:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
             begin = await TurnGitMetadata(self.config).begin()
-            return result.model_copy(update={"update": {**result.update, **begin}})
+            expires_at = proxy_token_set_since(cfg.thread_id, started)
+            return Prepared(
+                **result.model_dump(exclude={"update"}),
+                update={**result.update, **begin},
+                github_proxy=None
+                if expires_at is None
+                else GitHubProxyRefreshed(expires_at=expires_at),
+            )
 
         return await self._answer_phase("before_agent", request, begun)
 

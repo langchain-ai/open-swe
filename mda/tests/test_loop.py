@@ -27,7 +27,14 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
+from runtime_api.loop import (
+    Done,
+    GitHubProxyRefreshed,
+    PhaseResult,
+    Prepared,
+    Route,
+    TaskContext,
+)
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
@@ -443,13 +450,17 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     backend, calls = _backend(
         monkeypatch,
         {
-            "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
+            # Preparation just put a token on the box, so the model call keeps it.
+            "prepare": Prepared(
+                update={"rendered_system_prompt": "You review."},
+                github_proxy=GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
+            ),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
-        LoopRules(at_end=["settle_review_check"]),
+        LoopRules(at_end=["settle_review_check"], refresh_github_proxy=True),
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",

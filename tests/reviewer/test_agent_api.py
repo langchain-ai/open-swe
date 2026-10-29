@@ -1093,17 +1093,17 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
 ) -> None:
     from pydantic import BaseModel
     from runtime_api.endpoint import Handlers
-    from runtime_api.loop import PREPARE, PhaseResult, Prepare
+    from runtime_api.loop import PREPARE, Prepare, Prepared
 
     from openswe.agent_api import server
 
     class Strict(BaseModel):
         count: int
 
-    async def prepare(run: RemoteRun, request: Prepare) -> PhaseResult:
+    async def prepare(run: RemoteRun, request: Prepare) -> Prepared:
         # A bug in the phase's own code, not in what MDA sent.
         Strict.model_validate({"count": "many"})
-        return PhaseResult()
+        return Prepared()
 
     handlers = Handlers[RemoteRun]()
     handlers.serve(PREPARE, prepare)

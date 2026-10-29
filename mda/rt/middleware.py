@@ -422,6 +422,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 sandbox_error=opened.error,
             ),
         )
+        if self._loop is not None:
+            prepared.update.update(self._loop.prepared(prepared))
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
