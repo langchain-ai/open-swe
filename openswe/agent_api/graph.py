@@ -881,9 +881,9 @@ class TokenRun:
     async def inbox(self, request: InboxRead) -> Inbox:
         if request.spec is None:
             return Inbox()
-        taken = await ThreadInbox(self.run.thread_id).read(
-            request.run_id or str(uuid4()), request.spec
-        )
+        inbox = ThreadInbox(self.run.thread_id)
+        await inbox.receive(request.received.queued, request.received.events)
+        taken = await inbox.read(request.run_id or str(uuid4()), request.spec)
         return Inbox(
             messages=dump_messages(as_messages(taken.messages)),
             update=taken.state_update(request.run_id),

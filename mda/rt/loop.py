@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -245,6 +245,30 @@ class _Turn:
         return ""
 
 
+class Asked:
+    """The task context and GitHub token refresh a model call waits on, asked for at once."""
+
+    def __init__(
+        self, context: Awaitable[TaskContext], proxy: Awaitable[dict[str, JsonValue]]
+    ) -> None:
+        self._context = asyncio.ensure_future(context)
+        self._proxy = asyncio.ensure_future(proxy)
+        self._answered = False
+
+    async def answers(self) -> tuple[TaskContext, dict[str, JsonValue]]:
+        self._answered = True
+        return await self._context, await self._proxy
+
+    async def close(self) -> None:
+        """Stop what is still asked; what failed unread is logged."""
+        asked = (self._context, self._proxy)
+        for task in asked:
+            task.cancel()
+        for result in await asyncio.gather(*asked, return_exceptions=True):
+            if not self._answered and isinstance(result, Exception):
+                logger.warning("A call before the model call failed unread", exc_info=result)
+
+
 class RunLoop:
     """What happens around each of the run's model calls, as its ``LoopRules`` say."""
 
@@ -277,17 +301,29 @@ class RunLoop:
     def looks_at_answers(self) -> bool:
         return self.rules.reply is not None or self.rules.cli_result is not None
 
-    async def before_model(self, state: Mapping[str, object]) -> BeforeModel:
+    def ask(self, state: Mapping[str, object]) -> Asked | None:
+        """Start what the backend is asked before a model call whose answer the inbox does
+        not change; None when the run stops here whatever the inbox holds."""
         held = _held(state)
-        if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
+        if self._stops(held):
+            return None
+        return Asked(self._task_context(), self._github_proxy(held))
+
+    def _stops(self, held: Mapping[str, object]) -> bool:
+        return any(held.get(key) for key in self.rules.stop_when)
+
+    async def before_model(
+        self, state: Mapping[str, object], asked: Asked | None = None
+    ) -> BeforeModel:
+        held = _held(state)
+        if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        proxy = asyncio.create_task(self._github_proxy(held))
+        if asked is None:
+            asked = Asked(self._task_context(), self._github_proxy(held))
         try:
-            context = await self._task_context()
-            update = await proxy
+            context, update = await asked.answers()
         finally:
-            proxy.cancel()
-            await asyncio.gather(proxy, return_exceptions=True)
+            await asked.close()
         visible = _visible(state)
         visible_guidance = _run_guidance(visible)
         added: list[BaseMessage] = [
