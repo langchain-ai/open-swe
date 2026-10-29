@@ -27,7 +27,14 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
+from runtime_api.loop import (
+    Done,
+    GitBaseline,
+    GitHubProxyRefreshed,
+    PhaseResult,
+    Route,
+    TaskContext,
+)
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
@@ -459,6 +466,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         monkeypatch,
         {
             "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
+            "git_baseline": GitBaseline(),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
@@ -485,6 +493,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     # work the backend keeps failing is tried again, then let go of for the rest.
     assert [name for name, _ in calls] == [
         "prepare",
+        "git_baseline",
         "step_limit_reached",
         "step_limit_reached",
         "step_limit_reached",
