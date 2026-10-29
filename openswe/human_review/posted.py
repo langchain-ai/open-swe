@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.design import DesignReview
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import record_pull_request, settle
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
@@ -58,6 +59,7 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
         for row in rows:
             row.run_config = {**row.run_config, "posted_pr_urls": urls}
     for request in requests:
+        await ReviewCard(request).link_on_github()
         await DesignReview(request).start()
         await settle(request)
 

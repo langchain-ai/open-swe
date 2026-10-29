@@ -170,6 +170,9 @@ if TYPE_CHECKING:
     from managed_deepagents.agent_entry import (
         AgentEntry,
         AgentFactory,
+        SharedAgentFactory,
+        SharedInputs,
+        shared_factory,
     )
     from managed_deepagents.define_browser import BrowserDefinition, define_browser
     from managed_deepagents.define_deep_agent import (
@@ -329,6 +332,8 @@ _EXPORTS: dict[str, str] = {
     "SchedulePage": "managed_deepagents._runtime_schedules",
     "SchedulePatch": "managed_deepagents._runtime_schedules",
     "ScheduleRecord": "managed_deepagents._runtime_schedules",
+    "SharedAgentFactory": "managed_deepagents.agent_entry",
+    "SharedInputs": "managed_deepagents.agent_entry",
     "SkillSelection": "managed_deepagents.define_deep_agent",
     "SlackActor": "managed_deepagents._channels.slack.events",
     "SlackChannelThread": "managed_deepagents._channels.slack.events",
@@ -368,6 +373,7 @@ _EXPORTS: dict[str, str] = {
     "open_sandbox": "managed_deepagents.sandbox",
     "replace_sandbox": "managed_deepagents.sandbox",
     "schedules": "managed_deepagents._runtime_schedules",
+    "shared_factory": "managed_deepagents.agent_entry",
 }
 
 
@@ -530,6 +536,8 @@ __all__ = [
     "SchedulePage",
     "SchedulePatch",
     "ScheduleRecord",
+    "SharedAgentFactory",
+    "SharedInputs",
     "SkillSelection",
     "SlackActor",
     "SlackChannelThread",
@@ -569,4 +577,5 @@ __all__ = [
     "open_sandbox",
     "replace_sandbox",
     "schedules",
+    "shared_factory",
 ]

@@ -1,8 +1,4 @@
-"""Simplified sandbox get-or-create-then-reconnect flow (no ``__creating__`` sentinel).
-
-Dispatch uses ``multitask_strategy="interrupt"`` so a thread never provisions
-two sandboxes concurrently; the cross-process sentinel poll was removed.
-"""
+"""Connecting to a thread's sandbox, which the backend never creates."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,44 +7,39 @@ import pytest
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.state import (
     SANDBOX_CONNECTIONS,
+    SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
     set_sandbox_backend,
 )
 
 
 @pytest.mark.asyncio
-async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
+@pytest.mark.parametrize("owner", [None, "mda"])
+async def test_ensure_sandbox_never_creates_one_for_a_thread_without(owner: str | None) -> None:
+    """MDA creates every thread's box: a thread without one waits for its run to open it."""
     thread_id = "thread-new"
     SANDBOX_BACKENDS.clear()
-    sandbox_backend = MagicMock()
-    sandbox_backend.id = "sandbox-new"
+    metadata = {} if owner is None else {"sandbox_owner": owner}
 
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value={},
+            return_value=metadata,
         ),
         patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
-            new_callable=AsyncMock,
-            return_value=sandbox_backend,
-        ) as create_sandbox,
-        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+            "openswe.sandboxes.lifecycle.connect_existing_sandbox", new_callable=AsyncMock
+        ) as connect,
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
+        pytest.raises(SandboxUnreachableError, match="Managed Deep Agents"),
     ):
-        result = await ensure_sandbox_for_thread(thread_id)
+        await ensure_sandbox_for_thread(thread_id)
 
-    assert result.id == "sandbox-new"
-    create_sandbox.assert_awaited_once()
-    # The new sandbox id is persisted to thread metadata (no sentinel writes).
-    assert update_thread.await_args_list[-1].kwargs == {
-        "thread_id": thread_id,
-        "metadata": {"sandbox_id": "sandbox-new"},
-    }
-    SANDBOX_BACKENDS.clear()
+    connect.assert_not_awaited()
+    update_thread.assert_not_awaited()
+    assert thread_id not in SANDBOX_BACKENDS
 
 
 @pytest.mark.asyncio
@@ -76,7 +67,7 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
             return_value={"sandbox_id": "sandbox-existing"},
         ),
         patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.connect_existing_sandbox",
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
@@ -126,7 +117,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
             return_value={"sandbox_id": "sandbox-existing"},
         ),
         patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.connect_existing_sandbox",
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
@@ -179,7 +170,7 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
             return_value={"sandbox_id": "sandbox-new"},
         ),
         patch(
-            "openswe.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.connect_existing_sandbox",
             new_callable=AsyncMock,
             return_value=new_backend,
         ) as connect_sandbox,
@@ -207,7 +198,7 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
 
 @pytest.mark.asyncio
 async def test_ensure_sandbox_does_not_replace_sandbox_when_metadata_lookup_fails() -> None:
-    """A failed lookup is not an unbound thread; creating here would strand its real sandbox."""
+    """A failed lookup is not an unbound thread; unbinding here would strand its real sandbox."""
     thread_id = "thread-metadata-down"
     set_sandbox_backend(thread_id, MagicMock(id="sandbox-live"))
 
@@ -218,16 +209,12 @@ async def test_ensure_sandbox_does_not_replace_sandbox_when_metadata_lookup_fail
             side_effect=RuntimeError("langgraph api unavailable"),
         ),
         patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
-        ) as create,
-        patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         with pytest.raises(RuntimeError, match="langgraph api unavailable"):
             await ensure_sandbox_for_thread(thread_id)
 
-    create.assert_not_awaited()
     update_thread.assert_not_awaited()
     assert SANDBOX_CONNECTIONS["sandbox-live"] is not None
 

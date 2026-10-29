@@ -75,6 +75,8 @@ from openswe.slack.client import (
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
+from openswe.threads import index
+from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
@@ -145,8 +147,11 @@ class RequestResult(BaseModel):
     error: str = ""
     request_id: str = ""
     channel: str = ""
+    channel_name: str = ""
     permalink: str = ""
     reused: bool = False
+    channel_mismatch: bool = False
+    requested_channel: str = ""
     summary_updated: bool = False
     claimed: bool = False
     auto_merge: bool = True
@@ -280,17 +285,14 @@ def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
         cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
 
 
-async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) -> RequestResult:
+async def _existing(
+    active: HumanReviewRequest, auto_merge: bool | None = None, requested_channel: str = ""
+) -> RequestResult:
     if active.kind == "expedited":
         permalink = await _permalink(active)
         return RequestResult(
             success=False,
-            error=(
-                "This pull request has an outstanding expedited review request. "
-                "A standard review cannot run concurrently. Cancel the expedited request "
-                "before asking for a standard review."
-                + (f" Open in Slack: {permalink}" if permalink else "")
-            ),
+            error=prompt("tools/human-review-existing-expedited", permalink=permalink),
             request_id=str(active.id),
             channel=active.slack_channel_id,
             permalink=permalink,
@@ -308,6 +310,8 @@ async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) 
         channel=active.slack_channel_id,
         permalink=await _permalink(active),
         reused=True,
+        channel_mismatch=bool(requested_channel and requested_channel != active.slack_channel_id),
+        requested_channel=requested_channel,
     )
 
 
@@ -394,6 +398,12 @@ async def _request_review(
         result = await _existing(active, auto_merge)
         if not result.success:
             return result
+        if active.kind == "standard" and channel.strip():
+            target = await _target_channel(pr_ref, pull, channel)
+            if isinstance(target, RequestResult):
+                return target
+            if target.id != active.slack_channel_id:
+                return await _existing(active, auto_merge, target.id)
         if design_review_reason:
             blockers = await review_blockers(pull)
             if blockers is None or blockers:
@@ -455,7 +465,7 @@ async def _request_review(
         winner = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if winner is None:
             raise
-        return await _existing(winner, auto_merge)
+        return await _existing(winner, auto_merge, target.id if channel.strip() else "")
     # Without its deadlines a request could wait forever on a reviewer who never approves.
     scheduled = await _schedule(
         request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
@@ -478,6 +488,7 @@ async def _request_review(
         raise
     request.slack_message_ts = message_ts
     request = await request.save()
+    await ReviewCard(request).link_on_github()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
     await DesignReview(request).start(pull, design_review_reason)
@@ -486,6 +497,7 @@ async def _request_review(
         auto_merge=request.auto_merge,
         request_id=str(request.id),
         channel=target.id,
+        channel_name=target.name,
         permalink=await _permalink(request),
     )
 
@@ -994,6 +1006,33 @@ async def settle(request: HumanReviewRequest) -> bool:
         return False
 
 
+async def _auto_merge_hold(request: HumanReviewRequest) -> str | None:
+    thread_ids = set(request.pull_request.thread_ids)
+    if request.thread_id:
+        thread_ids.add(request.thread_id)
+    try:
+        for thread_id in sorted(thread_ids):
+            thread = await index.get(thread_id)
+            if thread is None:
+                continue
+            if thread.status not in {"idle", "interrupted", "error", "busy"}:
+                return "auto-merge paused — could not verify PR thread activity"
+            if thread.status == "busy":
+                return "auto-merge paused — a PR thread has an active run"
+            client = RUNTIMES.runs_on(thread.runtime).client
+            for run_status in ("pending", "running"):
+                if await client.runs.list(thread_id, status=run_status, limit=1):
+                    return "auto-merge paused — a PR thread has an active run"
+    except Exception:
+        logger.warning(
+            "Could not check PR thread activity before auto-merge",
+            extra={"request_id": str(request.id)},
+            exc_info=True,
+        )
+        return "auto-merge paused — could not verify PR thread activity"
+    return None
+
+
 async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     readiness = await Readiness.assess(pull)
     if readiness is None:
@@ -1054,6 +1093,11 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
             return True
         if not row.auto_merge:
             row.detail = "approved — awaiting manual merge"
+            await ReviewCard(row).refresh()
+            return True
+        if hold := await _auto_merge_hold(row):
+            row.detail = hold
+            await _schedule(row, "auto_merge", _DEADLINE_RETRY)
             await ReviewCard(row).refresh()
             return True
         result = await merge_pull_request(

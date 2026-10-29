@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
@@ -127,6 +128,11 @@ def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     client = _FakeClient()
     monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
     monkeypatch.setattr(schedules, "queue", client.jobs)
+
+    async def indexed(thread_id: str) -> SimpleNamespace:
+        return SimpleNamespace(metadata=(await client.threads.get(thread_id))["metadata"])
+
+    monkeypatch.setattr(schedules.THREADS, "get", indexed)
     return client
 
 

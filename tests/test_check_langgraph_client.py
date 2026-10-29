@@ -12,13 +12,16 @@ class LangGraphClientCheckTests(unittest.TestCase):
 -import os
 +from openswe.utils.thread_ops import langgraph_client as legacy_client
 +client = legacy_client()
-@@ -20,0 +22,2 @@
+@@ -20,0 +22,5 @@
 +client = langgraph_client()
 +client = get_langgraph_client()
++from langgraph_sdk import get_client
++await get_client().threads.update(thread_id, metadata={})
++from langgraph_sdk.client import LangGraphClient
 """
         self.assertEqual(
             violations(diff.splitlines()),
-            [f"openswe/example.py:{line}: {REASON}" for line in (1, 22, 23)],
+            [f"openswe/example.py:{line}: {REASON}" for line in (1, 22, 23, 24, 25, 26)],
         )
 
     def test_allows_removal_and_unchanged_legacy_uses(self):
@@ -30,6 +33,17 @@ class LangGraphClientCheckTests(unittest.TestCase):
 -client = get_langgraph_client()
 +client = mda_client()
  value = client
+"""
+        self.assertEqual(violations(diff.splitlines()), [])
+
+    def test_allows_sdk_imports_that_are_not_the_client(self):
+        diff = """diff --git a/openswe/example.py b/openswe/example.py
+--- a/openswe/example.py
++++ b/openswe/example.py
+@@ -0,0 +1,3 @@
++from langgraph_sdk.errors import NotFoundError
++from langgraph_sdk.schema import Thread
++from langgraph_sdk import Auth
 """
         self.assertEqual(violations(diff.splitlines()), [])
 

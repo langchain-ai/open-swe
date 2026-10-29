@@ -5,9 +5,9 @@ its capture lands:
 
 - ``full``: boot from the base snapshot, run ``setup_script`` then
   ``update_script``, capture. Nightly per workspace on a LangGraph cron, and on
-  demand from an admin thread. This is the lineage reset — every update chains
-  snapshot to snapshot, and the nightly rebuild from base keeps drift from
-  accumulating.
+  demand from ``snapshotctl`` or the dashboard. This is the lineage reset —
+  every update chains snapshot to snapshot, and the nightly rebuild from base
+  keeps drift from accumulating.
 - ``update``: boot from the workspace's *current* snapshot, run only
   ``update_script`` (a ``git pull``, a dependency sync), capture. Triggered
   lazily: creating a sandbox for a workspace whose snapshot is older than
@@ -36,11 +36,12 @@ from openswe.jobs import queue
 from openswe.utils.time import parse_iso
 from openswe.workspaces.store import (
     WORKSPACES,
+    RefreshInFlightError,
     RefreshKind,
     RefreshStep,
     Workspace,
+    WorkspaceUpdate,
     capture_workspace_snapshot,
-    require_capture_support,
     script_command,
     script_log_path,
 )
@@ -282,11 +283,6 @@ async def refresh_workspace(
         return {"status": "no_update_script", "slug": slug}
     if kind == "update" and record.ready_snapshot_id is None:
         return {"status": "no_snapshot_to_update", "slug": slug}
-    try:
-        require_capture_support()
-    except RuntimeError as exc:
-        return {"status": "unsupported", "slug": slug, "error": str(exc)}
-
     base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
     # This job's own marker: its earlier claim wrote it, or queueing it did over a
     # refresh that had already gone stale. Either way the builder it names is lost.
@@ -384,6 +380,50 @@ async def refresh_workspace(
     return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
 
 
+class RefreshStartError(RuntimeError):
+    """The refresh job could not be queued."""
+
+
+async def start_refresh(record: Workspace, kind: RefreshKind = "full") -> str:
+    """Start an on-demand refresh of ``record`` and return its run id.
+
+    Raises ``ValueError`` (:class:`RefreshInFlightError` when one is already
+    running) if it cannot start now, and :class:`RefreshStartError` if the job
+    could not be queued.
+    """
+    record.assert_refreshable(kind)
+    run_id = await start_refresh_run(record.slug, kind)
+    if run_id is None:
+        raise RefreshStartError("could not start the refresh job")
+    return run_id
+
+
+async def save_definition(previous: Workspace, update: WorkspaceUpdate) -> Workspace:
+    """Save a definition change and keep the workspace's rebuilds in step with it.
+
+    A scripted workspace gets its nightly cron, and a change of repositories
+    rebuilds at once because the image preloads them. Raises ``ValueError`` for a
+    definition the store refuses, :class:`RefreshInFlightError` for a repository
+    change during a refresh, and :class:`RefreshStartError` when the rebuild could
+    not start, by which point the definition is saved.
+    """
+    repos_changed = update.repos is not None and {repo.lower() for repo in update.repos} != {
+        repo.lower() for repo in previous.repos
+    }
+    if repos_changed and previous.refresh_in_flight():
+        raise RefreshInFlightError(previous.slug, previous.refresh_run_id)
+    record = await WORKSPACES.apply_update(previous.slug, update)
+    if not record.setup_script or record.inherit_default_sandbox:
+        return record
+    await ensure_refresh_cron(record.slug)
+    if not repos_changed:
+        return record
+    run_id = await start_refresh_run(record.slug)
+    if run_id is None:
+        raise RefreshStartError("workspace was saved but its snapshot rebuild could not start")
+    return record.model_copy(update={"refresh_status": "refreshing", "refresh_run_id": run_id})
+
+
 async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None:
     """Kick off a refresh as its own background run and return its id.
 
@@ -450,14 +490,12 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     """Tail a script's live ``bash -x`` trace off the builder, or ``None``.
 
     Best-effort by design: the builder is released the moment the capture lands,
-    so an unreachable box means "no live trace", never a failed poll. Goes
-    through the provider registry rather than the LangSmith client so every
-    provider — the local one the E2E runs on included — takes this same path.
+    so an unreachable box means "no live trace", never a failed poll.
     """
-    from openswe.sandboxes.providers.registry import create_sandbox
+    from openswe.sandboxes.providers.registry import connect_existing_sandbox
 
     try:
-        backend = await create_sandbox(sandbox_id=sandbox_id)
+        backend = await connect_existing_sandbox(sandbox_id)
         result = await backend.aexecute(
             f"tail -c {LIVE_LOG_MAX_BYTES} {shlex.quote(path)} 2>/dev/null",
             timeout=LIVE_LOG_READ_TIMEOUT_SECONDS,
@@ -472,6 +510,20 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
 
 def _running_step(record: Workspace) -> RefreshStep | None:
     return next((step for step in record.refresh_steps if step.status == "running"), None)
+
+
+def _trace_location(record: Workspace) -> tuple[str, str] | None:
+    """``(builder sandbox id, log path)`` of the script running now, if any."""
+    step = _running_step(record)
+    if step is None or not step.log_path or not record.refresh_sandbox_id:
+        return None
+    return record.refresh_sandbox_id, step.log_path
+
+
+async def builder_trace(record: Workspace) -> str | None:
+    """A tail of the running script's live ``bash -x`` trace, or ``None``."""
+    location = _trace_location(record)
+    return None if location is None else await _read_builder_log(*location)
 
 
 async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, Any]:
@@ -504,10 +556,10 @@ async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, An
         return state
     # While a script runs its trace only exists on the builder; once the refresh
     # settles the builder is gone and the record holds the whole log.
-    if step is not None and step.log_path and record.refresh_sandbox_id:
-        state["output"] = await _read_builder_log(record.refresh_sandbox_id, step.log_path)
+    if (location := _trace_location(record)) is not None:
+        state["output"] = await _read_builder_log(*location)
         state["output_source"] = "builder"
-        state["output_path"] = step.log_path
+        state["output_path"] = location[1]
         state["output_truncated"] = True
     else:
         state["output"] = record.refresh_log

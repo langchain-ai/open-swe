@@ -10,13 +10,14 @@ what needs its data or credentials. The file and shell tools are this runtime's 
 in the thread's box or against its files on the backend (``rt.file_tools``). The run
 token in the context authenticates every call.
 
-None of that is built into the graph. Each graph is built once per process from what
-is the same for every run that plays it (``GraphInputs``) and shared by every run,
-thread and person, and by every read of a thread's state. A run reads its catalog
-when it starts, and its tools and middleware read it per call from the run in
-progress (``rt.backend.current_run``): the operations each model call is offered and
-each tool call runs (``rt.run_tools``), the models, the box (``rt.managed_sandbox``),
-the skills and the loop.
+None of that is built into the graph but the run's models. Each graph is built once
+per process from what is the same for every run that plays it on the same models
+(``GraphInputs``) and shared by every such run, thread and person, and by every read
+of a thread's state. A run reads its catalog when it starts, and its tools and
+middleware read it per call from the run in progress (``rt.backend.current_run``):
+the operations each model call is offered and each tool call runs (``rt.run_tools``),
+the model a call is routed to, the box (``rt.managed_sandbox``), the skills and the
+loop.
 
 The same agent runs as the async ``general-purpose`` subagent, the graph
 ``open-swe--general-purpose``, for the task workers a coordinator launches with
@@ -27,25 +28,28 @@ worker grant, adopts its own run token, and runs this agent's middleware as it.
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Self, cast
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import AgentMiddleware
+from langchain_core.language_models import BaseChatModel
 from managed_deepagents import (
     DeepAgentDefinition,
     ManagedServerRuntime,
     define_deep_agent,
+    shared_factory,
 )
+from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
 from rt.backend import Graph, OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
-    BOX,
     EXECUTE_TIMEOUT_SECONDS,
     ReplaceSandboxMiddleware,
+    box,
     opened_sandbox,
 )
 from rt.middleware import (
@@ -57,8 +61,10 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
 )
 from rt.model_calls import model_call_guards
-from rt.remote_files import FILE_TOOLS, RemoteFiles
+from rt.models import build_model
+from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
 from rt.run_tools import (
+    BackendTools,
     RunCodeInterpreter,
     RunModelCallLimit,
     RunSubagentMiddleware,
@@ -70,15 +76,16 @@ from rt.run_tools import (
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
 from rt.tools import run_id
+from runtime_api.catalog import Catalog, ModelSpec
 
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
 
-# What the graph is declared with; each run's own model takes its place per call.
+# What a graph built for no run's models, such as a read's, is declared with.
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # The in-process graphs' cap on model calls per run, for a catalog that sets none.
 _MODEL_CALL_LIMIT: Final = 5_000
-# A worker's system prompt starts as this agent's; the backend's prepends the rest.
+# A worker's system prompt starts as this agent's; each run's follows it.
 _INSTRUCTIONS: Final = Path(__file__).with_name("instructions.md").read_text()
 _WORKER_DESCRIPTION: Final = (
     "An Open SWE task worker: a full agent of its own, sharing this thread's sandbox, "
@@ -109,11 +116,12 @@ _REVIEWER_PTC_TOOLS: Final = (
 
 
 class GraphInputs(BaseModel):
-    """What a graph is built from: the graph a run plays, and where its workers report.
+    """What a graph is built from: the graph a run plays, its models, and where its
+    workers report.
 
-    Both are the same for every run of the deployment that plays the graph, so MDA
-    builds each graph once per process and shares it. Every graph has the same
-    middleware, so a thread's state reads alike through any of them.
+    They are the same for every run of the deployment that plays the graph on the same
+    models, so MDA builds each graph once per process and shares it. Every graph has
+    the same middleware, so a thread's state reads alike through any of them.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -121,6 +129,34 @@ class GraphInputs(BaseModel):
     graph: Graph = "agent"
     # Where the Agent Server reports a launched worker's run ending.
     worker_webhook: str | None = None
+    # The models the agent and its subagent are built with. What deepagents does with
+    # the graph's own model, such as summarizing a long conversation, then uses the
+    # run's model and credentials; routing may still send a call to another model.
+    model: ModelSpec | None = None
+    subagent_model: ModelSpec | None = None
+    use_gateway: bool = False
+
+    @classmethod
+    def of(cls, graph: Graph, catalog: Catalog) -> Self:
+        models = catalog.models
+        if models is None:
+            return cls(graph=graph, worker_webhook=catalog.worker_webhook)
+        return cls(
+            graph=graph,
+            worker_webhook=catalog.worker_webhook,
+            model=models.model,
+            subagent_model=models.subagent_model,
+            use_gateway=models.use_gateway,
+        )
+
+    def agent_model(self) -> BaseChatModel | str:
+        return self._built(self.model)
+
+    def sync_subagent_model(self) -> BaseChatModel | str:
+        return self._built(self.subagent_model)
+
+    def _built(self, spec: ModelSpec | None) -> BaseChatModel | str:
+        return _DEFAULT_MODEL if spec is None else build_model(spec, use_gateway=self.use_gateway)
 
 
 async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
@@ -129,8 +165,7 @@ async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
         # A read: through the agent's graph, which has every graph's shape.
         return GraphInputs()
     context = RunContext.model_validate(execution.context or {})
-    catalog = await context.run().plan()
-    return GraphInputs(graph=context.graph, worker_webhook=catalog.worker_webhook)
+    return GraphInputs.of(context.graph, context.run().planned)
 
 
 @dataclass(frozen=True)
@@ -140,12 +175,18 @@ class _Parts:
     subagents: list[SubAgent]
     middleware: list[AgentMiddleware]
     worker_middleware: list[AgentMiddleware]
+    sandbox: SandboxDefinition
+
+    def sync_subagents(self, model: BaseChatModel | str) -> list[SubAgent]:
+        """The graph's sync subagents, built with ``model``."""
+        return [{**subagent, "model": model} for subagent in self.subagents]
 
 
 def _code_mode(
-    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware
+    graph: Graph, toolsets: RunToolsets, files: FileToolsMiddleware, backend_tools: BackendTools
 ) -> RunCodeInterpreter:
-    """The graph's code mode, with every tool the run's catalog offers from code callable from it."""
+    """The graph's code mode, with every tool the run offers from code callable from it:
+    those its catalog lists, and those ``search_tools`` finds on the backend."""
     if graph == "reviewer":
         return RunCodeInterpreter(
             toolsets,
@@ -157,12 +198,17 @@ def _code_mode(
     # As the in-process agent's code mode: state per turn, subagents through `task`,
     # for a run that offers tools from code.
     return RunCodeInterpreter(
-        toolsets, active=lambda tools: bool(tools.from_code), subagents=False, mode="turn"
+        toolsets,
+        # Also for a run whose catalog leaves tools out: code mode calls those.
+        active=lambda tools: bool(tools.from_code) or tools.catalog.search_tools,
+        subagents=False,
+        mode="turn",
+        backend_tools=backend_tools,
     )
 
 
 @cache
-def _parts(inputs: GraphInputs) -> _Parts:
+def _parts(graph: Graph) -> _Parts:
     timing = FactoryTiming()
     # Called as the run in progress: the graph serves every run.
     backend = OpenSweBackend()
@@ -176,6 +222,8 @@ def _parts(inputs: GraphInputs) -> _Parts:
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     toolsets = RunToolsets(backend, files)
+    # What the run calls that its catalog leaves out, as the backend names it.
+    backend_tools = BackendTools(backend)
     skills = RunSkillsMiddleware(backend, skill_files)
     replace_sandbox = ReplaceSandboxMiddleware(backend)
     # The backend's transcript and usage see every reply and every tool call.
@@ -184,13 +232,12 @@ def _parts(inputs: GraphInputs) -> _Parts:
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
         IncidentEvidenceMiddleware(backend),
     ]
-    subagent = _SUBAGENTS[inputs.graph]
+    subagent = _SUBAGENTS[graph]
     subagents: list[SubAgent] = [
         {
             "name": subagent,
             "description": subagent_description(subagent),
             "system_prompt": subagent_prompt(subagent),
-            "model": _DEFAULT_MODEL,
             "tools": [],
             "middleware": cast(
                 list[AgentMiddleware],
@@ -211,37 +258,42 @@ def _parts(inputs: GraphInputs) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, opened_sandbox),
+            BackendRunMiddleware(backend, opened_sandbox, read_ahead=[skill_files.list_ahead]),
             replace_sandbox,
             *reports,
             skills,
             files,
             task_retry(),
-            RunToolsMiddleware(toolsets),
-            _code_mode(inputs.graph, toolsets, files),
+            RunToolsMiddleware(toolsets, backend_tools=backend_tools),
+            _code_mode(graph, toolsets, files, backend_tools),
             DescribedToolsMiddleware(backend),
             # The coding agent's browser, a LangSmith browser per thread the dashboard
             # shows; the deployment's workspace needs the LangSmith browser beta.
-            ReportedBrowserMiddleware(backend, enabled=inputs.graph == "agent"),
+            ReportedBrowserMiddleware(backend, enabled=graph == "agent"),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             *model_call_guards(),
         ],
     )
     timing.lap("middleware")
-    timing.log(graph_name=inputs.graph, subagents=len(subagents) + 1, middleware=len(middleware))
+    timing.log(graph_name=graph, subagents=len(subagents) + 1, middleware=len(middleware))
     return _Parts(
         subagents=subagents,
         middleware=middleware,
         worker_middleware=[*middleware, AsyncWorkerLaunchMiddleware(backend)],
+        # A run without MDA's box keeps the graph's own files where its file tools are.
+        sandbox=box(
+            RunArtifacts(backend, run_id, lambda: backend.run.catalog.files.artifacts_root)
+        ),
     )
 
 
-# `mda build` reads the agent's name without running this factory, so its body
-# stays assignments and one `return define_deep_agent(...)`.
-async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
-    inputs = await _inputs(runtime)
-    parts = _parts(inputs)
-    sync_subagents: list[SubAgent] = parts.subagents
+# MDA builds this once per distinct inputs, from them alone, and shares its graph.
+# `mda build` reads the agent's name without running it, so its body stays
+# assignments and one `return define_deep_agent(...)`.
+@shared_factory(_inputs)
+def agent(inputs: GraphInputs) -> DeepAgentDefinition:
+    parts = _parts(inputs.graph)
+    sync_subagents: list[SubAgent] = parts.sync_subagents(inputs.sync_subagent_model())
     worker: ManagedAsyncSubAgent = {
         # MDA's build reads `name` and `async` as literals after any spread.
         **({"webhook": inputs.worker_webhook} if inputs.worker_webhook else {}),
@@ -257,15 +309,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     return define_deep_agent(
         name="open-swe",
         replicate_traces=False,
-        model=_DEFAULT_MODEL,
+        model=inputs.agent_model(),
         context_schema=RunContext,
-        # MDA compiles the graph once per inputs and shares it; nothing in it is a run's.
-        _openswe_graph_inputs=inputs.model_dump(mode="json"),
         # The thread's box, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
         # same box. Which box, and whether a run has one, is the run's catalog's: a
         # worker's catalog is its coordinator's, so it shares the coordinator's box.
-        sandbox=BOX,
+        sandbox=parts.sandbox,
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
         middleware=parts.worker_middleware,

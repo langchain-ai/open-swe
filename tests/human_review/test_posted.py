@@ -264,6 +264,7 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
 async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock, skip: str
 ) -> None:
+    monkeypatch.setattr(ReviewCard, "link_on_github", AsyncMock())
     monkeypatch.setattr(
         design.DesignReview,
         "settings",

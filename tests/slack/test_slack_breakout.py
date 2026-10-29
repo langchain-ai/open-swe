@@ -19,7 +19,6 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
             "id": channel_id,
             "name": channel_id.lower(),
             "is_channel": True,
-            "num_members": 10,
             "is_private": private,
             "is_ext_shared": False,
             "is_pending_ext_shared": False,
@@ -68,6 +67,10 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     ("text", "expected"),
     [
         ("<@U0BOT> /breakout fix it", Command("fix it")),
+        ("<@U0BOT> /breakout in <#C2> fix it", Command("fix it", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in <#C2>", Command("", "<#C2>", "C2")),
+        ("<@U0BOT> /breakout in #target fix it", Command("fix it", "#target")),
+        ("<@U0BOT> /breakout in the parser", Command("in the parser")),
         (
             "details <@U0BOT> /breakout <#C2|target> fix it",
             Command("fix it", "<#C2|target>", "C2", "details"),
@@ -200,30 +203,6 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     )
     assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("count", [50, None])
-async def test_default_breakout_waits_for_destination_in_large_or_unknown_channel(
-    monkeypatch, public_channels, count
-):
-    channel = _channel("C1", private=False)
-    assert channel is not None
-    channel.payload["num_members"] = count
-    public_channels.side_effect = None
-    public_channels.return_value = channel
-    posted = _patch_slack(monkeypatch)
-    start = AsyncMock()
-    monkeypatch.setattr(breakout, "_start", start)
-
-    await breakout.process_slack_breakout(_request(), Command("fix it"), None)
-
-    start.assert_not_awaited()
-    assert "destination" in posted.ephemeral.await_args.args[2]
-
-    await breakout.process_slack_breakout(_request(), Command("fix it", channel_id="C1"), None)
-
-    start.assert_awaited_once()
 
 
 @pytest.mark.asyncio

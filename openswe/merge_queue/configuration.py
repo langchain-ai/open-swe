@@ -6,9 +6,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 from sqlalchemy import select
 
-from openswe.config import ENV
 from openswe.database import postgres
-from openswe.merge_queue.admission import QueuePolicy
+from openswe.merge_queue.admission import QueuePolicy, digest
 from openswe.workspaces.rows import WorkspaceRow
 
 
@@ -27,15 +26,14 @@ class QueueConfiguration(BaseModel):
     retention_days: int = Field(default=90, ge=7, le=365)
 
     @classmethod
-    async def load(cls) -> Self | None:
+    async def load(cls, workspace_id: UUID | None = None) -> Self | None:
         async with postgres.session() as session:
-            rows = (
-                await session.execute(
-                    select(WorkspaceRow.id, WorkspaceRow.merge_queue_config)
-                    .where(WorkspaceRow.merge_queue_config.is_not(None))
-                    .limit(2)
-                )
-            ).all()
+            query = select(WorkspaceRow.id, WorkspaceRow.merge_queue_config).where(
+                WorkspaceRow.merge_queue_config.is_not(None)
+            )
+            if workspace_id is not None:
+                query = query.where(WorkspaceRow.id == workspace_id)
+            rows = (await session.execute(query.limit(2))).all()
         if not rows:
             return None
         if len(rows) != 1:
@@ -45,10 +43,37 @@ class QueueConfiguration(BaseModel):
             raise ValueError("Queue configuration must be a JSON object")
         return cls.model_validate({**config, "workspace_id": workspace_id})
 
+    @property
+    def generation(self) -> str:
+        settings = self.model_dump(mode="json")
+        settings["operator_emails"] = sorted(self.operator_emails)
+        return digest(settings)
+
+    @property
+    def native_trust(self) -> str:
+        return digest(
+            {
+                **self.model_dump(
+                    mode="json",
+                    include={
+                        "workspace_id",
+                        "repository",
+                        "repository_id",
+                        "mode",
+                        "dispatch_url",
+                        "workflow_digest",
+                        "check_app_id",
+                    },
+                ),
+                "checks": self.policy.model_dump(mode="json")["checks"],
+                "dispatch_actor_id": self.policy.validation.dispatch_actor_id
+                if self.policy.validation is not None
+                else None,
+            }
+        )
+
     @model_validator(mode="after")
     def validate_controller(self) -> Self:
-        if ENV.SANDBOX_TYPE.get() == "local":
-            raise ValueError("The queue requires isolated agent sandboxes")
         if self.mode == "custom" and (
             self.policy.validation is None
             or not self.policy.checks

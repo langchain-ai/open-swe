@@ -40,7 +40,9 @@ function renderMenu(isAdmin = false) {
       />
     </QueryClientProvider>
   )
-  fireEvent.click(screen.getByRole("button", { name: /octocat/i }))
+  fireEvent.keyDown(screen.getByRole("button", { name: /octocat/i }), {
+    key: "Enter",
+  })
 }
 
 afterEach(() => {
@@ -79,7 +81,9 @@ describe("SidebarUserMenu", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
-    fireEvent.click(screen.getByRole("button", { name: /octocat/i }))
+    fireEvent.keyDown(screen.getByRole("button", { name: /octocat/i }), {
+      key: "Enter",
+    })
     fireEvent.click(screen.getByRole("menuitem", { name: "Report an issue" }))
     expect(screen.getAllByRole("status")[0]?.textContent).toBe("")
   })

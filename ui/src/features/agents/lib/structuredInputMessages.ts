@@ -13,6 +13,7 @@ export type StructuredSenderKind = "person" | "system"
 const SILENT_SENDERS = new Set([
   "system:sender-context",
   "system:dashboard-handoff",
+  "system:slack-note",
 ])
 
 export function isSilentSender(sender: string): boolean {
