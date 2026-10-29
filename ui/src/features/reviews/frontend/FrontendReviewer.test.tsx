@@ -43,6 +43,7 @@ const run: FrontendReviewRun = {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 it("does not present dummy authentication as captured coverage or AI review", () => {
@@ -160,6 +161,100 @@ it("shows all saved states together and preserves route queries in page links", 
     ).toBe("https://pr.example.com/projects/42?tab=traces&filter=success")
     expect(card.queryByRole("link", { name: "Base" })).toBeNull()
   }
+})
+
+it("links recap notes to their screenshot region and clears the selection", async () => {
+  vi.stubGlobal(
+    "Image",
+    class {
+      naturalWidth = 100
+      naturalHeight = 100
+      src = ""
+      async decode() {}
+    }
+  )
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fixture")
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () => new Response(new Blob(), { status: 200 })
+  )
+  const media = "/dashboard/api/reviews/acme/app/7/frontend-reviews/run/media/"
+  const note = {
+    title: "Clipped label",
+    body: "The updated button cuts off its label.",
+    x: 20,
+    y: 30,
+    width: 40,
+    height: 10,
+  }
+  const scenario: FrontendScenario = {
+    id: "button",
+    title: "Button hover",
+    path: "/",
+    status: "complete",
+    before_url: `${media}before.png`,
+    after_url: `${media}after.png`,
+    diff_url: null,
+    mask_url: null,
+    before_video_url: null,
+    after_video_url: null,
+    width: 100,
+    height: 100,
+    metrics: null,
+    regions: [],
+    mask_rects: [],
+    tile_size: 32,
+    min_region_pixels: 4,
+    annotations: [note],
+    error: null,
+  }
+  render(
+    <FrontendReportView
+      run={{
+        ...run,
+        status: "complete",
+        error: null,
+        report: {
+          ...run.report!,
+          ai_review_status: "complete",
+          scenarios: [
+            scenario,
+            { ...scenario, id: "other", title: "Other state" },
+          ],
+        },
+      }}
+    />
+  )
+  const card = within(screen.getByRole("region", { name: scenario.title }))
+  await card.findByRole("region", { name: "Visual comparison" })
+  expect(card.queryByRole("img", { name: /Clipped label/ })).toBeNull()
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Inspect Clipped label" })[0]!
+  )
+  expect(
+    screen
+      .getAllByRole("button", { name: "Inspect Clipped label" })[0]!
+      .getAttribute("aria-pressed")
+  ).toBe("true")
+  expect(
+    card
+      .getAllByRole("status")
+      .some((item) => item.textContent?.includes(note.body))
+  ).toBe(true)
+  const marker = card.getByRole("img", {
+    name: "After screenshot: Clipped label",
+  })
+  expect(marker.getAttribute("style")).toContain(
+    "left: 20%; top: 30%; width: 40%; height: 10%"
+  )
+  expect(
+    card.getByRole("img", { name: "Before screenshot: Clipped label" })
+  ).toBeTruthy()
+  const other = within(screen.getByRole("region", { name: "Other state" }))
+  expect(other.queryByRole("img", { name: /Clipped label/ })).toBeNull()
+  fireEvent.click(card.getByRole("button", { name: "Clear highlight" }))
+  expect(card.queryByRole("img", { name: /Clipped label/ })).toBeNull()
 })
 
 it("shows capture as unavailable without offering a blocked start", async () => {

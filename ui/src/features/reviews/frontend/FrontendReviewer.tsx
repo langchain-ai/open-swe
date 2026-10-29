@@ -4,7 +4,7 @@ import { Card } from "@langchain/macaw-components/Card"
 import { Link as ExternalLink } from "@langchain/macaw-components/Link"
 import { Select } from "@langchain/macaw-components/Select"
 import { useQuery } from "@tanstack/react-query"
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { Link } from "@tanstack/react-router"
 
@@ -15,6 +15,7 @@ import {
 import {
   frontendReviewApi,
   frontendReviewKey,
+  type FrontendAnnotation,
   type FrontendReviewRun,
 } from "./api"
 import { EvidenceViewer } from "./EvidenceViewer"
@@ -117,8 +118,12 @@ export function FrontendReportView({
   const report = run.report
   const scenarios = report?.scenarios ?? []
   const sections = useRef(new Map<string, HTMLElement>())
+  const [selection, setSelection] = useState<{
+    scenarioId: string
+    note: FrontendAnnotation
+  } | null>(null)
   const notes = scenarios.flatMap((scenario) =>
-    scenario.annotations.map((note) => ({ ...note, scenario }))
+    scenario.annotations.map((note) => ({ note, scenario }))
   )
   const paired = scenarios.filter(
     (item) => item.status === "complete" && item.before_url && item.after_url
@@ -167,18 +172,23 @@ export function FrontendReportView({
           </p>
           {report.ai_review_status === "complete" && notes.length > 0 && (
             <div className="flex flex-wrap gap-space-2">
-              {notes.slice(0, 3).map((note, index) => (
+              {notes.slice(0, 3).map(({ note, scenario }, index) => (
                 <Button
-                  key={`${note.scenario.id}:${index}`}
+                  key={`${scenario.id}:${index}`}
                   size="sm"
                   color="secondary"
                   variant="plain"
                   aria-label={`Inspect ${note.title}`}
-                  onClick={() =>
-                    sections.current
-                      .get(note.scenario.id)
-                      ?.scrollIntoView({ block: "start", behavior: "smooth" })
+                  aria-pressed={
+                    selection?.scenarioId === scenario.id &&
+                    selection.note === note
                   }
+                  onClick={() => {
+                    setSelection({ scenarioId: scenario.id, note })
+                    sections.current
+                      .get(scenario.id)
+                      ?.scrollIntoView({ block: "start", behavior: "smooth" })
+                  }}
                 >
                   {note.title} ↗
                 </Button>
@@ -299,7 +309,13 @@ export function FrontendReportView({
               ))}
             </div>
           ) : null}
-          <EvidenceViewer scenario={scenario} />
+          <EvidenceViewer
+            scenario={scenario}
+            annotation={
+              selection?.scenarioId === scenario.id ? selection.note : undefined
+            }
+            onClearAnnotation={() => setSelection(null)}
+          />
           {scenario.actions?.length || scenario.annotations.length ? (
             <details className="border-t border-default px-space-4 py-space-2 text-xs text-secondary">
               <summary className="w-fit cursor-pointer">

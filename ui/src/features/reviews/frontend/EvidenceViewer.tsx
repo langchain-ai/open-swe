@@ -1,9 +1,14 @@
 import { Card } from "@langchain/macaw-components/Card"
+import { Button } from "@langchain/macaw-components/Button"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Slider } from "@langchain/macaw-components/Slider"
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 
-import { evidenceMediaUrl, type FrontendScenario } from "./api"
+import {
+  evidenceMediaUrl,
+  type FrontendAnnotation,
+  type FrontendScenario,
+} from "./api"
 import { ComparisonViewport } from "./ComparisonViewport"
 
 type ViewMode = "split" | "swipe" | "onion"
@@ -28,27 +33,51 @@ async function readImage(url: string, signal: AbortSignal) {
 function Screenshot({
   image,
   label,
+  annotation,
 }: {
   image: HTMLImageElement
   label: string
+  annotation?: FrontendAnnotation
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     ref.current?.getContext("2d")?.drawImage(image, 0, 0)
   }, [image])
   return (
-    <canvas
-      ref={ref}
-      width={image.naturalWidth}
-      height={image.naturalHeight}
-      className="block h-auto w-full"
-      role="img"
-      aria-label={label}
-    />
+    <div className="relative">
+      <canvas
+        ref={ref}
+        width={image.naturalWidth}
+        height={image.naturalHeight}
+        className="block h-auto w-full"
+        role="img"
+        aria-label={label}
+      />
+      {annotation && (
+        <div
+          role="img"
+          aria-label={`${label}: ${annotation.title}`}
+          className="pointer-events-none absolute border-2 border-focus"
+          style={{
+            left: `${(annotation.x / image.naturalWidth) * 100}%`,
+            top: `${(annotation.y / image.naturalHeight) * 100}%`,
+            width: `${(annotation.width / image.naturalWidth) * 100}%`,
+            height: `${(annotation.height / image.naturalHeight) * 100}%`,
+          }}
+        />
+      )}
+    </div>
   )
 }
 
-export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
+interface EvidenceViewerProps {
+  scenario: FrontendScenario
+  annotation?: FrontendAnnotation
+  onClearAnnotation?: () => void
+}
+
+export function EvidenceViewer(props: EvidenceViewerProps) {
+  const { scenario } = props
   const container = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(
     () => typeof IntersectionObserver === "undefined"
@@ -70,7 +99,7 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
   return (
     <div ref={container} className="min-w-0">
       {visible ? (
-        <LoadedEvidence scenario={scenario} />
+        <LoadedEvidence {...props} />
       ) : (
         <div
           className="flex min-h-[180px] items-center justify-center text-sm text-secondary"
@@ -86,7 +115,11 @@ export function EvidenceViewer({ scenario }: { scenario: FrontendScenario }) {
   )
 }
 
-function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
+function LoadedEvidence({
+  scenario,
+  annotation,
+  onClearAnnotation,
+}: EvidenceViewerProps) {
   const [mode, setMode] = useState<ViewMode>("split")
   const [swipe, setSwipe] = useState(50)
   const [opacity, setOpacity] = useState(50)
@@ -187,7 +220,11 @@ function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
 
   const combined = (
     <div className="relative isolate">
-      <Screenshot image={loaded.after} label="After screenshot" />
+      <Screenshot
+        image={loaded.after}
+        label="After screenshot"
+        annotation={annotation}
+      />
       <div
         className="pointer-events-none absolute inset-0"
         style={
@@ -196,7 +233,11 @@ function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
             : { opacity: 1 - opacity / 100 }
         }
       >
-        <Screenshot image={loaded.before} label="Before screenshot" />
+        <Screenshot
+          image={loaded.before}
+          label="Before screenshot"
+          annotation={annotation}
+        />
       </div>
       {mode === "swipe" && (
         <div
@@ -254,7 +295,26 @@ function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
 
   return (
     <div role="region" aria-label="Visual comparison" className="min-w-0">
+      {annotation && (
+        <div className="flex flex-col gap-space-2 border-y border-default bg-surface-level-3 px-space-4 py-space-2 sm:flex-row sm:items-start sm:justify-between">
+          <p role="status" className="text-xs text-secondary">
+            <span className="font-medium text-primary">{annotation.title}</span>
+            {" · "}
+            {annotation.body}
+          </p>
+          <Button
+            size="sm"
+            color="secondary"
+            variant="plain"
+            className="self-start"
+            onClick={onClearAnnotation}
+          >
+            Clear highlight
+          </Button>
+        </div>
+      )}
       <ComparisonViewport
+        key={JSON.stringify(annotation)}
         width={loaded.before.naturalWidth}
         height={loaded.before.naturalHeight}
         panes={
@@ -267,6 +327,7 @@ function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
                     <Screenshot
                       image={loaded.before}
                       label="Before screenshot"
+                      annotation={annotation}
                     />
                   ),
                 },
@@ -274,7 +335,11 @@ function LoadedEvidence({ scenario }: { scenario: FrontendScenario }) {
                   id: "after",
                   label: "After",
                   content: (
-                    <Screenshot image={loaded.after} label="After screenshot" />
+                    <Screenshot
+                      image={loaded.after}
+                      label="After screenshot"
+                      annotation={annotation}
+                    />
                   ),
                 },
               ]

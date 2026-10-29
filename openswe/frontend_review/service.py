@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 _SHA = re.compile(r"[0-9a-fA-F]{40,64}")
 MAX_ASSET_BYTES = 8 * 1024 * 1024
-MAX_RUN_BYTES = 32 * 1024 * 1024
+MAX_RUN_ASSETS = 40
+MAX_RUN_BYTES = MAX_RUN_ASSETS * MAX_ASSET_BYTES
 
 
 class FrontendReviewConflict(ValueError):
@@ -262,7 +263,7 @@ def _validate_report(
         or report.assessment_error is not None
     ):
         raise ValueError("Capture cannot publish an AI assessment")
-    if len(assets) > 40 or sum(len(asset.content) for asset in assets) > MAX_RUN_BYTES:
+    if len(assets) > MAX_RUN_ASSETS or sum(len(asset.content) for asset in assets) > MAX_RUN_BYTES:
         raise ValueError("Frontend evidence exceeds the per-run limit")
     by_name = {asset.name: asset for asset in assets}
     if len(by_name) != len(assets):

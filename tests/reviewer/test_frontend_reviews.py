@@ -1,4 +1,5 @@
 import io
+import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -516,6 +517,37 @@ def test_publishing_rejects_external_media_and_mismatched_capture_dimensions() -
     report.ai_review_status = "complete"
     with pytest.raises(ValueError, match="Capture cannot publish an AI assessment"):
         service._validate_report(report, _assets(), complete=True)
+
+
+def test_image_heavy_routes_and_interaction_states_fit_the_evidence_budget() -> None:
+    output = io.BytesIO()
+    Image.frombytes("RGB", (1440, 1000), random.Random(0).randbytes(1440 * 1000 * 3)).save(
+        output, format="PNG"
+    )
+    png = output.getvalue()
+    report = _report()
+    report.scenarios = []
+    assets = []
+    for index in range(10):
+        scenario = _report().scenarios[0]
+        scenario.id = f"state-{index}"
+        scenario.interaction = index >= 5
+        scenario.width, scenario.height = 1440, 1000
+        scenario.metrics = DifferenceMetrics(
+            changed_pixels=0, total_pixels=1440000, changed_ratio=0
+        )
+        for field in ("before_url", "after_url", "diff_url", "mask_url"):
+            name = f"{index}-{field}.png"
+            setattr(scenario, field, name)
+            assets.append(EvidenceAsset(name, "image/png", png))
+        report.scenarios.append(scenario)
+    service._validate_report(report, assets, complete=True)
+    with pytest.raises(ValueError, match="per-run limit"):
+        service._validate_report(
+            report, [*assets, EvidenceAsset("extra.png", "image/png", png)], complete=True
+        )
+    with pytest.raises(ValueError, match="asset exceeds its size limit"):
+        EvidenceAsset("oversized.png", "image/png", bytes(8 * 1024 * 1024 + 1)).validate()
 
 
 @pytest.mark.usefixtures("registry_db")
