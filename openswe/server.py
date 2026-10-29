@@ -31,6 +31,7 @@ from runtime_api.catalog import (
     CliResultRules,
     InboxSpec,
     LoopRules,
+    ModelSpec,
     ReplyRules,
     RoutingRules,
 )
@@ -57,7 +58,9 @@ from langchain_core.tools import BaseTool
 from langchain_core.tools import tool as as_tool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
+from pydantic import JsonValue, TypeAdapter
 
+from openswe.agent_api.preparation import AgentPreparation
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
@@ -1110,6 +1113,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         bridge_client: BridgeClient | None = None,
         tool_catalog_note: str = "",
     ) -> None:
+        self.planning: AgentPreparation | None = None
         self._tool_catalog_note = tool_catalog_note
         self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
@@ -1129,6 +1133,48 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._sole_writer = sole_writer
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
+
+    @classmethod
+    def from_plan(
+        cls,
+        plan: AgentPreparation,
+        config: RunnableConfig,
+        *,
+        profile_login: str | None,
+        credential_login: str | None,
+        admin_workspaces: bool,
+        sole_writer: bool,
+        model_selection: ModelSelectionMiddleware,
+    ) -> Self:
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None or cfg.resolved_agent_model_id is None:
+            raise ValueError("Agent preparation needs a thread and resolved model")
+        model_id = cfg.resolved_agent_model_id
+        prepared = cls(
+            thread_id=cfg.thread_id,
+            config=config,
+            profile_login=profile_login,
+            credential_login=credential_login,
+            repo_instructions=plan.repo_instructions,
+            model_id=model_id,
+            effort=cfg.resolved_agent_effort,
+            title_model=_make_model_or_defer(
+                plan.title_model.model_id, use_gateway=plan.use_gateway, **plan.title_model.kwargs
+            ),
+            source=cfg.source or "dashboard",
+            user_email=cfg.user_email or "",
+            draft_prs=cfg.draft_prs is True,
+            admin_workspaces=admin_workspaces,
+            sole_writer=sole_writer,
+            model_selection=model_selection,
+            routing_defaults=plan.routing_defaults,
+            requested_models=plan.requested_models,
+            saved_requested_model=plan.saved_requested_model,
+            bridge_client=plan.bridge_client,
+            tool_catalog_note=plan.tool_catalog_note,
+        )
+        prepared.planning = plan
+        return prepared
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
@@ -1576,6 +1622,60 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
 
+async def agent_preparation(config: RunnableConfig, plan: AgentPreparation) -> ToolSurface:
+    """Build only per-turn hooks, checking identity and access again on this replica."""
+    cfg = RunConfig.from_config(config)
+    profile_login = await resolve_github_login(as_json_object(config))
+    credential_login = None
+    try:
+        credential_login = await private_credential_login(config)
+    except Exception:
+        logger.exception("Cannot resolve thread credential scope during preparation")
+    admin_workspaces = await _admin_thread(config, profile_login)
+    access = await resolve_access(cfg, login=profile_login)
+    config["configurable"]["image_model_fallback_enabled"] = plan.image_fallback
+    config["metadata"] = {
+        **(config.get("metadata") or {}),
+        "model_routing_applied": plan.routing_mode is not None,
+        **({"model_routing_mode": plan.routing_mode} if plan.routing_mode else {}),
+    }
+    preparation = PrepareAgentRunMiddleware.from_plan(
+        plan,
+        config,
+        profile_login=profile_login,
+        credential_login=credential_login,
+        admin_workspaces=admin_workspaces,
+        sole_writer=access.sole,
+        model_selection=ModelSelectionMiddleware(
+            {
+                **{route: pair[0] for route, pair in plan.routing_defaults.items()},
+                "default": cfg.resolved_agent_model_id or "",
+            },
+            routing_mode=plan.routing_mode,
+        ),
+    )
+    return ToolSurface(
+        inbox=plan.inbox,
+        middleware=[
+            preparation,
+            *(
+                [
+                    ReviewGuideMiddleware(
+                        thread_id=cfg.thread_id, approve_ts=cfg.review_guide_approve_ts
+                    )
+                ]
+                if plan.review_guide and cfg.thread_id is not None
+                else []
+            ),
+            TranscriptMiddleware(),
+            RequireUserReplyMiddleware(
+                "slack_reply", "slack_no_reply_needed", initial_surface=plan.reply_surface
+            ),
+            *([RequireCliResultMiddleware("cli_result")] if plan.cli_result else []),
+        ],
+    )
+
+
 async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     """Plan an agent run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     configurable = config.get("configurable") or {}
@@ -1824,7 +1924,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
     configurable["resolved_agent_effort"] = profile_effort
-    user_email = cfg.user_email or ""
 
     cli_result_required = bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
@@ -1981,38 +2080,45 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         "default": model_id,
     }
     model_selection = ModelSelectionMiddleware(route_model_ids, routing_mode=model_routing_mode)
-    title_model = _make_model_or_defer(
-        title_model_id,
-        use_gateway=use_gateway,
-        **title_model_kwargs,
-    )
-    run_preparation = PrepareAgentRunMiddleware(
-        credential_login=credential_login,
-        thread_id=thread_id,
-        config=config,
-        profile_login=profile_login,
-        repo_instructions=repo_instructions,
+    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
+    inbox = InboxSpec(
+        events=True,
+        surface=initial_surface,
         model_id=model_id,
-        effort=profile_effort,
-        title_model=title_model,
-        source=source,
-        user_email=user_email,
-        draft_prs=sender_draft_prs,
+        image_fallback=vision_model is not None,
+    )
+    run_preparation = PrepareAgentRunMiddleware.from_plan(
+        AgentPreparation(
+            repo_instructions=repo_instructions,
+            title_model=ModelSpec(
+                model_id=title_model_id,
+                kwargs=TypeAdapter(dict[str, JsonValue]).validate_python(title_model_kwargs),
+            ),
+            use_gateway=bool(use_gateway),
+            routing_defaults=routing_defaults,
+            routing_mode=model_routing_mode,
+            requested_models=None if requested_models is None else dict(requested_models),
+            saved_requested_model=thread_settings.get("requested_model"),
+            bridge_client=bridge_client,
+            tool_catalog_note=mcp_tools.catalog_note if isinstance(mcp_tools, MCPTools) else "",
+            inbox=inbox,
+            reply_surface=initial_surface,
+            review_guide=walkthrough is not None,
+            cli_result=cli_result_required,
+            image_fallback=vision_model is not None,
+        ),
+        config,
+        credential_login=credential_login,
+        profile_login=profile_login,
         admin_workspaces=admin_thread,
         sole_writer=tool_access.sole,
         model_selection=model_selection,
-        routing_defaults=routing_defaults,
-        requested_models=requested_models,
-        saved_requested_model=thread_settings.get("requested_model"),
-        bridge_client=bridge_client,
-        tool_catalog_note=mcp_tools.catalog_note if isinstance(mcp_tools, MCPTools) else "",
     )
     subagent_tools = [
         tool
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
-    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
@@ -2090,12 +2196,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
         )
     )
-    surface.inbox = InboxSpec(
-        events=True,
-        surface=initial_surface,
-        model_id=model_id,
-        image_fallback=vision_model is not None,
-    )
+    surface.inbox = inbox
     surface.files = files.backend
     surface.artifacts_root = files.artifacts_root
     surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
