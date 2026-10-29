@@ -37,9 +37,9 @@ from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from openswe.slack.channels import SlackChannel
+from openswe.slack.command_intent import interpret_commands
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
-from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.slack.staged_files import (
@@ -889,7 +889,9 @@ async def _process_slack_mention_impl(
         ]
         if not message_update:
             source_messages = context_messages
-    parsed = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
+    parsed = request.command_message
+    if parsed is None or parsed.text != text:
+        parsed = await interpret_commands(text, bot_user_id, common.SLACK_BOT_USERNAME)
     performance_command = (
         parsed.performance_model
         and not message_update
@@ -1128,6 +1130,9 @@ async def _process_slack_mention_impl(
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
             request.turn_context,
+            prompt("slack/command-handoff", commands=parsed.handoff_commands)
+            if parsed.handoff_commands
+            else "",
             prompt("runs/slack-review-request", pull_request=review_card.pull_request)
             if review_card is not None
             else "",
