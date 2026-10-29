@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import failures
+from openswe.slack.request import SlackRequest
 from openswe.slack.retry import SlackRetry
 
 
@@ -78,3 +79,34 @@ async def test_run_slack_task_reports_failure(monkeypatch: pytest.MonkeyPatch) -
     await failures.run_slack_task(_target(), task())
 
     post_reply.assert_awaited_once()
+
+
+@pytest.mark.parametrize("has_thread", [False, True])
+@pytest.mark.parametrize("origin", ["button", "reaction", "message", "retry"])
+async def test_failure_retry_only_replays_explicitly_replayable_messages(
+    monkeypatch: pytest.MonkeyPatch, origin: str, has_thread: bool
+) -> None:
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "retry-test-secret-at-least-32-bytes")
+    post_reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(failures, "post_slack_thread_reply", post_reply)
+    request = SlackRequest(
+        channel_id="C1",
+        thread_ts="1.0",
+        event_ts="2.0",
+        original_message_ts="1.5" if origin != "button" else "",
+        retry_message_ts="1.5" if origin in {"message", "retry"} else "",
+        user_id="U1",
+        thread_id="thread-1" if has_thread else None,
+    )
+
+    await failures.report_slack_failure(request.target, RuntimeError("boom"))
+
+    assert post_reply.await_args is not None
+    blocks = post_reply.await_args.kwargs["blocks"]
+    if origin in {"button", "reaction"} and not has_thread:
+        assert blocks is None
+        return
+    token = json.loads(blocks[1]["elements"][0]["value"])["response"]
+    retry = SlackRetry.parse(token)
+    assert retry is not None
+    assert retry.message_ts == ("1.5" if origin in {"message", "retry"} else "")

@@ -143,6 +143,7 @@ class SlackRetry(BaseModel):
                 event_ts=f"{datetime.now(UTC).timestamp():.6f}",
                 event_id=f"slack-retry:{uuid7()}",
                 original_message_ts=self.message_ts,
+                retry_message_ts=self.message_ts,
                 user_id=self.user_id,
                 text=text,
                 attachments=attachments,
