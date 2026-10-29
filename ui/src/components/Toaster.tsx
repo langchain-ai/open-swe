@@ -45,7 +45,7 @@ export function Toaster(props: ToasterProps) {
         unstyled: true,
         classNames: {
           toast:
-            "flex w-[var(--width)] items-center gap-space-2 rounded-md border p-space-3 text-primary shadow-lg",
+            "flex w-[var(--width)] items-center gap-space-2 rounded-md border p-space-3 text-primary shadow-lg data-[expanded=false]:data-[front=false]:*:opacity-0",
           default: "border-subtle bg-surface-level-2",
           loading: "border-subtle bg-surface-level-2",
           info: "border-brand-subtle bg-brand-subtle",
