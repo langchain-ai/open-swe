@@ -49,7 +49,9 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, JsonValue
 from rt.backend import Run, current_run
+from rt.box_setup import BoxUnavailableError
 from rt.managed_sandbox import definition, opened_sandbox
+from rt.outbox import Outbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
@@ -61,6 +63,9 @@ from runtime_api.catalog import (
     SubagentSpec,
     ToolSpec,
 )
+from runtime_api.endpoint import Endpoint
+from runtime_api.loop import SANDBOX_UNREACHABLE
+from runtime_api.operations import RunRequest
 from runtime_api.reports import Reports
 from runtime_api.tool_search import ResolvedTool, ToolSpecs
 
@@ -77,6 +82,8 @@ def _thread(thread_id: str) -> ManagedRunConfig:
 
 # Each run's catalog by its token, whose tool specs the fake backend reads to it.
 _CATALOGS: dict[str, Catalog] = {}
+# What the fake backend's preparation writes to each run's state.
+_PREPARE_UPDATE: dict[str, JsonValue] = {}
 
 
 def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
@@ -155,6 +162,7 @@ def backend_calls(
         calls.append((hook, headers["Authorization"], operation))
         if hook == "prepare":
             prepared.append((json.get("sandbox_id"), json.get("sandbox_error")))
+            return httpx2.Response(200, request=request, json={"update": _PREPARE_UPDATE})
         if hook == "browser":
             browsers.append((json["browser"], json["opened"]))
         if hook == "operation":
@@ -263,21 +271,24 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
 async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
 ) -> None:
-    """The graph is compiled once, yet each run opens its own thread's box before it
+    """The graph is compiled once, yet each run asks for its own thread's box before it
     prepares, and its shell reaches that box, with the options its own catalog gives."""
     opened: set[tuple[object, object]] = set()
+
+    def claim(sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object) -> str:
+        thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
+        opened.add((thread_id, sandbox.options.get("snapshot_id")))
+        return f"box-{thread_id}"
 
     def resolve(
         sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
     ) -> StateBackend:
-        configurable = (config or {}).get("configurable") or {}
-        thread_id = configurable.get("thread_id")
-        opened.add((thread_id, sandbox.options.get("snapshot_id")))
         box = MagicMock(spec=StateBackend)
-        box.id = f"box-{thread_id}"
+        box.id = claim(sandbox, config)
         box.aexecute = AsyncMock(return_value=ExecuteResponse(output="ok", exit_code=0))
         return box
 
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", claim)
     monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
     monkeypatch.setattr(
         agent,
@@ -318,18 +329,15 @@ async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_report
     }
     attempts: list[object] = []
 
-    def resolve(
-        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
-    ) -> StateBackend:
+    def claim(sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object) -> str:
         thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
         attempts.append(thread_id)
         if failures[thread_id]:
             raise failures[thread_id].pop(0)
-        box = MagicMock(spec=StateBackend)
-        box.id = f"box-{thread_id}"
-        return box
+        return f"box-{thread_id}"
 
-    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", claim)
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", MagicMock(spec=StateBackend))
     monkeypatch.setattr("rt.managed_sandbox.asyncio.sleep", AsyncMock())
     answers = iter([AIMessage(content="done"), AIMessage(content="done")])
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=answers))
@@ -344,6 +352,47 @@ async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_report
         ("box-thread-1", None),
         (None, "SandboxAuthenticationError: Invalid api_key=[redacted]"),
     ]
+
+
+async def test_a_box_that_never_boots_ends_the_run_at_its_first_shell_call_with_why(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
+) -> None:
+    """The run prepares with the box it asked for, before the box boots; the first call that
+    needs the box finds it failed, and the backend hears why so it can tell the person."""
+    unreachable: list[JsonValue] = []
+    # Where the box's checkouts are, so the turn's git baseline is taken.
+    monkeypatch.setitem(_PREPARE_UPDATE, "work_dir", "/workspace")
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", lambda *args: "box-thread-1")
+    monkeypatch.setattr(
+        mda_runtime,
+        "_resolve_managed_sandbox",
+        opened := MagicMock(
+            side_effect=ResourceCreationError("Image pull failed", resource_type="sandbox")
+        ),
+    )
+    notify = Outbox.notify
+
+    def recorded(outbox: Outbox, endpoint: Endpoint, request: RunRequest) -> None:
+        if endpoint is SANDBOX_UNREACHABLE:
+            unreachable.append(request.model_dump(mode="json")["reason"])
+        notify(outbox, endpoint, request)
+
+    monkeypatch.setattr(Outbox, "notify", recorded)
+    monkeypatch.setattr(
+        agent, "_DEFAULT_MODEL", _calling(ToolCall(name="execute", args={"command": "ls"}, id="c"))
+    )
+
+    with pytest.raises(BoxUnavailableError):
+        await _run(
+            InMemoryStore(),
+            "thread-1",
+            _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a")),
+        )
+
+    assert prepared == [("box-thread-1", None)]
+    assert unreachable == ["ResourceCreationError: Image pull failed"]
+    # Only the boot opens the box: nothing reaches for it again, which would make another.
+    assert opened.call_count == 1
 
 
 @pytest.mark.parametrize("failure", ["lookup", "restart", "unusable", "conflict"])

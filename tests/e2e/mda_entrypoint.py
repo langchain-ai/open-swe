@@ -20,12 +20,20 @@ import sandbox_service  # noqa: E402
 if not sandbox_service.REAL:
     from managed_deepagents import runtime as mda_runtime
 
+    def _stand_in_claim(
+        _sandbox: object, *, scope_key: str, **_kwargs: object
+    ) -> mda_runtime._SandboxClaim:
+        # A stand-in box is ready at once; its first use opens it under the same name.
+        name = sandbox_service.mda_box_name(scope_key)
+        return mda_runtime._SandboxClaim(None, None, adopted=False, host_name=name)
+
     def _stand_in_box(
         _sandbox: object, *, scope_key: str, **_kwargs: object
     ) -> tuple[sandbox_service.StandInSandbox, str, str]:
         name = sandbox_service.mda_box_name(scope_key)
         return sandbox_service.open_box(name), name, name
 
+    mda_runtime._claim_langsmith_sandbox = _stand_in_claim
     mda_runtime._create_langsmith_sandbox = _stand_in_box
 
 if not os.environ.get("E2E_REAL_LLM"):

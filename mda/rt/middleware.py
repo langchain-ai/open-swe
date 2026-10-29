@@ -37,6 +37,7 @@ from contextvars import ContextVar
 from typing import Annotated, Final, NotRequired, cast
 
 import httpx
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware import async_subagents
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -344,14 +345,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self,
         backend: OpenSweBackend,
         open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
+        boot_sandbox: Callable[[SandboxBackendProtocol], Awaitable[OpenedSandbox]] | None = None,
         read_ahead: Sequence[Callable[[], None]] = (),
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
-        # Opens the thread's box before preparing, so the backend binds the thread to it.
+        # Asks for the thread's box before preparing, so the backend binds the thread to it,
+        # and waits for it to boot behind the run's other work.
         self._open_sandbox = open_sandbox
+        self._boot_sandbox = boot_sandbox
         # What later hooks read from the backend, started while the run prepares.
         self._read_ahead = read_ahead
 
@@ -414,16 +418,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # A box MDA could not open is not asked for again here: the run's first tool
             # call opens it, or says why it cannot.
             files = getattr(runtime, "backend", None) if opened else None
-            box_setup(run).start(files)
+            box_setup(run).start(files, self._boot_sandbox)
         else:
             # Without a box of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)
-        turn_git(run).start(files, held.get("work_dir"))
+        turn_git(run).start(files, held.get("work_dir"), box_setup(run).booted)
         return self._carrying(state, update)
 
     @property
     def _in_box(self) -> bool:
-        """Whether the run's files are in MDA's box, which it opens before preparing."""
+        """Whether the run's files are in MDA's box, which it asks for before preparing."""
         return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
 
     async def _before_agent(
@@ -448,7 +452,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if state.get("open_swe_prepared_for") == invocation:
             await self._backend.run.load_tool_specs(run_id())
             return None, True
-        # The box takes seconds to open; reading the tool specs needs none of it.
+        # Asking for the box takes a round trip; reading the tool specs needs none of it.
         opening = asyncio.create_task(self._opened(runtime))
         try:
             await self._backend.run.load_tool_specs(run_id())

@@ -1,8 +1,8 @@
 """Tool errors from the calls this runtime runs in the box, as results the model can act on.
 
-A box that stopped answering is the exception: nothing the model does next can
-succeed, so the backend tells the person and the run ends. The backend handles
-the errors of the tools it runs itself the same way.
+A box that stopped answering, or never booted, is the exception: nothing the model
+does next can succeed, so the backend tells the person, with why where known, and the
+run ends. The backend handles the errors of the tools it runs itself the same way.
 """
 
 import json
@@ -26,6 +26,7 @@ from langsmith.sandbox import (
 from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
 from rt.backend import OpenSweBackend
+from rt.box_setup import BoxUnavailableError
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -89,16 +90,23 @@ class ToolErrorMiddleware(AgentMiddleware):
 
     def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
         sandbox_id = _SANDBOX_ID.search(str(exc))
-        gone = SandboxGone(run_id=run_id(), sandbox_id=sandbox_id.group(0) if sandbox_id else None)
+        gone = SandboxGone(
+            run_id=run_id(),
+            sandbox_id=sandbox_id.group(0) if sandbox_id else None,
+            reason=str(exc) if isinstance(exc, BoxUnavailableError) else None,
+        )
         self._backend.outbox.notify(SANDBOX_UNREACHABLE, gone)
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:
-    """Whether the box itself did not answer, as opposed to a call that failed in it.
+    """Whether the box itself did not answer, or never booted, as opposed to a call that
+    failed in it.
 
     A reload left the command running, and a missing resource that is not the box
     is a missing file.
     """
+    if isinstance(exc, BoxUnavailableError):
+        return True
     if isinstance(exc, SandboxConnectionError):
         return not isinstance(exc, SandboxServerReloadError)
     return isinstance(exc, ResourceNotFoundError) and exc.resource_type == "sandbox"

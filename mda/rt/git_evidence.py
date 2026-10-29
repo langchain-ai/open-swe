@@ -15,7 +15,7 @@ fingerprint but a tool that may change a checkout, and only for the first.
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Final, Self
 
@@ -25,6 +25,7 @@ from runtime_api.operations import PullRequestHead
 
 from rt.backend import Run, RunLocal
 from rt.box_script import BoxScript
+from rt.box_setup import BoxUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -79,16 +80,21 @@ class TurnGit:
         self._changed_at: int | None = None
         self._observed: list[_Observed] = []
 
-    def start(self, files: object, root: object) -> None:
+    def start(
+        self,
+        files: object,
+        root: object,
+        booted: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         """Fingerprint the checkouts under ``root`` in the thread's ``files`` as the turn
-        starts, in the background."""
+        starts, in the background, once ``booted`` says the box has booted."""
         self._observed = []
         self._changed_at = None
         if not isinstance(files, SandboxBackendProtocol) or not isinstance(root, str) or not root:
             self._baseline = None
             return
         self._box, self._root = files, root
-        self._baseline = asyncio.ensure_future(self._fingerprint())
+        self._baseline = asyncio.ensure_future(self._first_fingerprint(booted))
 
     async def changing(self) -> None:
         """Wait for the turn's starting fingerprint, before a tool that may change a checkout."""
@@ -148,6 +154,19 @@ class TurnGit:
         after = await self._fingerprint()
         if before is not None and after is not None:
             self._observed.append(_Observed(at, tuple(after.changes_since(before))))
+
+    async def _first_fingerprint(
+        self, booted: Callable[[], Awaitable[None]] | None
+    ) -> GitSnapshot | None:
+        if booted is not None:
+            try:
+                await booted()
+            except BoxUnavailableError:
+                # Reaching for a box that never booted would open another; the run's
+                # first call that needs the box reports it.
+                logger.warning("No git evidence: the thread's box never booted")
+                return None
+        return await self._fingerprint()
 
     async def _fingerprint(self) -> GitSnapshot | None:
         if self._box is None:
