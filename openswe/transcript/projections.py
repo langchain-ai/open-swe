@@ -584,7 +584,6 @@ async def _tool_completed(
                 status = :status,
                 output_preview = :output_preview,
                 output_truncated = :output_truncated,
-                attachments = CAST(:attachments AS jsonb),
                 ended_at = :ended_at
             WHERE tool_call_id = :tool_call_id AND thread_id = :thread_id
             """
@@ -596,7 +595,6 @@ async def _tool_completed(
             "status": event.status,
             "output_preview": event.output_preview,
             "output_truncated": event.output_truncated,
-            "attachments": _models_json(event.attachments),
             "ended_at": occurred_at,
         },
     )

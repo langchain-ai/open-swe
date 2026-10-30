@@ -272,7 +272,22 @@ _TOOL_CALL_COLUMNS = """
         WHERE stored.thread_id = tool_call.thread_id
           AND stored.tool_call_id = tool_call.tool_call_id
     ) AS has_output,
-    tool_call.attachments, tool_call.namespace, tool_call.started_at, tool_call.ended_at
+    (
+        -- A tool result's images are stored under its tool call id.
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'mime_type', image.mime_type,
+                'file_name', image.file_name,
+                'url', NULL,
+                'attachment_id', image.attachment_id
+            )
+            ORDER BY image.position
+        )
+        FROM thread_attachment AS image
+        WHERE image.thread_id = tool_call.thread_id
+          AND image.message_id = tool_call.tool_call_id
+    ) AS attachments,
+    tool_call.namespace, tool_call.started_at, tool_call.ended_at
 """
 
 
