@@ -955,7 +955,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
     ref = GitHubPrRef(owner="lc", repo="repo", number=7, url=pr.url)
     with (
         patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
-        patch.object(standard, "_target_channel", AsyncMock(return_value=SlackChannel(id="C1"))),
+        patch.object(standard, "target_channel", AsyncMock(return_value=SlackChannel(id="C1"))),
         patch.object(standard, "record_pull_request", AsyncMock(return_value=(pr, details))),
         patch.object(
             standard,
