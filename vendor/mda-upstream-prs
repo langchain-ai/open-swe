@@ -4,5 +4,5 @@
 1135 7d845bdd9dfe7d0b107d3cda7974ca9dcd96f00c feat(channels): keep a Linear agent session alive while its run works
 1136 b5477b73cc1167d9b0f34908d27b1d3593a074bf fix(channels): tell a Linear session at once when its run can't start
 1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
-1147 9f07b89f4d741dc506b44116bbf1c511d9652497 feat(channels): let handlers start runs on threads they choose
+1147 e365dc2bf6dc1d125336666e81befeb2a7556edf feat(channels): let handlers start runs on threads they choose
 1149 3cc46489733aecd961883d0ba05fe42bd57ec18b feat(channels): answer the provider first, then ask the channel's handler

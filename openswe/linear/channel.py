@@ -10,6 +10,7 @@ one that asks nothing else.
 """
 
 import json
+from collections.abc import Mapping
 
 from runtime_api.linear import (
     LinearAutomation,
@@ -29,6 +30,7 @@ from runtime_api.linear import (
 from openswe.linear import session
 from openswe.mda_channels.api import ChannelCall
 from openswe.schedules import store
+from openswe.users import User
 from openswe.webhooks.event_log import EventLog, EventRefs
 
 
@@ -64,22 +66,35 @@ async def plan_linear_session(_call: ChannelCall, plan: PlanLinearSession) -> Li
     return await session.plan_linear_session(plan)
 
 
+def _creator_email(payload: Mapping[str, object]) -> str | None:
+    """The email of the issue's creator, as the delivery names it."""
+    data = payload.get("data")
+    creator = data.get("creator") if isinstance(data, Mapping) else None
+    email = creator.get("email") if isinstance(creator, Mapping) else None
+    return email if isinstance(email, str) and email else None
+
+
 async def linear_automation_rules(
     call: ChannelCall, request: LinearAutomationRulesRequest
 ) -> LinearAutomationRules:
     await _record(call, request.delivery)
     records = await store.linear_automation_rules(request.team)
+    if not records:
+        return LinearAutomationRules(automations=[])
+    creator = _creator_email(request.delivery.payload)
     return LinearAutomationRules(
+        creator_registered=bool(await User.login_for_email(creator)),
         automations=[
             LinearAutomation(
                 id=str(record["id"]),
+                prompt=str(record["prompt"]),
                 triggers=[
                     LinearTrigger.model_validate(config)
                     for config in store.linear_trigger_configs(record, request.team)
                 ],
             )
             for record in records
-        ]
+        ],
     )
 
 

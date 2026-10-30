@@ -704,8 +704,9 @@ async def _start_threaded_run(delivery: _Delivery, run: NormalizedRunInput, inde
         source_provider=channel.kind,
         binding=binding,
         assistant_id=delivery.assistant_id,
-        # Its own key on its thread, so two runs of one delivery never read as one.
-        delivery_key=f"{key}#{index}",
+        # Keyed by its thread, not its place among the handler's runs: a resent
+        # delivery whose handler starts a different set still finds its run.
+        delivery_key=f"{key}#{thread_id}",
         multitask_strategy=run.get("multitask_strategy", channel.multitask_strategy),
         prepare=functools.partial(_planned, run),
     )

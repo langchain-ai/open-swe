@@ -11,9 +11,9 @@ answers only what needs its data or its signing key:
   the repository and workspace; then the backend checks that choice again, indexes
   the thread and signs the run's context.
 - ``linear_automation_rules``, then ``plan_linear_automations``: a team's Linear
-  automations, which the channel matches against an issue event; then, for every
-  match at once, the backend claims each once per delivery, writes its run's input
-  and signs its context, on a thread of its own.
+  automations, which the channel matches against an issue event and writes each
+  match's prompt for; then, for every match at once, the backend claims each once
+  per delivery, writes its run's input and signs its context, on a thread of its own.
 """
 
 import json
@@ -26,6 +26,9 @@ from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 
 # Linear's deliveries are a few kilobytes; anything near this is not one.
 MAX_PAYLOAD_CHARS: Final = 1_000_000
+# Well above a written prompt: an automation's own is at most 20,000 characters,
+# and the issue description it quotes 8,000.
+MAX_AUTOMATION_PROMPT_CHARS: Final = 100_000
 # A Linear team key, such as ``ENG``.
 TEAM_KEY_PATTERN: Final = r"^[A-Z][A-Z0-9_]{0,9}$"
 # ``owner/name``, as GitHub spells a repository.
@@ -195,6 +198,8 @@ class LinearTrigger(BaseModel):
 
 class LinearAutomation(BaseModel):
     id: str = Field(min_length=1)
+    # What the automation asks its run to do, which the channel's prompt leads with.
+    prompt: str
     triggers: list[LinearTrigger]
 
 
@@ -208,13 +213,18 @@ class LinearAutomationRules(BaseModel):
     """The team's enabled Linear automations."""
 
     automations: list[LinearAutomation]
+    # Whether the issue's creator is an Open SWE user: otherwise the channel fences
+    # the issue it quotes as untrusted.
+    creator_registered: bool = False
 
 
 class FiredLinearAutomation(BaseModel):
-    """An automation the channel matched an issue event to, and the event it fires on."""
+    """An automation the channel matched an issue event to, the event it fires on, and
+    the prompt the channel wrote for its run."""
 
     automation_id: str = Field(min_length=1)
     event: LinearTriggerEvent
+    prompt: str = Field(min_length=1, max_length=MAX_AUTOMATION_PROMPT_CHARS)
 
 
 class PlanLinearAutomation(BaseModel):
@@ -224,12 +234,7 @@ class PlanLinearAutomation(BaseModel):
     delivery_id: str = Field(min_length=1)
     event: LinearTriggerEvent
     team: str = Field(pattern=TEAM_KEY_PATTERN)
-    # The delivery's issue (``data``), which the run's prompt quotes.
-    issue: dict[str, JsonValue]
-    labels: list[str] = []
-    project: str = ""
-
-    _bounded_issue = field_validator("issue")(_bounded)
+    prompt: str = Field(min_length=1, max_length=MAX_AUTOMATION_PROMPT_CHARS)
 
 
 class PlanLinearAutomations(BaseModel):
@@ -238,12 +243,6 @@ class PlanLinearAutomations(BaseModel):
     delivery_id: str = Field(min_length=1)
     automations: list[FiredLinearAutomation] = Field(min_length=1, max_length=100)
     team: str = Field(pattern=TEAM_KEY_PATTERN)
-    # The delivery's issue (``data``), which each run's prompt quotes.
-    issue: dict[str, JsonValue]
-    labels: list[str] = []
-    project: str = ""
-
-    _bounded_issue = field_validator("issue")(_bounded)
 
     def each(self) -> list[PlanLinearAutomation]:
         """One plan per automation, in order."""
@@ -253,9 +252,7 @@ class PlanLinearAutomations(BaseModel):
                 delivery_id=self.delivery_id,
                 event=fired.event,
                 team=self.team,
-                issue=self.issue,
-                labels=self.labels,
-                project=self.project,
+                prompt=fired.prompt,
             )
             for fired in self.automations
         ]

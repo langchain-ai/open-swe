@@ -1035,7 +1035,9 @@ start on the event's conversation; only that run may set `reply`, and only a
 run with `thread` may set `deliver_to`, for now to the event's own conversation
 (`current_thread`). `multitask_strategy` overrides the channel's for one run.
 A persistent id must be a UUID; which ids an event may reach is yours to
-check. The handler is asked once per delivery, before any thread is read, and
+check. A delivery starts at most one run on each thread, so a resent one
+starts nothing there again, even if the handler now starts a different set of
+runs. The handler is asked once per delivery, before any thread is read, and
 not at all once the conversation has seen the delivery. While the conversation
 waits on a decision, the handler is still asked (on GitHub with
 `thread.interrupted` set): its runs on other threads start, and a run on the
