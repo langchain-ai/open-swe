@@ -1,4 +1,4 @@
-"""Deterministic reviewer picks: code owners and recent authors of the changed files.
+"""Rank code owners and recent authors, guided by personal review routing preferences.
 
 Candidates come from one CODEOWNERS area at a time, the one owning the most changed
 files first. Each scores the changed files they own plus those they changed within
@@ -9,6 +9,7 @@ away from it for not accepting, is skipped.
 """
 
 import asyncio
+import json
 import logging
 from collections import Counter
 from collections.abc import Collection
@@ -27,9 +28,11 @@ from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.github.org_membership import team_members
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
+from openswe.prompts import prompt
 from openswe.slack.availability import SlackUserInfo
 from openswe.slack.client import get_slack_user_info
 from openswe.users import User
+from openswe.utils.jev import select_jev_choice
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +278,60 @@ async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) 
     return touched
 
 
+async def prefers_review(
+    request: HumanReviewRequest,
+    login: str,
+    *,
+    files: list[ChangedFile] | None = None,
+    coverage: Coverage | None = None,
+) -> bool:
+    """Apply advisory routing preferences, retaining normal eligibility on uncertainty."""
+    profile = await PROFILES.get(login) or {}
+    instructions = profile.get("review_assignment_instructions")
+    if not isinstance(instructions, str) or not instructions.strip():
+        return True
+    pr = request.pull_request
+    if files is None:
+        try:
+            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+                files = await ChangedFile.of_pull(pull)
+                codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None)
+        except GitHubAppUnavailable:
+            logger.warning("Cannot read review routing context", extra={"github_login": login})
+            return True
+        if not files:
+            return True
+        coverage = (
+            await Coverage.build(codeowners, [file.filename for file in files])
+            if codeowners is not None
+            else Coverage(())
+        )
+    choice = await select_jev_choice(
+        json.dumps(
+            {
+                "repository": f"{pr.owner}/{pr.repo}",
+                "title": pr.title,
+                "description": pr.body,
+                "changed_files": [file.filename for file in files],
+                "ownership": [
+                    {"handles": area.handles, "files": area.files} for area in coverage.areas
+                ]
+                if coverage
+                else [],
+                "candidate": login,
+                "review_assignment_instructions": instructions,
+            }
+        ),
+        question="review_routing",
+        instructions=prompt("human-review/routing-instructions"),
+        criteria={
+            "consider": prompt("human-review/routing-consider"),
+            "prefer_someone_else": prompt("human-review/routing-elsewhere"),
+        },
+    )
+    return choice != "prefer_someone_else"
+
+
 async def choose_reviewer(
     request: HumanReviewRequest, *, area: Area | None = None
 ) -> Pick | Wait | None:
@@ -428,6 +485,12 @@ async def _choose_reviewer(
         if not await pull.repo.can_write(candidate.login):
             logger.info(
                 "Skipped a reviewer candidate without write access",
+                extra={**extra, "github_login": candidate.login},
+            )
+            continue
+        if not await prefers_review(request, candidate.login, files=files, coverage=coverage):
+            logger.info(
+                "Reviewer routing preferences favor someone else",
                 extra={**extra, "github_login": candidate.login},
             )
             continue

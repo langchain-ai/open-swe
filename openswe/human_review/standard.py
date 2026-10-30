@@ -57,6 +57,7 @@ from openswe.human_review.picking import (
     ReviewerAvailability,
     Wait,
     choose_reviewer,
+    prefers_review,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.jobs import queue
@@ -729,6 +730,12 @@ async def assign(
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
+    if not replace and not await prefers_review(request, reviewer.github_login):
+        return _failure(
+            f"@{github_login}'s review assignment preferences favor someone else for this "
+            "change; pick another eligible reviewer. These are advisory preferences, "
+            "not a guaranteed exclusion."
+        )
     pr = request.pull_request
     label = f"<{pr.url}|{pr.label}>"
     theirs = coverage.of(github_login) if coverage is not None else []

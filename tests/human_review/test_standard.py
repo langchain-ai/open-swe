@@ -317,16 +317,17 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
 
 
 @pytest.mark.parametrize(
-    ("local_time", "out_of_office", "named", "allowed"),
+    ("local_time", "out_of_office", "named", "preferred", "allowed"),
     [
-        ("2026-10-22T03:00:00", False, False, False),
-        ("2026-10-22T09:00:00", False, False, True),
-        ("2026-10-22T12:00:00", True, False, False),
-        ("2026-10-22T03:00:00", False, True, True),
+        ("2026-10-22T03:00:00", False, False, True, False),
+        ("2026-10-22T09:00:00", False, False, True, True),
+        ("2026-10-22T12:00:00", True, False, True, False),
+        ("2026-10-22T03:00:00", False, True, False, True),
+        ("2026-10-22T09:00:00", False, False, False, False),
     ],
 )
 async def test_assignment_enforces_availability_before_contacting_reviewer(
-    local_time: str, out_of_office: bool, named: bool, allowed: bool
+    local_time: str, out_of_office: bool, named: bool, preferred: bool, allowed: bool
 ) -> None:
     from openswe.human_review import standard
     from openswe.human_review.people import Participant
@@ -354,6 +355,7 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(Coverage, "load", AsyncMock(return_value=None)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(standard.PROFILES, "allows_auto_human_review", AsyncMock(return_value=True)),
+        patch.object(standard, "prefers_review", AsyncMock(return_value=preferred)),
         patch.object(
             ReviewerAvailability,
             "for_user",
@@ -380,7 +382,14 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         github_review.assert_awaited_once()
         dm.assert_awaited_once()
     else:
-        assert ("out of office" if out_of_office else "outside working hours") in result.error
+        expected = (
+            "out of office"
+            if out_of_office
+            else "preferences favor someone else"
+            if not preferred
+            else "outside working hours"
+        )
+        assert expected in result.error
         github_review.assert_not_awaited()
         dm.assert_not_awaited()
         schedule.assert_not_awaited()
