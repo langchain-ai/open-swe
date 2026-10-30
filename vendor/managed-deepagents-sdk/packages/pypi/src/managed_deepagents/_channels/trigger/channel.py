@@ -268,10 +268,10 @@ async def _decide_event(
 ) -> TriggerMessageRoute | None:
     """What a message or interaction starts, as its key's handler decides.
 
-    ``None``, so what it starts without one. An endpoint is asked after
-    Trigger Server has its answer.
+    ``None``, so what it starts without one. Every handler is asked after
+    Trigger Server has its answer, since it may take longer than Trigger Server
+    waits.
     """
-    from managed_deepagents._channels.http.endpoint import is_endpoint_handler  # noqa: PLC0415
     from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
         read_slack_event,
         slack_thread,
@@ -294,9 +294,7 @@ async def _decide_event(
             lambda: handler(cast("SlackMessageEvent", event), slack_thread(thread, channel_name)),
         )
 
-    if is_endpoint_handler(handler):
-        return TriggerMessageBackground(decide)
-    return await decide()
+    return TriggerMessageBackground(decide)
 
 
 async def _run_handler(
