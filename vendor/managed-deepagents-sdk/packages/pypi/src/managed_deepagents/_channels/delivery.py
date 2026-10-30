@@ -390,7 +390,15 @@ async def _post_direct(
     except Exception as error:
         if scheduled:
             raise
-        logger.error("channel reply failed (%s)", logger.safe_error_label(error))
+        # Open SWE debug (vendor/mda-changes/2026-10-27-channel-reply-debug.md): say why.
+        logger.error(
+            "channel reply failed (%s) channel=%s transport=%s: %s",
+            logger.safe_error_label(error),
+            binding.get("name"),
+            binding.get("transport"),
+            str(error)[:500],
+            error=error,
+        )
 
 
 async def _post_to_transport(binding: ChannelBinding, message: ChannelMessage) -> None:

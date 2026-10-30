@@ -174,13 +174,19 @@ class LinearSessionTurn:
             return None
         try:
             validated = adapter.validate_python(payload)
-        except ValidationError:
+        except ValidationError as error:
             common.logger.warning(
-                "Linear session payload doesn't match MDA's schema", extra={"linear_event": key}
+                "Linear session event does not match MDA's schema; starting nothing",
+                extra={"linear_event": key, "error_count": error.error_count()},
             )
             return UNREADABLE_SESSION
         issue = validated["agentSession"].get("issue")
-        return cls(validated, issue) if issue else UNREADABLE_SESSION
+        if not issue:
+            common.logger.info(
+                "Linear session has no issue; starting nothing", extra={"linear_event": key}
+            )
+            return UNREADABLE_SESSION
+        return cls(validated, issue)
 
     async def repository(self, thread_id: str) -> tuple[dict[str, str], str | None] | LinearDecline:
         """The repository the turn works in, when one is named, preferred or allowed.
@@ -201,6 +207,10 @@ class LinearSessionTurn:
         if not repo:
             repo = (await common.get_workspace_settings()).default_repo
         if not repo:
+            common.logger.info(
+                "Linear session names no repository and none is a default; starting nothing",
+                extra={"linear_issue": self.issue.id, "author_has_email": bool(self.author.email)},
+            )
             return NO_REPOSITORY
         if not common.is_repo_allowed(repo):
             common.logger.warning(

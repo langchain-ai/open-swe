@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -538,7 +538,7 @@ async def process_slack_mention(
         if status_shown is not None:
             await asyncio.wait({status_shown})
             await _clear_early_status_if_idle(request, status_ts)
-        await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
+        await notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
 async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolution | None) -> bool:
@@ -546,7 +546,7 @@ async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolutio
     return await _process_slack_mention_impl(request, repo)
 
 
-async def _notify_slack_processing_error(
+async def notify_slack_processing_error(
     request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
     """Mark the agent thread errored when one exists, then always tell the Slack thread."""
@@ -559,6 +559,59 @@ async def _notify_slack_processing_error(
     if thread_id:
         await _mark_slack_thread_errored(thread_id, request, repo)
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
+
+
+async def _account_link_reason(login: str | None) -> Literal["revoked", "unlinked"]:
+    """Why a Slack user without a usable GitHub token can't start a run."""
+    # A stored-but-unusable token means "sign in again"; no record at all
+    # means the user has never connected GitHub + Slack via the dashboard.
+    # Guard the store read like token resolution so a transient failure
+    # still yields an actionable prompt.
+    if not login:
+        return "unlinked"
+    try:
+        has_token_record = await common.has_access_token_record(login)
+    except Exception:  # noqa: BLE001
+        common.logger.debug(
+            "Failed to check GitHub token record for %s; prompting sign-in",
+            login,
+            exc_info=True,
+        )
+        return "unlinked"
+    return "revoked" if has_token_record else "unlinked"
+
+
+@dataclass(frozen=True)
+class AccountLinkNeeded:
+    """A Slack user Open SWE can't start a run for until they connect their account."""
+
+    user_id: str
+    user_email: str | None
+    reason: Literal["revoked", "unlinked"]
+
+    async def prompt(self, channel_id: str, thread_ts: str) -> None:
+        """Ask them in the Slack thread to connect it."""
+        await common.post_account_link_prompt(
+            channel_id, thread_ts, self.user_id, self.user_email, reason=self.reason
+        )
+
+
+async def account_link_needed(user_id: str) -> AccountLinkNeeded | None:
+    """The account gate every person's Slack run passes; ``None`` when they pass it.
+
+    The same gate ``process_slack_mention`` applies, checked before a conversation is
+    handed to MDA's Slack channel, so a person who can't run gets the prompt instead.
+    """
+    if not user_id:
+        return None
+    slack_user = await common.get_slack_user_info(user_id)
+    profile = slack_user.get("profile") if slack_user else None
+    email = profile.get("email") if isinstance(profile, dict) else None
+    user_email = email if isinstance(email, str) and email else None
+    login = await slack_login(user_id, user_email)
+    if await _valid_access_token(login):
+        return None
+    return AccountLinkNeeded(user_id, user_email, await _account_link_reason(login))
 
 
 async def workspace_scoped_default_repo(
@@ -737,6 +790,34 @@ async def process_slack_web_mention(
     )
 
 
+@dataclass
+class SlackChannelRun:
+    """The run a Slack message starts, prepared for MDA's Slack channel to start it."""
+
+    input: RunInput
+    configurable: dict[str, Any]
+    trigger_ts: str
+
+
+@dataclass
+class _ChannelRunCapture:
+    run: SlackChannelRun | None = None
+
+
+async def prepare_slack_channel_run(
+    request: SlackRequest, repo: common.SlackRepoResolution | None
+) -> SlackChannelRun | None:
+    """The run a message in an MDA-owned Slack conversation starts, without starting it.
+
+    Everything else happens as for the backend's own Slack runs (the gates, the
+    account-link prompt, the thread's metadata, files staged in the sandbox);
+    MDA's Slack channel starts the run and shows its status (``openswe.slack.channel``).
+    """
+    capture = _ChannelRunCapture()
+    await _process_slack_mention_impl(request, repo, channel_run=capture)
+    return capture.run
+
+
 async def _process_slack_mention_impl(
     request: SlackRequest,
     repo_resolution: common.SlackRepoResolution | None,
@@ -744,6 +825,7 @@ async def _process_slack_mention_impl(
     inherited_workspace: str | None = None,
     model_choice: tuple[str, str | None] | None = None,
     status_shown: asyncio.Future[bool] | None = None,
+    channel_run: _ChannelRunCapture | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -1062,21 +1144,7 @@ async def _process_slack_mention_impl(
     has_valid_user_token = bool(user_token)
 
     if allowed_bot is None and not has_valid_user_token:
-        # A stored-but-unusable token means "sign in again"; no record at all
-        # means the user has never connected GitHub + Slack via the dashboard.
-        # Guard the store read like token resolution above so a transient
-        # failure still yields an actionable prompt and clears the status.
-        has_token_record = False
-        if mapped_login:
-            try:
-                has_token_record = await common.has_access_token_record(mapped_login)
-            except Exception:  # noqa: BLE001
-                common.logger.debug(
-                    "Failed to check GitHub token record for %s; prompting sign-in",
-                    mapped_login,
-                    exc_info=True,
-                )
-        reason = "revoked" if has_token_record else "unlinked"
+        reason = await _account_link_reason(mapped_login)
         common.logger.info(
             "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
             thread_id,
@@ -1287,7 +1355,8 @@ async def _process_slack_mention_impl(
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
         return False
 
-    if persisted:
+    # A channel run doesn't stage files here: MDA's channel starts its sandbox.
+    if persisted and channel_run is None:
         staged_files = await queue_slack_files(thread_id, slack_file_entries(source_messages))
         if staged_files:
             files_section = slack_files_section(staged_files)
@@ -1352,6 +1421,13 @@ async def _process_slack_mention_impl(
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    if channel_run is not None:
+        channel_run.run = SlackChannelRun(
+            input=run_input,
+            configurable=configurable,
+            trigger_ts=event_ts,
+        )
+        return True
     if status_shown is not None:
         await asyncio.wait({status_shown})
     try:
