@@ -2,7 +2,7 @@
 
 Serves the graph ``mda build`` compiled from the real ``mda/`` project, with the
 model it builds swapped for the scripted fake and LangSmith's sandbox service for
-the E2E's stand-in (``sandbox_service.py``), in which MDA creates each thread's box
+the E2E's stand-in (``sandbox_service.py``), in which MDA creates each thread's sandbox
 as it does in LangSmith. It runs in the ``mda/`` project's environment, which has
 no ``openswe``: the backend's hooks and tools are the E2E harness's own, reached
 over HTTP like a deployed runtime does.
@@ -20,13 +20,21 @@ import sandbox_service  # noqa: E402
 if not sandbox_service.REAL:
     from managed_deepagents import runtime as mda_runtime
 
-    def _stand_in_box(
+    def _stand_in_claim(
+        _sandbox: object, *, scope_key: str, **_kwargs: object
+    ) -> mda_runtime._SandboxClaim:
+        # A stand-in sandbox is ready at once; its first use opens it under the same name.
+        name = sandbox_service.mda_sandbox_name(scope_key)
+        return mda_runtime._SandboxClaim(None, None, adopted=False, host_name=name)
+
+    def _stand_in_mda_sandbox(
         _sandbox: object, *, scope_key: str, **_kwargs: object
     ) -> tuple[sandbox_service.StandInSandbox, str, str]:
-        name = sandbox_service.mda_box_name(scope_key)
-        return sandbox_service.open_box(name), name, name
+        name = sandbox_service.mda_sandbox_name(scope_key)
+        return sandbox_service.open_mda_sandbox(name), name, name
 
-    mda_runtime._create_langsmith_sandbox = _stand_in_box
+    mda_runtime._claim_langsmith_sandbox = _stand_in_claim
+    mda_runtime._create_langsmith_sandbox = _stand_in_mda_sandbox
 
 if not os.environ.get("E2E_REAL_LLM"):
     # From the build directory langgraph dev serves. Every model the runtime builds,

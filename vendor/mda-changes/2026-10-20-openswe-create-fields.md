@@ -6,11 +6,11 @@
 
 ## What
 
-`_openswe_create_fields={...}` merges the given fields into the body of the request that creates the box, through the SDK client's HTTP transport.
+`_openswe_create_fields={...}` merges the given fields into the body of the request that creates the sandbox, through the SDK client's HTTP transport.
 
 ## Why
 
-Open SWE creates every box with `preserve_memory_on_stop: true`, so running processes such as dev servers and background tasks survive an idle stop, plus a workspace's own create parameters and `SANDBOX_CREATE_EXTRA_JSON`. The SDK's `create_sandbox` takes only the fields it models.
+Open SWE creates every sandbox with `preserve_memory_on_stop: true`, so running processes such as dev servers and background tasks survive an idle stop, plus a workspace's own create parameters and `SANDBOX_CREATE_EXTRA_JSON`. The SDK's `create_sandbox` takes only the fields it models.
 
 ## Upstream
 

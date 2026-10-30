@@ -1168,9 +1168,10 @@ wheels = [
 
 [[package]]
 name = "langchain-core"
-version = "1.7.0"
+version = "1.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "certifi" },
     { name = "httpx" },
     { name = "jsonpatch" },
     { name = "langchain-protocol" },
@@ -1182,9 +1183,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/cb/77d1dabe57d0dc0f96f65cba321366c341627295d1c09eefa58549e34391/langchain_core-1.7.0.tar.gz", hash = "sha256:c34e53358b103cd73f43c63f5f46f9b5c6c3467efdffcdf134892b89020494e4", size = 1020046, upload-time = "2026-10-22T17:47:21.554Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/90/f932d9c82d15033ae9676fb3670993e10e1b4d9c59fe1b7ae024dee11955/langchain_core-1.7.3.tar.gz", hash = "sha256:77f70b81e238c981bfd8405840b03fdf143735ac93c0729c2bdb39d6f0648024", size = 1029116, upload-time = "2026-10-29T20:55:56.42Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/d8/ed130e91cee0525cb47d185b98a5a6ffd6a8b660a100fbee43d887e745d6/langchain_core-1.7.0-py3-none-any.whl", hash = "sha256:e82b24d7ac51fc74874baa29d6b3c0b8234880d4f3d897f8ff57fb80dfd9b07d", size = 574676, upload-time = "2026-10-22T17:47:19.749Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/c6/88bcc77899601e09a428d9c764e41ac3e7ede161384f85b9a2a8a828f81d/langchain_core-1.7.3-py3-none-any.whl", hash = "sha256:460c214bf31495d7b7e0a879e408dbfda677fd53fd879da786c1b966a4f6bff6", size = 577074, upload-time = "2026-10-29T20:55:54.722Z" },
 ]
 
 [[package]]
@@ -1576,6 +1577,7 @@ dependencies = [
     { name = "httpx2" },
     { name = "langchain", extra = ["mcp"] },
     { name = "langchain-anthropic" },
+    { name = "langchain-core" },
     { name = "langchain-fireworks" },
     { name = "langchain-openai" },
     { name = "langchain-quickjs" },
@@ -1600,6 +1602,7 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.12.0" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.7" },
     { name = "langchain-anthropic", specifier = ">=1.7.7" },
+    { name = "langchain-core", specifier = ">=1.7.2,<2" },
     { name = "langchain-fireworks", specifier = ">=1.7.1,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.7.3,<2.0.0" },
     { name = "langchain-quickjs", editable = "../vendor/langchain-quickjs" },

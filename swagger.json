@@ -5015,6 +5015,17 @@
             ],
             "title": "Experimental Fleet"
           },
+          "experimental_memory": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Memory"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -5025,17 +5036,6 @@
               }
             ],
             "title": "Pr Failure Reactions"
-          },
-          "pr_review_links": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Review Links"
           },
           "review_draft_prs": {
             "anyOf": [
@@ -5943,6 +5943,11 @@
             "default": false,
             "title": "Summary Updated",
             "type": "boolean"
+          },
+          "supplementary_refusal": {
+            "default": "",
+            "title": "Supplementary Refusal",
+            "type": "string"
           }
         },
         "required": [
@@ -8055,6 +8060,20 @@
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments"
+          },
           "ended_at": {
             "anyOf": [
               {
@@ -8140,6 +8159,7 @@
           "output_preview",
           "output_truncated",
           "has_output",
+          "attachments",
           "namespace",
           "started_at",
           "ended_at"
@@ -21585,7 +21605,7 @@
     },
     "/dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}": {
       "get": {
-        "description": "The bytes of one file attached to a message in this thread.",
+        "description": "The bytes of one file attached to a message or tool result in this thread.",
         "operationId": "api_get_thread_attachment_dashboard_api_threads__thread_id__transcript_attachments__attachment_id__get",
         "parameters": [
           {

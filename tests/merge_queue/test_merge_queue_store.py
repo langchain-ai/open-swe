@@ -22,7 +22,7 @@ from openswe.merge_queue import controller, runtime
 from openswe.merge_queue.admission import Admission, AdmissionReader, CheckSource, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.controller import QueueController
-from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected, WorkflowPolicyMismatch
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -1620,6 +1620,10 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "slow_dispatch",
         "dispatch_tuning",
         "dispatch_response_lost",
+        "dispatch_policy_mismatch",
+        "report_policy_mismatch",
+        "policy_discovery",
+        "policy_adoption_after_success",
         "rerun_after_success",
         "report_rejected",
         "issuer",
@@ -1654,6 +1658,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         operator_emails=frozenset({"operator@example.com"}),
         policy=policy,
     )
+    config = config.model_copy(update={"sync_workflow_policy": True, "workflow_policy_revision": 1})
     await save_configuration(config)
     repo = Mock(spec=RepoClient)
     repo.raw_file = AsyncMock(return_value=b"reviewed workflow")
@@ -1681,9 +1686,31 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     )
     sent: list[httpx2.Request] = []
     report_status = 502
+    policy_revision = 2
     tuned = config.model_copy(update={"policy": policy.model_copy(update={"max_batch_size": 2})})
 
     async def deliver(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.endswith("/workflow-policy"):
+            body = json.dumps(
+                {
+                    "nonce": request.url.params["nonce"],
+                    "repository": config.repository,
+                    "repository_id": config.repository_id,
+                    "workflow_digest": config.workflow_digest,
+                    "workflow_policy_revision": policy_revision,
+                    "dispatch_actor_id": 123,
+                    "check_app_id": 456,
+                }
+            ).encode()
+            return httpx2.Response(
+                200,
+                content=body,
+                headers={
+                    "X-Merge-Queue-Signature": hmac.digest(
+                        b"s" * 32, b"workflow-policy-response:" + body, "sha256"
+                    ).hex()
+                },
+            )
         sent.append(request)
         report = request.url.path.endswith("/check-reports")
         prefix = b"check-report:" if report else b""
@@ -1691,6 +1718,18 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             request.headers["X-Merge-Queue-Signature"]
             == hmac.digest(b"s" * 32, prefix + request.content, "sha256").hex()
         )
+        mismatch = (fault == "dispatch_policy_mismatch" and len(sent) == 1) or (
+            fault == "report_policy_mismatch" and len(sent) == 2
+        )
+        if mismatch:
+            return httpx2.Response(
+                412,
+                headers={
+                    "X-Merge-Queue-Policy-Signature": hmac.digest(
+                        b"s" * 32, b"policy-mismatch:" + request.content, "sha256"
+                    ).hex()
+                },
+            )
         if report:
             body = json.loads(request.content)
             assert body["dispatch_body"].encode() == next(
@@ -1713,6 +1752,13 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         yield repo
 
     async def reconcile() -> None:
+        if fault == "policy_discovery":
+            monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
+            monkeypatch.setattr(QueueController, "open_repo", lambda self, queue: open_repo(queue))
+            controller = QueueController(config)
+            controller.queue = queue
+            await controller.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
+            return
         worker = NativeQueueRuntime(
             queue.id,
             42,
@@ -1744,8 +1790,25 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     elif fault == "dispatch_response_lost":
         with pytest.raises(httpx2.ReadTimeout):
             await reconcile()
+    elif fault == "report_policy_mismatch":
+        with pytest.raises(WorkflowPolicyMismatch):
+            await reconcile()
+    elif fault == "dispatch_policy_mismatch":
+        await reconcile()
+        await reconcile()
+        assert sent[0].content == sent[1].content
     else:
         await reconcile()
+    if fault == "policy_discovery":
+        assert json.loads(sent[0].content)["workflow_policy_revision"] == 2
+        configured = await QueueConfiguration.load(queue.workspace_id)
+        assert configured is not None and configured.workflow_policy_revision == 2
+        policy_revision = 1
+        count = len(sent)
+        await reconcile()
+        assert len(sent) == count
+        assert await QueueConfiguration.load(queue.workspace_id) == configured
+        policy_revision = 2
     request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
     run = ValidationRun(
         id=42,
@@ -1808,7 +1871,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     history = await queue.history(request.batch_id)
     assert history.attempts[0].state == "succeeded"
     assert all(evidence.key != "validation-revoked" for evidence in history.evidence)
-    assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == 1
+    assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == (
+        2 if fault == "dispatch_policy_mismatch" else 1
+    )
     successes = [
         r
         for r in sent
@@ -1816,6 +1881,53 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     ]
     assert len(successes) == 2
     assert successes[0].content == successes[1].content
+
+    if fault == "policy_adoption_after_success":
+        from openswe.merge_queue.dispatch import WorkflowPolicy
+
+        config = await queue.adopt_workflow_policy(
+            config,
+            WorkflowPolicy(
+                nonce=uuid7(),
+                repository=config.repository,
+                repository_id=config.repository_id,
+                workflow_policy_revision=2,
+                workflow_digest=config.workflow_digest,
+                dispatch_actor_id=123,
+                check_app_id=456,
+            ),
+        )
+        lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+        assert lease is not None
+        previous = (await queue.native_validation_history(lease))[0]
+        assert not await queue.authorize_native_result(previous, native_snapshot(), lease)
+        pending_rebuild = native_snapshot().model_copy(update={"main_sha": "e" * 40})
+        assert (
+            await queue.prepare_native_validation(
+                pending_rebuild, 600, lease, policy=policy, trust=config.native_trust
+            )
+            is None
+        )
+        assert (await queue.history(request.batch_id)).batch.state == "active"
+        await queue.release(lease)
+        repo.native_queue.return_value = native_snapshot(main="e" * 40)
+        await reconcile()
+        replacement = await queue.history(request.batch_id)
+        assert replacement.batch.deadline == history.batch.deadline
+        assert replacement.batch.max_attempts == history.batch.max_attempts
+        assert replacement.batch.candidate == history.batch.candidate
+        assert [attempt.number for attempt in replacement.attempts] == [1, 2]
+        repo.native_queue.return_value = native_snapshot((), main=request.candidate_sha)
+        repo.merge_base = AsyncMock(return_value=request.candidate_sha)
+        await reconcile()
+        history = await queue.history(request.batch_id)
+        assert history.batch.state == "landed"
+        assert [attempt.state for attempt in history.attempts] == ["succeeded", "cancelled"]
+        assert [
+            r
+            for r in sent
+            if r.url.path.endswith("/check-reports") and json.loads(r.content)["state"] == "success"
+        ] == successes
 
 
 async def test_configuration_fences_stale_workers_and_serializes_check_publication(

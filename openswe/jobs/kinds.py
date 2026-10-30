@@ -25,12 +25,15 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
-from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
+from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
+from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
+from openswe.memories.curator import WorkspaceCurator
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
@@ -209,6 +212,9 @@ async def _tool_sets_purge(_job: Job) -> None:
     logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
+WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
+
+
 @WORKER.register(GITHUB_CHANNEL_FORWARD)
 async def _github_channel_forward(job: Job) -> None:
     # Retried, like a lost lease, without harm: MDA dedupes by X-GitHub-Delivery.
@@ -247,6 +253,7 @@ async def start_jobs() -> None:
             REPORT_RECEIPT_PURGE, cron=REPORT_RECEIPT_SCHEDULE, key=REPORT_RECEIPT_PURGE
         ),
         lambda: queue.schedule(TOOL_SETS_PURGE, cron=TOOL_SETS_SCHEDULE, key=TOOL_SETS_PURGE),
+        lambda: queue.schedule(CURATOR_WAKE, cron=CURATOR_SCHEDULE, key=CURATOR_WAKE),
     ]
     for step in steps:
         try:

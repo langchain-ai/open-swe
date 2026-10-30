@@ -100,7 +100,7 @@ async def test_create_sandbox_with_retry_retries_transient_errors(
 
 
 @pytest.mark.asyncio
-async def test_install_create_extra_fields_merges_only_boxes_post() -> None:
+async def test_install_create_extra_fields_merges_only_sandboxes_post() -> None:
     calls: list[tuple[str, dict]] = []
 
     class _FakeHttp:

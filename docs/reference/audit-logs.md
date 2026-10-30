@@ -13,7 +13,7 @@ Time, workspace/time, and operation/time indexes support queries.
 - Authenticated dashboard `POST`, `PUT`, `PATCH`, and `DELETE` requests, including API-key and federated GitHub Actions thread requests.
   Operation names use the endpoint name without its `api_` prefix.
   This is **API activity**, not proof of a committed business mutation: some POST endpoints are reads, and HTTP success follows the response status.
-- The `save_user_settings`, `save_user_instructions`, `manage_feature_flags`, and `manage_review_approval_mode` tools, whether called by the agent directly or from code mode.
+- The `save_user_settings`, `manage_feature_flags`, and `manage_review_approval_mode` tools, personal `remember` and `forget` calls, and each prompt a workspace curator publishes (`publish_workspace_prompt`), whether called by the agent directly or from code mode.
   Read actions are excluded.
   Exceptions and returned `ok: false`, `success: false`, or errors count as failures.
 - Workspace lifecycle, repository-configuration, and workspace-settings HTTP operations attach the target workspace ID before deletion or after creation.

@@ -53,7 +53,7 @@ SECOND_BARE_REMOTE = _GH_DIR / f"{SECOND_OWNER}__{SECOND_REPO}.git"
 
 _DEFAULTS = {
     # Sandboxes: the stand-in for LangSmith's sandbox service (sandbox_service.py)
-    # roots every box MDA or the backend opens in this throwaway temp dir.
+    # roots every sandbox MDA or the backend opens in this throwaway temp dir.
     "E2E_SANDBOX_ROOT": str(_WORK_DIR),
     # Workspace scripts write themselves and their logs here. The default,
     # /open-swe/environment, assumes a sandbox where the agent is root; the
