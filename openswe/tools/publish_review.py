@@ -133,8 +133,12 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    if description_review is None:
-        return {"success": False, "error": "Complete the description reviewer before publishing."}
+    description_enabled = bool(state and state.get("description_review_enabled"))
+    if description_enabled and description_review is None:
+        return {"success": False, "error": "Complete the description check before publishing."}
+
+    if not description_enabled:
+        description_review = None
 
     token = await resolve_thread_github_token()
     if not token:

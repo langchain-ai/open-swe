@@ -11,10 +11,11 @@ Args:
   Order by your own judgment of what the author most needs to fix first; severity is an input, not the rule.
   Pass ``[]`` when there are none.
   A ranking with missing, unknown, or repeated IDs publishes nothing and returns ``expected_finding_ids`` so you can rank that exact set.
-- description_review: Required outside eval mode.
-  The dedicated description reviewer's verified verdict: exact full `head_sha`, current `title`, current `body` (empty string if absent), and `issues` (a list of evidence-backed material inaccuracies or omissions, empty when clean).
+- description_review: Required only when the reviewer instructions enable the PR author’s description-verification experiment; omitted otherwise and in eval mode.
+  Your verified description verdict: exact full `head_sha`, current `title`, current `body` (empty string if absent), and `issues` (a list of evidence-backed material inaccuracies or omissions, empty when clean).
   The tool rechecks the live PR text and head before publication and rejects stale verdicts.
   Nonempty issues submit a real `REQUEST_CHANGES` review even with no inline findings or approval policy, and prevent automatic approval.
+  Startup already placed a description change request; failures or incomplete verification leave it standing.
   An empty issues list dismisses only this reviewer's marked description change requests, never human or unrelated reviews, without approving the PR.
   Description verdicts publish on re-reviews even with no new inline findings.
   Eval mode never submits change requests.

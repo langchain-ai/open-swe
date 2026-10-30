@@ -1758,28 +1758,6 @@ def build_script() -> list[StepSpec]:
 
 def _description_review_message(messages: list[BaseMessage]) -> AIMessage | None:
     systems = "\n".join(_text(m.content) for m in messages if isinstance(m, SystemMessage))
-    humans = "\n".join(_text(m.content) for m in messages if isinstance(m, HumanMessage))
-    if "You are the PR description reviewer." in systems:
-        tools = [m for m in messages if isinstance(m, ToolMessage)]
-        if not tools:
-            return AIMessage(
-                content="Inspecting the complete change.",
-                tool_calls=[
-                    {
-                        "name": "execute",
-                        "args": {
-                            "command": f"git -C {os.environ['E2E_SANDBOX_ROOT']}/demo fetch origin main && git -C {os.environ['E2E_SANDBOX_ROOT']}/demo diff origin/main...HEAD"
-                        },
-                        "id": "description-full-diff",
-                    }
-                ],
-            )
-        if "TIMEOUT_SECONDS = 60" not in _text(tools[-1].content):
-            raise RuntimeError(
-                f"Description reviewer did not read the full change: {_text(tools[-1].content)}"
-            )
-        verdict = json.loads(humans.split("E2E_DESCRIPTION_VERDICT:")[-1])
-        return AIMessage(content=json.dumps(verdict))
     match = re.search(r"Review GitHub pull request `fakeorg/demo#(\d+)`", systems)
     if match is None:
         return None
@@ -1791,19 +1769,33 @@ def _description_review_message(messages: list[BaseMessage]) -> AIMessage | None
     published = next((m for m in reversed(results) if m.name == "publish_review"), None)
     if published is not None and '"success": true' in _text(published.content).lower():
         return AIMessage(content="Description review published.")
-    delegated = next((m for m in reversed(results) if m.name == "task"), None)
-    if delegated is not None:
-        verdict = json.loads(_text(delegated.content))
+    if "# Description review" not in systems:
         return AIMessage(
-            content="Publishing the verified description verdict.",
+            content="Publishing the ordinary review.",
             tool_calls=[
                 {
                     "name": "publish_review",
-                    "args": {"ranking": [], "description_review": verdict},
-                    "id": f"publish-description-{len(messages)}",
+                    "args": {"ranking": []},
+                    "id": f"publish-ordinary-{len(messages)}",
                 }
             ],
         )
+    inspected = next((m for m in reversed(results) if m.name == "execute"), None)
+    if inspected is None:
+        return AIMessage(
+            content="Inspecting the full change directly.",
+            tool_calls=[
+                {
+                    "name": "execute",
+                    "args": {
+                        "command": f"git -C {os.environ['E2E_SANDBOX_ROOT']}/demo fetch origin main && git -C {os.environ['E2E_SANDBOX_ROOT']}/demo diff origin/main...HEAD"
+                    },
+                    "id": f"description-full-diff-{len(messages)}",
+                }
+            ],
+        )
+    if "TIMEOUT_SECONDS = 60" not in _text(inspected.content):
+        raise RuntimeError(f"Reviewer did not read the full change: {_text(inspected.content)}")
     response = httpx.get(f"{FAKE_GITHUB_API}/repos/fakeorg/demo/pulls/{match[1]}")
     response.raise_for_status()
     pull = response.json()
@@ -1819,15 +1811,12 @@ def _description_review_message(messages: list[BaseMessage]) -> AIMessage | None
         ],
     }
     return AIMessage(
-        content="Delegating the full-diff description check.",
+        content="Publishing the directly verified description check.",
         tool_calls=[
             {
-                "name": "task",
-                "args": {
-                    "subagent_type": "description-reviewer",
-                    "description": "E2E_DESCRIPTION_VERDICT:" + json.dumps(verdict),
-                },
-                "id": f"delegate-description-{len(messages)}",
+                "name": "publish_review",
+                "args": {"ranking": [], "description_review": verdict},
+                "id": f"publish-description-{len(messages)}",
             }
         ],
     )

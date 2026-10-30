@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { loginAs, SAME_USER, seedOpenPullRequest } from "./helpers/dashboard";
+import {
+  loginAs,
+  SAME_USER,
+  OTHER_USER,
+  SAME_ORIGIN_HEADERS,
+  seedOpenPullRequest,
+} from "./helpers/dashboard";
 
 interface Review {
   id: number;
@@ -21,6 +27,32 @@ for (const description of ["Only updates documentation.", ""]) {
   }, testInfo) => {
     test.setTimeout(180_000);
     await page.request.post("/control/reset");
+    await loginAs(page, OTHER_USER);
+    const existingProfile = await (
+      await page.request.get("/dashboard/api/profile")
+    ).json();
+    await page.request.put("/dashboard/api/profile", {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { ...existingProfile, experimental_description_review: false },
+    });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/my-settings/experiments");
+    const experiment = page.getByRole("switch", {
+      name: "Block until PR descriptions are verified",
+    });
+    if (!(await experiment.isChecked())) await experiment.click();
+    await expect(experiment).toBeChecked();
+    await expect
+      .poll(
+        async () =>
+          (await (await page.request.get("/dashboard/api/profile")).json())
+            .experimental_description_review,
+      )
+      .toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("description-review-experiment.png"),
+      fullPage: true,
+    });
     await loginAs(page, SAME_USER);
     const pr = await seedOpenPullRequest(page, {
       repo: "fakeorg/demo",
@@ -44,15 +76,21 @@ for (const description of ["Only updates documentation.", ""]) {
       .poll(
         async () =>
           (await pull()).reviews.some(
-            (review) => review.state === "CHANGES_REQUESTED",
+            (review) =>
+              review.state === "CHANGES_REQUESTED" &&
+              review.body.includes("settings.py:1"),
           ),
         { timeout: 90_000 },
       )
       .toBe(true);
     const blocked = await pull();
     const review = blocked.reviews.find(
-      (item) => item.state === "CHANGES_REQUESTED",
+      (item) =>
+        item.state === "CHANGES_REQUESTED" &&
+        item.body.includes("settings.py:1"),
     )!;
+    expect(blocked.reviews[0].state).toBe("CHANGES_REQUESTED");
+    expect(blocked.reviews[0].body).toContain("verification pending");
     expect(review.author).toBe("open-swe[bot]");
     expect(review.body).toContain("settings.py:1");
     expect(review.body).toContain("60-second timeout");
@@ -103,6 +141,9 @@ for (const description of ["Only updates documentation.", ""]) {
     );
     expect(corrected.review_decision).not.toBe("CHANGES_REQUESTED");
     expect(
+      corrected.reviews.filter((item) => item.state === "CHANGES_REQUESTED"),
+    ).toHaveLength(0);
+    expect(
       corrected.reviews.filter((item) => item.state === "COMMENTED"),
     ).toHaveLength(1);
     await page.reload();
@@ -127,3 +168,56 @@ for (const description of ["Only updates documentation.", ""]) {
     });
   });
 }
+
+test("description experiment applies to the PR author, not the requester", async ({
+  page,
+}) => {
+  await page.request.post("/control/reset");
+  await seedOpenPullRequest(page, { title: "Unrelated first PR" });
+  await seedOpenPullRequest(page, { title: "Unrelated second PR" });
+  await loginAs(page, OTHER_USER);
+  let profile = await (await page.request.get("/dashboard/api/profile")).json();
+  await page.request.put("/dashboard/api/profile", {
+    headers: SAME_ORIGIN_HEADERS,
+    data: { ...profile, experimental_description_review: false },
+  });
+  await loginAs(page, SAME_USER);
+  profile = await (await page.request.get("/dashboard/api/profile")).json();
+  await page.request.put("/dashboard/api/profile", {
+    headers: SAME_ORIGIN_HEADERS,
+    data: { ...profile, experimental_description_review: true },
+  });
+  const pr = await seedOpenPullRequest(page, {
+    repo: "fakeorg/demo",
+    author: "bob",
+    title: "Add request timeout",
+    body: "Only documentation.",
+    head: "description-review-disabled",
+    files: { "settings.py": "TIMEOUT_SECONDS = 60\n" },
+  });
+  const start = await page.request.post("/control/description-review", {
+    data: { repo: "fakeorg/demo", number: pr.number },
+  });
+  expect(start.ok()).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        const pulls = (await (
+          await page.request.get("/mock/github/data")
+        ).json()) as Pull[];
+        return pulls
+          .find((p) => p.number === pr.number)
+          ?.reviews.some((review) => review.state === "COMMENTED");
+      },
+      { timeout: 90_000 },
+    )
+    .toBe(true);
+  const pulls = (await (
+    await page.request.get("/mock/github/data")
+  ).json()) as Pull[];
+  expect(
+    pulls
+      .find((p) => p.number === pr.number)
+      ?.reviews.some((review) => review.state === "CHANGES_REQUESTED"),
+  ).toBe(false);
+});

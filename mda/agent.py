@@ -233,6 +233,7 @@ def _parts(graph: Graph) -> _Parts:
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
         IncidentEvidenceMiddleware(backend),
     ]
+    subagent = _SUBAGENTS[graph]
     subagents: list[SubAgent] = [
         {
             "name": subagent,
@@ -252,11 +253,6 @@ def _parts(graph: Graph) -> _Parts:
                 ],
             ),
         }
-        for subagent in (
-            (_SUBAGENTS[graph], "description-reviewer")
-            if graph == "reviewer"
-            else (_SUBAGENTS[graph],)
-        )
     ]
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
     # Middleware types are invariant in the state they extend; the agent merges them all.

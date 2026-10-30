@@ -983,7 +983,7 @@ async def _process_github_head_update(
 
     re_review_prompt = (
         "The PR title or description changed without necessarily changing the commit. "
-        "Re-run the description reviewer against the full base-to-head diff and current PR text; "
+        "Recheck the description yourself against the full base-to-head diff and current PR text; "
         "call publish_review to set or clear its description change request."
         if description_changed
         else f"A new commit has been pushed to PR #{pr_number}. The new HEAD is "

@@ -374,6 +374,15 @@ async def control_description_review(request: Request) -> JSONResponse:
         action = "edited"
         changes = {"body": {"from": previous}}
     else:
+        from openswe.github.webhook import reviewer_thread_id
+
+        thread_id = reviewer_thread_id(pull["owner"], pull["repo"], pull["number"])
+        try:
+            await get_client(url=BASE_URL).threads.delete(thread_id)
+        except NotFoundError:
+            import logging
+
+            logging.getLogger(__name__).debug("No prior reviewer thread to clear")
         action, changes = "opened", {}
     payload = {
         "action": action,
