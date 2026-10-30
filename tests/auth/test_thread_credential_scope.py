@@ -454,3 +454,24 @@ async def test_a_named_author_cannot_borrow_a_pinned_thread(
         thread_metadata.pop("owner_login")
         monkeypatch.setattr("openswe.run_config.get_config", lambda: config(login="alice"))
         assert await opr._resolve_pr_author_token("bob") == ("bot-token", "bot")
+
+
+@pytest.mark.parametrize("visibility", ["public", "private"])
+@pytest.mark.parametrize("author", [None, "alice"])
+async def test_ask_channel_prs_use_bot_without_borrowing_reporter_credentials(
+    monkeypatch, thread_metadata, credentials, visibility, author
+):
+    opr = importlib.import_module("openswe.tools.open_pull_request")
+    thread_metadata.update(
+        visibility=visibility,
+        source_context={"slack_thread": {"channel_id": "CASK", "thread_ts": "1.0"}},
+    )
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config(source="slack"))
+    monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
+    )
+    expected = ("personal-token", "user") if visibility == "private" else ("bot-token", "bot")
+    assert await opr._resolve_pr_author_token(author) == expected
+    if visibility == "public":
+        credentials.assert_not_awaited()

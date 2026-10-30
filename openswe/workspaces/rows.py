@@ -94,11 +94,16 @@ class WorkspaceSlackChannelRow(Base):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
     # Untagged human messages here start and continue threads.
     kitchen: Mapped[bool] = mapped_column(server_default="false", default=False)
+    ask: Mapped[bool] = mapped_column(server_default="false", default=False)
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
 def to_workspace(
-    row: WorkspaceRow, repos: list[str], channels: list[str], kitchen_channels: list[str]
+    row: WorkspaceRow,
+    repos: list[str],
+    channels: list[str],
+    kitchen_channels: list[str],
+    ask_channels: list[str],
 ) -> Workspace:
     """The record this row stores, with the bindings that route to it.
 
@@ -119,6 +124,7 @@ def to_workspace(
             "repos": repos,
             "slack_channel_ids": channels,
             "kitchen_channel_ids": kitchen_channels,
+            "ask_channel_ids": ask_channels,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
             "fs_capacity_bytes": row.fs_capacity_bytes,

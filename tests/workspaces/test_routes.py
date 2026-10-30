@@ -136,8 +136,9 @@ _ELIGIBLE = {"is_member": True, "is_ext_shared": False, "is_pending_ext_shared":
         ({**_ELIGIBLE, "is_member": False}, False),
     ],
 )
+@pytest.mark.parametrize("mode", ["kitchen", "ask"])
 async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
-    admin_client: httpx.AsyncClient, payload: dict[str, bool], allowed: bool
+    mode: str, admin_client: httpx.AsyncClient, payload: dict[str, bool], allowed: bool
 ) -> None:
     with patch.object(
         SlackChannel,
@@ -150,7 +151,7 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
                 "name": "OSS",
                 "repos": ["acme/oss"],
                 "slack_channel_ids": ["C0API", "C0NEW"],
-                "kitchen_channel_ids": ["C0API"],
+                f"{mode}_channel_ids": ["C0API"],
             },
         )
     assert created.status_code == 200
@@ -158,18 +159,18 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
     load = AsyncMock(return_value=SlackChannel(id="C0NEW", payload=payload))
     with patch.object(SlackChannel, "load", load):
         response = await admin_client.put(
-            "/dashboard/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
+            "/dashboard/api/workspaces/oss", json={f"{mode}_channel_ids": ["C0API", "C0NEW"]}
         )
 
     load.assert_awaited_once_with("C0NEW", use_cache=False)
     stored = (await admin_client.get("/dashboard/api/workspaces/oss")).json()
     if allowed:
         assert response.status_code == 200
-        assert stored["kitchen_channel_ids"] == ["C0API", "C0NEW"]
+        assert stored[f"{mode}_channel_ids"] == ["C0API", "C0NEW"]
     else:
         assert response.status_code == 400
         assert "C0NEW" in response.json()["detail"]
-        assert stored["kitchen_channel_ids"] == ["C0API"]
+        assert stored[f"{mode}_channel_ids"] == ["C0API"]
 
 
 async def test_a_prompt_edit_during_a_refresh_outlives_it(

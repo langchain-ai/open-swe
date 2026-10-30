@@ -108,6 +108,7 @@ def _require_bound_kitchen_channels(kitchen: list[str], channels: list[str]) -> 
 class _ChannelBindings(NamedTuple):
     channels: list[str]
     kitchen: list[str]
+    ask: list[str]
 
 
 class DefaultWorkspaceDeletionError(ValueError):
@@ -444,6 +445,7 @@ class WorkspaceCreate(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
+    ask_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -479,7 +481,7 @@ class WorkspaceCreate(BaseModel):
     def _check_repos(cls, v: list[str]) -> list[str]:
         return _validate_repos(v)
 
-    @field_validator("slack_channel_ids", "kitchen_channel_ids")
+    @field_validator("slack_channel_ids", "kitchen_channel_ids", "ask_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
         return _validate_slack_channel_ids(v)
@@ -489,9 +491,16 @@ class WorkspaceCreate(BaseModel):
     def _check_create_params(cls, v: dict[str, JsonValue]) -> dict[str, JsonValue]:
         return _validate_create_params(v)
 
+    def validate_channel_modes(self) -> None:
+        for channels in (self.kitchen_channel_ids, self.ask_channel_ids):
+            if set(channels) - set(self.slack_channel_ids):
+                raise ValueError("Kitchen and Ask channels must be bound to this workspace")
+        if set(self.kitchen_channel_ids) & set(self.ask_channel_ids):
+            raise ValueError("A Slack channel cannot be both Kitchen and Ask")
+
     @model_validator(mode="after")
     def _check_kitchen_channels_bound(self) -> Self:
-        _require_bound_kitchen_channels(self.kitchen_channel_ids, self.slack_channel_ids)
+        self.validate_channel_modes()
         return self
 
 
@@ -509,6 +518,7 @@ class WorkspaceUpdate(BaseModel):
     repos: list[str] | None = None
     slack_channel_ids: list[str] | None = None
     kitchen_channel_ids: list[str] | None = None
+    ask_channel_ids: list[str] | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -539,7 +549,7 @@ class WorkspaceUpdate(BaseModel):
     def _check_repos(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_repos(v)
 
-    @field_validator("slack_channel_ids", "kitchen_channel_ids")
+    @field_validator("slack_channel_ids", "kitchen_channel_ids", "ask_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_slack_channel_ids(v)
@@ -597,6 +607,7 @@ class Workspace(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
+    ask_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -635,10 +646,17 @@ class Workspace(BaseModel):
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
-    @field_validator("slack_channel_ids", "kitchen_channel_ids")
+    @field_validator("slack_channel_ids", "kitchen_channel_ids", "ask_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
         return _validate_slack_channel_ids(v)
+
+    def validate_channel_modes(self) -> None:
+        for channels in (self.kitchen_channel_ids, self.ask_channel_ids):
+            if set(channels) - set(self.slack_channel_ids):
+                raise ValueError("Kitchen and Ask channels must be bound to this workspace")
+        if set(self.kitchen_channel_ids) & set(self.ask_channel_ids):
+            raise ValueError("A Slack channel cannot be both Kitchen and Ask")
 
     @classmethod
     def seed(cls, create: WorkspaceCreate, created_by: str) -> Workspace:
@@ -657,6 +675,7 @@ class Workspace(BaseModel):
             repos=create.repos,
             slack_channel_ids=create.slack_channel_ids,
             kitchen_channel_ids=create.kitchen_channel_ids,
+            ask_channel_ids=create.ask_channel_ids,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
             fs_capacity_bytes=create.fs_capacity_bytes,
@@ -769,6 +788,7 @@ class Workspace(BaseModel):
             "repos": list(self.repos),
             "slack_channel_ids": list(self.slack_channel_ids),
             "kitchen_channel_ids": list(self.kitchen_channel_ids),
+            "ask_channel_ids": list(self.ask_channel_ids),
             "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
             "has_snapshot": self.ready_snapshot_id is not None,
             "refresh_status": self.refresh_status,
@@ -853,7 +873,7 @@ class WorkspaceStore:
             repos = await _bound_repos(session, row.id)
             channels = await _bound_channels(session, row.id)
         try:
-            return to_workspace(row, repos, channels.channels, channels.kitchen)
+            return to_workspace(row, repos, channels.channels, channels.kitchen, channels.ask)
         except ValidationError:
             logger.error(
                 "Unreadable workspace record", extra={"workspace_slug": slug}, exc_info=True
@@ -887,10 +907,12 @@ class WorkspaceStore:
             channels = await _channels_by_workspace(session)
         records: list[Workspace] = []
         for row in rows:
-            bound = channels.get(row.id, _ChannelBindings([], []))
+            bound = channels.get(row.id, _ChannelBindings([], [], []))
             try:
                 records.append(
-                    to_workspace(row, repos.get(row.id, []), bound.channels, bound.kitchen)
+                    to_workspace(
+                        row, repos.get(row.id, []), bound.channels, bound.kitchen, bound.ask
+                    )
                 )
             except ValidationError:
                 logger.error(
@@ -938,7 +960,11 @@ class WorkspaceStore:
                 await session.flush()
                 await _bind_repos(session, row.id, record.repos)
                 await _bind_channels(
-                    session, row.id, record.slack_channel_ids, record.kitchen_channel_ids
+                    session,
+                    row.id,
+                    record.slack_channel_ids,
+                    record.kitchen_channel_ids,
+                    record.ask_channel_ids,
                 )
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
@@ -947,13 +973,18 @@ class WorkspaceStore:
                 if definition_only:
                     await session.refresh(row)
                     return to_workspace(
-                        row, stored_repos, stored_channels.channels, stored_channels.kitchen
+                        row,
+                        stored_repos,
+                        stored_channels.channels,
+                        stored_channels.kitchen,
+                        stored_channels.ask,
                     )
             return record.model_copy(
                 update={
                     "repos": stored_repos,
                     "slack_channel_ids": stored_channels.channels,
                     "kitchen_channel_ids": stored_channels.kitchen,
+                    "ask_channel_ids": stored_channels.ask,
                 }
             )
         except IntegrityError as exc:
@@ -1120,19 +1151,31 @@ class WorkspaceStore:
             )
 
     async def is_kitchen_channel(self, channel_id: str) -> bool:
-        """Whether this Slack channel is bound to a workspace with kitchen mode on."""
+        """Whether this channel receives untagged messages (Kitchen or Ask)."""
         channel = (channel_id or "").strip().upper()
         if not channel:
             return False
         async with postgres.session() as session:
             kitchen = await session.scalar(
-                select(WorkspaceSlackChannelRow.kitchen).where(
+                select(WorkspaceSlackChannelRow.kitchen | WorkspaceSlackChannelRow.ask).where(
                     WorkspaceSlackChannelRow.channel_id == channel
                 )
             )
         return kitchen is True
 
+    async def is_ask_channel(self, channel_id: str) -> bool:
+        async with postgres.session() as session:
+            return (
+                await session.scalar(
+                    select(WorkspaceSlackChannelRow.ask).where(
+                        WorkspaceSlackChannelRow.channel_id == channel_id.strip().upper()
+                    )
+                )
+                is True
+            )
+
     async def _assert_unique(self, record: Workspace) -> None:
+        record.validate_channel_modes()
         await self._assert_bindings_free(record)
 
     async def _assert_bindings_free(self, record: Workspace) -> None:
@@ -1192,7 +1235,11 @@ class WorkspaceStore:
                 return None
             channels = await _bound_channels(session, row.id)
             record = to_workspace(
-                row, await _bound_repos(session, row.id), channels.channels, channels.kitchen
+                row,
+                await _bound_repos(session, row.id),
+                channels.channels,
+                channels.kitchen,
+                channels.ask,
             )
             if attempt is not None and not attempt.holds(record):
                 logger.warning(
@@ -1464,16 +1511,22 @@ async def _bound_repos(session: AsyncSession, workspace_id: UUID) -> list[str]:
 async def _bound_channels(session: AsyncSession, workspace_id: UUID) -> _ChannelBindings:
     rows = (
         await session.execute(
-            select(WorkspaceSlackChannelRow.channel_id, WorkspaceSlackChannelRow.kitchen)
+            select(
+                WorkspaceSlackChannelRow.channel_id,
+                WorkspaceSlackChannelRow.kitchen,
+                WorkspaceSlackChannelRow.ask,
+            )
             .where(WorkspaceSlackChannelRow.workspace_id == workspace_id)
             .order_by(WorkspaceSlackChannelRow.channel_id)
         )
     ).tuples()
-    bound = _ChannelBindings([], [])
-    for channel_id, kitchen in rows:
+    bound = _ChannelBindings([], [], [])
+    for channel_id, kitchen, ask in rows:
         bound.channels.append(channel_id)
         if kitchen:
             bound.kitchen.append(channel_id)
+        if ask:
+            bound.ask.append(channel_id)
     return bound
 
 
@@ -1491,19 +1544,22 @@ async def _repos_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
 
 
 async def _channels_by_workspace(session: AsyncSession) -> dict[UUID, _ChannelBindings]:
-    grouped: dict[UUID, _ChannelBindings] = defaultdict(lambda: _ChannelBindings([], []))
+    grouped: dict[UUID, _ChannelBindings] = defaultdict(lambda: _ChannelBindings([], [], []))
     rows = await session.execute(
         select(
             WorkspaceSlackChannelRow.workspace_id,
             WorkspaceSlackChannelRow.channel_id,
             WorkspaceSlackChannelRow.kitchen,
+            WorkspaceSlackChannelRow.ask,
         ).order_by(WorkspaceSlackChannelRow.channel_id)
     )
-    for workspace_id, channel_id, kitchen in rows.tuples():
+    for workspace_id, channel_id, kitchen, ask in rows.tuples():
         bound = grouped[workspace_id]
         bound.channels.append(channel_id)
         if kitchen:
             bound.kitchen.append(channel_id)
+        if ask:
+            bound.ask.append(channel_id)
     return grouped
 
 
@@ -1550,49 +1606,30 @@ async def _bind_repos(session: AsyncSession, workspace_id: UUID, repos: list[str
 
 
 async def _bind_channels(
-    session: AsyncSession, workspace_id: UUID, channels: list[str], kitchen: list[str]
+    session: AsyncSession,
+    workspace_id: UUID,
+    channels: list[str],
+    kitchen: list[str],
+    ask: list[str],
 ) -> None:
-    """Make this workspace's channel rows exactly ``channels``, flagged per ``kitchen``."""
     wanted = set(channels)
-    flagged = set(kitchen) & wanted
-    current: dict[str, bool] = dict(
-        (
-            await session.execute(
-                select(WorkspaceSlackChannelRow.channel_id, WorkspaceSlackChannelRow.kitchen).where(
-                    WorkspaceSlackChannelRow.workspace_id == workspace_id
-                )
+    current = {
+        row.channel_id: row
+        for row in await session.scalars(
+            select(WorkspaceSlackChannelRow).where(
+                WorkspaceSlackChannelRow.workspace_id == workspace_id
             )
         )
-        .tuples()
-        .all()
-    )
-    if stale := current.keys() - wanted:
-        await session.execute(
-            delete(WorkspaceSlackChannelRow).where(
-                WorkspaceSlackChannelRow.workspace_id == workspace_id,
-                WorkspaceSlackChannelRow.channel_id.in_(stale),
-            )
-        )
-    enable = {channel_id for channel_id in flagged if current.get(channel_id) is False}
-    disable = {
-        channel_id for channel_id, on in current.items() if on and channel_id in wanted - flagged
     }
-    for enabled, changed in ((True, enable), (False, disable)):
-        if changed:
-            await session.execute(
-                update(WorkspaceSlackChannelRow)
-                .where(
-                    WorkspaceSlackChannelRow.workspace_id == workspace_id,
-                    WorkspaceSlackChannelRow.channel_id.in_(changed),
-                )
-                .values(kitchen=enabled)
-            )
-    for channel_id in wanted - current.keys():
-        session.add(
-            WorkspaceSlackChannelRow(
-                channel_id=channel_id, workspace_id=workspace_id, kitchen=channel_id in flagged
-            )
-        )
+    for channel_id, row in current.items():
+        if channel_id not in wanted:
+            await session.delete(row)
+    for channel_id in channels:
+        if (row := current.get(channel_id)) is None:
+            row = WorkspaceSlackChannelRow(channel_id=channel_id, workspace_id=workspace_id)
+            session.add(row)
+        row.kitchen = channel_id in kitchen
+        row.ask = channel_id in ask
 
 
 async def _repo_owners(session: AsyncSession, repos: list[str], excluding: str) -> dict[str, str]:
@@ -1642,6 +1679,13 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         record.kitchen_channel_ids = [
             channel for channel in record.kitchen_channel_ids if channel in record.slack_channel_ids
         ]
+    if update.ask_channel_ids is not None:
+        record.ask_channel_ids = update.ask_channel_ids
+    else:
+        record.ask_channel_ids = [
+            channel for channel in record.ask_channel_ids if channel in record.slack_channel_ids
+        ]
+    record.validate_channel_modes()
     if update.setup_script is not None:
         record.setup_script = update.setup_script
     if update.update_script is not None:

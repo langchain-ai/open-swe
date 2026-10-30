@@ -1171,12 +1171,15 @@ async def _process_slack_mention_impl(
     review_guide = guide is not None
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
+    ask_channel = await WORKSPACES.is_ask_channel(channel_id)
     constant_context = "\n\n".join(
         section
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel and not review_guide else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
-            _KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT,
+            prompt("runs/slack-ask")
+            if ask_channel
+            else (_KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT),
         )
         if section
     )

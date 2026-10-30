@@ -829,6 +829,7 @@ export interface WorkspaceOption {
   slack_channel_ids: Array<string>
   /** Bound channels where untagged messages start and continue threads. */
   kitchen_channel_ids: Array<string>
+  ask_channel_ids?: Array<string>
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -869,6 +870,7 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
 }
@@ -890,6 +892,7 @@ export interface WorkspaceUpdate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
   vcpus?: number | null
@@ -913,6 +916,7 @@ export interface WorkspaceRecord {
   repos: Array<string>
   slack_channel_ids: Array<string>
   kitchen_channel_ids: Array<string>
+  ask_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
