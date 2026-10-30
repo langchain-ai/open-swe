@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from openswe.incidents.evidence_tools import EvidenceCollector, redact, source_url
 from openswe.incidents.models import Evidence, Hypothesis, IncidentReport
@@ -31,6 +31,13 @@ class Claim(BaseModel):
     text: str = Field(max_length=1200)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
 
+    @field_validator("evidence_ids", mode="before")
+    @classmethod
+    def discard_null_evidence_ids(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item for item in value if item is not None]
+        return value
+
 
 class ReportDraft(BaseModel):
     summary: list[Claim] = Field(default_factory=list, max_length=6)
@@ -42,6 +49,33 @@ class ReportDraft(BaseModel):
     hypotheses: list[Hypothesis] = Field(default_factory=list, max_length=8)
     gaps: list[str] = Field(default_factory=list, max_length=10)
     questions: list[str] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_serialized_lists(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        for field in (
+            "summary",
+            "problem",
+            "previous_occurrence",
+            "impact",
+            "cause",
+            "next_steps",
+            "hypotheses",
+            "gaps",
+            "questions",
+        ):
+            item = normalized.get(field)
+            if isinstance(item, str):
+                try:
+                    parsed: object = json.loads(item)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, list):
+                    normalized[field] = parsed
+        return normalized
 
 
 INCIDENT_PROMPT = prompt("incidents/report")
