@@ -165,6 +165,17 @@ describe("liveActivityLabel", () => {
     expect(liveActivityLabel(chunks, repoPath)).toBe("Exploring · AGENTS.md")
   })
 
+  it("shows the current thought instead of a bare Thinking label", () => {
+    expect(
+      liveActivityLabel([
+        { kind: "reasoning", text: "**Checking the snapshot**\n\nDetails" },
+      ])
+    ).toBe("Thinking · Checking the snapshot")
+    expect(liveActivityLabel([{ kind: "reasoning", text: " " }])).toBe(
+      "Thinking…"
+    )
+  })
+
   it("keeps showing an active parallel tool until all tools finish", () => {
     const running = chunk({
       toolCallId: "running",

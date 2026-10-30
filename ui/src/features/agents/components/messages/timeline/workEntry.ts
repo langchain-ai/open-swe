@@ -231,6 +231,18 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
   }
 }
 
+/** The thought's first line as plain text — the label's CSS truncation handles overflow. */
+function thoughtPreview(text: string): string | null {
+  const firstLine = text.split("\n").find((line) => line.trim()) ?? ""
+  const plain = firstLine
+    .replace(/^\s*#+\s*/, "")
+    .replace(/[*_`]/g, "")
+    .trim()
+  return plain ? plain.slice(0, MAX_THOUGHT_PREVIEW_LENGTH) : null
+}
+
+const MAX_THOUGHT_PREVIEW_LENGTH = 200
+
 export function liveActivityLabel(
   chunks: Array<Chunk>,
   repoPath?: string
@@ -239,7 +251,10 @@ export function liveActivityLabel(
     let chunk = chunks[index]
     if (!chunk) continue
 
-    if (chunk.kind === "reasoning") return "Thinking…"
+    if (chunk.kind === "reasoning") {
+      const preview = thoughtPreview(chunk.text)
+      return preview ? `Thinking · ${preview}` : "Thinking…"
+    }
     if (chunk.kind === "text") {
       if (chunk.text.trim()) return "Writing response…"
       continue
