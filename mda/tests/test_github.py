@@ -1,16 +1,20 @@
 """What Open SWE's GitHub channel starts for each GitHub delivery."""
 
 import uuid
-from typing import Any, cast
+from typing import Any, cast, get_args
 
 import pytest
 import rt.github as github
 from managed_deepagents import (
     ChannelRunInput,
     ChannelRunOptions,
+    GitHubAccount,
     GitHubChannelThread,
     GitHubEvent,
     GitHubEventResult,
+    GitHubInstallationEvent,
+    GitHubInstallationEventKey,
+    GitHubInstallationPayload,
     GitHubPayload,
     SupportedEventKey,
 )
@@ -292,6 +296,30 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             id="untagged-workflow-command",
         ),
         pytest.param(
+            "installation_repositories",
+            {"action": "added", "repositories_added": [], "repositories_removed": []},
+            _facts(routable=True, allowed=False),
+            False,
+            Route(("forget_cached_repos",)),
+            id="installation-changed",
+        ),
+        pytest.param(
+            "issues",
+            _issue("closed"),
+            _FACTS,
+            False,
+            Route(),
+            id="issue-closed-only-logged",
+        ),
+        pytest.param(
+            "pull_request",
+            {"action": "labeled"},
+            _FACTS,
+            False,
+            Route(("wake_merge_queue",)),
+            id="pr-labeled-wakes-the-queue",
+        ),
+        pytest.param(
             "pull_request_review_comment",
             {
                 "action": "created",
@@ -496,6 +524,55 @@ async def test_pull_request_work_is_the_backends_and_starts_no_run_here(
     assert started is None
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
     assert (act.work, act.mentioned, act.issue_run) == (["route_comment"], True, None)
+
+
+async def test_an_installation_event_drops_the_cached_repository_listings(
+    backend: _Backend,
+) -> None:
+    event = GitHubInstallationEvent(
+        key="installation.created",
+        name="installation",
+        action="created",
+        delivery_id="delivery-1",
+        installation_id=1,
+        account=GitHubAccount(id=3, login="acme"),
+        sender=GitHubSender(id=2, login="ada", type="User"),
+        payload=cast(
+            GitHubInstallationPayload,
+            {
+                "action": "created",
+                "installation": {"id": 1, "account": {"id": 3, "login": "acme"}},
+                "sender": {"id": 2, "login": "ada", "type": "User"},
+            },
+        ),
+    )
+
+    assert await github.on_installation_event(event, _THREAD) is None
+    # Logged, then the backend drops everyone's cached listing; no run starts.
+    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert (act.event, act.work, act.issue_run) == ("installation", ["forget_cached_repos"], None)
+
+
+def test_the_channel_takes_every_event_the_app_sends() -> None:
+    from channels.github import channel
+
+    events = set(cast(list[str], channel.provider_config["events"]))
+    assert {"issues.closed", "check_run.created", "installation.created"} <= events
+    assert events == set(get_args(SupportedEventKey)) | set(get_args(GitHubInstallationEventKey))
+    # Every action of the events it already took: the App subscribes to nothing new.
+    assert channel.provider_config["webhookEvents"] == [
+        "check_run",
+        "check_suite",
+        "issue_comment",
+        "issues",
+        "merge_group",
+        "pull_request",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "push",
+        "status",
+        "workflow_run",
+    ]
 
 
 async def test_a_delivery_that_starts_nothing_is_only_logged(backend: _Backend) -> None:

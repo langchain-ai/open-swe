@@ -62,6 +62,9 @@ class GitHubDeliveryFacts(BaseModel):
 type GitHubWorkName = Literal[
     # The native merge queue reads the queue again.
     "wake_merge_queue",
+    # The App was installed, removed or suspended, or its repositories changed:
+    # everyone's cached list of the repositories they reach through it is dropped.
+    "forget_cached_repos",
     # The agent thread that opened a pull request learns its state, and its usage.
     "track_pull_request_state",
     "track_pull_request_usage",

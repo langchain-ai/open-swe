@@ -34,6 +34,7 @@ from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.github.comments import OPEN_SWE_TAGS
+from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.mda_channels.api import ChannelCall
 from openswe.merge_queue.controller import wake_native_queue
@@ -139,6 +140,7 @@ def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Await
     event, delivery_id = work.event, work.delivery_id
     return {
         "wake_merge_queue": lambda: wake_native_queue(payload),
+        "forget_cached_repos": forget_cached_repos,
         "track_pull_request_state": lambda: common.update_agent_thread_pr_state(payload),
         "track_pull_request_usage": lambda: common.update_agent_pr_usage_from_webhook(
             payload, delivery_id=delivery_id

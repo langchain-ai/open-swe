@@ -18,6 +18,9 @@ from typing import Final, cast
 from runtime_api.github import GitHubDeliveryFacts, GitHubWorkName
 
 CI_EVENTS: Final = frozenset({"check_run", "check_suite", "workflow_run", "status"})
+# GitHub sends these to every App: it was installed, removed or suspended, or its
+# repositories changed.
+INSTALLATION_EVENTS: Final = frozenset({"installation", "installation_repositories"})
 ISSUE_ACTIONS: Final = frozenset({"opened", "edited", "reopened"})
 COMMENT_ACTIONS: Final = {
     "issue_comment": frozenset({"created", "edited"}),
@@ -86,6 +89,9 @@ def route(
     event: str, payload: Mapping[str, object], facts: GitHubDeliveryFacts, *, from_app: bool
 ) -> Route:
     """What a delivery of ``event`` starts. ``from_app``: Open SWE's own App caused it."""
+    if event in INSTALLATION_EVENTS:
+        # About the installation, not a repository, so no workspace owns it.
+        return Route(("forget_cached_repos",))
     if not facts.routable:
         return Route()
     if event == "merge_group":
