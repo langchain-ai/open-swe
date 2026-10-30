@@ -8,7 +8,7 @@ import { ReasoningBlock } from "./ReasoningBlock"
 afterEach(() => cleanup())
 
 describe("ReasoningBlock", () => {
-  it("previews the thought while collapsed and shows all of it once expanded", () => {
+  it("previews the reasoning on its toggle and shows all of it once expanded", () => {
     render(
       <ReasoningBlock
         isLive={false}
@@ -16,12 +16,11 @@ describe("ReasoningBlock", () => {
       />
     )
 
-    expect(screen.getByText("Checking the snapshot")).toBeTruthy()
+    const toggle = screen.getByRole("button", { name: "Checking the snapshot" })
     expect(screen.queryByText(/The image looks stale/)).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "Thought" }))
+    fireEvent.click(toggle)
 
-    expect(screen.queryByText("Checking the snapshot")).toBeNull()
     expect(screen.getByText(/The image looks stale/)).toBeTruthy()
   })
 })

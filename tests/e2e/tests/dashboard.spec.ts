@@ -687,7 +687,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
-  test("previews each collapsed thought instead of only labelling it", async ({
+  test("previews each collapsed reasoning block on its brain-icon toggle", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -702,16 +702,19 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       await fold.click();
     }
 
-    const thought = page
-      .getByRole("button", { name: /^Thought/ })
-      .filter({ hasText: "Checking the snapshot status" })
+    const toggle = page
+      .getByRole("button", { name: "Checking the snapshot status" })
       .first();
-    await expect(thought).toBeVisible();
+    await expect(toggle).toBeVisible();
     await expect(
       page.getByText(/compare it with the latest capture/),
     ).toHaveCount(0);
+    await test.info().attach("collapsed-reasoning", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
 
-    await thought.click();
+    await toggle.click();
     await expect(
       page.getByText(/compare it with the latest capture/).first(),
     ).toBeVisible();
