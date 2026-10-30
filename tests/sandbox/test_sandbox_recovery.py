@@ -87,38 +87,36 @@ async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
     assert "recovery" not in payload
 
 
+async def test_a_review_run_leaves_its_lost_sandbox_to_its_own_failure_notice() -> None:
+    """A review's failure notice and check already tell its PR; a second warning repeats it."""
+    with patch(
+        "openswe.agent_api.failures.post_sandbox_unreachable_notification",
+        new_callable=AsyncMock,
+    ) as notify:
+        failure = await OperationFailure.of(
+            SandboxConnectionError("WebSocket upgrade to sb-dead failed (no valid HTTP response)"),
+            operation="execute",
+            config=_CONFIG,
+            notify=False,
+        )
+
+    # The run still ends; only the warning is left to the review's notice.
+    assert failure.sandbox_unreachable
+    notify.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
-    ("kind", "posted"), [("reviewer", False), ("review-scout", False), (None, True)]
+    ("assistant_id", "notified"),
+    [("reviewer", False), ("review-scout", False), ("agent", True), (None, True)],
 )
-async def test_a_review_leaves_its_lost_sandbox_to_its_own_failure_notice(
-    monkeypatch: pytest.MonkeyPatch, kind: str | None, posted: bool
+async def test_only_a_review_skips_the_lost_sandbox_notice(
+    assistant_id: str | None, notified: bool
 ) -> None:
-    """A review's failure notice and check already tell the PR; a second warning repeats it."""
-    from openswe.middleware import sandbox_circuit_breaker
+    from openswe.agent_api import graph
 
-    monkeypatch.setattr(
-        sandbox_circuit_breaker, "get_active_slack_thread", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(
-        sandbox_circuit_breaker,
-        "read_thread",
-        AsyncMock(return_value={"metadata": {"kind": kind} if kind else {}}),
-    )
-    monkeypatch.setattr(
-        sandbox_circuit_breaker, "resolve_thread_github_token", AsyncMock(return_value="token")
-    )
-    comment = AsyncMock()
-    monkeypatch.setattr(sandbox_circuit_breaker, "post_github_comment", comment)
+    with patch.object(
+        graph, "post_sandbox_unreachable_notification", new_callable=AsyncMock
+    ) as notify:
+        await graph._tell_sandbox_gone(_CONFIG, assistant_id, sandbox_id="sb-dead")
 
-    await sandbox_circuit_breaker.post_sandbox_unreachable_notification(
-        {
-            "configurable": {
-                "thread_id": "thread-1",
-                "repo": {"owner": "acme", "name": "api"},
-                "pr_number": 7,
-            }
-        },
-        sandbox_id="sb-dead",
-    )
-
-    assert comment.await_count == (1 if posted else 0)
+    assert notify.await_count == (1 if notified else 0)
