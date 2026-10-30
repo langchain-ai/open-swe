@@ -5,9 +5,14 @@ from typing import cast
 import pytest
 import rt.images as images
 import rt.linear as linear
+import rt.linear_automations as automations
 from managed_deepagents import (
+    ChannelRunOptions,
     LinearChannelThread,
     LinearIssueCreateEvent,
+    LinearIssueCreatePayload,
+    LinearIssueUpdateEvent,
+    LinearIssueUpdatePayload,
     LinearSessionCreatedEvent,
     LinearSessionCreatedPayload,
     LinearSessionPromptedEvent,
@@ -18,14 +23,26 @@ from pydantic import BaseModel, TypeAdapter
 from rt.intake import backend_endpoint
 from runtime_api.endpoint import Endpoint
 from runtime_api.linear import (
+    LINEAR_AUTOMATION_RULES,
+    LINEAR_SESSION_FACTS,
+    PLAN_LINEAR_AUTOMATION,
+    PLAN_LINEAR_SESSION,
     RECORD_LINEAR_DELIVERY,
-    START_LINEAR_SESSION,
+    LinearAutomation,
+    LinearAutomationRules,
+    LinearAutomationRun,
     LinearDelivery,
     LinearDeliveryRecorded,
     LinearSessionDeclined,
+    LinearSessionFacts,
     LinearSessionRun,
     LinearSessionStart,
-    LinearSessionTurn,
+    LinearTrigger,
+    PlanLinearAutomation,
+    PlanLinearSession,
+    PlannedLinearAutomation,
+    RepositoryChoice,
+    RepositoryPolicy,
 )
 
 _THREAD = LinearChannelThread(id=str(uuid.uuid4()), channel=ChannelName(name="linear"))
@@ -36,13 +53,18 @@ _RUN = LinearSessionRun(
     metadata={"channel": "linear"},
     webhook="https://backend.example/webhooks/run-complete",
 )
+_FACTS = LinearSessionFacts(
+    author="signed_in",
+    instance_default="acme/api",
+    policy=RepositoryPolicy(default_owner="acme"),
+)
 
 
 def test_the_channel_asks_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.example/")
     assert (
-        backend_endpoint(START_LINEAR_SESSION.path)
-        == "https://backend.example/mda/channel-api/start_linear_session"
+        backend_endpoint(PLAN_LINEAR_SESSION.path)
+        == "https://backend.example/mda/channel-api/plan_linear_session"
     )
 
     # MDA reads the channels to build the deployment, without its environment:
@@ -52,12 +74,22 @@ def test_the_channel_asks_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _Backend:
-    """The backend's channel API, answering ``start_linear_session`` with ``answer``."""
+    """The backend's channel API, with the facts, plan and automations it answers with."""
 
-    def __init__(self, answer: LinearSessionRun | LinearSessionDeclined = _RUN) -> None:
+    def __init__(
+        self,
+        facts: LinearSessionFacts = _FACTS,
+        answer: LinearSessionRun | LinearSessionDeclined = _RUN,
+        rules: list[LinearAutomation] | None = None,
+        skip: frozenset[str] = frozenset(),
+    ) -> None:
+        self.facts = facts
         self.answer = answer
+        self.rules = rules or []
+        self.skip = skip
         self.recorded: list[LinearDelivery] = []
-        self.turns: list[LinearSessionTurn] = []
+        self.plans: list[PlanLinearSession] = []
+        self.automations: list[PlanLinearAutomation] = []
 
     async def __call__(
         self, endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
@@ -65,20 +97,38 @@ class _Backend:
         if endpoint is RECORD_LINEAR_DELIVERY:
             self.recorded.append(cast(LinearDelivery, request))
             return LinearDeliveryRecorded()
-        assert endpoint is START_LINEAR_SESSION
-        assert msg_id == "msg_delivery-1"
-        self.turns.append(cast(LinearSessionTurn, request))
-        return LinearSessionStart(answer=self.answer)
+        if endpoint is LINEAR_SESSION_FACTS:
+            return self.facts
+        if endpoint is PLAN_LINEAR_SESSION:
+            assert msg_id == "msg_delivery-1"
+            self.plans.append(cast(PlanLinearSession, request))
+            return LinearSessionStart(answer=self.answer)
+        if endpoint is LINEAR_AUTOMATION_RULES:
+            return LinearAutomationRules(automations=self.rules)
+        assert endpoint is PLAN_LINEAR_AUTOMATION
+        planned = cast(PlanLinearAutomation, request)
+        self.automations.append(planned)
+        if planned.automation_id in self.skip:
+            return PlannedLinearAutomation()
+        return PlannedLinearAutomation(
+            run=LinearAutomationRun(
+                thread_id=uuid.uuid5(uuid.NAMESPACE_URL, planned.automation_id),
+                input={"messages": [{"role": "user", "content": planned.automation_id}]},
+                context={"__run_token": "signed"},
+                metadata={"channel": "linear"},
+            )
+        )
 
 
 @pytest.fixture
 def backend(monkeypatch: pytest.MonkeyPatch) -> _Backend:
     backend = _Backend()
     monkeypatch.setattr(linear, "ask_backend", backend)
+    monkeypatch.setattr(automations, "ask_backend", backend)
     return backend
 
 
-def _created(**session: object) -> LinearSessionCreatedEvent:
+def _created(body: str = "@Open SWE fix it", **session: object) -> LinearSessionCreatedEvent:
     return LinearSessionCreatedEvent(
         delivery_id="delivery-1",
         organization_id="org-1",
@@ -100,7 +150,7 @@ def _created(**session: object) -> LinearSessionCreatedEvent:
                         "description": "It crashes: ![shot](https://uploads.example/a.png)",
                         "url": "https://linear.app/acme/issue/ENG-1",
                     },
-                    "comment": {"id": "comment-1", "body": "@Open SWE fix it"},
+                    "comment": {"id": "comment-1", "body": body},
                     "creator": {"id": "user-1", "name": "Ada", "email": "ada@example.com"},
                     **session,
                 },
@@ -120,15 +170,17 @@ async def test_a_session_turn_starts_the_run_the_backend_planned(
 
     result = await linear.start_session(_created(), _THREAD)
 
-    # Logged and handed to automations, as every delivery the channel handles.
+    # Logged, as every delivery the channel handles.
     assert [delivery.key for delivery in backend.recorded] == ["AgentSessionEvent.created"]
-    (turn,) = backend.turns
-    assert str(turn.thread_id) == _THREAD.id
-    assert (turn.author.email, turn.body, turn.comment_id) == (
+    (plan,) = backend.plans
+    assert str(plan.turn.thread_id) == _THREAD.id
+    assert (plan.turn.author.email, plan.turn.body, plan.turn.comment_id) == (
         "ada@example.com",
         "@Open SWE fix it",
         "comment-1",
     )
+    # Nothing named, nothing remembered: the instance's default, in the workspace that owns it.
+    assert (plan.repository, plan.workspace) == ("acme/api", None)
     assert isinstance(result, tuple)
     run_input, options = result
     # The run calls back with the context the backend signed, and completes through its webhook.
@@ -139,7 +191,7 @@ async def test_a_session_turn_starts_the_run_the_backend_planned(
     }
     introduction, issue, human = cast(dict[str, list[dict[str, object]]], run_input)["messages"]
     assert "system:linear-issue" in str(introduction["content"])
-    # The issue's prompt names the repository the backend chose, beside the image it shows.
+    # The issue's prompt names the repository the backend accepted, beside the image it shows.
     text, shown = cast(list[dict[str, str]], issue["content"])
     assert "## Repository: acme/api" in text["text"]
     assert shown == {"type": "image", "url": "https://uploads.example/a.png"}
@@ -171,31 +223,99 @@ async def test_a_reply_in_the_session_is_the_repliers_turn(backend: _Backend) ->
 
     await linear.start_session(event, _THREAD)
 
-    (turn,) = backend.turns
-    assert (turn.author.id, turn.body, turn.comment_id) == ("user-2", "and the docs", "comment-2")
+    (plan,) = backend.plans
+    assert (plan.turn.author.id, plan.turn.body, plan.turn.comment_id) == (
+        "user-2",
+        "and the docs",
+        "comment-2",
+    )
+
+
+_PERSONAL = RepositoryChoice(repository="ada/personal", workspace="ada-space")
+
+
+@pytest.mark.parametrize(
+    ("body", "facts", "chosen"),
+    [
+        # The turn names it: that wins, in the thread's workspace.
+        (
+            "fix it in repo:acme/web",
+            {"thread_repository": "acme/api", "thread_workspace": "core"},
+            ("acme/web", "core"),
+        ),
+        # A bare name takes the default owner.
+        ("fix it in repo web", {}, ("acme/web", None)),
+        # A follow-up works where the session does.
+        ("now add a test", {"thread_repository": "acme/api"}, ("acme/api", None)),
+        # The issue names it explicitly; an uploaded screenshot is no repository.
+        ("fix it", {"issue": "Crashes in repo:acme/app"}, ("acme/app", None)),
+        # The author's default, in the workspace whose default it is.
+        ("fix it", {"personal_default": _PERSONAL}, ("ada/personal", "ada-space")),
+        # The instance's default comes last.
+        ("fix it", {"instance_default": "acme/main"}, ("acme/main", None)),
+    ],
+    ids=["named", "bare-name", "remembered", "issue", "personal", "instance"],
+)
+def test_a_turn_works_in_the_repository_it_names_remembers_or_prefers(
+    body: str, facts: dict[str, object], chosen: tuple[str, str | None]
+) -> None:
+    issue_text = cast(str, facts.pop("issue", "![shot](https://github.com/user-attachments/x)"))
+    event = _created(body, issue={"id": "issue-1", "title": "Bug", "description": issue_text})
+    turn = linear.SessionTurn.of(event, _THREAD.id)
+    assert turn is not None
+    choice = turn.repository(
+        LinearSessionFacts.model_validate(
+            {"author": "signed_in", "policy": RepositoryPolicy(default_owner="acme"), **facts}
+        )
+    )
+    assert isinstance(choice, RepositoryChoice)
+    assert (choice.repository, choice.workspace) == chosen
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("declined", "told"),
+    ("answering", "told"),
     [
-        (LinearSessionDeclined(reason="no_repository"), "repo:owner/name"),
         (
-            LinearSessionDeclined(reason="repository_not_allowed", repository="acme/secret"),
-            "I'm not allowed to work in `acme/secret`",
+            _Backend(facts=_FACTS.model_copy(update={"instance_default": None})),
+            "repo:owner/name",
         ),
         (
-            LinearSessionDeclined(reason="sign_in", settings_url="https://swe.example/settings"),
+            _Backend(
+                facts=_FACTS.model_copy(
+                    update={"policy": RepositoryPolicy(allowed_orgs=["langchain-ai"])}
+                )
+            ),
+            "I'm not allowed to work in `acme/api`",
+        ),
+        (
+            _Backend(
+                facts=LinearSessionFacts(
+                    author="sign_in",
+                    settings_url="https://swe.example/settings",
+                    policy=RepositoryPolicy(),
+                )
+            ),
             "[your Open SWE settings](https://swe.example/settings)",
         ),
-        (LinearSessionDeclined(reason="sign_in_again"), "no longer valid"),
+        (
+            _Backend(facts=LinearSessionFacts(author="sign_in_again", policy=RepositoryPolicy())),
+            "no longer valid",
+        ),
+        # The backend's own check refuses what the channel chose.
+        (
+            _Backend(
+                answer=LinearSessionDeclined(reason="repository_not_allowed", repository="acme/api")
+            ),
+            "I'm not allowed to work in `acme/api`",
+        ),
     ],
-    ids=["no-repository", "not-allowed", "sign-in", "sign-in-again"],
+    ids=["no-repository", "not-allowed", "sign-in", "sign-in-again", "backend-refuses"],
 )
-async def test_the_session_hears_why_the_backend_started_nothing(
-    monkeypatch: pytest.MonkeyPatch, declined: LinearSessionDeclined, told: str
+async def test_the_session_hears_why_nothing_started(
+    monkeypatch: pytest.MonkeyPatch, answering: _Backend, told: str
 ) -> None:
-    monkeypatch.setattr(linear, "ask_backend", _Backend(declined))
+    monkeypatch.setattr(linear, "ask_backend", answering)
 
     result = await linear.start_session(_created(), _THREAD)
 
@@ -208,28 +328,126 @@ async def test_a_session_without_its_issue_is_told_so(backend: _Backend) -> None
     result = await linear.start_session(_created(issue=None), _THREAD)
 
     assert result == EndpointDeclined(linear.UNREADABLE_SESSION)
-    assert backend.turns == []
+    assert backend.plans == []
 
 
-@pytest.mark.asyncio
-async def test_issue_events_start_nothing(backend: _Backend) -> None:
-    event = LinearIssueCreateEvent(
+def _issue(
+    action: str,
+    *,
+    team: str = "ENG",
+    labels: dict[str, str] | None = None,
+    labels_before: list[str] | None = None,
+    project: str | None = None,
+) -> dict[str, object]:
+    labels = labels or {}
+    payload: dict[str, object] = {
+        "type": "Issue",
+        "action": action,
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "data": {
+            "id": "issue-1",
+            "identifier": f"{team}-7",
+            "title": "Checkout fails",
+            "team": {"id": "team-1", "key": team},
+            "labelIds": list(labels),
+            "labels": [{"id": label_id, "name": name} for label_id, name in labels.items()],
+            "project": {"name": project} if project else None,
+        },
+    }
+    if labels_before is not None:
+        payload["updatedFrom"] = {"labelIds": labels_before}
+    return payload
+
+
+def _issue_event(payload: dict[str, object]) -> LinearIssueCreateEvent | LinearIssueUpdateEvent:
+    """The event as MDA's channel validates and hands it to the handler."""
+    if payload["action"] == "create":
+        return LinearIssueCreateEvent(
+            delivery_id="delivery-1",
+            organization_id="org-1",
+            issue_id="issue-1",
+            payload=TypeAdapter(LinearIssueCreatePayload).validate_python(payload),
+        )
+    return LinearIssueUpdateEvent(
         delivery_id="delivery-1",
         organization_id="org-1",
         issue_id="issue-1",
-        payload={
-            "type": "Issue",
-            "action": "create",
-            "organizationId": "org-1",
-            "webhookTimestamp": 1_700_000_000_000,
-            "data": {"id": "issue-1", "identifier": "ENG-1", "title": "Bug"},
-        },
+        payload=TypeAdapter(LinearIssueUpdatePayload).validate_python(payload),
     )
 
-    assert await linear.record(event, _THREAD) is None
-    (delivery,) = backend.recorded
-    assert (delivery.key, delivery.delivery_id) == ("Issue.create", "delivery-1")
-    assert backend.turns == []
+
+_TRIAGE = LinearAutomation(
+    id="triage",
+    triggers=[LinearTrigger(events=["issue.created"], labels=["Bug"], project="API")],
+)
+_FIX = LinearAutomation(
+    id="fix", triggers=[LinearTrigger(events=["issue.labeled"], labels=["agent-fix"])]
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "started"),
+    [
+        (_issue("create", labels={"l1": "bug"}, project="api"), ["triage"]),
+        # Filtered out: no Bug label; another project.
+        (_issue("create", project="API"), []),
+        (_issue("create", labels={"l1": "Bug"}, project="Web"), []),
+        # A label it already had isn't added.
+        (_issue("update", labels={"l2": "agent-fix", "l3": "p1"}, labels_before=["l2"]), []),
+        (_issue("update", labels={"l2": "agent-fix"}, labels_before=[]), ["fix"]),
+        # An update that adds no label is no trigger event at all.
+        (_issue("update", labels={"l2": "agent-fix"}), []),
+    ],
+    ids=["created", "no-label", "other-project", "label-kept", "label-added", "no-label-change"],
+)
+async def test_an_issue_event_starts_the_automations_it_fires_on_threads_of_their_own(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, object], started: list[str]
+) -> None:
+    backend = _Backend(rules=[_TRIAGE, _FIX])
+    monkeypatch.setattr(linear, "ask_backend", backend)
+    monkeypatch.setattr(automations, "ask_backend", backend)
+
+    result = await automations.start_automations(_issue_event(payload), _THREAD)
+
+    # Logged either way.
+    assert [delivery.key for delivery in backend.recorded] == [
+        "Issue.create" if payload["action"] == "create" else "Issue.update"
+    ]
+    assert [planned.automation_id for planned in backend.automations] == started
+    if not started:
+        assert result is None
+        return
+    assert isinstance(result, list)
+    runs = cast(list[tuple[object, ChannelRunOptions]], result)
+    for (run_input, options), automation_id in zip(runs, started, strict=True):
+        assert run_input == {"messages": [{"role": "user", "content": automation_id}]}
+        # Never the issue's conversation: a thread of its own, kept for the dashboard.
+        assert options["thread"] == {
+            "mode": "persistent",
+            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, automation_id)),
+        }
+        assert options["context"] == {"__run_token": "signed"}
+
+
+@pytest.mark.asyncio
+async def test_an_automation_the_backend_doesnt_claim_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _Backend(rules=[_TRIAGE], skip=frozenset({"triage"}))
+    monkeypatch.setattr(linear, "ask_backend", backend)
+    monkeypatch.setattr(automations, "ask_backend", backend)
+
+    payload = _issue("create", labels={"l1": "bug"}, project="api")
+    assert await automations.start_automations(_issue_event(payload), _THREAD) is None
+    (planned,) = backend.automations
+    assert (planned.event, planned.team, planned.labels, planned.project) == (
+        "issue.created",
+        "ENG",
+        ["bug"],
+        "api",
+    )
 
 
 @pytest.mark.asyncio

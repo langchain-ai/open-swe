@@ -1,12 +1,14 @@
 """What Open SWE's Linear channel does with each Linear delivery, in this deployment.
 
-Every delivery the channel handles goes to the backend's event log and Linear
-automations (``record_linear_delivery``); issue and comment events start nothing
-here. An agent session turn starts the coding agent's run on the session's own
-thread: the backend says who the author is in Open SWE, which repository and
-workspace the turn works in, and signs the run's context
-(``start_linear_session``); this side reads the turn, fetches the images it
-shows, writes the run's input and tells the session when nothing starts.
+Every delivery the channel handles goes to the backend's event log
+(``record_linear_delivery``). An agent session turn starts the coding agent's run
+on the session's own thread. This side reads the turn and decides: whether its
+author may run as themselves, which repository and workspace it works in, and why
+nothing starts when nothing does, from what Open SWE knows about them
+(``linear_session_facts``). It fetches the images the turn shows and writes the
+run's input. The backend checks the choice again, indexes the thread and signs the
+run's context (``plan_linear_session``). Issue events start Linear automations
+(``rt.linear_automations``).
 """
 
 import asyncio
@@ -26,20 +28,26 @@ from managed_deepagents import (
 from managed_deepagents._channels.http.endpoint import EndpointDeclined  # noqa: PLC2701
 from pydantic import JsonValue
 from runtime_api.linear import (
+    LINEAR_SESSION_FACTS,
+    PLAN_LINEAR_SESSION,
     RECORD_LINEAR_DELIVERY,
-    START_LINEAR_SESSION,
     LinearDelivery,
     LinearIssue,
     LinearPerson,
     LinearSessionDeclined,
+    LinearSessionFacts,
+    LinearSessionFactsRequest,
     LinearSessionRun,
     LinearSessionTurn,
+    PlanLinearSession,
+    RepositoryChoice,
 )
 
 from rt.images import extract_image_urls, fetch_image_block
 from rt.input_messages import RunInput, human_input, system_input, system_introduction
 from rt.intake import ask_backend
 from rt.prompts import prompt
+from rt.repositories import is_allowed, repository_in
 
 UNREADABLE_SESSION: Final = (
     "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
@@ -153,6 +161,44 @@ class SessionTurn:
             )
         )
 
+    def repository(self, facts: LinearSessionFacts) -> RepositoryChoice | LinearSessionDeclined:
+        """The repository the turn works in, when one is named, remembered or preferred.
+
+        A repository the turn names wins; then the one the session's thread already
+        works in, so a follow-up needn't name it again; then one the issue names;
+        then the author's and the instance's defaults. With it, the thread's
+        workspace, else the one whose default chose it; ``None`` leaves it to the
+        workspace that owns the repository. Otherwise why the turn starts nothing.
+        """
+        issue = self.turn.issue
+        owner = facts.policy.default_owner
+        named = (
+            repository_in(self.turn.body, owner)
+            or facts.thread_repository
+            or repository_in(f"{issue.title}\n{issue.description or ''}", owner, explicit_only=True)
+        )
+        choice: RepositoryChoice | None = None
+        if named:
+            choice = RepositoryChoice(repository=named, workspace=facts.thread_workspace)
+        elif facts.personal_default is not None:
+            choice = RepositoryChoice(
+                repository=facts.personal_default.repository,
+                workspace=facts.thread_workspace or facts.personal_default.workspace,
+            )
+        elif facts.instance_default:
+            choice = RepositoryChoice(
+                repository=facts.instance_default, workspace=facts.thread_workspace
+            )
+        if choice is None:
+            return LinearSessionDeclined(reason="no_repository")
+        if not is_allowed(
+            choice.repository, orgs=facts.policy.allowed_orgs, repos=facts.policy.allowed_repos
+        ):
+            return LinearSessionDeclined(
+                reason="repository_not_allowed", repository=choice.repository
+            )
+        return choice
+
     async def run_input(self, run: LinearSessionRun) -> RunInput:
         """The issue, as the system tells it, then the author's words, each with its images."""
         issue, author = self.turn.issue, self.turn.author
@@ -233,7 +279,7 @@ async def _images(urls: list[str]) -> dict[str, dict[str, object]]:
 
 
 async def record(event: LinearEvent, _thread: LinearChannelThread) -> LinearEventResult:
-    """Hand the delivery to the event log and automations; it starts nothing here."""
+    """Hand the delivery to the event log; it starts nothing here."""
     await ask_backend(
         RECORD_LINEAR_DELIVERY,
         LinearDelivery(
@@ -254,8 +300,29 @@ async def start_session(
     turn = SessionTurn.of(event, thread.id)
     if turn is None:
         return _declined(UNREADABLE_SESSION)
+    facts = await ask_backend(
+        LINEAR_SESSION_FACTS,
+        LinearSessionFactsRequest(
+            thread_id=turn.turn.thread_id, author_email=turn.turn.author.email
+        ),
+        msg_id=f"msg_{event.delivery_id}_facts",
+    )
+    if facts.author != "signed_in":
+        reason = "sign_in_again" if facts.author == "sign_in_again" else "sign_in"
+        return _declined(
+            decline_text(LinearSessionDeclined(reason=reason, settings_url=facts.settings_url))
+        )
+    choice = turn.repository(facts)
+    if isinstance(choice, LinearSessionDeclined):
+        return _declined(decline_text(choice))
     started = (
-        await ask_backend(START_LINEAR_SESSION, turn.turn, msg_id=f"msg_{event.delivery_id}")
+        await ask_backend(
+            PLAN_LINEAR_SESSION,
+            PlanLinearSession(
+                turn=turn.turn, repository=choice.repository, workspace=choice.workspace
+            ),
+            msg_id=f"msg_{event.delivery_id}",
+        )
     ).answer
     if isinstance(started, LinearSessionDeclined):
         return _declined(decline_text(started))

@@ -1,11 +1,18 @@
 """The calls MDA's Linear channel makes on the backend, with no run yet.
 
-The channel verifies each Linear delivery and owns its conversations. It hands
-every delivery it handles to the backend's event log and automations
-(``record_linear_delivery``), and for an agent session turn asks the backend for
-what only it knows (``start_linear_session``): who the author is in Open SWE,
-the repository and workspace, and the signed run context. The channel builds
-the run's input and says why nothing started itself.
+The channel's handlers decide what each Linear delivery starts; the backend
+answers only what needs its data or its signing key:
+
+- ``record_linear_delivery``: every handled delivery goes to the event log, which
+  wakes the threads that listen for Linear events.
+- ``linear_session_facts``, then ``plan_linear_session``: what Open SWE knows about
+  a session turn's author, thread and repositories, from which the channel picks
+  the repository and workspace; then the backend checks that choice again, indexes
+  the thread and signs the run's context.
+- ``linear_automation_rules``, then ``plan_linear_automation``: a team's Linear
+  automations, which the channel matches against an issue event; then, for each
+  match, the backend claims it once per delivery, writes the run's input and signs
+  its context, on a thread of its own.
 """
 
 import json
@@ -18,6 +25,10 @@ from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 
 # Linear's deliveries are a few kilobytes; anything near this is not one.
 MAX_PAYLOAD_CHARS: Final = 1_000_000
+# A Linear team key, such as ``ENG``.
+TEAM_KEY_PATTERN: Final = r"^[A-Z][A-Z0-9_]{0,9}$"
+# ``owner/name``, as GitHub spells a repository.
+REPOSITORY_PATTERN: Final = r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$"
 
 LinearEventKey = Literal[
     "Issue.create",
@@ -28,6 +39,12 @@ LinearEventKey = Literal[
 ]
 
 
+def _bounded(payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    if len(json.dumps(payload)) > MAX_PAYLOAD_CHARS:
+        raise ValueError("payload is too large for a Linear delivery")
+    return payload
+
+
 class LinearDelivery(BaseModel):
     """A delivery the channel verified, as Linear sent it."""
 
@@ -35,16 +52,11 @@ class LinearDelivery(BaseModel):
     delivery_id: str = Field(min_length=1)
     payload: dict[str, JsonValue]
 
-    @field_validator("payload")
-    @classmethod
-    def _bounded(cls, payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        if len(json.dumps(payload)) > MAX_PAYLOAD_CHARS:
-            raise ValueError("payload is too large for a Linear delivery")
-        return payload
+    _bounded_payload = field_validator("payload")(_bounded)
 
 
 class LinearDeliveryRecorded(BaseModel):
-    """The delivery is in the event log, and its automations are on their way."""
+    """The delivery is in the event log."""
 
 
 class LinearIssue(BaseModel):
@@ -75,8 +87,60 @@ class LinearSessionTurn(BaseModel):
     comment_id: str = ""
 
 
+class LinearSessionFactsRequest(BaseModel):
+    thread_id: UUID
+    author_email: str = ""
+
+
+# Whether the author can run as themselves on GitHub: they signed in to Open SWE with
+# the email Linear knows them by (``signed_in``), never did (``sign_in``), or their
+# GitHub sign-in is no longer valid (``sign_in_again``).
+AuthorStanding = Literal["signed_in", "sign_in", "sign_in_again"]
+
+
+class RepositoryChoice(BaseModel):
+    repository: str = Field(pattern=REPOSITORY_PATTERN)
+    # The workspace whose default chose it; ``None`` for a default that applies to all.
+    workspace: str | None = None
+
+
+class RepositoryPolicy(BaseModel):
+    """Which repositories Open SWE may work in, and how a bare name is read."""
+
+    # The owner of a repository a turn names without one (``repo name``).
+    default_owner: str | None = None
+    # Lowercased; both empty allows every repository.
+    allowed_orgs: list[str] = []
+    allowed_repos: list[str] = []
+
+
+class LinearSessionFacts(BaseModel):
+    """What Open SWE knows about a session turn, for the channel to pick its repository."""
+
+    author: AuthorStanding
+    # Where the author signs in, when the backend has a dashboard URL.
+    settings_url: str | None = None
+    # What the session's thread already works in, from its earlier turns.
+    thread_repository: str | None = None
+    thread_workspace: str | None = None
+    # The author's default for the thread's workspace, else their global one.
+    personal_default: RepositoryChoice | None = None
+    # The instance's default repository.
+    instance_default: str | None = None
+    policy: RepositoryPolicy
+
+
+class PlanLinearSession(BaseModel):
+    """Start the turn's run in ``repository``: the channel's choice, which the backend checks."""
+
+    turn: LinearSessionTurn
+    repository: str = Field(pattern=REPOSITORY_PATTERN)
+    # The workspace the turn runs in; ``None`` for the one that owns the repository.
+    workspace: str | None = None
+
+
 class LinearSessionRun(BaseModel):
-    """Start the turn's run on the issue's repository, with this context."""
+    """Start the turn's run on the session's thread, with this context."""
 
     kind: Literal["run"] = "run"
     # ``owner/name``.
@@ -114,19 +178,102 @@ class LinearSessionStart(BaseModel):
     answer: Annotated[LinearSessionRun | LinearSessionDeclined, Field(discriminator="kind")]
 
 
+LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
+
+
+class LinearTrigger(BaseModel):
+    """When a Linear automation fires, for one team."""
+
+    events: list[LinearTriggerEvent]
+    # Label names: the issue must carry one, or for ``issue.labeled``, gain one.
+    labels: list[str] = []
+    project: str | None = None
+
+
+class LinearAutomation(BaseModel):
+    id: str = Field(min_length=1)
+    triggers: list[LinearTrigger]
+
+
+class LinearAutomationRulesRequest(BaseModel):
+    team: str = Field(pattern=TEAM_KEY_PATTERN)
+
+
+class LinearAutomationRules(BaseModel):
+    """The team's enabled Linear automations."""
+
+    automations: list[LinearAutomation]
+
+
+class PlanLinearAutomation(BaseModel):
+    """Start ``automation`` for the issue event the channel matched it to."""
+
+    automation_id: str = Field(min_length=1)
+    delivery_id: str = Field(min_length=1)
+    event: LinearTriggerEvent
+    team: str = Field(pattern=TEAM_KEY_PATTERN)
+    # The delivery's issue (``data``), which the run's prompt quotes.
+    issue: dict[str, JsonValue]
+    labels: list[str] = []
+    project: str = ""
+
+    _bounded_issue = field_validator("issue")(_bounded)
+
+
+class LinearAutomationRun(BaseModel):
+    """Start the automation's run on ``thread_id``, a thread of its own for this delivery."""
+
+    thread_id: UUID
+    input: dict[str, JsonValue]
+    context: dict[str, JsonValue]
+    metadata: dict[str, JsonValue]
+    webhook: str | None = None
+
+
+class PlannedLinearAutomation(BaseModel):
+    # ``None`` when nothing starts: the delivery already ran it, or it hit its hourly
+    # limit, or it can't run any more.
+    run: LinearAutomationRun | None = None
+
+
 RECORD_LINEAR_DELIVERY: Final = Endpoint(
     "record_linear_delivery",
     LinearDelivery,
     LinearDeliveryRecorded,
     seconds=60.0,
-    # Recorded once per delivery ID, so a repeat logs and launches nothing again.
+    # Recorded once per delivery ID, so a repeat logs nothing again.
     delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )
-START_LINEAR_SESSION: Final = Endpoint(
-    "start_linear_session",
-    LinearSessionTurn,
+LINEAR_SESSION_FACTS: Final = Endpoint(
+    "linear_session_facts",
+    LinearSessionFactsRequest,
+    LinearSessionFacts,
+    seconds=60.0,
+    delivery="idempotent",
+    prefix=CHANNEL_API_PREFIX,
+)
+PLAN_LINEAR_SESSION: Final = Endpoint(
+    "plan_linear_session",
+    PlanLinearSession,
     LinearSessionStart,
     seconds=60.0,
+    prefix=CHANNEL_API_PREFIX,
+)
+LINEAR_AUTOMATION_RULES: Final = Endpoint(
+    "linear_automation_rules",
+    LinearAutomationRulesRequest,
+    LinearAutomationRules,
+    seconds=60.0,
+    delivery="idempotent",
+    prefix=CHANNEL_API_PREFIX,
+)
+PLAN_LINEAR_AUTOMATION: Final = Endpoint(
+    "plan_linear_automation",
+    PlanLinearAutomation,
+    PlannedLinearAutomation,
+    seconds=60.0,
+    # Claimed once per automation and delivery, so a repeat starts nothing again.
+    delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )

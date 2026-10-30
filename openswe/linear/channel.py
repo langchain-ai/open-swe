@@ -1,39 +1,41 @@
 """What MDA's Linear channel calls on the backend (``runtime_api.linear``).
 
 The channel receives Linear's webhooks in the MDA deployment, verifies each
-delivery, and decides what it starts there. It hands every delivery it handles
-here to be logged, to wake the threads that listen for Linear events, and to run
-the Linear automations an issue event triggers (``record_linear_delivery``). For
-an agent session turn it asks what needs Open SWE's data (``start_linear_session``,
-``openswe.linear.session``).
+delivery, and decides what it starts there. It asks here only for what needs Open
+SWE's data or signing key: to log each delivery and wake the threads that listen
+for Linear events (``record_linear_delivery``); what Open SWE knows about a session
+turn, and its signed run (``openswe.linear.session``); and a team's automations, and
+the run each one it matched starts (``openswe.schedules.store``).
 """
 
 import json
 
-from pydantic import JsonValue
 from runtime_api.linear import (
+    LinearAutomation,
+    LinearAutomationRules,
+    LinearAutomationRulesRequest,
     LinearDelivery,
     LinearDeliveryRecorded,
+    LinearSessionFacts,
+    LinearSessionFactsRequest,
     LinearSessionStart,
-    LinearSessionTurn,
+    LinearTrigger,
+    PlanLinearAutomation,
+    PlanLinearSession,
+    PlannedLinearAutomation,
 )
 
-from openswe.linear.session import LinearSession
+from openswe.linear import session
 from openswe.mda_channels.api import ChannelCall
-from openswe.webhooks import common
+from openswe.schedules import store
 from openswe.webhooks.event_log import EventLog, EventRefs
-
-_AUTOMATION_KEYS = frozenset({"Issue.create", "Issue.update"})
 
 
 async def record_linear_delivery(
     call: ChannelCall, delivery: LinearDelivery
 ) -> LinearDeliveryRecorded:
-    """Log the delivery and run its automations, once per delivery.
-
-    MDA's channel calls again for a delivery Linear retries, or after an answer it
-    didn't get.
-    """
+    """Log the delivery, once per delivery: MDA's channel calls again for a delivery
+    Linear retries, or after an answer it didn't get."""
     body = json.dumps(delivery.payload).encode()
     await EventLog.record_once(
         call.request,
@@ -43,22 +45,38 @@ async def record_linear_delivery(
         delivery_id=delivery.delivery_id,
         refs=EventRefs.linear(body),
     )
-    if delivery.key in _AUTOMATION_KEYS:
-        call.background.add_task(_launch_automations, delivery.payload, delivery.delivery_id)
     return LinearDeliveryRecorded()
 
 
-async def start_linear_session(_call: ChannelCall, turn: LinearSessionTurn) -> LinearSessionStart:
-    """The run a session turn starts on its thread, or why it starts none."""
-    return await LinearSession(turn).start()
+async def linear_session_facts(
+    _call: ChannelCall, request: LinearSessionFactsRequest
+) -> LinearSessionFacts:
+    return await session.linear_session_facts(request)
 
 
-async def _launch_automations(payload: dict[str, JsonValue], delivery_id: str) -> None:
-    from openswe.schedules.store import launch_linear_automations
+async def plan_linear_session(_call: ChannelCall, plan: PlanLinearSession) -> LinearSessionStart:
+    return await session.plan_linear_session(plan)
 
-    try:
-        await launch_linear_automations(payload, delivery_id)
-    except Exception:
-        common.logger.exception(
-            "Linear automations failed for a delivery", extra={"linear_delivery": delivery_id}
-        )
+
+async def linear_automation_rules(
+    _call: ChannelCall, request: LinearAutomationRulesRequest
+) -> LinearAutomationRules:
+    records = await store.linear_automation_rules(request.team)
+    return LinearAutomationRules(
+        automations=[
+            LinearAutomation(
+                id=str(record["id"]),
+                triggers=[
+                    LinearTrigger.model_validate(config)
+                    for config in store.linear_trigger_configs(record, request.team)
+                ],
+            )
+            for record in records
+        ]
+    )
+
+
+async def plan_linear_automation(
+    _call: ChannelCall, request: PlanLinearAutomation
+) -> PlannedLinearAutomation:
+    return PlannedLinearAutomation(run=await store.plan_linear_automation(request))
