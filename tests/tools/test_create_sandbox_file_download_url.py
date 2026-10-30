@@ -4,9 +4,10 @@ from typing import Any
 
 import pytest
 
-from openswe.sandboxes.file_links import get_link
+from openswe.sandboxes.file_links import SandboxFileLink
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import ThreadCreated
+from openswe.users import User
 
 download_tool = importlib.import_module("openswe.tools.create_sandbox_file_download_url")
 
@@ -41,10 +42,12 @@ class _Backend:
         return SimpleNamespace(exit_code=0, output=f"{path}\n")
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClient:
-    monkeypatch.setattr(
-        "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
-    )
+def _configure(
+    monkeypatch: pytest.MonkeyPatch, backend: _Backend, **configurable: str
+) -> _AsyncClient:
+    config = {"configurable": {"thread_id": "thread-1", **configurable}}
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
+    monkeypatch.setattr(download_tool, "get_config", lambda: config)
 
     async def get_backend(_thread_id: str) -> _Backend:
         return backend
@@ -86,7 +89,7 @@ async def test_a_public_deployment_hands_out_a_short_link(
     assert result["file_path"] == "/workspace/project/shot.png"
     assert result["expires_at"] is None
     assert client.calls == []
-    link = await get_link(result["url"].removeprefix(prefix))
+    link = await SandboxFileLink.by_token(result["url"].removeprefix(prefix))
     assert link is not None
     assert (
         link.thread_id,
@@ -94,7 +97,8 @@ async def test_a_public_deployment_hands_out_a_short_link(
         link.path,
         link.content_type,
         link.content_disposition,
-    ) == ("thread-1", "sandbox-1", "/workspace/project/shot.png", "image/png", "inline")
+        link.created_by,
+    ) == ("thread-1", "sandbox-1", "/workspace/project/shot.png", "image/png", "inline", None)
 
 
 async def test_a_short_link_reports_when_it_expires(
@@ -108,9 +112,27 @@ async def test_a_short_link_reports_when_it_expires(
         "result.zip", expires_in_seconds=600
     )
 
-    link = await get_link(result["url"].rsplit("/", 1)[1])
+    link = await SandboxFileLink.by_token(result["url"].rsplit("/", 1)[1])
     assert link is not None and link.expires_at is not None
     assert result["expires_at"] == link.expires_at.isoformat()
+
+
+@pytest.mark.parametrize(("run", "attributed"), [({}, True), ({"schedule_id": "daily"}, False)])
+async def test_a_short_link_records_the_person_who_started_the_run(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, run: dict[str, str], attributed: bool
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://openswe.example")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada")
+    await _create_thread("thread-1")
+    ada = await User.sign_in("github", "1", login="ada")
+    _configure(monkeypatch, _Backend(), source="dashboard", github_login="ada", **run)
+
+    result = await download_tool.create_sandbox_file_download_url("shot.png")
+
+    link = await SandboxFileLink.by_token(result["url"].rsplit("/", 1)[1])
+    assert link is not None
+    person = ada.id if attributed else None
+    assert (link.created_by, link.updated_by) == (person, person)
 
 
 async def test_a_thread_without_a_transcript_falls_back_to_the_signed_url(

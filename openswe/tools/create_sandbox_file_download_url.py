@@ -3,12 +3,18 @@ import posixpath
 import shlex
 from typing import Any
 
+from langgraph.config import get_config
+
+from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.run_config import RunConfig
-from openswe.sandboxes.file_links import LINKS_PATH, ContentDisposition, create_link
+from openswe.sandboxes.file_links import LINKS_PATH, ContentDisposition, SandboxFileLink
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from openswe.tools.access import direct_user_run
+from openswe.users import User
 from openswe.utils.dashboard_links import public_dashboard_api_base_url
+from openswe.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -98,18 +104,24 @@ async def _short_link(
     Models copy a short link reliably; a signed URL is hundreds of random characters.
     """
     base = public_dashboard_api_base_url()
-    thread_id = RunConfig.from_runtime().thread_id
-    if base is None or thread_id is None:
+    cfg = RunConfig.from_runtime()
+    if base is None or cfg.thread_id is None:
         return None
-    link = await create_link(
-        thread_id=thread_id,
+    # Only a person's own run is theirs; scheduled and other automatic runs write as the system.
+    login = (
+        await resolve_github_login(as_json_object(get_config())) if direct_user_run(cfg) else None
+    )
+    person = await User.for_login("github", login) if login else None
+    link = await SandboxFileLink.create(
+        thread_id=cfg.thread_id,
         sandbox_id=sandbox_id,
         path=path,
         content_type=content_type,
         content_disposition=content_disposition,
         expires_in_seconds=expires_in_seconds,
+        created_by=person.id if person else None,
     )
     if link is None:
         return None
     expires_at = None if link.expires_at is None else link.expires_at.isoformat()
-    return f"{base}{LINKS_PATH}/{link.id}", expires_at
+    return f"{base}{LINKS_PATH}/{link.token}", expires_at

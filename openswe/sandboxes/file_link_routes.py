@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
 from langsmith.sandbox import ResourceNotFoundError
 
-from openswe.sandboxes.file_links import LINKS_PATH, get_link
+from openswe.sandboxes.file_links import LINKS_PATH, SandboxFileLink
 
 router = APIRouter(prefix=LINKS_PATH, tags=["sandbox-file-links"])
 
@@ -19,9 +19,9 @@ router = APIRouter(prefix=LINKS_PATH, tags=["sandbox-file-links"])
 SIGNED_URL_SECONDS = 3600
 
 
-@router.get("/{link_id}", status_code=302, response_class=RedirectResponse)
-async def open_sandbox_file_link(link_id: str) -> RedirectResponse:
-    link = await get_link(link_id)
+@router.get("/{token}", status_code=302, response_class=RedirectResponse)
+async def open_sandbox_file_link(token: str) -> RedirectResponse:
+    link = await SandboxFileLink.by_token(token)
     if link is None:
         raise HTTPException(404, "link not found")
     lifetime = SIGNED_URL_SECONDS
