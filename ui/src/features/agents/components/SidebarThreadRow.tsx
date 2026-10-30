@@ -284,8 +284,8 @@ export function SidebarConversationRow({
       onMouseLeave={marquee.reset}
     >
       <Link
-        to="/agents/chat"
-        search={{ chat: threadId }}
+        to="/agents/$threadId"
+        params={{ threadId }}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
         className={sidebarRowClassName({

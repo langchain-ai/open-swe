@@ -1,5 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { FleetHome } from "@/features/agents/components/FleetHome"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/chat")({
@@ -12,11 +11,9 @@ export const Route = createFileRoute("/agents/chat")({
 
 function ChatPage() {
   const { chat } = Route.useSearch()
-  const navigate = Route.useNavigate()
-  return (
-    <FleetHome
-      threadId={chat}
-      onThreadCreated={(thread) => void navigate({ search: { chat: thread } })}
-    />
+  return chat ? (
+    <Navigate to="/agents/$threadId" params={{ threadId: chat }} replace />
+  ) : (
+    <Navigate to="/agents" replace />
   )
 }

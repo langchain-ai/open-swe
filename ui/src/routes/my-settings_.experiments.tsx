@@ -23,7 +23,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_fleet"
           label="Fleet chats"
-          description="Add an Open SWE / Fleet switch to the sidebar to chat with Fleet in your LangSmith workspace, as you. Needs a LangSmith connection."
+          description="Use the Fleet chat interface for your Open SWE agents, with one list of pinned, recent, and archived chats."
         />
       </SettingsSection>
       <SettingsSection title="Slack">
