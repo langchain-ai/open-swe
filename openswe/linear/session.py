@@ -4,8 +4,9 @@ MDA's Linear channel receives the event and starts the run on the session's own
 thread, so the conversation's reply, Stop and errors reach Linear. Each agent
 session is its own thread, so a second session on the same issue is a new
 conversation, with the issue's title. The backend decides everything else, as it
-does for its own runs: the repository, the workspace, the input, and the signed
-run token the run calls back with. The run carries the backend's run-complete
+does for its own runs: whether the author has signed in to Open SWE, which acts
+on GitHub as them; the repository, the workspace, the input, and the signed run
+token the run calls back with. The run carries the backend's run-complete
 webhook, which completes it as it does the backend's own runs; the channel reports
 its failures in the session.
 """
@@ -24,6 +25,7 @@ from managed_deepagents import (
 from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
+from openswe.dashboard.oauth import build_settings_url
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import (
     PersonIdentity,
@@ -70,6 +72,30 @@ UNREADABLE_SESSION: LinearDecline = {
         "again; if it keeps happening, let your Open SWE admin know."
     )
 }
+
+
+def _sign_in(reason: common.AccountLinkReason) -> LinearDecline:
+    """Ask the author to sign in to Open SWE, which acts on GitHub as them.
+
+    Without a dashboard URL configured the text names the settings page instead
+    of linking it, since the session must still be told why nothing started.
+    """
+    settings_url = build_settings_url()
+    settings = f"[your Open SWE settings]({settings_url})" if settings_url else "Open SWE"
+    if reason == "revoked":
+        return {
+            "decline": (
+                "Your GitHub sign-in to Open SWE is no longer valid, so I can't work as you. "
+                f"Sign in with GitHub again in {settings}, then mention me again."
+            )
+        }
+    return {
+        "decline": (
+            "I don't know who you are in Open SWE yet, so I can't work as you. Sign in "
+            f"with GitHub in {settings}, using the same email as your Linear account, "
+            "then mention me again."
+        )
+    }
 
 
 def _not_allowed(repo: Mapping[str, str]) -> LinearDecline:
@@ -197,7 +223,7 @@ class LinearSessionTurn:
         return cls(validated, issue)
 
     async def repository(
-        self, thread: common.ThreadRecord
+        self, thread: common.ThreadRecord, author: User
     ) -> tuple[dict[str, str], str | None] | LinearDecline:
         """The repository the turn works in, when one is named, remembered or preferred.
 
@@ -212,9 +238,9 @@ class LinearSessionTurn:
             or self.issue.repository()
         )
         workspace: str | None = None
-        if not repo and self.author.email:
+        if not repo:
             try:
-                repo, workspace = await self._personal_default(self.author.email, thread.workspace)
+                repo, workspace = await self._personal_default(author, thread.workspace)
             except Exception:
                 common.logger.exception(
                     "Reading a Linear user's default repository failed",
@@ -225,7 +251,7 @@ class LinearSessionTurn:
         if not repo:
             common.logger.info(
                 "Linear session names no repository and none is a default; starting nothing",
-                extra={"linear_issue": self.issue.id, "author_has_email": bool(self.author.email)},
+                extra={"linear_issue": self.issue.id},
             )
             return NO_REPOSITORY
         if not common.is_repo_allowed(repo):
@@ -238,17 +264,38 @@ class LinearSessionTurn:
 
     @staticmethod
     async def _personal_default(
-        email: str, thread_workspace: str | None
+        author: User, thread_workspace: str | None
     ) -> tuple[dict[str, str] | None, str | None]:
         """The author's default for the thread's workspace, else their global one."""
-        user = await User.for_email(email)
-        if user is None:
-            return None, None
-        workspace = thread_workspace or (await resolve_workspace(login=user.github_login)).slug
-        personal = await user.default_repo(workspace, fallback_global=False)
+        workspace = thread_workspace or (await resolve_workspace(login=author.github_login)).slug
+        personal = await author.default_repo(workspace, fallback_global=False)
         if personal:
             return personal, workspace
-        return await user.default_repo(), None
+        return await author.default_repo(), None
+
+    async def _signed_in_author(self) -> User | LinearDecline:
+        """The Open SWE user who wrote the turn, if they can run as themselves on GitHub.
+
+        Linear only says who wrote it by email, so an author without one, or whose
+        email no Open SWE sign-in carries, is asked to sign in, as Slack asks.
+        """
+        user = await User.for_email(self.author.email) if self.author.email else None
+        reason: common.AccountLinkReason = "unlinked"
+        if user is not None:
+            gap = await common.account_link_reason(user.github_login)
+            if gap is None:
+                return user
+            reason = gap
+        common.logger.info(
+            "Linear session author can't run as themselves; asking them to sign in",
+            extra={
+                "linear_issue": self.issue.id,
+                "author_has_email": bool(self.author.email),
+                "author_known": user is not None,
+                "account_link_reason": reason,
+            },
+        )
+        return _sign_in(reason)
 
     @staticmethod
     async def _thread(thread_id: str) -> common.ThreadRecord:
@@ -264,16 +311,19 @@ class LinearSessionTurn:
             return common.ThreadRecord(exists=False, metadata={})
 
     async def prepare_run(self, thread_id: str) -> EndpointAnswer | LinearDecline:
-        """Index the session's thread and prepare the run for it, or say why not."""
+        """Index the session's thread and prepare the run for its author, or say why not."""
+        author = await self._signed_in_author()
+        if not isinstance(author, User):
+            return author
         thread = await self._thread(thread_id)
-        chosen = await self.repository(thread)
+        chosen = await self.repository(thread, author)
         if not isinstance(chosen, tuple):
             return chosen
         repo, default_workspace = chosen
         repository = f"{repo['owner']}/{repo['name']}"
         title = self.issue.title or self.issue.identifier or "Linear issue"
         description = self.issue.description or "No description"
-        mapped_login = await User.login_for_email(self.author.email) if self.author.email else None
+        login = author.github_login
         workspace = (
             thread.workspace or default_workspace or await common.workspace_for_repo_config(repo)
         )
@@ -291,7 +341,7 @@ class LinearSessionTurn:
         description_urls = common.extract_image_urls(description)
         comment_urls = common.extract_image_urls(self.body)
         images, model_override = await self._images(
-            [*description_urls, *comment_urls], mapped_login, workspace
+            [*description_urls, *comment_urls], login, workspace
         )
 
         linear_issue: dict[str, JsonValue] = {
@@ -304,13 +354,12 @@ class LinearSessionTurn:
         configurable: dict[str, JsonValue] = {
             "repo": cast(dict[str, JsonValue], repo),
             "linear_issue": linear_issue,
-            "user_email": self.author.email or None,
+            "user_email": self.author.email,
             "source": "linear",
             "workspace": workspace,
             "environment": workspace,
+            "github_login": login,
         }
-        if mapped_login:
-            configurable["github_login"] = mapped_login
         if model_override:
             configurable["agent_model_id"], configurable["agent_effort"] = model_override
 
@@ -320,7 +369,7 @@ class LinearSessionTurn:
             thread_id,
             source="linear",
             repo_config=repo,
-            github_login=mapped_login or "",
+            github_login=login,
             user_email=self.author.email,
             title=title,
             source_context=SourceContext.parse({"linear_issue": linear_issue}),
@@ -358,7 +407,7 @@ class LinearSessionTurn:
         return prepared
 
     async def _images(
-        self, urls: list[str], login: str | None, workspace: str | None
+        self, urls: list[str], login: str, workspace: str | None
     ) -> tuple[dict[str, dict[str, JsonValue]], tuple[str, str] | None]:
         """Image blocks by URL, and the vision model to use when the configured one can't see."""
         if not urls:

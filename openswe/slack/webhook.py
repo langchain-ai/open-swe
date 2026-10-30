@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -561,33 +561,13 @@ async def notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def _account_link_reason(login: str | None) -> Literal["revoked", "unlinked"]:
-    """Why a Slack user without a usable GitHub token can't start a run."""
-    # A stored-but-unusable token means "sign in again"; no record at all
-    # means the user has never connected GitHub + Slack via the dashboard.
-    # Guard the store read like token resolution so a transient failure
-    # still yields an actionable prompt.
-    if not login:
-        return "unlinked"
-    try:
-        has_token_record = await common.has_access_token_record(login)
-    except Exception:  # noqa: BLE001
-        common.logger.debug(
-            "Failed to check GitHub token record for %s; prompting sign-in",
-            login,
-            exc_info=True,
-        )
-        return "unlinked"
-    return "revoked" if has_token_record else "unlinked"
-
-
 @dataclass(frozen=True)
 class AccountLinkNeeded:
     """A Slack user Open SWE can't start a run for until they connect their account."""
 
     user_id: str
     user_email: str | None
-    reason: Literal["revoked", "unlinked"]
+    reason: common.AccountLinkReason
 
     async def prompt(self, channel_id: str, thread_ts: str) -> None:
         """Ask them in the Slack thread to connect it."""
@@ -608,10 +588,9 @@ async def account_link_needed(user_id: str) -> AccountLinkNeeded | None:
     profile = slack_user.get("profile") if slack_user else None
     email = profile.get("email") if isinstance(profile, dict) else None
     user_email = email if isinstance(email, str) and email else None
-    login = await slack_login(user_id, user_email)
-    if await _valid_access_token(login):
-        return None
-    return AccountLinkNeeded(user_id, user_email, await _account_link_reason(login))
+    login = await slack_login(user_id, _resolved(SlackSenderProfile(email=user_email)))
+    reason = await common.account_link_reason(login)
+    return AccountLinkNeeded(user_id, user_email, reason) if reason else None
 
 
 async def workspace_scoped_default_repo(
@@ -639,21 +618,6 @@ async def workspace_scoped_default_repo(
 async def _resolved[T](value: T) -> T:
     """``value`` as an awaitable, for a branch of an ``asyncio.gather`` with nothing to do."""
     return value
-
-
-async def _valid_access_token(login: str | None) -> str | None:
-    """The person's usable GitHub token, or ``None`` when they have none we can use."""
-    if not login:
-        return None
-    try:
-        return await common.get_valid_access_token(login)
-    except Exception:  # noqa: BLE001
-        common.logger.debug(
-            "Failed to resolve GitHub token for %s; treating as unauthenticated",
-            login,
-            exc_info=True,
-        )
-        return None
 
 
 @dataclass(frozen=True)
@@ -984,7 +948,7 @@ async def _process_slack_mention_impl(
         user_names_by_id,
         channel_names_by_id,
         (logins_by_user_id, person_ids_by_user_id),
-        user_token,
+        account_link_reason,
         _,
     ) = await asyncio.gather(
         # The sender's name came with their profile; Slack is asked only for the rest.
@@ -1003,7 +967,7 @@ async def _process_slack_mention_impl(
             ]
         ),
         _slack_accounts_by_user_id([*context_user_ids, user_id]),
-        _valid_access_token(mapped_login),
+        common.account_link_reason(mapped_login),
         persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
     )
     if user_id and user_name and user_id not in user_names_by_id:
@@ -1141,14 +1105,11 @@ async def _process_slack_mention_impl(
     # GitHub, and users whose stored authorization is no longer usable, are
     # blocked and prompted to set up via the dashboard. Bot-token-only
     # deployments are exempt — they run on the installation token.
-    has_valid_user_token = bool(user_token)
-
-    if allowed_bot is None and not has_valid_user_token:
-        reason = await _account_link_reason(mapped_login)
+    if allowed_bot is None and account_link_reason is not None:
         common.logger.info(
             "Blocking Slack run for thread %s: no valid user GitHub token (%s)",
             thread_id,
-            reason,
+            account_link_reason,
         )
         if user_id:
             await common.post_account_link_prompt(
@@ -1156,7 +1117,7 @@ async def _process_slack_mention_impl(
                 thread_ts,
                 user_id,
                 user_email,
-                reason=reason,
+                reason=account_link_reason,
                 agent_thread_id=thread_id,
             )
         return False
