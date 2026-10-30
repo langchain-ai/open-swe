@@ -223,6 +223,25 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "MDA_GITHUB_PROXY_CONNECTION",
+    "MDA connection (mda/github-token, the GitHub channel's App token) whose token MDA puts "
+    "in the GitHub proxy of the boxes it owns whose thread reaches the whole App "
+    "installation; MDA then writes those boxes' proxy config, not the backend. Set it only "
+    "once the MDA deployment runs a build that writes it: an older one leaves those boxes "
+    "without one. Unset: the backend writes every box's proxy config with a token it mints.",
+)
+ENV.var(
+    "MDA_EXA_CONNECTION",
+    "Slug of the MDA deployment's agent connection holding the Exa API key, e.g. "
+    "open-swe-exa: runs' web_search reads its key there. Unset: EXA_API_KEY.",
+)
+ENV.var(
+    "MDA_GITHUB_USER_CONNECTION",
+    "Slug of the MDA deployment's user GitHub OAuth connection, e.g. open-swe-github-prod: "
+    "open_pull_request opens the requester's own PR with their grant there, which MDA asks "
+    "them for when they have none. Unset: their dashboard GitHub sign-in.",
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens MDA runs present to the agent API (/agent-api); "
     "comma-separated, the first signs and every one verifies. Required.",

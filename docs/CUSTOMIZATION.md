@@ -49,6 +49,7 @@ For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a s
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
+With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the boxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
 ### Who creates sandboxes
@@ -354,6 +355,30 @@ Both scopes share the **MCPs** tool group.
 A personal connection with the same name as a workspace connection replaces it entirely for that user's runs, and a disabled personal connection hides the workspace one rather than falling back to it.
 Desktop (local) runs do not load MCP connections yet.
 GitHub PR follow-ups targeting a private thread are rejected unless the commenter owns that thread, before credentials are read or a run is dispatched.
+
+### MCP servers on an MDA connection
+
+An instance, workspace or personal MCP server can keep its credential in an MDA connection (LangSmith Agent Auth) instead of Open SWE's database.
+The MDA run then connects to the server itself; the backend holds no credential for it and never calls it.
+Create the connection from `mda/` after the deployment's first `mda deploy`, for example `mda connections create open-swe-mcp-incident-io --secret-from-env INCIDENT_IO_API_KEY --deployment-id <id>`, then save the server through the dashboard API with `connection` and the tools to allow:
+
+```json
+{
+  "name": "incident",
+  "url": "https://mcp.incident.io/mcp",
+  "allowed_tools": ["incident_list"],
+  "connection": {"slug": "open-swe-mcp-incident-io", "owner": "agent"}
+}
+```
+
+The slug must be `open-swe-mcp-<server>`: a server never gets a credential Open SWE or a channel reads for itself, such as `mda/github-token` or `open-swe-exa`.
+Instance and workspace servers read the deployment's connection (`"owner": "agent"`); personal servers read their owner's own (`"owner": "user"`), and only in runs that act for their owner, so not in a background task's completion.
+The credential goes as `Authorization: Bearer <credential>`, or as it is in the header `connection_header` names, such as `DD_API_KEY`.
+A server with a connection takes no headers or OAuth, and saving it drops those the record had.
+An update that sends no `connection`, headers or OAuth, such as the dashboard's enable toggle, keeps the connection; changing the URL needs `connection` sent again.
+Open SWE cannot list its tools, so name them in `allowed_tools`; each run lists the server's tools once and offers those, under the same names and tier rules as other MCP tools.
+A person who has not granted a personal server's connection is asked to through MDA's credential interrupt; a run that acts for no person, or whose agent connection is missing, goes without the server.
+The dashboard's forms do not set `connection` yet, and the inbound MCP server and Linear notices leave these servers out.
 
 ### Adding a Python tool
 

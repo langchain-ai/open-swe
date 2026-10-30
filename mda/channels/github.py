@@ -13,6 +13,20 @@ from rt.intake import backend_endpoint
 backend = backend_endpoint("/github/channel/events")
 
 channel = channels.github(
+    # The App's repository permissions (docs/INSTALLATION.md): its token
+    # (``mda/github-token``) is the one a box's GitHub proxy carries where MDA writes it.
+    app={
+        "permissions": {
+            "contents": "write",
+            "pull_requests": "write",
+            "issues": "write",
+            "checks": "write",
+            "statuses": "read",
+            "security_events": "read",
+            "actions": "read",
+            "workflows": "write",
+        }
+    },
     # A new mention redirects the work in progress, as the backend's own dispatch did.
     multitask_strategy="interrupt",
     on_event={

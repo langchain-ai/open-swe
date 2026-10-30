@@ -1,0 +1,103 @@
+"""The MDA connections the run's operations read, and what a call carries of them.
+
+Where a backend setting names a connection's slug, the catalog names it in the spec of
+each operation whose tool reads it (``ToolSpec.connections``). The MDA runtime reads
+it as the run and sends its value with each call (``RunOperation.credentials``); the
+tool reads it here, for that call alone. Nothing keeps it.
+"""
+
+import logging
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from functools import cache
+from types import MappingProxyType
+from typing import Final, Literal
+
+from langchain_core.runnables import RunnableConfig
+from pydantic import ValidationError
+from runtime_api.connections import ConnectionRef
+
+from openswe.config import ENV, EnvVar
+
+logger = logging.getLogger(__name__)
+
+_carried: ContextVar[Mapping[str, str]] = ContextVar(
+    "operation_credentials", default=MappingProxyType({})
+)
+
+
+@dataclass(frozen=True)
+class OperationConnection:
+    """A connection operations read once this backend's ``setting`` names its slug."""
+
+    setting: EnvVar
+    owner: Literal["agent", "user"]
+
+    def ref(self) -> ConnectionRef | None:
+        slug = self.setting.optional()
+        return None if slug is None else _ref(self.setting.name, slug, self.owner)
+
+    def credential(self) -> str | None:
+        """What the runtime read of it for the operation in progress; None when it sent none."""
+        ref = self.ref()
+        return None if ref is None else _carried.get().get(ref.slug)
+
+
+EXA: Final = OperationConnection(ENV.MDA_EXA_CONNECTION, "agent")
+GITHUB_USER: Final = OperationConnection(ENV.MDA_GITHUB_USER_CONNECTION, "user")
+
+_READ_BY: Final[Mapping[str, tuple[OperationConnection, ...]]] = {
+    "web_search": (EXA,),
+    "open_pull_request": (GITHUB_USER,),
+}
+
+
+def operation_connections(operation: str, config: RunnableConfig) -> list[ConnectionRef]:
+    """The connections ``operation``'s tool reads in the run ``config`` configures, as this
+    backend's settings name them.
+
+    A person's own only when the run acts for one. A run the backend starts for no one has
+    no person's principal: on a channel's thread it is MDA's channel service principal
+    (``mda:channel``), which reads no user connections, and on any other thread the
+    principal of the backend's own key, which all such runs share, so a grant made there
+    would serve every one of them.
+    """
+    for_person = _acts_for_person(config)
+    return [
+        ref
+        for read in _READ_BY.get(operation, ())
+        if (ref := read.ref()) is not None and (ref.owner == "agent" or for_person)
+    ]
+
+
+def _acts_for_person(config: RunnableConfig) -> bool:
+    # Dispatch records the person a run is for (``user_id``) only when there is one, and
+    # the thread router starts the run in a channel's conversation as them.
+    user_id = (config.get("metadata") or {}).get("user_id")
+    return isinstance(user_id, str) and bool(user_id.strip())
+
+
+@cache
+def _ref(setting: str, slug: str, owner: Literal["agent", "user"]) -> ConnectionRef | None:
+    """The connection ``setting`` names, or None when MDA could not read it, said once."""
+    try:
+        return ConnectionRef(slug=slug, owner=owner)
+    except ValidationError:
+        logger.warning(
+            "A setting names a connection MDA cannot read; operations go without it",
+            extra={"setting": setting, "connection": slug},
+            exc_info=True,
+        )
+        return None
+
+
+@contextmanager
+def carrying(credentials: Mapping[str, str]) -> Iterator[None]:
+    """Hand ``credentials`` to the operation run inside, and to nothing after it."""
+    token = _carried.set(credentials)
+    try:
+        yield
+    finally:
+        _carried.reset(token)

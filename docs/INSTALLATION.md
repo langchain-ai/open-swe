@@ -214,7 +214,7 @@ Users can override the model for an individual thread, for example by asking the
 Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.**
-`EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool.
+`EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool; with `MDA_EXA_CONNECTION`, runs read the key from the MDA deployment's connection instead ([mda/README.md](../mda/README.md#configure)).
 `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
 ## 5. Create the Slack app
