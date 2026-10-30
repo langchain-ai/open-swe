@@ -133,6 +133,9 @@ class ToolResultReport(ToolCallReport):
 class RunStarted(Report):
     """The run's turn began: what asked for it, and what preparation chose for it."""
 
+    # The invocation the run is: a later run on the thread may send this report for it.
+    invocation_id: str | None = None
+
     # The human messages since the conversation's last reply; the latest asked for the turn.
     humans: list[dict[str, JsonValue]] = []
     # The model, effort and route preparation chose.
@@ -142,6 +145,8 @@ class RunStarted(Report):
 
 
 class RunEnded(Report):
+    # The invocation the run is: a later run on the thread may send this report for it.
+    invocation_id: str | None = None
     # The run's replies without their content: their ids, usage and model, for usage.
     replies: list[dict[str, JsonValue]] = []
 

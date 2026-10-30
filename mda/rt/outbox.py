@@ -1,13 +1,14 @@
 """What this runtime tells the backend happened, held until the backend says it took it.
 
-Nothing the run does next waits on a report. Each reply and tool call, each inbox
-receipt and each notice (work the backend does for the run whose answer the run
-never reads) joins the outbox in the order it was made, and goes out with whatever
-else is waiting in one ``reports`` call, after a moment's gathering unless a phase
-waits on it. An item
-leaves the outbox only once an answer names it taken; until then it is sent again,
-for as long as the backend takes to come back. Its key, unique in the thread, has
-the backend record it once however often it arrives.
+Nothing the run does next waits on a report, until it ends: the run is done only once
+the backend took them all, since its completion closes the transcript turn they belong
+to. Each reply and tool call, each inbox receipt and each notice (work the backend does
+for the run whose answer the run never reads) joins the outbox in the order it was
+made, and goes out with whatever else is waiting in one ``reports`` call, after a
+moment's gathering unless a phase waits on it. An item leaves the outbox only once an
+answer names it taken; until then it is sent again, for as long as the backend takes to
+come back. Its key, unique in the thread, has the backend record it once however often
+it arrives.
 
 The items still waiting ride in the run's graph state (``open_swe_outbox``), written
 with the step that made them: alongside the reply, the tool call's result, or the

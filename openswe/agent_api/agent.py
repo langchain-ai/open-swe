@@ -67,7 +67,7 @@ class AgentParts(RunParts):
             repo_instructions=repo_instructions if isinstance(repo_instructions, str) else None,
             box=None if turn.reaches_box else box,
         )
-        if not turn.review_guide:
+        if not (turn.review_guide or turn.review_guide_closed):
             return [prepare]
         cfg = RunConfig.from_config(config)
         guide = ReviewGuideMiddleware(thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts)

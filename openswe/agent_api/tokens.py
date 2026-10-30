@@ -75,6 +75,8 @@ class AgentTurnSettings(BaseModel):
     tool_discovery_failures: list[str] = []
     # Whether the thread runs a review walkthrough, which pins its checkout in the box.
     review_guide: bool = False
+    # Whether the thread had one that has closed: its guide stays, to retire its rules.
+    review_guide_closed: bool = False
     # Whether the thread is a task worker, which may use its coordinator's box only once
     # the backend has checked it may.
     task_worker: bool = False

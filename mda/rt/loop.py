@@ -665,7 +665,9 @@ class RunLoop:
             if isinstance(message, AIMessage) and message.usage_metadata
         ]
         ended = RunEnded(
-            run_id=current, replies=_json_dicts.validate_python(messages_to_dict(replies))
+            run_id=current,
+            replies=_json_dicts.validate_python(messages_to_dict(replies)),
+            invocation_id=self._backend.invocation_id,
         )
         outbox.notify(RUN_ENDED, ended)
 

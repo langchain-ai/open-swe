@@ -492,11 +492,11 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
-    await backend.outbox.drain()
 
     # Only preparation is a phase call: the loop and the end of the run are named calls.
     # The graph's own work goes out before the run's end, in the order asked for, and
-    # what the backend keeps failing is tried again, then let go of for the rest.
+    # what the backend keeps failing is tried again, then let go of for the rest. The
+    # run is done only once the backend took its reports, the last as the invocation it is.
     assert [name for name, _ in calls] == [
         "prepare",
         "run_started",
@@ -508,6 +508,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         "run_ended",
         "run_ended",
     ]
+    assert calls[-1][1]["invocation_id"] == "turn"
 
 
 async def test_reports_carry_what_they_report_never_the_conversation(

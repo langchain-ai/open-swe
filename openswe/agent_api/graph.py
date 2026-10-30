@@ -1012,8 +1012,14 @@ class TokenRun:
         )
         return result.model_copy(update={"events": [_json_or_text(e) for e in emitted]})
 
+    def _as_invocation(self, invocation_id: str | None) -> None:
+        """Record as the invocation a report names, which need not be this token's."""
+        if invocation_id is not None:
+            self.config = self.graph.config_for(self.run, self.run_id, invocation_id=invocation_id)
+
     async def run_started(self, request: RunStarted) -> Done:
         """Record the run's start: its transcript turn, and what it runs as."""
+        self._as_invocation(request.invocation_id)
 
         async def record(_state: dict[str, object], _runtime: Runtime) -> None:
             await self.parts.started(self.config, self.run.settings, request)
@@ -1168,6 +1174,7 @@ class TokenRun:
 
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
+        self._as_invocation(request.invocation_id)
         reporters = self.parts.reporters
 
         async def ended(state: dict[str, object], runtime: Runtime) -> None:
@@ -1251,13 +1258,25 @@ class RemoteGraph:
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
 
     def config_for(
-        self, run: RemoteRun, run_id: str | None, *, settled: bool = True
+        self,
+        run: RemoteRun,
+        run_id: str | None,
+        *,
+        settled: bool = True,
+        invocation_id: str | None = None,
     ) -> RunnableConfig:
+        """The run's config, as the run ``run_id`` and invocation ``invocation_id`` when
+        given: a report a later run on the thread sends belongs to the run that made it."""
         config = run_config(run, settled=settled)
         configurable = dict(config.get("configurable") or {})
         if run_id:
             # The transcript keys a run's turn by it; never the tracer's run id.
             configurable["run_id"] = run_id
+        if invocation_id is not None and configurable.get("invocation_id") != invocation_id:
+            # Usage keys an invocation by it; when that one started is not this token's.
+            configurable.pop("prepare_run_id", None)
+            configurable.pop("invocation_started_at", None)
+            configurable["invocation_id"] = invocation_id
         return {**config, "configurable": configurable}
 
     async def _planned(self, run: RemoteRun, run_id: str | None, *, fresh: bool) -> RunSession:
@@ -1317,9 +1336,12 @@ class RemoteGraph:
             if not call.legacy:
                 return await TOOL_CALLS.dispatch(endpoint, call, raw)
         if endpoint == PREPARE.name:
-            prepared = await TokenRun(self, run, run_id).prepare(Prepare.model_validate(raw))
-            if prepared is not None:
-                return prepared.model_dump(mode="json")
+            call = TokenRun(self, run, run_id)
+            # A run its plan still answers prepares from the plan, whose hooks its loop needs.
+            if not call.legacy:
+                prepared = await call.prepare(Prepare.model_validate(raw))
+                if prepared is not None:
+                    return prepared.model_dump(mode="json")
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
         # The reviewer's and the scout's preparation start the run's session; the end of

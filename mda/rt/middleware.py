@@ -465,8 +465,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             ]
         return update, opened.error is None
 
-    @staticmethod
-    def _started(state: RunState, prepared: Mapping[str, JsonValue]) -> RunStarted:
+    def _started(self, state: RunState, prepared: Mapping[str, JsonValue]) -> RunStarted:
         """The run's start, for the transcript to open its turn and the thread to record it."""
         held = {**state.get(STATE_KEY, {}), **prepared}
 
@@ -480,6 +479,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             model_id=chosen("selected_model_id"),
             effort=chosen("selected_effort"),
             model_route=chosen("model_route"),
+            invocation_id=self._backend.invocation_id,
         )
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
@@ -641,8 +641,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         run = self._backend.run
         try:
             if self._loop is not None:
-                # Reported, not waited on.
                 self._loop.after_agent(state)
+                # Not before the backend took the run's reports: once the run is done, its
+                # completion closes the transcript turn, and a report after that is lost.
+                await self._backend.outbox.drain()
                 return None
             return _apply(await self._phase(AFTER_AGENT, run_call(RunCall, run_id(), state)))
         except BackendCallError:

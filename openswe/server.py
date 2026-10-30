@@ -2012,6 +2012,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         saved_requested_model=thread_settings.get("requested_model"),
         bridge_client=bridge_client,
         review_guide=guide is not None,
+        review_guide_closed=walkthrough is not None and walkthrough.closed,
         task_worker=task_coordination is not None and task_coordination.is_worker,
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
     )
