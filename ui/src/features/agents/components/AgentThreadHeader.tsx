@@ -42,6 +42,7 @@ import {
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { reportError } from "@/lib/errorReporting"
 import { cn } from "@/lib/utils"
 
 function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
@@ -305,6 +306,28 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
+          {agentWorkspace &&
+            worktreeThread &&
+            window.openSweDesktop?.openTaskFolder && (
+              <IconButton
+                icon={FolderIcon}
+                label="Open task folder"
+                size="sm"
+                color="secondary"
+                variant="plain"
+                data-no-drag=""
+                onClick={() => {
+                  void window.openSweDesktop
+                    ?.openTaskFolder?.(worktreeThread.id)
+                    .catch((error: unknown) =>
+                      reportError({
+                        title: "Couldn't open the task folder",
+                        error,
+                      })
+                    )
+                }}
+              />
+            )}
           <span
             role="img"
             aria-label={`Runs on ${target}`}
@@ -352,9 +375,11 @@ export function AgentThreadHeader({
         onConfirm={confirmDelete}
         detail={
           worktreeThread
-            ? worktreeThread.ownedWorktrees.length
-              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your repository."
+            ? worktreeThread.managedTaskFolder
+              ? `This deletes the conversation. Its task files are kept at ${worktreeThread.cwd}.`
+              : worktreeThread.ownedWorktrees.length
+                ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+                : "This removes its history but does not revert changes made to your repository."
             : undefined
         }
       />

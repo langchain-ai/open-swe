@@ -228,18 +228,16 @@ describe("ChatComposer options", () => {
       screen.queryByRole("button", { name: "Select repository" })
     ).toBeNull()
     fireEvent.click(
-      screen.getByRole("button", { name: "Task context: Choose a folder" })
+      screen.getByRole("button", { name: "Task context: Use a folder" })
     )
     const dialog = await screen.findByRole("dialog", { name: "Task context" })
     expect(
-      screen.getByRole("button", { name: "Select repository" })
+      screen.getByRole("button", { name: "Automatic task folder" })
     ).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
     expect(
-      screen.getByRole("button", { name: "No branch" }).hasAttribute("disabled")
-    ).toBe(true)
-    expect(
-      screen.getByRole("button", { name: "Current checkout" })
-    ).toBeTruthy()
+      screen.queryByRole("button", { name: "Current checkout" })
+    ).toBeNull()
     fireEvent.keyDown(dialog, { key: "Escape" })
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Task context" })).toBeNull()
@@ -258,6 +256,9 @@ describe("ChatComposer options", () => {
         runTarget: "local",
         selectedLocalRepoPath: "/projects/demo",
         selectedLocalRepoBranch: "main",
+        localRepoBranches: [
+          { name: "main", current: true, isDefault: true, worktreePath: null },
+        ],
         onSelectLocalRepoBranch: vi.fn(),
         onRefreshLocalRepoBranch: vi.fn(),
       },

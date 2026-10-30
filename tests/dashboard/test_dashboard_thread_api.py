@@ -32,7 +32,7 @@ from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
-from openswe.users import User
+from openswe.users import User, UserPreferences
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
@@ -224,6 +224,61 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         blocked.set()
         await profile_finished.wait()
         await history_finished.wait()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_agent_workspace_experience_is_bound_before_first_dispatch(
+    monkeypatch, enabled: bool
+) -> None:
+    monkeypatch.setattr(
+        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
+    )
+    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="private"))
+    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: False)
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_fleet=enabled)),
+    )
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
+            "config": {"configurable": {"experience": "agent_workspace"}},
+        },
+    }
+    if not enabled:
+        with pytest.raises(HTTPException) as rejected:
+            await thread_runs._enrich_run_start_command(
+                "new-tid", "octocat", command, metadata={}, creating=True
+            )
+        assert rejected.value.status_code == 403
+        assert "metadata" not in created
+        return
+    first = await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", command, metadata={}, creating=True
+    )
+    assert first["params"]["config"]["configurable"]["experience"] == "agent_workspace"
+    assert first["params"]["config"]["configurable"]["repo_explicitly_none"] is True
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["experience"] == "agent_workspace"
+    followup = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Continue"}]},
+            "config": {"configurable": {"experience": "coding"}},
+        },
+    }
+    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    _patch_new_thread_deps(monkeypatch, profile={})
+    next_run = await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", followup, metadata=metadata
+    )
+    assert next_run["params"]["config"]["configurable"]["experience"] == "agent_workspace"
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -642,6 +697,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
                     "invocation_id": "stolen",
                     "prepare_run_id": "stolen",
                     "repo": {"owner": "evil", "name": "repo"},
+                    "experience": "agent_workspace",
                     "agent_model_id": _VISION_MODEL,
                     "agent_effort": "medium",
                 }
@@ -670,6 +726,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
+    assert "experience" not in configurable
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"

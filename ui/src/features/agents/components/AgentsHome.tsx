@@ -186,11 +186,13 @@ export function AgentsHome({
     ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
     : undefined
   const namedRepo = (
-    repoOverride === undefined
-      ? personalWorkspaceRepo
-        ? null
-        : userDefaultRepo
-      : repoOverride
+    agentWorkspace && repoOverride === undefined
+      ? null
+      : repoOverride === undefined
+        ? personalWorkspaceRepo
+          ? null
+          : userDefaultRepo
+        : repoOverride
   )?.toLowerCase()
   const selectedWorkspace = pickComposerWorkspace({
     override: workspaceOverride,
@@ -209,7 +211,7 @@ export function AgentsHome({
   // mutation to the React Compiler and costs the component its optimization.
   const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
   const repo = pickComposerRepo({
-    override: repoOverride,
+    override: agentWorkspace ? (repoOverride ?? null) : repoOverride,
     userDefault: userDefaultRepo,
     userWorkspaceDefault: selectedWorkspace
       ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
@@ -253,7 +255,13 @@ export function AgentsHome({
   }, [panelCollapsed, pendingThreadId])
 
   useEffect(() => {
-    if (!isDesktop || !localReposLoaded) return
+    if (
+      !isDesktop ||
+      !localReposLoaded ||
+      profileQuery.isPending ||
+      agentWorkspace
+    )
+      return
     const stored =
       window.localStorage.getItem(LAST_LOCAL_REPO_KEY) ??
       window.localStorage.getItem(LEGACY_LAST_LOCAL_REPO_KEY)
@@ -262,7 +270,14 @@ export function AgentsHome({
     )
     // oxlint-disable-next-line react/set-state-in-effect
     setLocalRepoPath(selected?.cwd ?? localRepos[0]?.cwd ?? null)
-  }, [isDesktop, localRepoPath, localRepos, localReposLoaded])
+  }, [
+    isDesktop,
+    localRepoPath,
+    localRepos,
+    localReposLoaded,
+    agentWorkspace,
+    profileQuery.isPending,
+  ])
 
   const refreshLocalRepoBranch = useCallback(async () => {
     const cwd = localRepoPathRef.current
@@ -446,13 +461,29 @@ export function AgentsHome({
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
+    if (
+      agentWorkspace &&
+      profileQuery.data?.agent_workspace_tasks_supported !== true
+    ) {
+      setLocalError(
+        "The connected backend needs an update before it can start general-purpose Agent Workspace chats."
+      )
+      return
+    }
     const desktop = window.openSweDesktop
     const localCheckout =
       runTarget === "local"
         ? localRepos.find((candidate) => candidate.cwd === localRepoPath)
         : undefined
-    if (runTarget === "local" && (!desktop || !localCheckout)) {
+    const localRun = runTarget === "local"
+    if (localRun && (!desktop || (!localCheckout && !agentWorkspace))) {
       setLocalError("Choose or add a repository from This Mac before sending.")
+      return
+    }
+    if (localRun && !localCheckout && !desktop?.taskWorkspaces) {
+      setLocalError(
+        "Update Open SWE Desktop to start without selecting a folder."
+      )
       return
     }
     // Minted here so the seeded thread, the graph's HumanMessage and the
@@ -460,7 +491,7 @@ export function AgentsHome({
     const messageId = crypto.randomUUID()
     // A "This Mac" thread's repo is its checkout's, named once it is prepared,
     // and its transcript is its owner's: nobody else can run it.
-    const draft = localCheckout
+    const draft = localRun
       ? {
           prompt,
           images,
@@ -475,7 +506,8 @@ export function AgentsHome({
           client_message_id: messageId,
           repo,
           visibility,
-          repo_explicitly_none: repoOverride === null,
+          repo_explicitly_none:
+            repoOverride === null || (agentWorkspace && !repo),
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
         }
@@ -484,12 +516,15 @@ export function AgentsHome({
 
     const configurable: Record<string, unknown> =
       modelConfigurable(activeSelection)
-    if (localCheckout) {
-      window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
+    if (agentWorkspace) configurable.experience = "agent_workspace"
+    if (localRun) {
+      if (localCheckout)
+        window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
       configurable.thread_type = "private"
     } else {
       if (repo) configurable.repo = repo
-      if (repoOverride === null) configurable.repo_explicitly_none = true
+      if (repoOverride === null || (agentWorkspace && !repo))
+        configurable.repo_explicitly_none = true
       configurable.thread_type =
         visibility === "private" ? "private" : "workspace"
       if (selectedWorkspace) configurable.workspace = selectedWorkspace
@@ -502,12 +537,16 @@ export function AgentsHome({
     void (async () => {
       let prepared = false
       try {
-        if (localCheckout && desktop) {
+        if (localRun && desktop) {
           await refreshLocalRepoBranch()
           const local = await desktop.prepareLocalThread({
             threadId,
-            cwd: localCheckout.cwd,
-            workspaceMode: localWorkspaceMode,
+            cwd: localCheckout?.cwd,
+            taskWorkspace: agentWorkspace,
+            workspaceMode:
+              localCheckout && (!agentWorkspace || localRepoBranches.length)
+                ? localWorkspaceMode
+                : "local",
             baseBranch: localRepoBranch,
           })
           prepared = true
@@ -553,7 +592,7 @@ export function AgentsHome({
         }),
         // So the seeded thread already reads as This Mac, not Cloud, until
         // the server's record replaces it.
-        ...(localCheckout ? { sandboxBridgeClient: "desktop" as const } : {}),
+        ...(localRun ? { sandboxBridgeClient: "desktop" as const } : {}),
       }
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       seedAgentThreadLists(queryClient, thread)
@@ -653,6 +692,16 @@ export function AgentsHome({
               selectedLocalRepoBranch={localRepoBranch}
               localRepoBranches={localRepoBranches}
               onSelectLocalRepo={handleSelectLocalRepo}
+              onUseTaskFolder={
+                agentWorkspace && !optimisticDraftThread
+                  ? () => {
+                      setLocalRepoPath(null)
+                      setLocalRepoBranch(null)
+                      setLocalRepoBranches([])
+                      setLocalError(null)
+                    }
+                  : undefined
+              }
               onAddLocalRepo={() => void handleAddLocalRepo()}
               onRemoveLocalRepo={(cwd) => void handleRemoveLocalRepo(cwd)}
               onRefreshLocalRepoBranch={() => void refreshLocalRepoBranch()}

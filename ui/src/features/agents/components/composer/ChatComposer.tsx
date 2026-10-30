@@ -175,6 +175,7 @@ export interface ChatComposerProps {
   localWorktreeLabel?: string
   onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
   onSelectLocalRepo?: (cwd: string) => void
+  onUseTaskFolder?: () => void
   onAddLocalRepo?: () => void
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
@@ -317,6 +318,7 @@ export const ChatComposer = memo(function ChatComposer({
   localWorktreeLabel,
   onLocalWorkspaceModeChange,
   onSelectLocalRepo,
+  onUseTaskFolder,
   onAddLocalRepo,
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
@@ -783,7 +785,7 @@ export const ChatComposer = memo(function ChatComposer({
     runTarget === "local"
       ? (localRepos.find((repo) => repo.cwd === selectedLocalRepoPath)?.name ??
         selectedLocalRepoPath?.split("/").filter(Boolean).at(-1) ??
-        "Choose a folder")
+        (agentWorkspace ? "Use a folder" : "Choose a folder"))
       : (selectedRepo?.split("/").at(-1) ?? "Task context")
   const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
@@ -818,9 +820,12 @@ export const ChatComposer = memo(function ChatComposer({
             repos={localRepos}
             selectedRepoPath={selectedLocalRepoPath}
             side="top"
+            placeholder={agentWorkspace ? "Automatic task folder" : undefined}
+            onUseTaskFolder={onUseTaskFolder}
           />
         )}
       {runTarget === "local" &&
+        (!agentWorkspace || localRepoBranches.length > 0) &&
         onRefreshLocalRepoBranch &&
         onSelectLocalRepoBranch && (
           <LocalBranchSelector
@@ -831,13 +836,15 @@ export const ChatComposer = memo(function ChatComposer({
             selectedBranch={selectedLocalRepoBranch}
           />
         )}
-      {runTarget === "local" && onSelectLocalRepoBranch && (
-        <LocalWorkspaceSelector
-          onChange={onLocalWorkspaceModeChange}
-          value={localWorkspaceMode}
-          worktreeLabel={localWorktreeLabel}
-        />
-      )}
+      {runTarget === "local" &&
+        (!agentWorkspace || localRepoBranches.length > 0) &&
+        onSelectLocalRepoBranch && (
+          <LocalWorkspaceSelector
+            onChange={onLocalWorkspaceModeChange}
+            value={localWorkspaceMode}
+            worktreeLabel={localWorktreeLabel}
+          />
+        )}
     </>
   )
 
@@ -1080,7 +1087,7 @@ export const ChatComposer = memo(function ChatComposer({
                         <h2 className="text-sm font-medium">Task context</h2>
                         <p className="text-xs leading-relaxed text-secondary">
                           {runTarget === "local"
-                            ? "Choose where the agent can work on this Mac."
+                            ? "Each chat gets its own task folder. Use an existing folder when you need one."
                             : "Add a repository or workspace when your task needs one."}
                         </p>
                       </div>
