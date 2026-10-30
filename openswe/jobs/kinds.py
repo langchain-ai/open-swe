@@ -25,7 +25,7 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
-from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
+from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
