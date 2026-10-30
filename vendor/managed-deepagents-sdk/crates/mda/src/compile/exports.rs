@@ -34,6 +34,11 @@ const CHANNELS_NS: &str = "channels";
 /// First-party channel factories that mount Events ingress.
 const INGRESS_CHANNEL_PROVIDERS: [&str; 3] = ["slack", "github", "linear"];
 
+/// First-party channels that may still change in a minor release, with their
+/// display names.
+const EXPERIMENTAL_CHANNEL_PROVIDERS: [(&str, &str); 2] =
+    [("github", "GitHub"), ("linear", "Linear")];
+
 /// What the exported `channel` binding resolves to, as far as compile can tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChannelIngress {
@@ -178,6 +183,19 @@ pub(super) fn scan_exported_channels(project: &Project) -> Result<ChannelScan> {
         needs_public_url,
         providers,
     })
+}
+
+/// One build warning per declared experimental channel provider.
+pub(super) fn experimental_channel_warnings(providers: &BTreeSet<String>) -> Vec<String> {
+    EXPERIMENTAL_CHANNEL_PROVIDERS
+        .into_iter()
+        .filter(|(provider, _)| providers.contains(*provider))
+        .map(|(provider, name)| {
+            format!(
+                "the {name} channel (`channels.{provider}`) is experimental and may change in a minor release"
+            )
+        })
+        .collect()
 }
 
 /// Whether any channel declares Events ingress that needs a public HTTPS URL
@@ -600,6 +618,19 @@ mod tests {
             "channels/slack.ts",
         )
         .unwrap());
+    }
+
+    #[test]
+    fn warns_only_for_experimental_channel_providers() {
+        let providers = BTreeSet::from(["github", "linear", "slack"].map(String::from));
+        assert_eq!(
+            experimental_channel_warnings(&providers),
+            [
+                "the GitHub channel (`channels.github`) is experimental and may change in a minor release",
+                "the Linear channel (`channels.linear`) is experimental and may change in a minor release",
+            ]
+        );
+        assert!(experimental_channel_warnings(&BTreeSet::from(["slack".to_string()])).is_empty());
     }
 
     #[test]

@@ -85,6 +85,10 @@ def github_channel(
 
     Runs for the same issue or pull request share one thread.
 
+    !!! warning "Experimental"
+
+        The GitHub channel may change in a minor release.
+
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
             message, or state), or ``None`` to skip. While a thread waits on an

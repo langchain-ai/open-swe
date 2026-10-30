@@ -198,12 +198,14 @@ fn run_inner(
     // The deployment's secrets stand in for `.env` in every preflight; the
     // host-backend-owned MDA_* values are already excluded by the reserved list.
     let secrets = secrets_from_env(&env_vars);
+    // A checkout has no `.env`; preflight errors still name the conventional one.
+    let env_path = project.root.join(".env");
 
     // -- 2. Preflight -------------------------------------------------------
     let mut workspace_keys = WorkspaceSecretKeys::Unloaded;
     ensure_model_api_key(
         agent.model.as_deref(),
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -212,6 +214,7 @@ fn run_inner(
     )?;
     ensure_ingress_secret(
         project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -285,7 +288,7 @@ fn run_inner(
         &assistant_id,
     )?;
     ensure_connector_requirements_secrets(
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,
@@ -294,7 +297,7 @@ fn run_inner(
         &mut workspace_keys,
     )?;
     ensure_channel_requirements_secrets(
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         &client,

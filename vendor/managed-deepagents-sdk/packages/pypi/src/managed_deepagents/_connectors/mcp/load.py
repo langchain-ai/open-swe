@@ -37,6 +37,7 @@ from managed_deepagents._connectors.mcp.langsmith_url import (
 )
 from managed_deepagents._connectors.tool_selection import select_tools
 from managed_deepagents._credential_gate import CredentialConsumer
+from managed_deepagents._graph_build_timing import build_step
 from managed_deepagents._log import logger
 from managed_deepagents._memory.async_util import await_if_needed
 from managed_deepagents._memory.deps import optional_runtime_symbols, require_runtime_dependency
@@ -662,7 +663,8 @@ async def load_tools(
             _client, server, auth.get(name), opaque(authorization.get(name, "public"))
         )
         try:
-            server_tools = await _discover_tools(name, client_factory)
+            with build_step(name):
+                server_tools = await _discover_tools(name, client_factory)
         except Exception as error:
             if throw_on_load_error:
                 raise

@@ -57,16 +57,18 @@ pub struct LogsOptions {
     pub workspace_id: Option<String>,
     /// Host backend URL override.
     pub host_url: Option<String>,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
 }
 
 /// Run the logs command end-to-end.
 #[expect(clippy::print_stderr, reason = "log stream status and retry messages")]
 pub fn run(opts: LogsOptions) -> Result<CommandCompletion> {
-    let env_path = opts.path.join(".env");
+    let env_path = env_file::project_env_path(&opts.path, opts.env_file.as_deref());
     let env_vars = env_file::parse_env_file(&env_path);
     let name = resolve_deployment_name(&opts)?;
     update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
-    let ctx = LangSmithContext::resolve(
+    let ctx = LangSmithContext::resolve_verified(
         &env_vars,
         opts.host_url.as_deref(),
         opts.workspace_id.as_deref(),
@@ -342,6 +344,7 @@ mod tests {
             follow: None,
             workspace_id: None,
             host_url: None,
+            env_file: None,
         };
 
         let error = resolve_deployment_name(&options).unwrap_err().to_string();

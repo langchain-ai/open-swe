@@ -93,10 +93,8 @@ pub fn authenticate(client: &Client) {
     if !client.sends_key_securely() {
         return;
     }
-    let Ok(headers) = client.auth_headers() else {
-        return;
-    };
-    if let Some(exporter) = build_exporter(logs_url(client.platform_base()), headers) {
+    if let Some(exporter) = build_exporter(logs_url(client.platform_base()), client.auth_headers())
+    {
         deferred.send_with(exporter);
     }
 }

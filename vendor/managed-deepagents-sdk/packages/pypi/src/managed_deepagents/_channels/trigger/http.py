@@ -1296,8 +1296,8 @@ async def _principal_for_event(
     raw_identity_context = event.get("identity_context")
     if not isinstance(raw_identity_context, str) or not raw_identity_context.strip():
         raise _MissingIdentityContextError
-    # PyJWKClient fetches the LangSmith JWKS with blocking urllib; run the
-    # verification off the event loop.
+    # identity_context verification fetches the JWKS over blocking HTTP on a cache
+    # miss; run it off the event loop.
     return await asyncio.to_thread(
         principal_id_from_identity_context,
         raw_identity_context,
