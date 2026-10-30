@@ -55,14 +55,14 @@ class ChannelRunOptions(TypedDict, total=False):
     ``{"mode": "ephemeral"}`` for a fresh thread, deleted once the run ends, or
     ``{"mode": "persistent", "id": "<uuid>"}`` for the thread with that id, kept
     across events. Omitted, the run starts on the event's conversation. GitHub,
-    Linear and HTTP channels only."""
+    Linear, HTTP and Slack channels only."""
     reply: ChannelReply
     """Whether a run on the event's conversation posts its final answer there,
     overriding the channel's ``reply`` for this run. Only without ``thread``."""
     multitask_strategy: MultitaskStrategy
     """What the run does while its thread already runs, overriding the
-    channel's ``multitask_strategy`` for this run. GitHub, Linear and HTTP
-    channels only."""
+    channel's ``multitask_strategy`` for this run. GitHub, Linear, HTTP and
+    Slack channels only."""
     deliver_to: ChannelRunDeliveryTarget
     """Where a run on a ``thread`` posts its final answer; omitted, nowhere.
     Only with ``thread``, and for now only to the event's own conversation:
@@ -86,7 +86,7 @@ ChannelRunResult = (
     | list[tuple[ChannelRunInput, ChannelRunOptions]]
 )
 """What a channel handler may return to start a run: the input, the input with
-run options, or, on GitHub, Linear and HTTP channels, a list of
+run options, or, on GitHub, Linear, HTTP and Slack channels, a list of
 ``(input, options)`` to start several runs, at most one of them on the event's
 conversation.
 
@@ -199,7 +199,7 @@ class RunChannel(TypedDict):
 
 
 def normalize_run_inputs(value: object, channel: RunChannel) -> list[NormalizedRunInput]:
-    """Normalize what a handler of a GitHub, Linear or HTTP channel returned.
+    """Normalize what a handler of a GitHub, Linear, HTTP or Slack channel returned.
 
     ``None`` or an empty list starts nothing. A list starts a run per
     ``(input, options)`` in it. Options may choose each run's thread, reply,
@@ -250,8 +250,8 @@ def _normalize_result(
 
 
 _RUN_OPTIONS = frozenset({"context", "metadata", "webhook"})
-# The options that choose where a run starts and answers; GitHub, Linear and HTTP
-# channels only.
+# The options that choose where a run starts and answers; GitHub, Linear, HTTP and
+# Slack channels only.
 _ROUTING_OPTIONS = frozenset({"thread", "reply", "multitask_strategy", "deliver_to"})
 _MULTITASK_STRATEGIES = frozenset({"enqueue", "interrupt", "rollback", "reject"})
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)

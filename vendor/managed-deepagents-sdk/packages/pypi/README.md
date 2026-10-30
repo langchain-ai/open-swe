@@ -592,6 +592,30 @@ after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
 
+A handler may also choose each run's thread and strategy, as on GitHub, Linear
+and HTTP channels: it returns `(input, options)`, or a list of them, at most
+one on the Slack thread's own conversation:
+
+```python
+def on_message(event: SlackMessageEvent, thread: SlackChannelThread):
+    if event.text.startswith("<@"):
+        return event.text  # a mention interrupts, as the channel says
+    if channel_session_id is not None:
+        # One session for the whole channel: every Slack thread's message waits its turn.
+        return (event.text, {"thread": {"mode": "persistent", "id": channel_session_id},
+                             "multitask_strategy": "enqueue"})
+    return (event.text, {"multitask_strategy": "enqueue"})  # waits behind the running run
+```
+
+A run on a thread of the handler's choosing shows its status, reaction and
+decisions in the Slack thread its message came from, and posts its answer
+there only with `deliver_to`. Stop in that Slack thread cancels the runs its
+messages started, on the conversation and on the handler's threads; another
+Slack thread's run on a shared thread goes on. A decision a run there waits on
+is answered from the Slack thread that started the run. Every thread a
+channel's handlers choose is owned by the channel, not by one Slack thread.
+An ephemeral thread is deleted once its run ends, unless it waits on a decision.
+
 `event.actor` is the Slack user who sent the message, as Trigger Server read
 it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
 `team_id` is their own workspace: in a Slack Connect channel, someone from
@@ -1012,7 +1036,7 @@ is still working waits for that run to finish, so it never skips a decision the
 run stops for. GitHub never redelivers on its own.
 
 A handler may instead return a list of `(input, options)` to start several
-runs for one event, on threads it chooses (GitHub, Linear and HTTP channels):
+runs for one event, on threads it chooses (GitHub, Linear, HTTP and Slack channels):
 
 ```python
 def on_comment(event, thread):
