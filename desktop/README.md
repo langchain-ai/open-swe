@@ -176,9 +176,14 @@ An external user does not need the deployment's server-side `LANGSMITH_API_KEY` 
 
 ## Agent Workspace
 
-Agent Workspace is a separate macOS app with a fixed `https://openswe.langchain.dev` backend and LangSmith login. No backend prompt, Homebrew cask, or bundled CLI. Browser and regular Open SWE stay coding-only; there is no experience toggle.
+Agent Workspace is a separate macOS app with a fixed `https://openswe.langchain.dev` backend and LangSmith login.
+No backend prompt, Homebrew cask, or bundled CLI.
+Browser and regular Open SWE stay coding-only; there is no experience toggle.
 
-The bundle ID is `com.langchain.agentworkspace`. Its Electron profiles (`Agent Workspace` and `Agent Workspace Development`) isolate cookies, task folders, projects, UI caches, and instance locks. It never reads or migrates `~/.open-swe/config.json` or shares CLI sessions. Both apps consume the same desktop UI archive; the build-stamped preload `appVariant` selects the UI.
+The bundle ID is `com.langchain.agentworkspace`.
+Its Electron profiles (`Agent Workspace` and `Agent Workspace Development`) isolate cookies, task folders, projects, UI caches, and instance locks.
+It never reads or migrates `~/.open-swe/config.json` or shares CLI sessions.
+Both apps consume the same desktop UI archive; the build-stamped preload `appVariant` selects the UI.
 
 ### Build and release
 
@@ -188,18 +193,41 @@ pnpm --dir desktop run pack:agent-workspace
 pnpm --dir desktop run dist:agent-workspace
 ```
 
-Outputs go to `desktop/dist-agent-workspace/`. Bump `desktop/agent-workspace.json`, merge, and manually run **Release Desktop** on `main` with distribution **agent-workspace**. The packager rejects Open SWE output. Signed/notarized DMG and zip assets publish under `agent-workspace-v<version>`; zip/blockmap updates use `agent-workspace-updates/latest-mac.yml`. Both tags are prereleases, never GitHub's latest release, so Open SWE's updater is unaffected. DMGs are excluded from updater metadata because stapling changes their bytes.
+Outputs go to `desktop/dist-agent-workspace/`.
+Bump `desktop/agent-workspace.json`, merge, and manually run **Release Desktop** on `main` with distribution **agent-workspace**.
+The packager rejects Open SWE output.
+Signed/notarized DMG and zip assets publish under `agent-workspace-v<version>`; zip/blockmap updates use `agent-workspace-updates/latest-mac.yml`.
+Both tags are prereleases, never GitHub's latest release, so Open SWE's updater is unaffected.
+DMGs are excluded from updater metadata because stapling changes their bytes.
 
-Register the Apple bundle ID and reuse the existing signing/notarization secrets. Optional `AGENT_WORKSPACE_APPLE_PROVISIONING_PROFILE` must target this bundle and team `H253X88X9F`; Universal Links also need an AASA entry for `H253X88X9F.com.langchain.agentworkspace`. Without the profile, login still uses browser loopback handoff. macOS decides which app receives overlapping Universal Links.
+Register the Apple bundle ID and reuse the existing signing/notarization secrets.
+Optional `AGENT_WORKSPACE_APPLE_PROVISIONING_PROFILE` must target this bundle and team `H253X88X9F`; Universal Links also need an AASA entry for `H253X88X9F.com.langchain.agentworkspace`.
+Without the profile, login still uses browser loopback handoff. macOS decides which app receives overlapping Universal Links.
 
 ### LangSmith deployment
 
-Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/langsmith/callback`. Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration. Apply migration `0088_af406b7c5892`. Never ship the client secret in the app.
+Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/langsmith/callback`.
+Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
+Apply migration `0088_af406b7c5892`.
+Never ship the client secret in the app.
 
-Login discovers OIDC endpoints on the issuer origin and requests `openid profile email offline_access` for the API resource. Users must select org `f5c798a2-2155-4999-ad27-6d466bd26e1c`. Membership requires both `/userinfo`'s acting-org claim and current `/orgs?skip_create=true` membership; the claim alone does not prove membership. The organization list is unpaginated.
+Login discovers OIDC endpoints on the issuer origin and requests `openid profile email offline_access` for the API resource.
+Users must select org `f5c798a2-2155-4999-ad27-6d466bd26e1c`.
+Membership requires both `/userinfo`'s acting-org claim and current `/orgs?skip_create=true` membership; the claim alone does not prove membership.
+The organization list is unpaginated.
 
-The desktop starts `/dashboard/api/auth/langsmith/login` with a PKCE challenge and loopback port. The backend returns a short-lived handoff code to `127.0.0.1`; `/auth/desktop/exchange` requires the verifier. No browser session is created, and the handoff cannot itself authenticate as a cookie. LangSmith identities have independent internal UUID accounts, without GitHub identities or email-based linking.
+The desktop starts `/dashboard/api/auth/langsmith/login` with a PKCE challenge and loopback port.
+The backend returns a short-lived handoff code to `127.0.0.1`; `/auth/desktop/exchange` requires the verifier.
+No browser session is created, and the handoff cannot itself authenticate as a cookie.
+LangSmith identities have independent internal UUID accounts, without GitHub identities or email-based linking.
 
-Encrypted `langsmith_login` grants refresh automatically and also serve managed tools. Every authenticated request, run dispatch, runtime call and worker grant rechecks access. Revocation removes the grant; temporary provider failures deny access without discarding it. `/me` renews valid seven-day sessions on loading/focus; sessions inactive past expiry need login again. Sign out rather than disconnecting the login grant.
+Encrypted `langsmith_login` grants refresh automatically and also serve managed tools.
+Every authenticated request, run dispatch, runtime call and worker grant rechecks access.
+Revocation removes the grant; temporary provider failures deny access without discarding it.
+`/me` renews valid seven-day sessions on loading/focus; sessions inactive past expiry need login again.
+Sign out rather than disconnecting the login grant.
 
-Tasks and workers use private local bridges, with automatic task folders or an optional existing folder. Cloud moves, GitHub operations, and borrowed deployment bot/App credentials are unavailable. Deploy the login routes and variant-aware desktop UI before distributing installers. Real confidential-client OAuth, macOS signing/install and update installation still need production smoke tests; Linux packaging and mocked integration tests do not establish deployment readiness.
+Tasks and workers use private local bridges, with automatic task folders or an optional existing folder.
+Cloud moves, GitHub operations, and borrowed deployment bot/App credentials are unavailable.
+Deploy the login routes and variant-aware desktop UI before distributing installers.
+Real confidential-client OAuth, macOS signing/install and update installation still need production smoke tests; Linux packaging and mocked integration tests do not establish deployment readiness.

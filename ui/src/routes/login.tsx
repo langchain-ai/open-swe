@@ -64,7 +64,7 @@ function Login() {
         <div className="flex flex-col items-center gap-space-3 text-center">
           <LogoMark alt={appDistribution.name} className="size-8" />
           <Text as="h1" variant="h3">
-            Sign in to {appDistribution.name}
+            {`Sign in to ${appDistribution.name}`}
           </Text>
         </div>
         <Button
