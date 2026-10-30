@@ -65,6 +65,7 @@ function PullRequestMenuItem({
       label={github ? "Open PR on GitHub" : "Open PR review"}
       title={github ? undefined : "Hold ⌥ Option / Alt for GitHub"}
       copyLabel={github ? "Copy GitHub PR link" : "Copy PR review link"}
+      href={github ? undefined : reviewPagePath(pullRequest.review)}
       onOpen={() =>
         github
           ? openExternal(pullRequest.url)
@@ -119,7 +120,8 @@ export function ThreadMenuItems({
           icon={<TreeStructureIcon size={ICON_SIZE} weight="regular" />}
           label="Open trace"
           copyLabel="Copy trace link"
-          onOpen={() => thread.traceUrl && openExternal(thread.traceUrl)}
+          href={thread.traceUrl}
+          external
           onCopy={() =>
             thread.traceUrl &&
             copyText(thread.traceUrl, "Copied the trace link")
@@ -132,7 +134,8 @@ export function ThreadMenuItems({
           icon={<SlackLogoIcon size={ICON_SIZE} weight="regular" />}
           label="Open in Slack"
           copyLabel="Copy Slack link"
-          onOpen={() => slackUrl && openExternal(slackUrl)}
+          href={slackUrl ?? undefined}
+          external
           onCopy={() =>
             thread.sourceUrl &&
             copyText(thread.sourceUrl, "Copied the Slack link")

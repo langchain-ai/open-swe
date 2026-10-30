@@ -9,6 +9,7 @@ import {
   type ComponentProps,
   type ElementRef,
   type ReactNode,
+  useRef,
 } from "react"
 
 import { cn } from "@/lib/utils"
@@ -54,14 +55,18 @@ ContextMenuItem.displayName = "ContextMenuItem"
 
 /**
  * A menu row that opens a link, with a trailing button that copies it instead.
- * The copy button swallows its own click so the row's select (open) never fires;
- * its pointerdown must still reach the row, or Radix selects the row on pointerup.
+ * With `href` the row is a real link (middle-click and open-in-new-tab work);
+ * `onOpen` replaces a plain click, e.g. for router navigation. The copy button
+ * swallows its own click; its pointerdown must still reach the row, or Radix
+ * selects the row on pointerup.
  */
 export function LinkMenuItem({
   item: Item,
   icon,
   label,
   copyLabel,
+  href,
+  external = false,
   onOpen,
   onCopy,
   title,
@@ -70,14 +75,55 @@ export function LinkMenuItem({
   icon: ReactNode
   label: ReactNode
   copyLabel: string
-  onOpen: () => void
+  href?: string
+  external?: boolean
+  onOpen?: () => void
   onCopy: () => void
   title?: string
 }) {
+  const anchor = useRef<HTMLAnchorElement>(null)
+  // A click on the link itself already opened it; its select must not open it twice.
+  const openedByLink = useRef(false)
   return (
-    <Item onSelect={onOpen} title={title} className="pr-space-1">
-      {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+    <Item
+      title={title}
+      className="pr-space-1"
+      onSelect={() => {
+        if (openedByLink.current) openedByLink.current = false
+        else if (href) anchor.current?.click()
+        else onOpen?.()
+      }}
+    >
+      {href ? (
+        <a
+          ref={anchor}
+          href={href}
+          target={external ? "_blank" : undefined}
+          rel={external ? "noreferrer" : undefined}
+          className="flex min-w-0 flex-1 items-center gap-space-2 truncate"
+          onClick={(event) => {
+            openedByLink.current = true
+            const plain =
+              event.button === 0 &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.shiftKey &&
+              !event.altKey
+            if (onOpen && plain) {
+              event.preventDefault()
+              onOpen()
+            }
+          }}
+        >
+          {icon}
+          {label}
+        </a>
+      ) : (
+        <>
+          {icon}
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+        </>
+      )}
       <IconButton
         icon={LinkSimpleIcon}
         label={copyLabel}

@@ -381,10 +381,8 @@ export function Header({
                 }
                 label="Open reviewer trace"
                 copyLabel="Copy reviewer trace link"
-                onOpen={() =>
-                  detail.trace_url &&
-                  window.open(detail.trace_url, "_blank", "noopener,noreferrer")
-                }
+                href={detail.trace_url}
+                external
                 onCopy={() =>
                   detail.trace_url &&
                   copyText(detail.trace_url, "Copied the trace link")
