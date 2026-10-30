@@ -149,13 +149,13 @@ export function slackChannelMatches(
   )
 }
 
-/** `#name` for a channel the directory knows, else the id as stored. */
+/** A cached channel name, with a readable fallback while names are unavailable. */
 export function slackChannelLabel(
   directory: SlackChannelDirectory | undefined,
   id: string
 ): string {
   const channel = directory?.channels.find((entry) => entry.id === id)
-  return channel ? `#${channel.name}` : id
+  return channel?.name ? `#${channel.name}` : "Slack channel"
 }
 
 /** The canonical id for a pasted channel id, or null when it cannot be one. */

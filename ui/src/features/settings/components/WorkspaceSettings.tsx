@@ -179,7 +179,7 @@ export function WorkspaceSettingsPanel({
   // them is one of its settings.
   const modelOptions = useOptions(slug)
   const scope: SettingsScope = { kind: "workspace", slug }
-  const channelDirectory = useSlackChannelDirectory(canEdit)
+  const channelDirectory = useSlackChannelDirectory(true)
   const channelLabel = (id: string) =>
     slackChannelLabel(channelDirectory.data, id)
 

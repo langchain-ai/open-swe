@@ -200,8 +200,7 @@ export function WorkspacesSection({
   const qc = useQueryClient()
   const workspaces = useWorkspaceOptions()
   const options = workspaces.data
-  // Channel names are an admin's view; everyone else sees the stored ids.
-  const channelDirectory = useSlackChannelDirectory(isAdmin)
+  const channelDirectory = useSlackChannelDirectory(true)
   const channelLabel = (id: string) =>
     slackChannelLabel(channelDirectory.data, id)
 
