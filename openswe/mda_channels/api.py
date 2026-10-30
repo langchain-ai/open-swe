@@ -44,9 +44,11 @@ def _handlers() -> Handlers[ChannelCall]:
         PLAN_LINEAR_SESSION,
         RECORD_LINEAR_DELIVERY,
     )
+    from runtime_api.slack import PLAN_SLACK_TURN
 
     from openswe.github import channel as github
     from openswe.linear import channel as linear
+    from openswe.slack import channel as slack
 
     handlers = Handlers[ChannelCall]()
     handlers.serve(RECORD_GITHUB_DELIVERY, github.record_github_delivery)
@@ -56,6 +58,7 @@ def _handlers() -> Handlers[ChannelCall]:
     handlers.serve(PLAN_LINEAR_SESSION, linear.plan_linear_session)
     handlers.serve(LINEAR_AUTOMATION_RULES, linear.linear_automation_rules)
     handlers.serve(PLAN_LINEAR_AUTOMATIONS, linear.plan_linear_automations)
+    handlers.serve(PLAN_SLACK_TURN, slack.plan_slack_turn)
     return handlers
 
 
