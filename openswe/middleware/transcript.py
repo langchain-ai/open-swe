@@ -30,7 +30,14 @@ from uuid import UUID
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolCall, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolCall,
+    ToolMessage,
+    get_notification_metadata,
+)
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
@@ -1044,7 +1051,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         for message in messages:
             if not isinstance(message, HumanMessage):
                 continue
-            if message.additional_kwargs.get("lc_source") == "summarization":
+            notification = get_notification_metadata(message)
+            if notification is not None and notification["source"] == "summarization":
                 continue
             message_id = message.id
             if not isinstance(message_id, str) or message_id in state.seen_human_ids:
