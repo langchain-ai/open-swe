@@ -1,4 +1,5 @@
 import importlib
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -97,8 +98,7 @@ async def test_a_public_deployment_hands_out_a_short_link(
         link.path,
         link.content_type,
         link.content_disposition,
-        link.created_by,
-    ) == ("thread-1", "sandbox-1", "/workspace/project/shot.png", "image/png", "inline", None)
+    ) == ("thread-1", "sandbox-1", "/workspace/project/shot.png", "image/png", "inline")
 
 
 async def test_a_short_link_reports_when_it_expires(
@@ -107,6 +107,7 @@ async def test_a_short_link_reports_when_it_expires(
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://openswe.example")
     await _create_thread("thread-1")
     _configure(monkeypatch, _Backend())
+    before = datetime.now(UTC)
 
     result = await download_tool.create_sandbox_file_download_url(
         "result.zip", expires_in_seconds=600
@@ -115,6 +116,8 @@ async def test_a_short_link_reports_when_it_expires(
     link = await SandboxFileLink.by_token(result["url"].rsplit("/", 1)[1])
     assert link is not None and link.expires_at is not None
     assert result["expires_at"] == link.expires_at.isoformat()
+    lifetime = timedelta(seconds=600)
+    assert before + lifetime <= link.expires_at <= datetime.now(UTC) + lifetime
 
 
 @pytest.mark.parametrize(("run", "attributed"), [({}, True), ({"schedule_id": "daily"}, False)])

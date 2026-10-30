@@ -1,6 +1,5 @@
 """Short links to sandbox files, against a real migrated schema."""
 
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -37,46 +36,6 @@ async def _link(
         expires_in_seconds=expires_in_seconds,
         created_by=None,
     )
-
-
-async def test_a_link_stores_its_target_under_a_short_random_token(registry_db: None) -> None:
-    await _create_thread("thread-1")
-
-    link = await _link()
-
-    assert link is not None
-    assert len(link.token) == 22
-    stored = await SandboxFileLink.by_token(link.token)
-    assert stored is not None
-    assert stored.id == link.id
-    assert (
-        stored.thread_id,
-        stored.sandbox_id,
-        stored.path,
-        stored.content_type,
-        stored.content_disposition,
-        stored.expires_at,
-    ) == ("thread-1", "sandbox-1", "/workspace/project/shot.png", "image/png", "inline", None)
-
-
-async def test_a_link_records_when_it_expires(registry_db: None) -> None:
-    await _create_thread("thread-1")
-    before = datetime.now(UTC)
-
-    link = await _link(expires_in_seconds=600)
-
-    assert link is not None
-    stored = await SandboxFileLink.by_token(link.token)
-    assert stored is not None and stored.expires_at is not None
-    assert (
-        before + timedelta(seconds=600)
-        <= stored.expires_at
-        <= datetime.now(UTC) + timedelta(seconds=600)
-    )
-
-
-async def test_a_thread_without_a_transcript_row_gets_no_link(registry_db: None) -> None:
-    assert await _link("legacy-thread") is None
 
 
 async def test_deleting_the_thread_deletes_its_links(registry_db: None) -> None:
