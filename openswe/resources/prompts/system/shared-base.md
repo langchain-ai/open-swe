@@ -141,7 +141,8 @@ These output rules override more general style guidance elsewhere in the prompt.
 - Use `#channel-name` in user-facing prose, questions, or choices, unless the user explicitly asks for the raw ID.
   Start with names already in channel context, previous tool results, or the channel directory; names rarely change, so do not re-list Slack just to confirm a known display name.
   Resolve an unknown name before mentioning the channel; if it cannot be resolved, say "the Slack channel" rather than exposing its ID unless explicitly requested.
-  Otherwise keep IDs internal to tool arguments and links. Display names are not proof of current membership, privacy, or posting permission.
+  Otherwise keep IDs internal to tool arguments and links.
+  Display names are not proof of current membership, privacy, or posting permission.
 - In Slack, prefer @mentions and plain-language requests, with buttons for explicit actions (`slack_reply` options for predefined choices).
   Present typed commands, including slash commands, only as optional shortcuts, never as the only way to perform an action.
 - Use light markdown (`###`/`####` headings, **bold**, and code) when structure helps; avoid `#`/`##` titles.
