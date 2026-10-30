@@ -6,13 +6,17 @@ from typing import Any, cast
 import pytest
 import rt.github as github
 from managed_deepagents import (
+    ChannelRunInput,
+    ChannelRunOptions,
     GitHubChannelThread,
     GitHubEvent,
+    GitHubEventResult,
     GitHubPayload,
     SupportedEventKey,
 )
 from managed_deepagents._channels.github_types import GitHubRepository, GitHubSender
 from managed_deepagents._channels.http.types import ChannelName
+from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
 from pydantic import BaseModel
 from rt.github_routes import Route, route
 from runtime_api.endpoint import Endpoint
@@ -20,6 +24,7 @@ from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
+    GitHubAutomationRun,
     GitHubDeliveryActed,
     GitHubDeliveryFacts,
     GitHubIssueRun,
@@ -79,11 +84,11 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             Route(
                 (
                     "wake_merge_queue",
-                    "launch_automations",
                     "track_pull_request_state",
                     "track_pull_request_usage",
                     "review_pull_request",
-                )
+                ),
+                automations=True,
             ),
             id="pr-opened-by-the-agent",
         ),
@@ -128,12 +133,12 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             Route(
                 (
                     "wake_merge_queue",
-                    "launch_automations",
                     "track_pull_request_state",
                     "track_pull_request_usage",
                     "settle_review_on_close",
                     "update_reviewer_watch",
-                )
+                ),
+                automations=True,
             ),
             id="pr-closed",
         ),
@@ -203,7 +208,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _issue(),
             _FACTS,
             False,
-            Route(("launch_automations",), issue_run=True),
+            Route(automations=True, issue_run=True),
             id="issue-mention",
         ),
         pytest.param(
@@ -211,7 +216,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _issue(body="no handle"),
             _FACTS,
             False,
-            Route(("launch_automations",)),
+            Route(automations=True),
             id="issue-without-mention",
         ),
         pytest.param(
@@ -219,7 +224,7 @@ def _review(action: str = "submitted", body: str = "") -> dict:
             _issue(),
             _FACTS,
             True,
-            Route(("launch_automations",)),
+            Route(automations=True),
             id="issue-the-agent-opened",
         ),
         pytest.param(
@@ -320,6 +325,7 @@ class _Backend:
                 webhook="https://backend.example/webhooks/run-complete",
             ),
         )
+        self.automations: list[GitHubAutomationRun] = []
         self.calls: list[tuple[str, BaseModel, str]] = []
 
     async def __call__(
@@ -329,8 +335,11 @@ class _Backend:
         if endpoint is RECORD_GITHUB_DELIVERY:
             return self.facts
         assert endpoint is ACT_ON_GITHUB_DELIVERY
-        asked = cast(ActOnGitHubDelivery, request).issue_run is not None
-        return GitHubDeliveryActed(issue_run=self.planned if asked else None)
+        act = cast(ActOnGitHubDelivery, request)
+        return GitHubDeliveryActed(
+            issue_run=self.planned if act.issue_run is not None else None,
+            automations=self.automations if act.automations else [],
+        )
 
     def called[Request: BaseModel](self, endpoint: Endpoint[Request, Any]) -> list[Request]:
         return [cast(Request, request) for name, request, _ in self.calls if name == endpoint.name]
@@ -365,21 +374,23 @@ async def test_an_issue_mention_starts_the_planned_run_on_the_issues_thread(
 ) -> None:
     started = await github.on_event(_event("issues", _issue()), _THREAD)
 
-    assert started == (
-        {"messages": [{"role": "user", "content": "Fix the crash"}]},
-        {
-            "context": {"__run_token": "signed"},
-            "metadata": {"channel": "github"},
-            "webhook": "https://backend.example/webhooks/run-complete",
-        },
-    )
+    assert started == [
+        (
+            {"messages": [{"role": "user", "content": "Fix the crash"}]},
+            {
+                "context": {"__run_token": "signed"},
+                "metadata": {"channel": "github"},
+                "webhook": "https://backend.example/webhooks/run-complete",
+            },
+        )
+    ]
     # Two calls: log it and learn the facts, then act.
     assert [msg_id for *_, msg_id in backend.calls] == [
         "msg_delivery-1_record",
         "msg_delivery-1_act",
     ]
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
-    assert act.work == ["launch_automations"]
+    assert (act.work, act.automations) == ([], True)
     assert act.event == "issues"
     assert act.issue_run is not None
     assert (str(act.issue_run.thread_id), act.issue_run.waiting) == (_THREAD.id, False)
@@ -395,9 +406,78 @@ async def test_a_mention_while_the_thread_waits_only_points_to_the_decision(
         _event("issue_comment", _comment("@openswe go", on_pr=False)), waiting
     )
 
-    assert started == github.ACTS_WHILE_WAITING
+    assert started == [(github.ACTS_WHILE_WAITING, {})]
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
     assert act.issue_run is not None and act.issue_run.waiting is True
+
+
+def _runs(started: GitHubEventResult) -> list[tuple[ChannelRunInput, ChannelRunOptions]]:
+    """The runs a handler started, as a list."""
+    assert isinstance(started, list)
+    return started
+
+
+def _automation(prompt: str) -> GitHubAutomationRun:
+    return GitHubAutomationRun(
+        thread_id=uuid.uuid4(),
+        input={"messages": [{"role": "user", "content": prompt}]},
+        context={"__run_token": f"signed:{prompt}"},
+        metadata={"channel": "github"},
+    )
+
+
+async def test_each_automation_starts_on_the_thread_the_backend_planned(
+    backend: _Backend,
+) -> None:
+    triage, label = _automation("Triage"), _automation("Label")
+    backend.automations = [triage, label]
+
+    started = _runs(await github.on_event(_event("issues", _issue()), _THREAD))
+
+    # The mention's run on the issue's conversation, and each automation's on its own thread.
+    assert len(started) == 3
+    assert [options.get("thread") for _, options in started[1:]] == [
+        {"mode": "persistent", "id": str(triage.thread_id)},
+        {"mode": "persistent", "id": str(label.thread_id)},
+    ]
+    assert started[1] == (
+        triage.input,
+        {
+            "context": triage.context,
+            "metadata": triage.metadata,
+            "thread": {"mode": "persistent", "id": str(triage.thread_id)},
+        },
+    )
+    # Still two calls.
+    assert len(backend.calls) == 2
+    # MDA takes the list: one run on the conversation, the others on their threads.
+    runs = normalize_run_inputs(started, RunChannel(name="github", provider="github"))
+    assert ["thread" in run for run in runs] == [False, True, True]
+
+
+async def test_automations_start_while_the_issues_thread_waits(backend: _Backend) -> None:
+    backend.planned = PlannedGitHubIssueRun(starts=True)
+    backend.automations = [_automation("Triage")]
+    waiting = GitHubChannelThread(id=_THREAD.id, channel=_THREAD.channel, interrupted=True)
+
+    started = _runs(await github.on_event(_event("issues", _issue()), waiting))
+
+    assert started[0] == (github.ACTS_WHILE_WAITING, {})
+    assert len(normalize_run_inputs(started, RunChannel(name="github", provider="github"))) == 2
+    assert started[1][1].get("thread") == {
+        "mode": "persistent",
+        "id": str(backend.automations[0].thread_id),
+    }
+
+
+async def test_a_pull_request_opened_starts_only_its_automations(backend: _Backend) -> None:
+    backend.automations = [_automation("Summarize")]
+
+    started = _runs(await github.on_event(_event("pull_request", {"action": "opened"}), _THREAD))
+
+    assert len(started) == 1
+    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert (act.automations, act.issue_run) == (True, None)
 
 
 async def test_a_mention_the_backend_refuses_starts_nothing(backend: _Backend) -> None:

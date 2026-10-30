@@ -4,15 +4,18 @@ Every delivery goes to the backend's event log (``record_github_delivery``), whi
 answers what Open SWE knows about its repository. This side decides what the
 delivery starts (``rt.github_routes``), and tells the backend in one call
 (``act_on_github_delivery``): the backend's work, such as a review, a CI wakeup or a
-pull request comment's run, which the backend runs once per delivery; and for an
-``@openswe`` mention on an issue, the coding agent's run on the issue's
-conversation, which the backend checks and signs. So a delivery takes at most two calls.
+pull request comment's run, which the backend runs once per delivery; whether it may
+fire automations; and for an ``@openswe`` mention on an issue, the coding agent's run
+on the issue's conversation. The backend checks and signs the runs, and this side
+starts them: each automation's on a thread of its own, the issue's on its
+conversation. So a delivery takes at most two calls.
 """
 
 from typing import Final, cast
 from uuid import UUID
 
 from managed_deepagents import (
+    ChannelRunInput,
     ChannelRunOptions,
     GitHubChannelThread,
     GitHubEvent,
@@ -24,8 +27,11 @@ from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
+    GitHubAutomationRun,
     GitHubDelivery,
+    GitHubIssueRun,
     GitHubIssueRunRequest,
+    PlannedGitHubIssueRun,
 )
 
 from rt.github_routes import route
@@ -49,7 +55,7 @@ async def on_event[Payload: GitHubPayload](
         RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
     )
     routed = route(event.name, delivery.payload, facts, from_app=event.from_app)
-    if not routed.work and not routed.issue_run:
+    if not routed.work and not routed.automations and not routed.issue_run:
         return None
     issue_run = (
         GitHubIssueRunRequest(thread_id=UUID(thread.id), waiting=thread.interrupted)
@@ -62,17 +68,33 @@ async def on_event[Payload: GitHubPayload](
             **delivery.model_dump(),
             work=list(routed.work),
             mentioned=routed.mentioned,
+            automations=routed.automations,
             issue_run=issue_run,
         ),
         msg_id=f"msg_{event.delivery_id}_act",
     )
-    planned = acted.issue_run
-    if planned is None or not planned.starts:
-        return None
-    run = planned.run
-    if run is None:
-        return ACTS_WHILE_WAITING
+    runs = [_issue_run(acted.issue_run)] if acted.issue_run and acted.issue_run.starts else []
+    runs += [_automation_run(run) for run in acted.automations]
+    return runs or None
+
+
+def _options(run: GitHubIssueRun | GitHubAutomationRun) -> ChannelRunOptions:
     options: ChannelRunOptions = {"context": run.context, "metadata": run.metadata}
     if run.webhook:
         options["webhook"] = run.webhook
-    return (run.input, options)
+    return options
+
+
+def _issue_run(planned: PlannedGitHubIssueRun) -> tuple[ChannelRunInput, ChannelRunOptions]:
+    """The issue's run on its conversation, or, while it waits, what points it to the decision."""
+    if planned.run is None:
+        return (ACTS_WHILE_WAITING, {})
+    return (planned.run.input, _options(planned.run))
+
+
+def _automation_run(run: GitHubAutomationRun) -> tuple[ChannelRunInput, ChannelRunOptions]:
+    """An automation's run, on the thread the backend planned it on for this delivery."""
+    return (
+        run.input,
+        {**_options(run), "thread": {"mode": "persistent", "id": str(run.thread_id)}},
+    )

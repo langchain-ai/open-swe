@@ -57,7 +57,7 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr("openswe.github.channel.EventLog.record_once", AsyncMock(return_value=True))
     monkeypatch.setattr(channel.Topic.PULL_REQUESTS, "invalidate", AsyncMock())
     monkeypatch.setattr(channel, "repo_is_routable", AsyncMock(return_value=True))
-    monkeypatch.setattr(channel.schedules, "launch_github_automations", AsyncMock())
+    monkeypatch.setattr(channel.schedules, "plan_github_automations", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
     )

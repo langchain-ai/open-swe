@@ -10,8 +10,9 @@ answers only what needs its data, its GitHub App or its signing key:
   for it, and the handles that mention Open SWE.
 - ``act_on_github_delivery``: runs the work the channel chose for the delivery (a
   review, a CI wakeup, a pull request comment's run, ...), once per delivery, after
-  it answers; and for an ``@openswe`` mention on an issue, plans the run it starts
-  on the issue's conversation.
+  it answers; plans the runs of the automations the delivery fires, each on a thread
+  of its own; and for an ``@openswe`` mention on an issue, plans the run it starts
+  on the issue's conversation. The channel starts the planned runs.
 
 So a delivery takes at most two calls.
 """
@@ -61,7 +62,6 @@ class GitHubDeliveryFacts(BaseModel):
 type GitHubWorkName = Literal[
     # The native merge queue reads the queue again.
     "wake_merge_queue",
-    "launch_automations",
     # The agent thread that opened a pull request learns its state, and its usage.
     "track_pull_request_state",
     "track_pull_request_usage",
@@ -100,11 +100,13 @@ class ActOnGitHubDelivery(GitHubDelivery):
     work: list[GitHubWorkName] = []
     # Whether the comment ``route_comment`` routes mentions Open SWE.
     mentioned: bool = False
+    # The delivery may fire automations: an issue opened, a pull request opened or closed.
+    automations: bool = False
     issue_run: GitHubIssueRunRequest | None = None
 
     @model_validator(mode="after")
     def _acts(self) -> Self:
-        if not self.work and self.issue_run is None:
+        if not self.work and self.issue_run is None and not self.automations:
             raise ValueError("a delivery that starts nothing needs no call")
         return self
 
@@ -124,11 +126,25 @@ class PlannedGitHubIssueRun(BaseModel):
     run: GitHubIssueRun | None = None
 
 
+class GitHubAutomationRun(BaseModel):
+    """Start the automation's run on ``thread_id``, a thread of its own for this delivery."""
+
+    thread_id: UUID
+    input: dict[str, JsonValue]
+    context: dict[str, JsonValue]
+    metadata: dict[str, JsonValue]
+    webhook: str | None = None
+
+
 class GitHubDeliveryActed(BaseModel):
     """The backend took the work, which it runs after answering, as it did for its webhook."""
 
     # The issue's run, when the call asked for one.
     issue_run: PlannedGitHubIssueRun | None = None
+    # A run per automation the delivery fires, each claimed once per delivery. A call
+    # sent again plans the runs it already claimed on the same threads, where the
+    # channel starts each delivery's run once.
+    automations: list[GitHubAutomationRun] = []
 
 
 RECORD_GITHUB_DELIVERY: Final = Endpoint(
@@ -144,7 +160,8 @@ ACT_ON_GITHUB_DELIVERY: Final = Endpoint(
     "act_on_github_delivery",
     ActOnGitHubDelivery,
     GitHubDeliveryActed,
-    seconds=60.0,
+    # Each automation's planning signs a run; a repository rarely fires more than a few at once.
+    seconds=120.0,
     # The work is claimed once per delivery ID, but planning an issue's run reacts to
     # the comment and indexes the thread, so a call isn't sent again blindly.
     prefix=CHANNEL_API_PREFIX,

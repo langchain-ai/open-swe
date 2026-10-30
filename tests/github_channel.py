@@ -2,7 +2,7 @@
 
 MDA's handler (``mda/rt/github.py``) logs each delivery on the backend, routes it
 with ``mda/rt/github_routes.py``, and asks the backend to run the work it routes
-to, or to plan an issue's run. This does the same, each call signed with the
+to, and to plan the runs of its automations and an issue's. This does the same, each call signed with the
 service secret as MDA signs it. The backend runs its work after answering, which
 an in-process client waits for, so a test sees its effects once this returns.
 """
@@ -26,6 +26,7 @@ from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
+    GitHubAutomationRun,
     GitHubDelivery,
     GitHubDeliveryFacts,
     GitHubIssueRunRequest,
@@ -60,6 +61,9 @@ class GitHubDelivered:
     work: tuple[str, ...]
     # The issue run the backend planned; ``None`` when the delivery routes to none.
     issue_run: PlannedGitHubIssueRun | None
+    # Whether the delivery may fire automations, and the runs the backend planned for them.
+    automations: bool = False
+    automation_runs: tuple[GitHubAutomationRun, ...] = ()
 
 
 async def _call[Request: BaseModel, Response: BaseModel](
@@ -116,7 +120,8 @@ async def deliver_as_mda(
         )
         routed = MDA_ROUTES.route(event_type, delivery.payload, facts, from_app=from_app)
         planned = None
-        if routed.work or routed.issue_run:
+        automation_runs: list[GitHubAutomationRun] = []
+        if routed.work or routed.automations or routed.issue_run:
             issue_run = (
                 GitHubIssueRunRequest(thread_id=thread_id or uuid.uuid4(), waiting=waiting)
                 if routed.issue_run
@@ -129,13 +134,21 @@ async def deliver_as_mda(
                     **delivery.model_dump(),
                     work=list(routed.work),
                     mentioned=routed.mentioned,
+                    automations=routed.automations,
                     issue_run=issue_run,
                 ),
                 f"msg_{delivery_id}_act",
                 secret,
             )
             planned = acted.issue_run
-    return GitHubDelivered(facts=facts, work=tuple(routed.work), issue_run=planned)
+            automation_runs = acted.automations
+    return GitHubDelivered(
+        facts=facts,
+        work=tuple(routed.work),
+        issue_run=planned,
+        automations=routed.automations,
+        automation_runs=tuple(automation_runs),
+    )
 
 
 async def deliver_github_event(

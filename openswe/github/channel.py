@@ -5,9 +5,10 @@ channel, which verifies each delivery and decides there what it starts. It asks
 here only for what needs Open SWE's data, its App or its signing key: to log each
 delivery and say what Open SWE knows about its repository
 (``record_github_delivery``); then, in one call (``act_on_github_delivery``), to run
-the work it chose, as the backend's own webhook ran it, and to plan the run an
-``@openswe`` mention on an issue starts on the channel's thread. Each run carries
-the backend's run-complete webhook.
+the work it chose, as the backend's own webhook ran it, and to plan the runs the
+channel starts: each automation's the delivery fires, on a thread of its own
+(``openswe.schedules.store``), and the run an ``@openswe`` mention on an issue
+starts on the channel's thread. Each run carries the backend's run-complete webhook.
 """
 
 import json
@@ -138,9 +139,6 @@ def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Await
     event, delivery_id = work.event, work.delivery_id
     return {
         "wake_merge_queue": lambda: wake_native_queue(payload),
-        "launch_automations": lambda: schedules.launch_github_automations(
-            event, payload, delivery_id
-        ),
         "track_pull_request_state": lambda: common.update_agent_thread_pr_state(payload),
         "track_pull_request_usage": lambda: common.update_agent_pr_usage_from_webhook(
             payload, delivery_id=delivery_id
@@ -266,12 +264,18 @@ async def _plan_issue_run(
 async def act_on_github_delivery(
     call: ChannelCall, act: ActOnGitHubDelivery
 ) -> GitHubDeliveryActed:
-    """Take the work the channel chose for a delivery, and plan an issue mention's run."""
+    """Take the work the channel chose for a delivery, and plan the runs it starts."""
     if act.work:
         await _accept_work(call, act)
-    if act.issue_run is None:
-        return GitHubDeliveryActed()
-    return GitHubDeliveryActed(issue_run=await _plan_issue_run(act, act.issue_run))
+    automations = (
+        await schedules.plan_github_automations(
+            act.event, cast(_Payload, act.payload), act.delivery_id
+        )
+        if act.automations
+        else []
+    )
+    issue_run = None if act.issue_run is None else await _plan_issue_run(act, act.issue_run)
+    return GitHubDeliveryActed(issue_run=issue_run, automations=automations)
 
 
 def _no_run(reason: str, **fields: str) -> PlannedGitHubIssueRun:

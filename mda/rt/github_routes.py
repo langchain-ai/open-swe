@@ -2,10 +2,11 @@
 
 ``route`` reads a delivery's event, action and payload, with what Open SWE knows
 about its repository (``GitHubDeliveryFacts``), and names the backend's work it
-starts and whether it starts an issue's run here. It decides as the backend's
-``/webhooks/github`` did. The backend keeps the action sets and the mention handles
-too, so ``tests/agent/test_mda_github_routes.py`` holds these copies to them
-(AGENTS.md): standard library and ``runtime_api`` only, so that test can load it.
+starts, whether it may fire automations, and whether it starts an issue's run
+here. It decides as the backend's ``/webhooks/github`` did. The backend keeps the
+action sets and the mention handles too, so ``tests/agent/test_mda_github_routes.py``
+holds these copies to them (AGENTS.md): standard library and ``runtime_api`` only,
+so that test can load it.
 """
 
 import re
@@ -52,6 +53,8 @@ class Route:
     work: tuple[GitHubWorkName, ...] = ()
     # Whether the comment ``route_comment`` routes mentions Open SWE.
     mentioned: bool = False
+    # The delivery may fire automations, whose runs start here, each on its own thread.
+    automations: bool = False
     # An ``@openswe`` mention on an issue: its run starts on the issue's conversation.
     issue_run: bool = False
 
@@ -61,8 +64,6 @@ def _fields(value: object) -> Mapping[str, object]:
 
 
 def _pull_request(action: str, facts: GitHubDeliveryFacts, work: list[GitHubWorkName]) -> Route:
-    if action in {"opened", "closed"} and facts.allowed:
-        work.append("launch_automations")
     if action in {"opened", "edited"} or action in PR_AGENT_STATE_ACTIONS:
         work.append("track_pull_request_state")
     if action == "synchronize":
@@ -78,7 +79,7 @@ def _pull_request(action: str, facts: GitHubDeliveryFacts, work: list[GitHubWork
         work.append("update_reviewer_watch")
     elif action in PR_FIRST_REVIEW_ACTIONS and facts.auto_review:
         work.append("review_pull_request")
-    return Route(tuple(work))
+    return Route(tuple(work), automations=action in {"opened", "closed"} and facts.allowed)
 
 
 def route(
@@ -115,10 +116,12 @@ def route(
         changes = _fields(payload.get("changes"))
         if action == "edited" and not any(field in changes for field in ("body", "title")):
             return Route(tuple(work))
-        if action == "opened":
-            work.append("launch_automations")
         text = f"{issue.get('title') or ''}\n\n{issue.get('body') or ''}"
-        return Route(tuple(work), issue_run=not from_app and mentions(text, facts.tags))
+        return Route(
+            tuple(work),
+            automations=action == "opened",
+            issue_run=not from_app and mentions(text, facts.tags),
+        )
     if action not in COMMENT_ACTIONS.get(event, frozenset()) or from_app:
         # The App's own comments and reviews start nothing, so the agent doesn't answer itself.
         return Route(tuple(work))

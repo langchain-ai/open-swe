@@ -2,8 +2,8 @@
 
 Records live in PostgreSQL (``automation`` and ``automation_trigger``); each
 schedule trigger owns one LangGraph cron, whose input names the automation.
-GitHub triggers fire from the GitHub webhook, and every inbound event is
-claimed once per automation in ``event_claim`` before it runs.
+GitHub and Linear triggers fire from MDA's channels, which start the runs planned
+here; every inbound event is claimed once per automation in ``event_claim`` first.
 """
 
 import json
@@ -12,11 +12,12 @@ import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, Field, JsonValue, TypeAdapter, field_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from runtime_api.github import GitHubAutomationRun
 from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -82,6 +83,7 @@ LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
 _LINEAR_TEAM_KEY_RE = re.compile(TEAM_KEY_PATTERN)
 # Each automation run a Linear delivery starts gets a thread of its own, named by both.
 _LINEAR_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:linear-automation")
+_GITHUB_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:github-automation")
 _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
@@ -1212,10 +1214,16 @@ async def _github_trigger_matches(
     return matches
 
 
-async def launch_github_automations(
+async def plan_github_automations(
     event_type: str, payload: dict[str, Any], delivery_id: str
-) -> list[dict[str, Any]]:
-    """Run every automation a GitHub delivery triggers, each at most once per delivery."""
+) -> list[GitHubAutomationRun]:
+    """The run of every automation a GitHub delivery fires, for MDA's channel to start.
+
+    Each automation is claimed once per delivery, and its run planned on a thread of
+    its own for that delivery. A call sent again for a delivery plans the runs it
+    already claimed again, on the same threads, where the channel starts each
+    delivery's run once.
+    """
     events = _github_events(event_type, payload)
     if not events:
         return []
@@ -1260,7 +1268,7 @@ async def launch_github_automations(
     # automations keep firing for any author, as before, with a narrowed token.
     if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
         return []
-    results: list[dict[str, Any]] = []
+    runs: list[GitHubAutomationRun] = []
     private = repo_private_from_payload(payload)
     for record, event in matches:
         schedule_id = record["id"]
@@ -1275,7 +1283,7 @@ async def launch_github_automations(
         try:
             claimed = await event_claims.claim(
                 _DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL
-            )
+            ) or await event_claims.held(_DELIVERY_CLAIM_SCOPE, claim_key)
         except Exception:
             logger.exception(
                 "Failed to claim GitHub automation delivery",
@@ -1283,15 +1291,14 @@ async def launch_github_automations(
             )
             continue
         if not claimed:
-            logger.info(
-                "Skipping already-claimed GitHub automation delivery",
-                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
-            )
             continue
         try:
-            result = await _launch_agent_schedule_record(
+            run = await _planned_github_automation(
                 record,
                 repo=f"{owner_login}/{repo_name}",
+                thread_id=str(
+                    uuid.uuid5(_GITHUB_AUTOMATION_THREADS, f"{schedule_id}/{delivery_id}")
+                ),
                 prompt=await _github_event_prompt(record, event_type, payload, event),
                 # An outsider can open an issue on a public repository, so the
                 # run it starts reaches only that repository.
@@ -1300,29 +1307,54 @@ async def launch_github_automations(
                 ),
             )
         except Exception:
-            logger.exception(
-                "Failed to launch GitHub automation", extra={"schedule_id": schedule_id}
+            logger.exception("Failed to plan GitHub automation", extra={"schedule_id": schedule_id})
+            # Released, so the channel's call sent again plans it afresh.
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+            continue
+        if run is None:
+            logger.error(
+                "GitHub automation plans no run",
+                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
             )
             await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
             continue
-        if result.get("status") != "started":
-            logger.error(
-                "GitHub automation did not start",
-                extra={
-                    "schedule_id": schedule_id,
-                    "github_delivery": delivery_id,
-                    "launch_status": result.get("status"),
-                },
-            )
-            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-        results.append(result)
-    return results
+        runs.append(run)
+    return runs
 
 
-async def launch_github_issue_automations(
-    payload: dict[str, Any], delivery_id: str
-) -> list[dict[str, Any]]:
-    return await launch_github_automations("issues", {"action": "opened", **payload}, delivery_id)
+async def _planned_github_automation(
+    record: dict[str, Any],
+    *,
+    repo: str,
+    thread_id: str,
+    prompt: str,
+    token_repositories: list[str] | None,
+) -> GitHubAutomationRun | None:
+    """The automation's run in ``repo``; ``None`` when its workspace can't run it there."""
+    from openswe.github.channel import CHANNEL as GITHUB_CHANNEL
+
+    workspace = _record_workspace(record)
+    if not await WORKSPACES.slug_exists(workspace):
+        # Running in another workspace would hand it that workspace's settings
+        # and connections, which nobody chose for it.
+        error = f"workspace {workspace!r} no longer exists"
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        return None
+    try:
+        await require_repo_access_for_workspace(repo)
+    except HTTPException as exc:
+        await _put_run_state(record, {"last_error": str(exc.detail), "last_error_at": now_iso()})
+        return None
+    return GitHubAutomationRun(
+        **await _planned_channel_automation(
+            record,
+            channel=GITHUB_CHANNEL,
+            thread_id=thread_id,
+            prompt=prompt,
+            repo=_repo_dict(repo),
+            token_repositories=token_repositories,
+        )
+    )
 
 
 _SLACK_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_message)", re.IGNORECASE)
@@ -1560,8 +1592,36 @@ async def plan_linear_automation(request: PlanLinearAutomation) -> LinearAutomat
 async def _planned_linear_automation(
     record: dict[str, Any], request: PlanLinearAutomation
 ) -> LinearAutomationRun:
-    from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
     from openswe.linear.session import LINEAR_CHANNEL
+
+    return LinearAutomationRun(
+        **await _planned_channel_automation(
+            record,
+            channel=LINEAR_CHANNEL,
+            thread_id=str(
+                uuid.uuid5(_LINEAR_AUTOMATION_THREADS, f"{record['id']}/{request.delivery_id}")
+            ),
+            prompt=request.prompt,
+        )
+    )
+
+
+async def _planned_channel_automation(
+    record: dict[str, Any],
+    *,
+    channel: str,
+    thread_id: str,
+    prompt: str,
+    repo: dict[str, str] | None = None,
+    token_repositories: list[str] | None = None,
+) -> dict[str, Any]:
+    """Index ``thread_id`` as ``channel``'s and sign the automation's run on it.
+
+    What the channel starts the run with: ``thread_id``, ``input``, ``context``,
+    ``metadata`` and ``webhook``. A token scope is recorded on the thread as it is
+    indexed, so a thread whose scope couldn't be written starts nothing.
+    """
+    from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
     from openswe.threads.router import (
         adopt_channel_run,
         channel_run_metadata,
@@ -1570,10 +1630,11 @@ async def _planned_linear_automation(
     from openswe.threads.runtimes import RUNTIMES
 
     schedule_id = record["id"]
-    thread_id = str(uuid.uuid5(_LINEAR_AUTOMATION_THREADS, f"{schedule_id}/{request.delivery_id}"))
     admin_thread = _admin_thread_enabled(record)
-    run_config = await _agent_run_config(record, thread_id, None, admin_thread=admin_thread)
-    metadata = _agent_run_metadata(record, thread_id, None, admin_thread=admin_thread)
+    run_config = await _agent_run_config(record, thread_id, repo, admin_thread=admin_thread)
+    metadata = _agent_run_metadata(record, thread_id, repo, admin_thread=admin_thread)
+    if token_repositories is not None:
+        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
     if admin_thread:
         metadata["system_authorization"] = {
             "schedule_id": schedule_id,
@@ -1585,15 +1646,15 @@ async def _planned_linear_automation(
         "kind": "system",
     }
     run_input = build_run_input(
-        request.prompt,
+        prompt,
         input_context,
         systems=[await _automation_identity(record)],
     )
-    await adopt_channel_run(thread_id, LINEAR_CHANNEL, metadata=metadata)
+    await adopt_channel_run(thread_id, channel, metadata=metadata)
     planned = await prepare_durable_run(
         _AGENT_ASSISTANT_ID,
         run_config,
-        {CHANNEL_METADATA_KEY: LINEAR_CHANNEL},
+        {CHANNEL_METADATA_KEY: channel},
         source="schedule",
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
@@ -1615,13 +1676,13 @@ async def _planned_linear_automation(
             "last_error_at": None,
         },
     )
-    return LinearAutomationRun(
-        thread_id=uuid.UUID(thread_id),
-        input=cast(dict[str, JsonValue], run_input),
-        context=cast(dict[str, JsonValue], rewritten["context"]),
-        metadata=channel_run_metadata(planned["metadata"]),
-        webhook=COMPLETION_WEBHOOK_URL or None,
-    )
+    return {
+        "thread_id": uuid.UUID(thread_id),
+        "input": run_input,
+        "context": rewritten["context"],
+        "metadata": channel_run_metadata(planned["metadata"]),
+        "webhook": COMPLETION_WEBHOOK_URL or None,
+    }
 
 
 async def launch_scheduled_agent_run(

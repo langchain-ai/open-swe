@@ -2,12 +2,14 @@ import asyncio
 import hashlib
 import hmac
 import importlib
+import uuid
 from typing import cast
 from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
 from langgraph_sdk.errors import NotFoundError
+from runtime_api.github import GitHubAutomationRun
 
 from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
@@ -109,15 +111,24 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
     assert called is False
 
 
-async def test_github_webhook_launches_issue_automation_for_external_author(
+async def test_github_webhook_plans_issue_automation_for_external_author(
     monkeypatch, registry_db
 ) -> None:
     called: dict[str, object] = {}
+    run = GitHubAutomationRun(
+        thread_id=uuid.uuid4(),
+        input={"messages": []},
+        context={"__run_token": "signed"},
+        metadata={"channel": "github"},
+    )
 
-    async def fake_launch(event_type: str, payload: dict[str, object], delivery_id: str) -> None:
+    async def fake_plan(
+        event_type: str, payload: dict[str, object], delivery_id: str
+    ) -> list[GitHubAutomationRun]:
         called["event_type"] = event_type
         called["payload"] = payload
         called["delivery_id"] = delivery_id
+        return [run]
 
     async def reject_external_author(
         payload: dict[str, object], event_type: str
@@ -125,7 +136,7 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         called["gate_calls"] = int(called.get("gate_calls", 0)) + 1
         return {"status": "ignored", "reason": "Sender is not authorized"}
 
-    monkeypatch.setattr(schedules, "launch_github_automations", fake_launch)
+    monkeypatch.setattr(schedules, "plan_github_automations", fake_plan)
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", reject_external_author)
 
     delivered = await _deliver(
@@ -140,9 +151,10 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         delivery_id="delivery-1",
     )
 
-    # It doesn't mention Open SWE, so no run plans for it.
-    assert delivered.work == ("launch_automations",)
+    # It doesn't mention Open SWE, so no run plans for it; MDA starts the automation's.
+    assert delivered.work == ()
     assert delivered.issue_run is None
+    assert delivered.automation_runs == (run,)
     assert called["event_type"] == "issues"
     assert called["delivery_id"] == "delivery-1"
     assert called.get("gate_calls", 0) == 0
