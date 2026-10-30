@@ -17,10 +17,6 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {{ repo_instructions_section }}
 
 {% endif %}
-{% if workspace_section %}
-{{ workspace_section }}
-
-{% endif %}
 {% if admin_workspaces %}
 {% include "system/admin-workspace.md" +%}
 {% else %}
