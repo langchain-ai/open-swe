@@ -12,10 +12,10 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
 the backend hands the channel with the run. A channel that answers failures in its
-own conversation gets no failure reply from here, and a channel run starts no
-follow-up pickup. Task messages and event wakes that arrived during it are
-delivered as after any run: the backend starts those runs on the channel's thread
-through MDA's trusted ingress.
+own conversation gets no failure reply from here. Follow-ups steered into it,
+task messages and event wakes that arrived during it are picked up as after any
+run: the backend starts those runs on the channel's thread through MDA's trusted
+ingress.
 """
 
 import hmac
@@ -526,13 +526,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
-    if (
-        status == "success"
-        and channel is None
-        and not (
-            isinstance(payload_metadata, dict)
-            and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
-        )
+    if status == "success" and not (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
     ):
         pickup_allowed = True
         if is_worker:

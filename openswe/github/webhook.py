@@ -6,7 +6,7 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, JsonValue, ValidationError
@@ -1087,6 +1087,8 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
 CHANNEL_HISTORY_MESSAGES = 50
 #: PR thread metadata naming the channel conversation it continues.
 CONTINUES_THREAD_KEY = "continues_thread"
+#: Who may read and prompt a channel's thread, which the PR thread continuing it keeps.
+_INHERITED_ACCESS_KEYS: Final = ("visibility", "owner_type", "owner_login")
 
 
 def _state_messages(state: object) -> list[dict[str, JsonValue]]:
@@ -1210,10 +1212,19 @@ async def process_github_pr_comment(
         thread_id = pr_comment_thread_id(
             repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
         )
+        # It also keeps the conversation's visibility and owner, so a private
+        # conversation's history stays as private on the PR's thread.
+        inherited = {
+            key: channel_metadata[key] for key in _INHERITED_ACCESS_KEYS if key in channel_metadata
+        }
         await THREADS.create(
             thread_id,
             title=f"PR #{pr_number}",
-            metadata={"branch_name": branch_name, CONTINUES_THREAD_KEY: continues_thread},
+            metadata={
+                "branch_name": branch_name,
+                CONTINUES_THREAD_KEY: continues_thread,
+                **inherited,
+            },
         )
 
     repo = Repo.parse(repo_config)

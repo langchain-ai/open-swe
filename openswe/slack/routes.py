@@ -783,6 +783,16 @@ async def slack_webhook(
         return ignored("By-the-way questions are answered once")
 
     if is_message_update:
+        if not (in_code_channel or in_concierge_mode) and (
+            edited_thread := await mda_forwarding.owned_thread(channel_id, thread_ts)
+        ):
+            # Trigger Server hands MDA's channel no edits, and the conversation is MDA's, so
+            # the backend can't rerun it either.
+            common.logger.info(
+                "Slack edit in an MDA conversation, which MDA's channel doesn't take",
+                extra={"agent_thread_id": edited_thread, "slack_message_ts": original_message_ts},
+            )
+            return ignored("MDA's Slack channel doesn't take message edits")
         try:
             claimed = await common.claim_slack_event(event_id, channel_id, event_ts)
         except Exception:  # noqa: BLE001

@@ -144,24 +144,27 @@ class ChannelWrite:
 
 
 class _SdkThreads:
-    """A runtime reached through the LangGraph SDK: ``client`` writes, ``reads`` reads."""
+    """A runtime reached through the LangGraph SDK."""
 
-    def __init__(self, client: LangGraphClient, reads: LangGraphClient | None = None) -> None:
+    def __init__(self, client: LangGraphClient) -> None:
         self.client = client
-        self.reads = reads or client
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         try:
-            return _object.validate_python(dict(await self.reads.threads.get(thread_id)))
+            return _object.validate_python(dict(await self.client.threads.get(thread_id)))
         except NotFoundError:
             return None
 
     async def indexed(self, thread_id: str) -> IndexedThread | None:
         """The thread as the index keeps it, read without its values."""
-        found = await self.reads.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
+        found = await self.client.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
         return next(
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
+
+    async def state(self, thread_id: str) -> dict[str, JsonValue]:
+        """The thread's current state here."""
+        return _object.validate_python(dict(await self.client.threads.get_state(thread_id)))
 
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
@@ -226,12 +229,6 @@ class MdaRuntime:
     def sdk(self) -> LangGraphClient:
         """For writes, scoped to the threads the backend owns."""
         return get_client(url=self.url, api_key=mda_runtime_api_key())
-
-    def read_sdk(self) -> LangGraphClient:
-        """For reads, of any thread on the deployment."""
-        return get_client(
-            url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
-        )
 
     async def channel_write(self, thread_id: str, *, user_id: str | None = None) -> ChannelWrite:
         """What lets the backend start, answer and stop runs on a thread an MDA channel owns.
@@ -504,6 +501,39 @@ class MdaRuntime:
         }
 
 
+class _MdaThreads(_SdkThreads):
+    """MDA's runtime: SDK writes, as the backend; reads over :attr:`MdaRuntime.read_http`.
+
+    So the backend reads the threads an MDA channel owns too, and writes only its own.
+    """
+
+    def __init__(self, runtime: MdaRuntime) -> None:
+        super().__init__(runtime.sdk())
+        self.reads = runtime.read_http
+
+    async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
+        response = await self.reads.get(f"/threads/{thread_id}")
+        if response.status_code == httpx.codes.NOT_FOUND:
+            return None
+        response.raise_for_status()
+        return _object.validate_python(response.json())
+
+    async def indexed(self, thread_id: str) -> IndexedThread | None:
+        response = await self.reads.post(
+            "/threads/search", json={"ids": [thread_id], "limit": 1, "select": INDEXED_FIELDS}
+        )
+        response.raise_for_status()
+        found = response.json()
+        return next(
+            (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
+        )
+
+    async def state(self, thread_id: str) -> dict[str, JsonValue]:
+        response = await self.reads.get(f"/threads/{thread_id}/state")
+        response.raise_for_status()
+        return _object.validate_python(response.json())
+
+
 class Runtimes:
     """This deployment's Agent Server, and the MDA deployment."""
 
@@ -524,8 +554,7 @@ class Runtimes:
 
     @property
     def mda(self) -> _SdkThreads:
-        runtime = self.mda_runtime
-        return _SdkThreads(runtime.sdk(), runtime.read_sdk())
+        return _MdaThreads(self.mda_runtime)
 
     def runs_on(self, runtime: Runtime) -> _SdkThreads:
         return self.mda if runtime == "mda" else self.local

@@ -884,7 +884,7 @@ async def _process_slack_mention_impl(
     # it off the metadata write, which would otherwise wait on it before dispatch.
     opening_permalink = asyncio.ensure_future(
         common.get_slack_permalink(channel_id, thread_ts)
-        if not thread_record.exists and not request.web_only
+        if not thread_record.started and not request.web_only
         else _resolved(None)
     )
     # The thread's state only matters once dispatching, but reading it is one of
@@ -990,7 +990,7 @@ async def _process_slack_mention_impl(
         and allowed_bot is None
         and not concierge_mode
     )
-    is_first_mention = not thread_record.exists
+    is_first_mention = not thread_record.started
     # A `/workspace:<name>` command on the message that opens a thread is one
     # input to which workspace its sandbox boots from — resolved below, once the
     # triggering user's GitHub login is known. Only the opening message can pick

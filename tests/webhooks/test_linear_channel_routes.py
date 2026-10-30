@@ -336,3 +336,62 @@ async def test_a_session_it_cant_read_is_told_so(
     assert response.json() == UNREADABLE_SESSION
     assert mda_declines(response.json()) == UNREADABLE_SESSION["decline"]
     prepare.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("activity", "author_id", "author_email"),
+    [
+        ({"userId": "user-2"}, "user-2", ""),
+        ({"userId": "user-1"}, "user-1", "ada@example.com"),
+        ({}, "user-1", "ada@example.com"),
+    ],
+    ids=["someone-else-by-id", "the-creator-by-id", "no-one-named"],
+)
+def test_a_reply_named_only_by_id_never_borrows_the_creators_identity(
+    activity: dict[str, JsonValue], author_id: str, author_email: str
+) -> None:
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "prompted",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "agentSession": {
+            "id": "session-1",
+            "issue": {"id": "issue-1"},
+            "creator": {"id": "user-1", "name": "Ada", "email": "ada@example.com"},
+        },
+        "agentActivity": {"content": {"type": "prompt", "body": "and the docs"}, **activity},
+    }
+
+    turn = session.LinearSessionTurn(payload, {"id": "issue-1"})  # type: ignore[arg-type]
+
+    # Without an email, someone other than the creator is asked to sign in.
+    assert (turn.author.id, turn.author.email) == (author_id, author_email)
+
+
+@pytest.mark.asyncio
+async def test_a_session_thread_it_cant_read_fails_the_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never resolved as a new thread, which would move the session's repository."""
+    ada = User(identities=[UserIdentity(provider="github", external_id="1", login="ada")])
+    turn = session.LinearSessionTurn(
+        {  # type: ignore[arg-type]
+            "type": "AgentSessionEvent",
+            "action": "created",
+            "organizationId": "org-1",
+            "webhookTimestamp": 1_700_000_000_000,
+            "agentSession": {"id": "session-1", "issue": {"id": "issue-1"}},
+        },
+        {"id": "issue-1"},
+    )
+    monkeypatch.setattr(turn, "_signed_in_author", AsyncMock(return_value=ada))
+    monkeypatch.setattr(
+        session.common.ThreadRecord, "read", AsyncMock(side_effect=httpx.ReadTimeout("slow"))
+    )
+    repository = AsyncMock()
+    monkeypatch.setattr(turn, "repository", repository)
+
+    with pytest.raises(httpx.ReadTimeout):
+        await turn.prepare_run(_THREAD)
+    repository.assert_not_awaited()

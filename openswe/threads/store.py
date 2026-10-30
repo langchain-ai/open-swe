@@ -201,8 +201,7 @@ class ThreadStore:
         if thread.runtime == "mda" and channel_of(thread.metadata) is None:
             # The channel created its threads there; the backend's own may need it.
             await RUNTIMES.mda_runtime.ensure_remote_thread(thread_id)
-        state = await RUNTIMES.runs_on(thread.runtime).reads.threads.get_state(thread_id)
-        return _object.validate_python(dict(state))
+        return await RUNTIMES.runs_on(thread.runtime).state(thread_id)
 
     async def command(
         self, thread_id: str, body: bytes, *, user_id: str | None = None

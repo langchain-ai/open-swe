@@ -189,6 +189,11 @@ class LinearSessionTurn:
             # A reply in the session.
             activity = cast(LinearSessionPromptedPayload, payload)["agentActivity"]
             user = LinearAuthor.of(cast(Mapping[str, object] | None, activity.get("user")))
+            replier = activity.get("userId")
+            if user is None and replier and (creator is None or creator.id != replier):
+                # Someone other than the creator, named only by id: they sign in as
+                # themselves, never borrowing the creator's identity.
+                user = LinearAuthor(id=replier)
             self.comment_id = activity.get("sourceCommentId") or ""
             self.body = activity["content"].get("body") or ""
             self.author = user or creator or actor or LinearAuthor()
@@ -301,25 +306,12 @@ class LinearSessionTurn:
         )
         return _sign_in(reason)
 
-    @staticmethod
-    async def _thread(thread_id: str) -> common.ThreadRecord:
-        """The session's thread as its earlier turns left it; a failed read starts afresh."""
-        try:
-            return await common.ThreadRecord.read(thread_id)
-        except Exception:
-            common.logger.warning(
-                "Reading a Linear session's thread failed; resolving it as new",
-                exc_info=True,
-                extra={"agent_thread_id": thread_id},
-            )
-            return common.ThreadRecord(exists=False, metadata={})
-
     async def prepare_run(self, thread_id: str) -> EndpointAnswer | LinearDecline:
         """Index the session's thread and prepare the run for its author, or say why not."""
         author = await self._signed_in_author()
         if not isinstance(author, User):
             return author
-        thread = await self._thread(thread_id)
+        thread = await common.ThreadRecord.read(thread_id)
         chosen = await self.repository(thread, author)
         if not isinstance(chosen, tuple):
             return chosen
