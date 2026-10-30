@@ -1,6 +1,7 @@
 """The channel directory behind the workspace Slack picker."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -158,6 +159,36 @@ async def test_channel_events_keep_the_directory_current(monkeypatch: pytest.Mon
     directory = await channel_options.list_slack_channels()
     assert [(option.id, option.name) for option in directory.channels] == [("C1", "new-name")]
     assert (await SlackChannel.resolve("#new-name")) is not None
+
+
+async def test_display_names_outlive_security_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    known = SlackChannel.from_payload({"id": "C1", "name": "engineering"})
+    assert known is not None
+    known.fetched_at = datetime.fromtimestamp(0, UTC)
+    monkeypatch.setattr(SlackChannel, "_row", AsyncMock(return_value=known))
+    client = _FakeClient([], [])
+    client.info["C1"] = {"id": "C1", "name": "renamed", "is_private": True}
+    _install(monkeypatch, client)
+
+    assert await SlackChannel.name_for("C1") == "engineering"
+    assert await SlackChannel.cached("C1") is None
+    refreshed = await SlackChannel.load("C1")
+    assert refreshed is not None and refreshed.details.is_private is True
+    assert refreshed.name == "renamed"
+
+
+async def test_missing_display_name_is_fetched_and_failure_never_exposes_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(SlackChannel, "_row", AsyncMock(return_value=None))
+    client = _FakeClient([], [])
+    client.info["C1"] = {"id": "C1", "name": "engineering"}
+    _install(monkeypatch, client)
+    assert await SlackChannel.name_for("C1") == "engineering"
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=None))
+    assert await SlackChannel.name_for("C2") == ""
 
 
 @pytest.mark.usefixtures("registry_db")
