@@ -10,9 +10,10 @@ Work directly in those checkouts; there is usually no need to create worktrees u
 {% if delete_seconds == 0 %}
 New remote sandboxes default to no automatic deletion after STOP (`0`), not permanent storage.
 {% else %}
-New remote sandboxes default to deletion {{ delete_seconds / 86400 }} days after STOP; idle stopping alone does not delete files.
+New remote sandboxes default to deletion {{ delete_seconds }} seconds after STOP; idle stopping alone does not delete files.
 {% endif %}
-Existing sandboxes and workspace overrides may differ. Push code and preserve important outputs externally; sandbox files and download links are not permanent.
+Existing sandboxes and workspace overrides may differ.
+Push code and preserve important outputs externally; sandbox files and download links are not permanent.
 
 #### Repository Setup Steps
 
