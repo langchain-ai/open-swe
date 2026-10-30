@@ -313,6 +313,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string

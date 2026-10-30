@@ -212,6 +212,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         "workspace": metadata.workspace,
         "admin_thread": metadata.admin_thread,
         "repo_explicitly_none": metadata.repo_explicitly_none,
+        "experience": metadata.experience,
     }
     if metadata.owner_type != "system":
         owner = await metadata.owner()
@@ -386,6 +387,7 @@ def _worker_metadata(
             "repo_owner",
             "repo_name",
             "repo_explicitly_none",
+            "experience",
             "base_branch",
             "branch_prefix",
             "sandbox_id",
