@@ -12,10 +12,7 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def traced_under(headers: Mapping[str, str]) -> Iterator[None]:
-    """Trace the block under the span ``headers`` name, when they name one.
-
-    Without it every hook would start a trace of its own, apart from the run's turn.
-    """
+    """Trace the block under the forwarded span in its project."""
     parent: RunTree | None = None
     if dotted_order := headers.get("langsmith-trace"):
         try:
@@ -27,5 +24,5 @@ def traced_under(headers: Mapping[str, str]) -> Iterator[None]:
     if parent is None:
         yield
         return
-    with tracing_context(parent=parent):
+    with tracing_context(parent=parent, project_name=parent.session_name):
         yield

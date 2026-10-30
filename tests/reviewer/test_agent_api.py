@@ -1130,7 +1130,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
 
     from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
     from langgraph.runtime import Runtime
-    from langsmith import Client
+    from langsmith import Client, trace, tracing_context
     from langsmith.run_trees import RunTree
 
     from openswe.agent_api import server
@@ -1141,7 +1141,8 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
         async def operation(runtime: Runtime) -> dict[str, object]:  # noqa: ARG001
-            return {}
+            with trace("classifier", run_type="llm", client=client):
+                return {}
 
         return await in_graph_context({"callbacks": [tracer], "run_name": called}, operation)
 
@@ -1165,7 +1166,8 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     async def send(message: Message) -> None:
         sent.append(message)
 
-    await server.API(scope, _asgi_receive(b"{}"), send)
+    with tracing_context(enabled=True, project_name="backend", client=client):
+        await server.API(scope, _asgi_receive(b"{}"), send)
 
     wait_for_all_tracers()
     assert sent[0]["status"] == 200
@@ -1178,6 +1180,11 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     assert hook["parent_run_id"] == caller.id
     assert hook["trace_id"] == caller.trace_id
     assert hook["session_name"] == "turns"
+    spans = [run.kwargs for run in client.create_run.call_args_list]
+    assert {span["session_name"] for span in spans} == {"turns"}
+    assert all(span["trace_id"] == caller.trace_id for span in spans)
+    [classifier] = [span for span in spans if span["name"] == "classifier"]
+    assert classifier["dotted_order"].startswith(hook["dotted_order"])
 
 
 async def test_a_worker_grant_only_adopts_a_run_token(

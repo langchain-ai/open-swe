@@ -63,6 +63,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
+from langsmith import get_current_run_tree, tracing_context
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from runtime_api.catalog import InboxSpec
 from runtime_api.endpoint import Endpoint, call
@@ -891,7 +892,19 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                 args={**tool_call["args"], "description": reply.assignment},
                 id=tool_call.get("id"),
             )
-            with _LAUNCH_ERRORS.catching() as errors:
+            parent = get_current_run_tree()
+            configurable = request.runtime.config.get("configurable", {})
+            project = configurable.get("__langsmith_project__")
+            metadata = configurable.get("langsmith-metadata")
+            if (
+                not project
+                and isinstance(metadata, Mapping)
+                and metadata.get(async_subagents._NEST_UNDER_PARENT) is True  # noqa: SLF001
+            ):
+                project = configurable.get("langsmith-project")
+            if parent is not None and isinstance(project, str) and project:
+                parent = parent.model_copy(update={"session_name": project})
+            with _LAUNCH_ERRORS.catching() as errors, tracing_context(parent=parent):
                 result = await handler(
                     request.override(
                         tool_call=launched_call,
