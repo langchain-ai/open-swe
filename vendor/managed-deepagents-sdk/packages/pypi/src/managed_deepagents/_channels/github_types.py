@@ -95,9 +95,10 @@ class GitHubChannelThread:
     thread, such as a token a backend signs for it."""
     channel: ChannelName
     interrupted: bool = False
-    """Set when the thread waits on an interrupt. No run starts: what the
-    handler returns only decides whether the App tells the issue or pull
-    request that a decision is pending, so skip side effects such as reactions."""
+    """Set when the thread waits on an interrupt. A run the handler returns
+    for this thread doesn't start: it only has the App tell the issue or pull
+    request that a decision is pending. Runs on threads of its own choosing
+    (``thread``) still start."""
 
 
 class GitHubAppOptions(TypedDict, total=False):
@@ -317,9 +318,10 @@ GitHubHandlers = TypedDict(
     total=False,
 )
 """Event handlers that start runs. Return a prompt (string, message, or state),
-or ``None`` to skip. While a thread waits on an interrupt, events start nothing:
-the handler still runs, with ``thread.interrupted`` set, to decide whether the issue
-or pull request is told to continue it in LangSmith Studio.
+or ``None`` to skip. While a thread waits on an interrupt, the handler still runs,
+with ``thread.interrupted`` set: a run it returns for that thread doesn't start,
+and has the issue or pull request told to continue it in LangSmith Studio, while
+runs on other threads start.
 
 Example::
 

@@ -55,6 +55,7 @@ from managed_deepagents._channels.http.provider import (
 from managed_deepagents._channels.http.studio import interrupted_notice, pending_decision
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.resolve_user import checked_resolve_user
+from managed_deepagents._channels.run_input import starts_on_conversation
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
@@ -94,8 +95,9 @@ def github_channel(
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
             message, or state), or ``None`` to skip. While a thread waits on an
-            interrupt, events start nothing and the issue or pull request is
-            told to continue it in LangSmith Studio. A handler may also be an
+            interrupt, a run for that thread doesn't start and the issue or
+            pull request is told to continue it in LangSmith Studio; runs on
+            other threads still start. A handler may also be an
             endpoint, a URL or an ``httpx.Request`` carrying headers: MDA POSTs it
             the event and its thread, and starts the run it answers with.
         app: App ``mda deploy`` creates; permissions and repository allowlist.
@@ -160,22 +162,47 @@ def github_channel(
             GitHubChannelThread(id=message["thread_id"], channel=ChannelName(name=name())),
         )
 
+    # Deliveries whose handler was asked while their thread waited: a run it
+    # put on that thread is what found it waiting, so the notice needn't ask again.
+    asked_interrupted: set[str] = set()
+
+    async def interrupted_input(
+        message: HttpChannelInboundMessage, raw_event: JsonValue | None
+    ) -> ChannelRunResult | None:
+        delivery_id = _delivery_id(raw_event)
+        if delivery_id is not None:
+            asked_interrupted.add(delivery_id)
+        return await _handler_input(
+            handlers,
+            raw_event,
+            GitHubChannelThread(
+                id=message["thread_id"], channel=ChannelName(name=name()), interrupted=True
+            ),
+        )
+
     async def notify_interrupted(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
         """Tell the issue or pull request that a new event found its thread waiting on a decision.
 
         A run that stops on interrupts posts its own notice as it ends. Only
-        for an event its handler would act on, so the handler's filters,
-        such as trusted senders or mentions, decide who gets a notice. The
-        handler knows it is only asked, so it can skip side effects.
+        for an event its handler would start a run on the thread for, so the
+        handler's filters, such as trusted senders or mentions, decide who
+        gets a notice. A handler asked once its thread waited already said so;
+        any other is asked here, knowing it is only asked, so it can skip side
+        effects.
         """
+        delivery_id = _delivery_id(delivery.get("raw_event"))
+        asked = delivery_id in asked_interrupted
+        asked_interrupted.discard(delivery_id or "")
         pending = pending_decision(delivery)
         if pending is None:
             return
-        thread = GitHubChannelThread(
-            id=delivery["thread_id"], channel=ChannelName(name=name()), interrupted=True
-        )
-        if await _handler_input(handlers, delivery.get("raw_event"), thread) is None:
-            return
+        if not asked:
+            thread = GitHubChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name()), interrupted=True
+            )
+            result = await _handler_input(handlers, delivery.get("raw_event"), thread)
+            if not starts_on_conversation(result):
+                return
         await _post_interrupted_notice(target, delivery, pending)
 
     channel = http_channel(
@@ -201,6 +228,7 @@ def github_channel(
         multitask_strategy=multitask_strategy,
     )
     channel.paused_notice = _post_paused_notice
+    channel.interrupted_input = interrupted_input
     # Deploy provides the App's token at this name.
     channel.agent_connections = [GITHUB_TOKEN_SLUG]
     channel.resolve_user = checked_resolve_user("channels.github", resolve_user)
@@ -397,6 +425,11 @@ async def _handler_input(
         "GitHub", event.key, event.delivery_id, lambda: handler(event, thread)
     )
     return outcome.input
+
+
+def _delivery_id(raw_event: JsonValue | None) -> str | None:
+    delivery_id = raw_event.get("delivery_id") if isinstance(raw_event, Mapping) else None
+    return delivery_id if isinstance(delivery_id, str) else None
 
 
 def _event(raw_event: JsonValue | None) -> GitHubEvent | None:

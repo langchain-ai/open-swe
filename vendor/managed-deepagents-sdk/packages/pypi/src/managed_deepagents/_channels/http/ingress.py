@@ -127,6 +127,30 @@ async def http_ingress_thread_state(
     return read["state"]
 
 
+async def record_http_ingress_delivery(
+    *,
+    user_id: str,
+    source_thread_key: str,
+    source_provider: str,
+    thread_id: str,
+    delivery_key: str,
+    principal_id: str | None = None,
+) -> None:
+    """Record a delivery on a thread that took no run for it, so a redelivery
+    is a duplicate; a thread that doesn't exist yet records nothing."""
+    client = _create_ingress_loopback_client(
+        user_id=user_id,
+        source_thread_key=source_thread_key,
+        source_provider=source_provider,
+        principal_id=principal_id,
+    )
+    try:
+        await record_thread_delivery(client=client, thread_id=thread_id, delivery_key=delivery_key)
+    except Exception as error:
+        if lookup_status(error) != HTTPStatus.NOT_FOUND:
+            raise
+
+
 async def delete_http_ingress_thread(
     *,
     user_id: str,

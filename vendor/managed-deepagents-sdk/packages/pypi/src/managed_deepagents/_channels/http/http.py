@@ -466,12 +466,15 @@ async def _finish_skipped(
 class _ConversationRun:
     """The run a delivery starts on its own conversation, once its input is known."""
 
-    __slots__ = ("multitask_strategy", "reply", "run_input")
+    __slots__ = ("multitask_strategy", "reply", "run_input", "skip")
 
     def __init__(self, run_input: dict[str, object], multitask_strategy: MultitaskStrategy) -> None:
         self.run_input = run_input
         self.multitask_strategy = multitask_strategy
         self.reply: ChannelReply | None = None
+        #: The conversation waits on a decision and the channel's input
+        #: started no run on it: it takes none, as ``ignored``.
+        self.skip = False
 
 
 class _Delivery:
@@ -521,8 +524,10 @@ async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _Threa
 
     Its run on the event's conversation becomes ``plan``'s input, which the
     conversation's own start uses as before; every other run starts on its own
-    thread, in the background. A conversation that waits on a decision, or has
-    seen the delivery already, keeps today's answer, and the input isn't asked.
+    thread, in the background. A conversation that waits on a decision is
+    asked through the channel's ``interrupted_input``: its run there is then
+    skipped, as ``waiting``, while the others start. A conversation that has
+    seen the delivery already starts nothing, and the input isn't asked.
     """
     if not delivery.plans:
         return
@@ -544,17 +549,23 @@ async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _Threa
             logger.safe_error_label(error),
         )
         state = None
-    if state in ("paused", "duplicate"):
+    if state == "duplicate":
         return
     channel = delivery.channel
+    paused = state == "paused"
     runs = await _prepare_runs(
         channel,
         message,
         delivery.raw_event,
         waiter,
         RunChannel(name=delivery.name, provider=channel.kind),
+        interrupted=paused,
     )
     conversation = next((run for run in runs if "thread" not in run), None)
+    if (paused or conversation is None) and any("thread" in run for run in runs):
+        # The conversation starts no run for the delivery, so its thread records
+        # it: a redelivery is then a duplicate, and starts nothing twice.
+        await _record_conversation_delivery(delivery, thread_id)
     for index, run in enumerate(runs):
         if "thread" in run:
             _ingress.schedule_ingress_work(
@@ -565,6 +576,29 @@ async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _Threa
         plan.multitask_strategy = conversation.get("multitask_strategy", plan.multitask_strategy)
         plan.reply = conversation.get("reply")
     plan.run_input = {"prepare": functools.partial(_planned, conversation)}
+    # A waiting conversation would say it waits for a run its input didn't ask for.
+    plan.skip = paused and conversation is None
+
+
+async def _record_conversation_delivery(delivery: _Delivery, thread_id: str) -> None:
+    delivery_key = delivery.message.get("delivery_key")
+    if delivery_key is None:
+        return
+    try:
+        await http_ingress.record_http_ingress_delivery(
+            user_id=delivery.user_id,
+            principal_id=delivery.principal_id,
+            source_thread_key=_source_thread_key(delivery.name, thread_id),
+            source_provider=delivery.channel.kind,
+            thread_id=thread_id,
+            delivery_key=delivery_key,
+        )
+    except Exception as error:  # noqa: BLE001
+        # The runs still start; only a redelivery may start them again.
+        logger.warning(
+            "channel delivery was not recorded on its conversation (%s)",
+            logger.safe_error_label(error),
+        )
 
 
 async def _planned(run: NormalizedRunInput | None) -> NormalizedRunInput | None:
@@ -578,6 +612,8 @@ async def _start_conversation(
     **options: Any,
 ) -> StartedIngressRun | SkippedIngressRun:
     """Start the delivery's run on its own conversation, as its plan says."""
+    if plan.skip:
+        return {"skipped": "ignored"}
     return await http_ingress.start_http_ingress_agent(
         binding=_with_reply(copy.deepcopy(binding), plan.reply),
         multitask_strategy=plan.multitask_strategy,
@@ -592,15 +628,20 @@ async def _prepare_runs(
     raw_event: JsonValue | None,
     waiter: _ThreadWaiter,
     run_channel: RunChannel,
+    *,
+    interrupted: bool = False,
 ) -> list[NormalizedRunInput]:
-    """What the channel's ``input`` starts; failures start nothing."""
-    if channel.input is None:
+    """What the channel's ``input`` starts; failures start nothing.
+
+    While the conversation waits on a decision, the channel's
+    ``interrupted_input`` is asked instead, when it has one.
+    """
+    input_ = (channel.interrupted_input if interrupted else None) or channel.input
+    if input_ is None:
         return []
     try:
         result = await _resolve(
-            channel.input(
-                _copied_message(message), None if raw_event is None else json_copy(raw_event)
-            )
+            input_(_copied_message(message), None if raw_event is None else json_copy(raw_event))
         )
     except Exception as error:  # noqa: BLE001
         logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
