@@ -342,8 +342,6 @@ class ThreadRouter:
             if_exists=if_exists,
         )
         if channel_of(thread.metadata) is not None:
-            # A channel's thread, such as a channel conversation's async worker, is the one
-            # MDA created as its conversation's own; the backend's writes can't create it.
             await RUNTIMES.local.create(thread_id, thread.metadata)
             return thread
         await asyncio.gather(
