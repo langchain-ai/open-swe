@@ -288,6 +288,64 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 
+async def test_a_pr_comment_starts_on_the_pull_requests_own_thread(
+    app: FastAPI, prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pr_thread = str(uuid.uuid4())
+
+    async def comment(
+        _payload: object, _event: str, *, agent_thread_id: str | None, channel: object
+    ) -> None:
+        # The real one adopts the PR's own thread, then hands the run to the channel.
+        assert agent_thread_id is None
+        await channel.adopt(pr_thread, {"branch_name": "fix"})  # type: ignore[attr-defined]
+        await channel.start(  # type: ignore[attr-defined]
+            pr_thread,
+            {"source": "github", "github_login": "ada", "pr_number": 7},
+            {"messages": [{"role": "user", "content": "Fix CI"}]},
+        )
+
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", comment)
+
+    delivered = await _deliver(app, "issue_comment", _comment_payload(pull_request={"url": "u"}))
+
+    assert delivered.comment
+    run = delivered.comment_run
+    assert run is not None and str(run.thread_id) == pr_thread
+    assert run.input == {"messages": [{"role": "user", "content": "Fix CI"}]}
+    channel.adopt_channel_run.assert_awaited_once_with(  # type: ignore[attr-defined]
+        pr_thread, "github", metadata={"branch_name": "fix"}
+    )
+    channel.channel_run_starting.assert_awaited_once_with(pr_thread)  # type: ignore[attr-defined]
+    token = verify_runtime_token(str(run.context["__run_token"]))
+    assert (token.thread_id, token.configurable["github_login"]) == (pr_thread, "ada")
+    metadata = mda_starts(run.model_dump(exclude={"thread_id"}, exclude_none=True))["metadata"]
+    assert metadata["github_delivery"] == "delivery-1"
+
+
+async def test_a_pr_comment_the_backend_starts_itself_starts_once_per_delivery(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    started = AsyncMock()
+
+    async def comment(
+        _payload: object, _event: str, *, agent_thread_id: str | None, channel: object
+    ) -> None:
+        # The agent's own thread: the backend starts the run, once per delivery.
+        if await channel.once():  # type: ignore[attr-defined]
+            await started()
+
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", comment)
+    payload = _comment_payload(pull_request={"url": "u"})
+
+    # MDA sends the call again after an answer it didn't get.
+    for _ in range(2):
+        delivered = await _deliver(app, "issue_comment", payload)
+        assert delivered.comment_run is None
+
+    started.assert_awaited_once()
+
+
 async def test_an_unregistered_commenter_starts_nothing(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,

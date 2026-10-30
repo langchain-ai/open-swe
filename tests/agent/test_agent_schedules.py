@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
-from runtime_api.github import GitHubAutomationRun
+from runtime_api.github import GitHubThreadRun
 from runtime_api.linear import LinearAutomationRun, LinearTriggerEvent, PlanLinearAutomation
 from sqlalchemy import text
 
@@ -197,12 +197,12 @@ def planning(monkeypatch: pytest.MonkeyPatch) -> _Planning:
     return planned
 
 
-def _configurable(run: GitHubAutomationRun) -> dict[str, Any]:
+def _configurable(run: GitHubThreadRun) -> dict[str, Any]:
     """The configurable the run's signed token carries."""
     return cast(dict[str, Any], verify_runtime_token(str(run.context["__run_token"])).configurable)
 
 
-def _prompt(run: GitHubAutomationRun) -> str:
+def _prompt(run: GitHubThreadRun) -> str:
     return cast(list[dict[str, str]], run.input["messages"])[-1]["content"]
 
 
@@ -585,7 +585,7 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
         "pull_request", closed(merged=True), "delivery-2"
     )
 
-    def automations(runs: list[GitHubAutomationRun]) -> set[str]:
+    def automations(runs: list[GitHubThreadRun]) -> set[str]:
         return {planning.adopted[str(run.thread_id)]["schedule_id"] for run in runs}
 
     assert automations(unmerged) == {on_close["id"]}
@@ -618,9 +618,9 @@ async def test_github_automations_isolate_claim_failures(
 
     planned: list[str] = []
 
-    async def plan(record: dict[str, Any], **kwargs: Any) -> GitHubAutomationRun:
+    async def plan(record: dict[str, Any], **kwargs: Any) -> GitHubThreadRun:
         planned.append(str(record["id"]))
-        return GitHubAutomationRun(thread_id=uuid.uuid4(), input={}, context={}, metadata={})
+        return GitHubThreadRun(thread_id=uuid.uuid4(), input={}, context={}, metadata={})
 
     monkeypatch.setattr(schedules.event_claims, "claim", claim)
     monkeypatch.setattr(schedules, "_planned_github_automation", plan)

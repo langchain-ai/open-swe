@@ -9,10 +9,11 @@ answers only what needs its data, its GitHub App or its signing key:
   its repository, whether the allowlist takes it, whether automatic review is on
   for it, and the handles that mention Open SWE.
 - ``act_on_github_delivery``: runs the work the channel chose for the delivery (a
-  review, a CI wakeup, a pull request comment's run, ...), once per delivery, after
-  it answers; plans the runs of the automations the delivery fires, each on a thread
-  of its own; and for an ``@openswe`` mention on an issue, plans the run it starts
-  on the issue's conversation. The channel starts the planned runs.
+  review, a CI wakeup, ...), once per delivery, after it answers; plans the runs of
+  the automations the delivery fires, each on a thread of its own; routes a pull
+  request comment, planning its run when it goes to the pull request's own thread;
+  and for an ``@openswe`` mention on an issue, plans the run it starts on the
+  issue's conversation. The channel starts the planned runs.
 
 So a delivery takes at most two calls.
 """
@@ -81,10 +82,6 @@ type GitHubWorkName = Literal[
     "review_push",
     "ci_event",
     "record_completed_review",
-    # A pull request comment, review or review comment: who wrote it, whether it
-    # answers a review finding or wakes the agent thread that opened the pull
-    # request, the public-repo gate, then its run.
-    "route_comment",
 ]
 
 
@@ -101,7 +98,11 @@ class ActOnGitHubDelivery(GitHubDelivery):
     """What the channel decided a delivery starts."""
 
     work: list[GitHubWorkName] = []
-    # Whether the comment ``route_comment`` routes mentions Open SWE.
+    # A pull request comment, review or review comment to route: who wrote it,
+    # whether it answers a review finding or wakes the agent thread that opened the
+    # pull request, the public-repo gate, then its run.
+    comment: bool = False
+    # Whether that comment mentions Open SWE.
     mentioned: bool = False
     # The delivery may fire automations: an issue opened, a pull request opened or closed.
     automations: bool = False
@@ -109,7 +110,7 @@ class ActOnGitHubDelivery(GitHubDelivery):
 
     @model_validator(mode="after")
     def _acts(self) -> Self:
-        if not self.work and self.issue_run is None and not self.automations:
+        if not (self.work or self.comment or self.automations or self.issue_run):
             raise ValueError("a delivery that starts nothing needs no call")
         return self
 
@@ -129,8 +130,9 @@ class PlannedGitHubIssueRun(BaseModel):
     run: GitHubIssueRun | None = None
 
 
-class GitHubAutomationRun(BaseModel):
-    """Start the automation's run on ``thread_id``, a thread of its own for this delivery."""
+class GitHubThreadRun(BaseModel):
+    """Start the run on ``thread_id``: an automation's thread of its own for this
+    delivery, or the pull request's own thread for a comment's."""
 
     thread_id: UUID
     input: dict[str, JsonValue]
@@ -147,7 +149,11 @@ class GitHubDeliveryActed(BaseModel):
     # A run per automation the delivery fires, each claimed once per delivery. A call
     # sent again plans the runs it already claimed on the same threads, where the
     # channel starts each delivery's run once.
-    automations: list[GitHubAutomationRun] = []
+    automations: list[GitHubThreadRun] = []
+    # A comment's run on the pull request's own thread, the channel's. A comment the
+    # backend starts a run for itself, on the agent's thread or one the backend
+    # owns, has none; its run starts once per delivery.
+    comment_run: GitHubThreadRun | None = None
 
 
 RECORD_GITHUB_DELIVERY: Final = Endpoint(

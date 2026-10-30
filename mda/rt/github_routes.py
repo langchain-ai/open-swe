@@ -54,7 +54,9 @@ class Route:
 
     # The backend's work, in the order it runs.
     work: tuple[GitHubWorkName, ...] = ()
-    # Whether the comment ``route_comment`` routes mentions Open SWE.
+    # A pull request comment, review or review comment for the backend to route.
+    comment: bool = False
+    # Whether that comment mentions Open SWE.
     mentioned: bool = False
     # The delivery may fire automations, whose runs start here, each on its own thread.
     automations: bool = False
@@ -139,4 +141,4 @@ def route(
     if not mentioned and event == "issue_comment" and body.lstrip().startswith("!"):
         # An untagged workflow command, such as another bot's ``!merge``.
         return Route(tuple(work))
-    return Route((*work, "route_comment"), mentioned=mentioned)
+    return Route(tuple(work), comment=True, mentioned=mentioned)

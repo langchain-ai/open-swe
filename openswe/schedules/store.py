@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
-from runtime_api.github import GitHubAutomationRun
+from runtime_api.github import GitHubThreadRun
 from runtime_api.linear import TEAM_KEY_PATTERN, LinearAutomationRun, PlanLinearAutomation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -1216,7 +1216,7 @@ async def _github_trigger_matches(
 
 async def plan_github_automations(
     event_type: str, payload: dict[str, Any], delivery_id: str
-) -> list[GitHubAutomationRun]:
+) -> list[GitHubThreadRun]:
     """The run of every automation a GitHub delivery fires, for MDA's channel to start.
 
     Each automation is claimed once per delivery, and its run planned on a thread of
@@ -1268,7 +1268,7 @@ async def plan_github_automations(
     # automations keep firing for any author, as before, with a narrowed token.
     if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
         return []
-    runs: list[GitHubAutomationRun] = []
+    runs: list[GitHubThreadRun] = []
     private = repo_private_from_payload(payload)
     for record, event in matches:
         schedule_id = record["id"]
@@ -1329,7 +1329,7 @@ async def _planned_github_automation(
     thread_id: str,
     prompt: str,
     token_repositories: list[str] | None,
-) -> GitHubAutomationRun | None:
+) -> GitHubThreadRun | None:
     """The automation's run in ``repo``; ``None`` when its workspace can't run it there."""
     from openswe.github.channel import CHANNEL as GITHUB_CHANNEL
 
@@ -1345,7 +1345,7 @@ async def _planned_github_automation(
     except HTTPException as exc:
         await _put_run_state(record, {"last_error": str(exc.detail), "last_error_at": now_iso()})
         return None
-    return GitHubAutomationRun(
+    return GitHubThreadRun(
         **await _planned_channel_automation(
             record,
             channel=GITHUB_CHANNEL,
