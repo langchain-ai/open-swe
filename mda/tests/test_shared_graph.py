@@ -380,6 +380,27 @@ def test_thread_sandbox_failures_never_create_a_second_workspace(
     assert len(client.create_sandbox.call_args_list) == (1 if failure == "conflict" else 0)
 
 
+@pytest.mark.parametrize("owner", [None, "coordinator"])
+def test_browser_finds_the_opened_per_thread_sandbox(
+    monkeypatch: pytest.MonkeyPatch, owner: str | None
+) -> None:
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    source = MagicMock()
+    source.sandbox = definition(spec.create, owner)
+    source.run_config = None
+    source.selection_fingerprint = "graph-selection"
+    backend = mda_runtime._LazyManagedSandboxBackend(source, {"thread_id": "thread-1"})
+    opened = MagicMock(spec=SandboxBackendProtocol)
+    opened.id = "existing-box"
+    entry = mda_runtime._ManagedSandboxEntry(opened, host_name="existing-box")
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {f"thread:{owner or 'thread-1'}": entry})
+    runtime = MagicMock()
+    runtime.backend = backend
+
+    assert mda_browser._thread_sandbox(runtime) is opened
+
+
 @pytest.mark.parametrize("replaced", [False, True])
 def test_losing_a_thread_sandbox_only_reconnects_to_an_existing_replacement(
     monkeypatch: pytest.MonkeyPatch, replaced: bool

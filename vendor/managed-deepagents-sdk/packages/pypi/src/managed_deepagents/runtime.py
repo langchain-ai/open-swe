@@ -2012,7 +2012,9 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if self._resolved_backend is not None:
             return self._resolved_backend
         try:
-            key = _thread_scope_key(self._config(), self._source.selection_fingerprint)
+            key = _sandbox_scope_key(
+                self._sandbox(), self._config(), self._source.selection_fingerprint
+            )
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
         with _managed_sandbox_lock:
