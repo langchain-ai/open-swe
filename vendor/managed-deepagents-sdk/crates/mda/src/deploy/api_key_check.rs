@@ -12,12 +12,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Error, Result};
 use reqwest::StatusCode;
 
-use crate::error::{categorized, ErrorCategory};
-use crate::langsmith::{self, ApiError, ApiKey, KeyCheck, Login, API_KEY_ENV};
+use crate::error::{categorized, coded, ErrorCategory, ErrorCode};
+use crate::langsmith::{self, ApiError, ApiKey, AuthIdentity, KeyCheck, Login, API_KEY_ENV};
 
 /// Where to make a new key. Named rather than linked: the dashboard origin
 /// comes from an authenticated lookup, which a refused key cannot make.
 const NEW_KEY_PAGE: &str = "Settings → API Keys in LangSmith";
+/// Where to make a personal access token.
+const USER_KEY_PAGE: &str = "the API Keys page of your LangSmith settings";
 
 /// Where the `LANGSMITH_API_KEY` a command uses came from.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -82,6 +84,24 @@ impl ApiKeySource {
                 .to_string(),
         }
     }
+
+    /// How to swap a service key for one that belongs to a user.
+    fn user_key_remedy(&self) -> String {
+        match self {
+            Self::EnvFile(_) => format!(
+                "Replace it with a personal access token from {USER_KEY_PAGE}, or delete that \
+                 line and rerun this command in a terminal to sign in with your browser."
+            ),
+            Self::ProcessEnv => format!(
+                "Export a personal access token from {USER_KEY_PAGE}, or unset {API_KEY_ENV} \
+                 and rerun this command in a terminal to sign in with your browser."
+            ),
+            // A browser sign-in always mints a key for the signed-in user.
+            Self::SignIn => "Rerun this command in a terminal to sign in with your browser \
+                             again."
+                .to_string(),
+        }
+    }
 }
 
 /// A resolved LangSmith API key and where it came from.
@@ -115,6 +135,64 @@ pub(crate) fn verify_api_key(
         ErrorCategory::Authentication,
         rejected_key_message(source, status.as_u16(), platform_url, workspace_id),
     ))
+}
+
+/// Where the key is checked, which decides what the command can say was left
+/// unchanged.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum UserKeyCheckpoint {
+    /// A deploy, before anything remote is written.
+    Preflight,
+    /// A deploy, after the Context Hub sync and before the deployment is
+    /// created or updated.
+    AfterContextSync,
+    /// `mda channels setup`, before any channel is looked up or set up.
+    ChannelsSetup,
+}
+
+/// Fail with [`ErrorCode::ChannelRequiresUserKey`] when `client`'s key belongs
+/// to no user, as a service key does. Trigger Server refuses such a key when it
+/// sets up `channel` (a provider label such as `Slack`), which deploy does only
+/// once the deployment is live, so commands that set up a Trigger Server
+/// channel check first.
+///
+/// An identity LangSmith did not return never blocks: the key may well work.
+pub(crate) fn require_user_key(
+    client: &langsmith::Client,
+    source: &ApiKeySource,
+    channel: &str,
+    checkpoint: UserKeyCheckpoint,
+) -> Result<()> {
+    match client.preflight_identity() {
+        Some(identity) if lacks_user(&identity) => Err(coded(
+            ErrorCategory::Authentication,
+            ErrorCode::ChannelRequiresUserKey,
+            user_key_message(source, channel, checkpoint),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// A key LangSmith resolved to an organization or workspace but no user.
+fn lacks_user(identity: &AuthIdentity) -> bool {
+    identity.user_id.is_none() && (identity.org_id.is_some() || identity.workspace_id.is_some())
+}
+
+fn user_key_message(source: &ApiKeySource, channel: &str, checkpoint: UserKeyCheckpoint) -> String {
+    let unchanged = match checkpoint {
+        UserKeyCheckpoint::Preflight => "Nothing was deployed.",
+        UserKeyCheckpoint::AfterContextSync => {
+            "The agent was not deployed, but its Context Hub files were already synced."
+        }
+        UserKeyCheckpoint::ChannelsSetup => "No channel was set up.",
+    };
+    format!(
+        "{channel} channel setup needs a LangSmith API key that belongs to a user, and {source} \
+         is a service key. LangSmith links an agent's {channel} channel to the user who sets it \
+         up, so a service key cannot set one up yet. {unchanged}\n{remedy}",
+        source = source.describe(),
+        remedy = source.user_key_remedy(),
+    )
 }
 
 /// Whether `err` is LangSmith refusing the request (HTTP 401 or 403), rather
@@ -156,10 +234,15 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::error::category_of;
+    use crate::error::{category_of, Failure};
 
     /// A platform API whose `/auth/public` answers `status` once.
     fn identity_endpoint(status: &'static str) -> String {
+        identity_answer(status, r#"{"error":"Forbidden"}"#)
+    }
+
+    /// A platform API whose `/auth/public` answers `status` with `body` once.
+    fn identity_answer(status: &'static str, body: &'static str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         thread::spawn(move || {
@@ -168,7 +251,6 @@ mod tests {
             };
             let mut buf = [0_u8; 2048];
             let _ = stream.read(&mut buf);
-            let body = r#"{"error":"Forbidden"}"#;
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
                  Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -293,6 +375,128 @@ mod tests {
         assert!(is_refusal(&api(StatusCode::UNAUTHORIZED)));
         assert!(!is_refusal(&api(StatusCode::BAD_GATEWAY)));
         assert!(!is_refusal(&anyhow::anyhow!("connection reset")));
+    }
+
+    const SERVICE_KEY_IDENTITY: &str =
+        r#"{"ls_user_id":null,"organization_id":"org-1","tenant_id":"ws-1"}"#;
+
+    #[test]
+    fn a_key_with_no_user_cannot_set_up_a_channel() {
+        let base = identity_answer("200 OK", SERVICE_KEY_IDENTITY);
+
+        let err = require_user_key(
+            &client_at(&base),
+            &ApiKeySource::ProcessEnv,
+            "Slack",
+            UserKeyCheckpoint::Preflight,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            Failure::of(&err),
+            Failure {
+                category: ErrorCategory::Authentication,
+                code: ErrorCode::ChannelRequiresUserKey,
+            }
+        );
+        assert!(!format!("{err:#}").contains("lsv2_pt_secret"));
+    }
+
+    #[test]
+    fn a_key_with_a_user_can_set_up_a_channel() {
+        let base = identity_answer(
+            "200 OK",
+            r#"{"ls_user_id":"user-1","organization_id":"org-1","tenant_id":"ws-1"}"#,
+        );
+
+        assert!(require_user_key(
+            &client_at(&base),
+            &ApiKeySource::ProcessEnv,
+            "Slack",
+            UserKeyCheckpoint::Preflight
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn an_unknown_identity_never_blocks_a_channel() {
+        let unanswered = identity_endpoint("503 Service Unavailable");
+        let anonymous = identity_answer("200 OK", r#"{"ls_user_id":null}"#);
+
+        assert!(require_user_key(
+            &client_at(&unanswered),
+            &ApiKeySource::ProcessEnv,
+            "Slack",
+            UserKeyCheckpoint::Preflight
+        )
+        .is_ok());
+        assert!(require_user_key(
+            &client_at(&anonymous),
+            &ApiKeySource::ProcessEnv,
+            "Slack",
+            UserKeyCheckpoint::Preflight
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn an_env_file_service_key_says_how_to_replace_it() {
+        let message = user_key_message(
+            &ApiKeySource::EnvFile(PathBuf::from("/project/.env")),
+            "Slack",
+            UserKeyCheckpoint::Preflight,
+        );
+
+        assert_eq!(
+            message,
+            "Slack channel setup needs a LangSmith API key that belongs to a user, and \
+             LANGSMITH_API_KEY in /project/.env is a service key. LangSmith links an agent's \
+             Slack channel to the user who sets it up, so a service key cannot set one up yet. \
+             Nothing was deployed.\n\
+             Replace it with a personal access token from the API Keys page of your LangSmith \
+             settings, or delete that line and rerun this command in a terminal to sign in with \
+             your browser."
+        );
+    }
+
+    #[test]
+    fn an_environment_service_key_says_to_export_or_unset_it() {
+        let message = user_key_message(
+            &ApiKeySource::ProcessEnv,
+            "Slack",
+            UserKeyCheckpoint::Preflight,
+        );
+
+        assert!(message.contains("LANGSMITH_API_KEY from the environment is a service key"));
+        assert!(message.contains("Export a personal access token"));
+        assert!(message.contains("unset LANGSMITH_API_KEY"));
+    }
+
+    #[test]
+    fn the_message_names_the_channel_and_what_already_changed() {
+        let message = user_key_message(
+            &ApiKeySource::ProcessEnv,
+            "Teams",
+            UserKeyCheckpoint::AfterContextSync,
+        );
+
+        assert!(message.starts_with("Teams channel setup needs"));
+        assert!(message.contains("an agent's Teams channel"));
+        assert!(message.contains("its Context Hub files were already synced"));
+        assert!(!message.contains("Slack"));
+        assert!(!message.contains('→'));
+    }
+
+    #[test]
+    fn channels_setup_says_no_channel_was_set_up() {
+        let message = user_key_message(
+            &ApiKeySource::ProcessEnv,
+            "Slack",
+            UserKeyCheckpoint::ChannelsSetup,
+        );
+
+        assert!(message.contains("a service key cannot set one up yet. No channel was set up.\n"));
+        assert!(!message.contains("deployed"));
     }
 
     #[test]

@@ -17,6 +17,7 @@ from managed_deepagents._channels.reactions import (
 )
 from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.slack_connections import SLACK_BOT_TOKEN_SLUG
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.actor import ChannelActor
@@ -138,16 +139,18 @@ class TriggerSlackChannel(Channel):
             thread: TriggerChannelThread,
             actor: ChannelActor | None,
         ) -> TriggerMessageRoute | None:
-            assert on_event is not None  # noqa: S101 - only passed with handlers
-            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
+            return await _decide_event(
+                on_event or {}, event, thread, name, actor, remember=remember
+            )
 
         async def decide_interaction(
             event: TriggerChannelUserPromptResponseEvent,
             thread: TriggerChannelThread,
             actor: ChannelActor | None,
         ) -> TriggerMessageRoute | None:
-            assert on_event is not None  # noqa: S101 - only passed with handlers
-            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
+            return await _decide_event(
+                on_event or {}, event, thread, name, actor, remember=remember
+            )
 
         on_finish = None
         if self.on_finish is not None:
@@ -187,10 +190,10 @@ class TriggerSlackChannel(Channel):
                 if on_event and "mention" in on_event and self.trigger_mode == "thread"
                 else None
             ),
-            decide_message=decide_message if on_event else None,
-            decide_interaction=(
-                decide_interaction if on_event and "interaction" in on_event else None
-            ),
+            # Asked even without handlers, so every run reports its event
+            # type; with no handler for the event, it starts the default run.
+            decide_message=decide_message,
+            decide_interaction=decide_interaction,
             multitask_strategy=self.multitask_strategy,
             on_finish=on_finish,
             resolve_user=context.get("resolve_user"),
@@ -278,6 +281,7 @@ async def _decide_event(
     )
 
     event = await read_slack_event(delivery, actor)
+    set_log_attributes({"provider_event_type": event.key if event is not None else None})
     handler = handlers.get(event.key) if event is not None else None
     if event is None or handler is None:
         return None

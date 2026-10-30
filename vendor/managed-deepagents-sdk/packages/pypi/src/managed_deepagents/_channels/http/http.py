@@ -27,6 +27,7 @@ from managed_deepagents._channels.resolve_user import (
     post_reply,
     resolve_channel_user,
     sender_principal_id,
+    user_resolution,
 )
 from managed_deepagents._channels.run_input import (
     InvalidRunInput,
@@ -36,6 +37,7 @@ from managed_deepagents._channels.run_input import (
 from managed_deepagents._channels.runtime import is_json_value, json_copy
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channel import ChannelEventsContext
@@ -179,6 +181,10 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
         return _error(500, "channel user resolution failed")
     principal_id = user["id"] if user is not None and user["type"] == "principal" else None
     user_id = principal_id or sender_id or message["user_id"]
+    # Ingress copies this onto the runs it starts, for their telemetry.
+    set_log_attributes(
+        {"user_resolution": user_resolution(user, ran_as_sender=sender_id is not None)}
+    )
     content = message.get("content")
     thread_id = message["thread_id"].lower()
     source_thread_key = _source_thread_key(ctx["name"], thread_id)

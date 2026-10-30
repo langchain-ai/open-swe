@@ -463,21 +463,31 @@ async def _post_direct(
     except Exception as error:
         if scheduled:
             raise
-        # Open SWE debug (vendor/mda-changes/2026-10-27-channel-reply-debug.md): say why.
+        reason = logger.safe_error_label(error)
+        if isinstance(error, NoReplyTransportError):
+            reason = f"{reason}: {error}"
         logger.error(
-            "channel reply failed (%s) channel=%s transport=%s: %s",
-            logger.safe_error_label(error),
-            binding.get("name"),
-            binding.get("transport"),
-            str(error)[:500],
+            "channel reply failed (channel=%s): %s",
+            logger.log_identifier(binding["name"]),
+            reason,
             error=error,
+        )
+
+
+class NoReplyTransportError(RuntimeError):
+    """The channel has no transport that posts a run's answer."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the channel has no `post`, so it cannot post the run's answer. "
+            'Add `post` to the channel, or set `reply` to "none"'
         )
 
 
 async def _post_to_transport(binding: ChannelBinding, message: ChannelMessage) -> None:
     transport = messaging_transport_for_name(binding["name"])
     if transport is None:
-        raise RuntimeError("Channel delivery is unavailable")
+        raise NoReplyTransportError
     posted = transport.post(
         message=message,
         target=binding["target"],

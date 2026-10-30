@@ -469,6 +469,17 @@ exact issuer and fetches its public `/.well-known/jwks.json`; it does not trust
 an issuer supplied by an incoming token. LangSmith must have signing keys
 configured, and the agent must be able to reach that public-key endpoint.
 
+### Setting up channels on deploy
+
+`mda deploy` sets up the agent's Slack, GitHub and Linear channels. A channel
+already set up on the deployment is set up again before the new revision is
+uploaded, so a setup that fails stops the deploy before anything changes. A new
+channel, and every channel on a first deploy, is set up once the new revision
+is live. A deploy that sets up a new channel, such as the first one, can't use
+`--no-wait`; once the channels are set up, later deploys can. To check the
+channels, or finish setting them up, without deploying, run
+`mda channels setup`.
+
 ## Tool and middleware runtime types
 
 Python requires 3.11 or later and includes Deep Agents, LangChain, and LangGraph.
@@ -809,17 +820,17 @@ LangSmith creates a managed app in the workspace you already authorized it in,
 and says so. When you haven't authorized it yet, or on self-hosted LangSmith,
 deploy stops before uploading and says what to set.
 
-When Slack still needs you once the deployment is live, to authorize LangSmith
+When Slack still needs you during setup, to authorize LangSmith
 or to install the new app (some workspaces have an admin approve it first),
 deploy prints the link and waits, continuing as soon as Slack reports it done.
 In a terminal the link also opens in your browser, and Ctrl-C skips the
 channel. Without one, deploy waits up to an hour, so a coding agent running it
 can hand you the link; Ctrl-C stops it.
 
-If a setup step fails once the deployment is live, deploy offers to try again
-or to continue without the Slack channel. Without a terminal the failure ends
-the deploy, once the other channels are set up. An agent with a Slack channel
-can't be deployed with `--no-wait`, because setup needs the live deployment.
+If a setup step fails, deploy offers to try again or to continue without the
+Slack channel. Without a terminal the failure ends the deploy, once the other
+channels are set up. See [Setting up channels on deploy](#setting-up-channels-on-deploy)
+for when deploy sets the channel up.
 
 ## GitHub channels
 
@@ -1105,10 +1116,10 @@ person to open and waits up to an hour for them to finish. `GH_WEBHOOK_SECRET`
 and `GH_APP_BOT_ID` (the App bot account's numeric user ID) are different: the
 deployment reads them, and they override what Agent Auth stores.
 
-If a setup step fails once the deployment is live, deploy offers to try again
-or to continue without the GitHub channel. Without a terminal the failure ends
-the deploy, once the other channels are set up. An agent with a GitHub channel
-can't be deployed with `--no-wait`, because setup needs the live deployment.
+If a setup step fails, deploy offers to try again or to continue without the
+GitHub channel. Without a terminal the failure ends the deploy, once the other
+channels are set up. See [Setting up channels on deploy](#setting-up-channels-on-deploy)
+for when deploy sets the channel up.
 
 ## Linear channels
 
@@ -1231,10 +1242,10 @@ without one it prints them before the install link for an admin to open.
 Without the redirect URI, Linear answers the install with "Invalid
 redirect_uri".
 
-If a setup step fails once the deployment is live, deploy offers to try again
-or to continue without the Linear channel. Without a terminal the failure ends
-the deploy, once the other channels are set up. An agent with a Linear channel
-can't be deployed with `--no-wait`, because setup needs the live deployment.
+If a setup step fails, deploy offers to try again or to continue without the
+Linear channel. Without a terminal the failure ends the deploy, once the other
+channels are set up. See [Setting up channels on deploy](#setting-up-channels-on-deploy)
+for when deploy sets the channel up.
 `mda delete` removes the credentials; delete the app itself in Linear.
 Deployments set up by an earlier `mda` keep the app as workspace connections,
 which only a LangSmith workspace admin can delete.
@@ -1888,10 +1899,13 @@ support for newer Python versions.
 This selects the deployment image's Python version. Local build processing,
 `mda dev`, Harbor task images, and execution sandboxes use separate interpreters.
 
+The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
+for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+
 Common deploy options:
 
 ```bash
-mda deploy ./my-agent --name my-agent-dev --deployment-type dev
+mda deploy ./my-agent --name my-agent-dev --deployment-type serverless
 mda deploy ./my-agent --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy ./my-agent --no-wait
 ```

@@ -103,6 +103,7 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
+from managed_deepagents._ingress_runs import ingress_run_origin
 from managed_deepagents._langsmith_env import resolve_server_api_key
 from managed_deepagents._log import logger
 from managed_deepagents._managed_composition import (
@@ -158,8 +159,8 @@ from managed_deepagents._memory.user_memory import UserMemoryBackend
 from managed_deepagents._telemetry.metadata import detect_run_identity
 from managed_deepagents._telemetry.run import (
     MemoryObservations,
-    RunChannel,
     RunConfiguration,
+    SubagentRole,
     start_run,
 )
 from managed_deepagents._telemetry.run_wrapper import observe_run
@@ -590,6 +591,7 @@ class _ManagedCompileOptions(TypedDict):
     memory: MemoryDefinitionLike | None
     browser: BrowserDefinition | None
     trial_root_dir: str | None
+    subagent_role: SubagentRole
 
 
 def _internal_server_runtime(
@@ -838,6 +840,7 @@ async def compile_managed_agent_async(
         is_run=is_run,
         report_telemetry=report_telemetry,
         skip_factory_inspection_tools=factory_inspection,
+        subagent_role="lead" if async_subagent is None else "async_subagent",
         factory_entry=factory_entry,
         shared_graph=async_subagent or "lead",
         shared_inputs=shared_inputs,
@@ -870,6 +873,7 @@ async def _compile_resolved_managed_agent_async(
     factory_entry: bool = False,
     shared_graph: str | None = None,
     shared_inputs: str | None = None,
+    subagent_role: SubagentRole = "lead",
     timing: GraphBuildTiming,
 ) -> CompiledAgent:
     """Select native context schema and memory access for a resolved definition.
@@ -920,6 +924,7 @@ async def _compile_resolved_managed_agent_async(
         "memory": run_memory,
         "browser": run_browser,
         "trial_root_dir": trial_root_dir,
+        "subagent_role": subagent_role,
     }
     context_schema = definition.config.get("context_schema")
     declared_memory_layers = _declared_memory_layers(run_memory)
@@ -1016,6 +1021,7 @@ def _for_call(
     if not isinstance(agent, CompiledAgent):
         return agent
     if report_telemetry:
+        origin = ingress_run_origin(config.get("metadata") if config else None)
         agent = observe_run(
             agent,
             start_run(
@@ -1023,7 +1029,12 @@ def _for_call(
                     caller=build_runtime_identity(resolve_runtime_configurable(config)),
                     is_run=is_run,
                 ),
-                replace(built.configuration, channel=_detect_run_channel(config)),
+                replace(
+                    built.configuration,
+                    channel=_detect_run_channel(config),
+                    provider_event_type=origin["provider_event_type"],
+                    user_resolution=origin["user_resolution"],
+                ),
                 run_id=_platform_run_id(config),
                 thread_id=_thread_id_of(config),
                 started_monotonic_ms=started_monotonic_ms,
@@ -1186,6 +1197,7 @@ def _compile_managed_agent(
     inspection: bool = False,
     skip_factory_inspection_tools: bool = False,
     context_schema: object = None,
+    subagent_role: SubagentRole = "lead",
     timing: GraphBuildTiming,
 ) -> tuple[CompiledAgent, RunConfiguration]:
     """Compile the definition; ``_for_call`` adds each call's telemetry and config."""
@@ -1356,6 +1368,11 @@ def _compile_managed_agent(
             layers_mounted=[layer["type"] for layer in mounted_memory],
             user_denied_reason=user_access.denied_reason,
         ),
+        # Each call's own, from its ingress metadata, set as it runs (``_for_call``).
+        provider_event_type=None,
+        user_resolution=None,
+        subagent_role=subagent_role,
+        browser_declared=browser is not None,
     )
 
 
@@ -1411,7 +1428,7 @@ def _with_thread_origin(policy_context: object, config: RunnableConfig | None) -
     return {**context, "mda_channel": origin, "channel": origin}
 
 
-def _detect_run_channel(config: Mapping[str, object] | None) -> RunChannel:
+def _detect_run_channel(config: Mapping[str, object] | None) -> str:
     """The cron principal cannot be forged, so it wins over a channel binding.
 
     An unrecognized provider reports ``unknown`` rather than widening the
@@ -1424,10 +1441,7 @@ def _detect_run_channel(config: Mapping[str, object] | None) -> RunChannel:
         return "unknown"
     if is_scheduled_execution(configurable):
         return "schedule"
-    provider = resolve_channel_provider(configurable)
-    if provider in {"slack", "http"}:
-        return provider
-    return "unknown"
+    return resolve_channel_provider(configurable) or "unknown"
 
 
 class _OpenedContextBackend:
@@ -1869,7 +1883,11 @@ def _prepend_slack_files_middleware(
 def _append_browser_middleware(
     merged: dict[str, object], browser: BrowserDefinition | None
 ) -> None:
-    """Give the agent a browser when the project declares one in ``browser.py``."""
+    """Give the agent a browser when the project declares one in ``browser.py``.
+
+    Without a sandbox its screenshots save to the agent's own ``backend``, so call it
+    once that is final.
+    """
     if browser is None:
         return
     from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
@@ -1877,7 +1895,11 @@ def _append_browser_middleware(
     authored_middleware = merged.get("middleware")
     merged["middleware"] = [
         *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
-        BrowserMiddleware(scope=browser.scope, idle_ttl_seconds=browser.idle_ttl_seconds),
+        BrowserMiddleware(
+            scope=browser.scope,
+            idle_ttl_seconds=browser.idle_ttl_seconds,
+            backend=cast("BackendProtocol | None", merged.get("backend")),
+        ),
     ]
 
 

@@ -138,6 +138,10 @@ struct SlackManagerResponse {
 pub(crate) struct TriggerChannel {
     pub(crate) provider: String,
     pub(crate) channel_name: String,
+    /// `active` once Slack delivers the channel's events; absent from older
+    /// Trigger Servers.
+    #[serde(default)]
+    pub(crate) status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1154,6 +1158,7 @@ mod tests {
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0].provider, "slack");
         assert_eq!(channels[0].channel_name, "support");
+        assert_eq!(channels[0].status.as_deref(), Some("active"));
     }
 
     #[test]

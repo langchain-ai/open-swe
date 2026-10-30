@@ -1354,7 +1354,7 @@ wheels = [
 
 [[package]]
 name = "managed-deepagents"
-version = "0.9.5"
+version = "0.10.0"
 source = { editable = "../vendor/managed-deepagents-sdk/packages/pypi" }
 dependencies = [
     { name = "deepagents" },
