@@ -1,9 +1,13 @@
 import asyncio
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
+from openswe.analytics import emitter
+from openswe.analytics.events import EventName
+from openswe.database import analytics
 from openswe.workspaces import refresh
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -135,6 +139,45 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
     release.assert_not_awaited()
     assert record is not None
     assert record.refresh_error == "no capacity"
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_failed_capture_is_kept_as_an_event_with_its_cause_and_redacted_log() -> None:
+    """The record is overwritten by the next refresh; the event is what stays queryable."""
+    backend = _backend(_Result("Updating repo\ntoken=ghp_secretvalue123", 0))
+    enqueue = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock(side_effect=TimeoutError())),
+        patch.object(analytics, "_WORKSPACE_ID", uuid4()),
+        patch.object(emitter, "enqueue", enqueue),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        await refresh.refresh_workspace("base")
+        record = await WORKSPACES.get("base")
+
+    assert record is not None
+    assert record.refresh_error == "TimeoutError"
+    [event] = [call.args[0] for call in enqueue.await_args_list]
+    assert event.event_name == EventName.WORKSPACE_REFRESH_FAILED
+    assert event.payload.error == "TimeoutError"
+    assert [(step.label, step.status) for step in event.payload.steps] == [
+        ("boot", "success"),
+        ("setup", "success"),
+        ("capture", "failed"),
+    ]
+    assert "Updating repo" in event.payload.log_tail
+    assert "ghp_secretvalue123" not in event.payload.log_tail
 
 
 @pytest.mark.usefixtures("registry_db")

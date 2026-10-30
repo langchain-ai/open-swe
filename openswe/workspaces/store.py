@@ -55,6 +55,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from openswe.analytics.emitter import workspace_refreshed
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
@@ -801,7 +802,11 @@ class RefreshAttempt:
     async def settle(
         self, status: RefreshStatus, *, log: str | None = None, error: str | None = None
     ) -> None:
-        await WORKSPACES.mark_refresh_settled(self.slug, status, log=log, error=error, attempt=self)
+        record = await WORKSPACES.mark_refresh_settled(
+            self.slug, status, log=log, error=error, attempt=self
+        )
+        if record is not None:
+            await workspace_refreshed(record)
 
 
 class WorkspaceStore:
@@ -1748,7 +1753,7 @@ async def capture_workspace_snapshot(
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
-            str(exc)[:1000],
+            (str(exc) or type(exc).__name__)[:1000],
         )
         raise
 

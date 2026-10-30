@@ -11,7 +11,6 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from openswe.config import ENV
-from openswe.incidents.evidence_tools import redact
 from openswe.incidents.models import (
     Activity,
     CommandReceipt,
@@ -30,6 +29,7 @@ from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, required_slack_value, slack_error
 from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.redaction import redact
 from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)

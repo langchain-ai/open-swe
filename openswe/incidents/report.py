@@ -6,9 +6,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openswe.incidents.evidence_tools import EvidenceCollector, redact, source_url
+from openswe.incidents.evidence_tools import EvidenceCollector, source_url
 from openswe.incidents.models import Evidence, Hypothesis, IncidentReport
 from openswe.prompts import prompt
+from openswe.utils.redaction import redact
 
 CONTEXT_MARKER = "INCIDENT_CONTEXT "
 _CONTEXT_HEADER = re.compile(r"INCIDENT_CONTEXT (\{[^\n]*\})")

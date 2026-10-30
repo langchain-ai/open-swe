@@ -371,8 +371,9 @@ async def refresh_workspace(
         raise
     except Exception as exc:
         logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
-        await attempt.settle("failed", log=log, error=str(exc))
-        return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
+        error = str(exc) or type(exc).__name__
+        await attempt.settle("failed", log=log, error=error)
+        return {"status": "failed", "slug": slug, "error": error, "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
