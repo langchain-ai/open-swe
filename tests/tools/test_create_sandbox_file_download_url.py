@@ -4,6 +4,10 @@ from typing import Any
 
 import pytest
 
+from openswe.sandboxes.file_links import get_link
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import ThreadCreated
+
 download_tool = importlib.import_module("openswe.tools.create_sandbox_file_download_url")
 
 
@@ -54,6 +58,85 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
     monkeypatch.setattr(download_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(download_tool, "get_async_sandbox_client", lambda: client)
     return client
+
+
+async def _create_thread(thread_id: str) -> None:
+    created = ThreadCreated(title="A thread", source="dashboard", owner_login="test-user")
+    await append(
+        thread_id,
+        [Command(command_id=f"thread:{thread_id}:created", event=created, actor_kind="user")],
+    )
+
+
+async def test_a_public_deployment_hands_out_a_short_link(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://openswe.example")
+    await _create_thread("thread-1")
+    client = _configure(monkeypatch, _Backend())
+
+    result = await download_tool.create_sandbox_file_download_url(
+        "shot.png", content_type="image/png", content_disposition="inline"
+    )
+
+    prefix = "https://openswe.example/dashboard/api/l/"
+    assert result["url"].startswith(prefix)
+    assert len(result["url"]) < 100
+    assert "token" not in result["url"]
+    assert result["file_path"] == "/workspace/project/shot.png"
+    assert result["expires_at"] is None
+    assert client.calls == []
+    link = await get_link(result["url"].removeprefix(prefix))
+    assert link is not None
+    assert (
+        link.thread_id,
+        link.sandbox_id,
+        link.path,
+        link.content_type,
+        link.content_disposition,
+    ) == ("thread-1", "sandbox-1", "/workspace/project/shot.png", "image/png", "inline")
+
+
+async def test_a_short_link_reports_when_it_expires(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://openswe.example")
+    await _create_thread("thread-1")
+    _configure(monkeypatch, _Backend())
+
+    result = await download_tool.create_sandbox_file_download_url(
+        "result.zip", expires_in_seconds=600
+    )
+
+    link = await get_link(result["url"].rsplit("/", 1)[1])
+    assert link is not None and link.expires_at is not None
+    assert result["expires_at"] == link.expires_at.isoformat()
+
+
+async def test_a_thread_without_a_transcript_falls_back_to_the_signed_url(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://openswe.example")
+    _configure(monkeypatch, _Backend())
+
+    result = await download_tool.create_sandbox_file_download_url("result.zip")
+
+    assert result["url"] == "https://downloads.example/file?token=secret"
+
+
+async def test_local_development_falls_back_to_the_signed_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://localhost:2024")
+    _configure(monkeypatch, _Backend())
+
+    result = await download_tool.create_sandbox_file_download_url("result.zip")
+
+    assert result == {
+        "url": "https://downloads.example/file?token=secret",
+        "file_path": "/workspace/project/result.zip",
+        "expires_at": "2026-08-20T12:00:00Z",
+    }
 
 
 async def test_create_download_url_defaults_to_a_non_expiring_link(

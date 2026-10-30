@@ -1,12 +1,14 @@
 import logging
 import posixpath
 import shlex
-from typing import Any, Literal
+from typing import Any
 
 from openswe.run_config import RunConfig
+from openswe.sandboxes.file_links import LINKS_PATH, ContentDisposition, create_link
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from openswe.utils.dashboard_links import public_dashboard_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ async def create_sandbox_file_download_url(
     file_path: str,
     expires_in_seconds: int | None = None,
     content_type: str | None = None,
-    content_disposition: Literal["attachment", "inline"] = "attachment",
+    content_disposition: ContentDisposition = "attachment",
 ) -> dict[str, Any]:
     """Implement the `create_sandbox_file_download_url` tool."""
     try:
@@ -57,21 +59,57 @@ async def create_sandbox_file_download_url(
         logger.warning("Sandbox download request rejected", extra={"error": str(exc)})
         return {"error": str(exc)}
     backend = unwrap_sandbox_backend(backend_proxy)
+    target = (backend.id, path, expires_in_seconds, content_type, content_disposition)
+    url, expires_at = await _short_link(*target) or await _signed_url(*target)
+    if unwrap_sandbox_backend(backend_proxy) is not backend:
+        raise RuntimeError("sandbox changed while creating the download URL; retry")
+    return {"url": url, "file_path": path, "expires_at": expires_at}
+
+
+async def _signed_url(
+    sandbox_id: str,
+    path: str,
+    expires_in_seconds: int | None,
+    content_type: str | None,
+    content_disposition: ContentDisposition,
+) -> tuple[str, str | None]:
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(
-            backend.id,
+            sandbox_id,
             path,
             expires_in_seconds=expires_in_seconds,
             content_type=content_type,
             content_disposition=content_disposition,
         )
-    if unwrap_sandbox_backend(backend_proxy) is not backend:
-        raise RuntimeError("sandbox changed while creating the download URL; retry")
-
     if not download.download_url:
         raise RuntimeError("LangSmith did not return a download URL")
-    return {
-        "url": download.download_url,
-        "file_path": path,
-        "expires_at": download.expires_at,
-    }
+    return download.download_url, download.expires_at
+
+
+async def _short_link(
+    sandbox_id: str,
+    path: str,
+    expires_in_seconds: int | None,
+    content_type: str | None,
+    content_disposition: ContentDisposition,
+) -> tuple[str, str | None] | None:
+    """A short Open SWE URL and its expiry, or None where only a signed URL can work.
+
+    Models copy a short link reliably; a signed URL is hundreds of random characters.
+    """
+    base = public_dashboard_api_base_url()
+    thread_id = RunConfig.from_runtime().thread_id
+    if base is None or thread_id is None:
+        return None
+    link = await create_link(
+        thread_id=thread_id,
+        sandbox_id=sandbox_id,
+        path=path,
+        content_type=content_type,
+        content_disposition=content_disposition,
+        expires_in_seconds=expires_in_seconds,
+    )
+    if link is None:
+        return None
+    expires_at = None if link.expires_at is None else link.expires_at.isoformat()
+    return f"{base}{LINKS_PATH}/{link.id}", expires_at

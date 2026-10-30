@@ -27,6 +27,24 @@ def dashboard_api_base_url() -> str:
     return (ENV.DASHBOARD_API_BASE_URL.optional() or ENV.LANGGRAPH_URL.get()).rstrip("/")
 
 
+def public_dashboard_api_base_url() -> str | None:
+    """``dashboard_api_base_url()`` when it is a public HTTPS origin, as for a deployment.
+
+    None in local development, where nothing outside this machine can reach it.
+    """
+    base = dashboard_api_base_url()
+    parsed = urlsplit(base)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return base
+
+
 def _origin(url: str) -> str | None:
     try:
         parsed = urlsplit(url)
