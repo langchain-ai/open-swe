@@ -455,7 +455,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 1")
     expect(api.openPullRequests).toHaveBeenCalledWith(
       "",
-      "updatedAt",
+      "createdAt",
       "desc",
       1,
       "mine"
@@ -492,6 +492,32 @@ describe("My PRs", () => {
         1,
         "mine"
       )
+    )
+  })
+
+  it("restores the user's last sort when returning without URL filters", async () => {
+    const first = mount()
+    await screen.findByText("Change 1")
+    fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
+    await waitFor(() =>
+      expect(api.openPullRequests).toHaveBeenLastCalledWith(
+        "",
+        "updatedAt",
+        "asc",
+        1,
+        "mine"
+      )
+    )
+    first.unmount()
+    vi.mocked(api.openPullRequests).mockClear()
+    mount()
+    await screen.findByText("Change 1")
+    expect(api.openPullRequests).toHaveBeenLastCalledWith(
+      "",
+      "updatedAt",
+      "asc",
+      1,
+      "mine"
     )
   })
 
@@ -537,7 +563,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "",
-        "updatedAt",
+        "createdAt",
         "desc",
         2,
         "mine"
@@ -871,7 +897,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
-        "updatedAt",
+        "createdAt",
         "desc",
         1,
         "mine"
@@ -882,7 +908,7 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
-        "updatedAt",
+        "createdAt",
         "desc",
         1,
         "mine"

@@ -31,6 +31,7 @@ import {
   refreshPullRequest,
 } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
+import { readPreference, writePreference } from "./lib/preferences"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
@@ -70,14 +71,21 @@ export function OpenPullRequests({
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
 }) {
+  const preferenceKey = `open-swe.reviews.sort.${login}`
+  const savedSort = readPreference(preferenceKey)?.split(":")
+  const defaultSort = savedSort?.[0] === "updatedAt" ? "updatedAt" : "createdAt"
+  const defaultDirection = savedSort?.[1] === "asc" ? "asc" : "desc"
   const {
     repo = [],
     q: search = "",
     status: filter,
-    sort = "updatedAt",
-    direction = "desc",
+    sort = defaultSort,
+    direction = defaultDirection,
     pr: selected,
   } = filters
+  useEffect(() => {
+    writePreference(preferenceKey, `${sort}:${direction}`)
+  }, [preferenceKey, sort, direction])
   const toggleSort = (next: ReviewSort) =>
     onFiltersChange({
       sort: next,
