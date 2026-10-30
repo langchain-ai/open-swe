@@ -172,6 +172,9 @@ async def _start(
                 "thread_ts": new_ts,
                 "thread_id": thread_id,
                 "text": command.thread_text,
+                "command_message": command.parsed_message(request.command_message)
+                if request.command_message is not None
+                else None,
                 "context_channel_id": request.channel_id,
                 "context_thread_ts": request.thread_ts,
                 "breakout_root_suffix": root_text[len(heading) :],
@@ -202,6 +205,9 @@ async def process_slack_web(
                 update={
                     "thread_id": thread_id,
                     "text": command.thread_text,
+                    "command_message": command.parsed_message(request.command_message)
+                    if request.command_message is not None
+                    else None,
                     "context_channel_id": request.channel_id,
                     "context_thread_ts": request.thread_ts,
                     "prior_message_text": command.prior_text,

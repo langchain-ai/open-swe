@@ -83,6 +83,13 @@ async def _post(
 
 @pytest.fixture(autouse=True)
 def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClaims:
+    for name in (
+        "TYPESAFE_API_KEY",
+        "LANGSMITH_GATEWAY_API_KEY",
+        "LANGSMITH_API_KEY",
+        "LANGCHAIN_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
     slack_events.reset_slack_event_claims()
     claims = _FakeClaims()
     monkeypatch.setattr(
@@ -109,6 +116,7 @@ async def test_mention_and_message_deliveries_start_one_run(
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
 
     first = await _post(_mention_payload("Ev1"), background_tasks)
     slack_events.reset_slack_event_claims()
@@ -522,7 +530,6 @@ async def test_command_intent_http_to_dispatch(
         assert decision.performance_model == (command == "/model:perf")
         assert decision.workspace == ("infra" if command == "/workspace" else None)
         assert decision.without(performance_model=True, workspace=True) == "<@BOT> investigate this"
-        assert not decision.handoff_commands
     else:
         assert request.text == text
         decision = request.command_message
@@ -531,7 +538,6 @@ async def test_command_intent_http_to_dispatch(
         assert not decision.performance_model
         assert decision.workspace is None
         assert decision.without(performance_model=True, workspace=True) == text
-        assert bool(decision.handoff_commands) == (outcome != "no_command")
     assert classifier_requests
     state = json.loads(classifier_requests[0]["state"])
     assert state["message"] == text

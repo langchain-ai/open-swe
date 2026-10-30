@@ -32,8 +32,6 @@ async def interpret_commands(
 ) -> ParsedSlackMessage:
     parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
     plain = ParsedSlackMessage(text=text, argument=text.strip())
-    if "/" not in text and not parsed.workspace:
-        return plain
     try:
         async with asyncio.timeout(1.5):
             choices = await select_jev_choices(
@@ -69,7 +67,7 @@ async def interpret_commands(
             )
     except TimeoutError:
         logger.warning("Slack command classification timed out")
-        return replace(plain, handoff_commands=tuple(_COMMANDS))
+        return plain
     available = {
         **{action: parsed.action == action for action in SlackAction},
         "/model:perf": parsed.performance_model,
@@ -83,7 +81,7 @@ async def interpret_commands(
         or (choices[command] == f"deterministic:{command}" and not available[command])
     )
     if handoff:
-        return replace(plain, handoff_commands=handoff)
+        return plain
     action = (
         parsed.action
         if choices.get(parsed.action or "") == f"deterministic:{parsed.action}"
@@ -98,7 +96,7 @@ async def interpret_commands(
             (parsed.workspace_span, workspace),
         )
     ):
-        return replace(plain, handoff_commands=(action,))
+        return plain
     return replace(
         parsed if action else plain,
         action=action,

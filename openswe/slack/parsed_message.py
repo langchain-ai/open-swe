@@ -61,7 +61,6 @@ class ParsedSlackMessage:
     argument_start: int = 0
     performance_span: Span | None = None
     workspace_span: Span | None = None
-    handoff_commands: tuple[str, ...] = ()
 
     @classmethod
     def parse(cls, text: str, bot_user_id: str, bot_username: str = "") -> Self:
@@ -233,6 +232,17 @@ class BreakoutCommand:
     def thread_text(self) -> str:
         """The new thread's opening message, keeping options typed alongside the command."""
         return f"{self.options} {self.instruction}".strip()
+
+    def parsed_message(self, original: ParsedSlackMessage) -> ParsedSlackMessage:
+        parsed = ParsedSlackMessage.parse(self.thread_text, "")
+        return replace(
+            parsed,
+            action=None,
+            performance_model=original.performance_model and parsed.performance_model,
+            performance_span=parsed.performance_span if original.performance_model else None,
+            workspace=parsed.workspace if original.workspace else None,
+            workspace_span=parsed.workspace_span if original.workspace else None,
+        )
 
     @classmethod
     def heading(cls, title: str) -> str:
