@@ -8,16 +8,15 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
-from pydantic import JsonValue
 from standardwebhooks import Webhook
 
 from openswe import dispatch
-from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
+from openswe.agent_api.tokens import verify_runtime_token
 from openswe.github import channel
 from openswe.github import webhook as github_webhooks
-from openswe.threads import runtimes
 from openswe.webhooks import common as webhook_common
 from tests.conftest import register_github_logins
+from tests.mda_helpers import mda_starts, stub_mda_runtime
 
 # As `openssl rand -hex 32` makes one: valid base64, as Standard Webhooks takes it.
 SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
@@ -112,29 +111,16 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(
         dispatch,
         "_run_user_metadata",
-        AsyncMock(return_value={"ls_repo_provider": "github", "user_id": "user-1"}),
+        AsyncMock(
+            return_value={
+                "ls_repo_provider": "github",
+                "user_id": "user-1",
+                "ls_attribution_identifier": "ada",
+            }
+        ),
     )
     monkeypatch.setattr(webhook_common, "AGENT_VERSION_METADATA", {"LANGSMITH_AGENT_VERSION": "v1"})
-
-    async def context(
-        configurable: dict[str, JsonValue],
-        *,
-        thread_id: str,
-        assistant_id: str,
-        metadata: dict[str, JsonValue] | None = None,
-    ) -> dict[str, JsonValue]:
-        run = RemoteRun(
-            thread_id=thread_id,
-            assistant_id=assistant_id,
-            configurable=configurable,
-            metadata=metadata or {},
-        )
-        return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
-
-    monkeypatch.setattr(runtimes, "remote_run_context", context)
-    monkeypatch.setattr(runtimes, "get_tracer_project", lambda: "open-swe-test")
-    monkeypatch.setattr(runtimes.RUNTIMES, "_mda", runtimes.MdaRuntime("https://mda.test"))
-    monkeypatch.setattr(runtimes.Runtimes, "mda_runtime", property(lambda self: self._mda))
+    stub_mda_runtime(monkeypatch)
     return prepare
 
 
@@ -172,14 +158,16 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     assert token.thread_id == THREAD
     assert token.configurable["github_login"] == "ada"
     assert run["context"]["graph"] == "agent"
-    # Every run metadata key is one MDA accepts from a handler.
-    metadata = run["metadata"]
+    # The attribution the run's hooks read rides in its token.
+    assert token.metadata["ls_attribution_identifier"] == "ada"
+    # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
+    metadata = mda_starts(run)["metadata"]
+    assert metadata == run["metadata"]
     assert metadata["channel"] == "github"
     assert metadata["github_delivery"] == "delivery-1"
     assert metadata["LANGSMITH_AGENT_VERSION"] == "v1"
-    assert metadata["user_id"] == "user-1"
     assert "invocation_id" in metadata
-    assert not [key for key in metadata if key.startswith(("mda_", "langgraph_"))]
+    assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
 
 
 @pytest.mark.parametrize(

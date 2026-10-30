@@ -6,7 +6,9 @@ which also runs the graphs Managed Deep Agents does not host.
 
 MDA scopes threads by owner. The backend reads through a second client that also
 says ``x-auth-scheme: langsmith``, as LangSmith Studio does, so it can read the
-threads an MDA channel owns too; every write goes through the owner-scoped one.
+threads an MDA channel owns too; every write goes through the owner-scoped one. A
+thread an MDA channel owns stays its conversation's: the backend starts, answers
+and stops runs there through MDA's trusted-backend ingress, naming that conversation.
 """
 
 import logging
@@ -30,6 +32,7 @@ from openswe.agent_api.client import (
     mda_runtime_url,
     remote_run_context,
 )
+from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
@@ -45,6 +48,11 @@ _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks
 # The run metadata the graph's hooks read. Only these ride in the run token, which
 # travels in a header on every hook call.
 _HOOK_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier")
+
+# MDA's channel threads are owned by ``mda:source-thread:<provider>:<conversation key>``.
+_CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
+# Who the backend's runs on a channel's thread are from, as MDA records them.
+BACKEND_USER: Final = "openswe:backend"
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -84,6 +92,10 @@ class MdaRun(BaseModel):
 
 
 _runs = TypeAdapter(list[MdaRun])
+
+
+class ChannelThreadError(RuntimeError):
+    """A thread an MDA channel owns that the backend can't act on: no owner, or no secret."""
 
 
 class _SdkThreads:
@@ -138,6 +150,8 @@ class MdaRuntime:
     def __init__(self, url: str) -> None:
         self.url = url
         self._mda_threads: set[str] = set()
+        # Each channel thread's conversation on MDA, (provider, key), which never changes.
+        self._channel_conversations: dict[str, tuple[str, str]] = {}
         self._http: httpx.AsyncClient | None = None
         self._read_http: httpx.AsyncClient | None = None
 
@@ -173,6 +187,39 @@ class MdaRuntime:
             url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
         )
 
+    async def channel_write_headers(self, thread_id: str) -> dict[str, str]:
+        """What lets the backend start, answer and stop runs on a thread an MDA channel owns.
+
+        MDA's trusted-backend ingress: its ingress secret, the ``MDA_INGRESS_SECRET``
+        the deployment gets with the value of the ``MDA_SERVICE_SECRET`` the two share,
+        with the reserved headers naming the conversation that owns the thread, read
+        from MDA once. The thread keeps that owner, so the conversation's later
+        messages still reach it. Raises ``ChannelThreadError`` without the secret or
+        when MDA names no channel conversation as the thread's owner.
+        """
+        secret = ENV.MDA_SERVICE_SECRET.optional()
+        if not secret:
+            raise ChannelThreadError("No MDA_SERVICE_SECRET to act on MDA's channel threads")
+        conversation = self._channel_conversations.get(thread_id)
+        if conversation is None:
+            response = await self.read_http.get(f"/threads/{thread_id}")
+            response.raise_for_status()
+            metadata = _object.validate_python(response.json()).get("metadata")
+            owner = metadata.get("owner") if isinstance(metadata, dict) else None
+            if not isinstance(owner, str) or not owner.startswith(_CHANNEL_OWNER_PREFIX):
+                raise ChannelThreadError(f"MDA names no conversation owning thread {thread_id}")
+            provider, _, key = owner.removeprefix(_CHANNEL_OWNER_PREFIX).partition(":")
+            if not provider or not key:
+                raise ChannelThreadError(f"MDA names no conversation owning thread {thread_id}")
+            conversation = self._channel_conversations[thread_id] = (provider, key)
+        provider, key = conversation
+        return {
+            "x-mda-ingress-secret": secret,
+            "x-mda-user-id": BACKEND_USER,
+            "x-mda-source-provider": provider,
+            "x-mda-source-thread-id": key,
+        }
+
     async def ensure_remote_thread(self, thread_id: str) -> None:
         if thread_id in self._mda_threads:
             return
@@ -199,10 +246,19 @@ class MdaRuntime:
         """Interrupt the run; ``False`` when MDA refused or could not be reached."""
         extra = {"thread_id": thread_id, "run_id": run_id}
         try:
-            response = await self.http.post(
-                f"/threads/{thread_id}/runs/{run_id}/cancel", params={"action": "interrupt"}
+            thread = await index.get(thread_id)
+            # A channel's thread is stopped as the backend acting in its conversation.
+            headers = (
+                await self.channel_write_headers(thread_id)
+                if thread is not None and dispatch.channel_of(thread.metadata) is not None
+                else {}
             )
-        except httpx.HTTPError:
+            response = await self.http.post(
+                f"/threads/{thread_id}/runs/{run_id}/cancel",
+                params={"action": "interrupt"},
+                headers=headers,
+            )
+        except httpx.HTTPError, ChannelThreadError:
             logger.warning("Could not interrupt an MDA run", extra=extra, exc_info=True)
             return False
         if response.is_error:
@@ -292,10 +348,13 @@ class MdaRuntime:
         *,
         thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
+        channel: bool = False,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
+        On a ``channel`` thread the run starts as the backend acting in its conversation
+        (:meth:`channel_write_headers`), which raises ``ChannelThreadError``.
         """
         starting_ms = now_ms()
         config = params.get("config")
@@ -325,10 +384,14 @@ class MdaRuntime:
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
+        # On a channel's thread the run starts in its conversation.
+        headers = await self.channel_write_headers(thread_id) if channel else {}
         rewritten = await self.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
-        response = await self.http.post(f"/threads/{thread_id}/runs", json=rewritten)
+        response = await self.http.post(
+            f"/threads/{thread_id}/runs", json=rewritten, headers=headers
+        )
         if response.is_error:
             logger.warning(
                 "Starting an MDA run failed",

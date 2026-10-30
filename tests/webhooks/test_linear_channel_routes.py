@@ -11,8 +11,11 @@ import pytest
 from fastapi import FastAPI
 from standardwebhooks import Webhook
 
-from openswe.linear import channel
+from openswe import dispatch
+from openswe.agent_api.tokens import verify_runtime_token
+from openswe.linear import channel, session
 from openswe.linear.session import NO_REPOSITORY, UNREADABLE_SESSION
+from tests.mda_helpers import mda_declines, mda_starts, stub_mda_runtime
 
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 _THREAD = str(uuid.uuid4())
@@ -150,6 +153,62 @@ async def test_a_session_turn_starts_the_run_prepared_on_the_sessions_thread(
 
 
 @pytest.mark.asyncio
+async def test_mda_starts_the_run_a_session_turn_prepares(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
+    monkeypatch.setattr(
+        session.LinearSessionTurn,
+        "repository",
+        AsyncMock(return_value=({"owner": "acme", "name": "api"}, None)),
+    )
+    monkeypatch.setattr(session.User, "login_for_email", AsyncMock(return_value="ada"))
+    monkeypatch.setattr(session.common, "get_thread_workspace", AsyncMock(return_value="acme"))
+    monkeypatch.setattr(session.common, "upsert_agent_thread_metadata", AsyncMock())
+    monkeypatch.setattr(session, "adopt_channel_run", AsyncMock())
+    monkeypatch.setattr(session, "channel_run_starting", AsyncMock())
+    monkeypatch.setattr(
+        dispatch,
+        "_run_user_metadata",
+        AsyncMock(
+            return_value={
+                "ls_repo_provider": "github",
+                "user_id": "user-1",
+                "ls_attribution_identifier": "ada",
+            }
+        ),
+    )
+    stub_mda_runtime(monkeypatch)
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "created",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "agentSession": {
+            "id": "session-1",
+            "issue": {"id": "issue-1", "identifier": "ENG-1", "title": "Bug"},
+            "comment": {"id": "comment-1", "body": "@Open SWE fix it"},
+            "creator": {"id": "user-1", "name": "Ada", "email": "ada@example.com"},
+        },
+    }
+
+    response = await _post(app, _call("AgentSessionEvent.created", payload))
+
+    assert response.status_code == 200
+    answer = response.json()
+    # The attribution the run's hooks read rides in its token.
+    token = verify_runtime_token(answer["context"]["__run_token"])
+    assert token.thread_id == _THREAD
+    assert token.metadata["ls_attribution_identifier"] == "ada"
+    # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
+    metadata = mda_starts(answer)["metadata"]
+    assert metadata == answer["metadata"]
+    assert metadata["channel"] == "linear"
+    assert "invocation_id" in metadata
+    assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
+
+
+@pytest.mark.asyncio
 async def test_a_session_turn_the_backend_declines_tells_the_session_why(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -166,6 +225,7 @@ async def test_a_session_turn_the_backend_declines_tells_the_session_why(
     response = await _post(app, _call("AgentSessionEvent.created", payload))
     # MDA's channel starts nothing, and posts the text in the session.
     assert response.json() == NO_REPOSITORY
+    assert mda_declines(response.json()) == NO_REPOSITORY["decline"]
 
 
 @pytest.mark.asyncio
@@ -191,4 +251,5 @@ async def test_a_session_it_cant_read_is_told_so(
         del payload["webhookTimestamp"]
     response = await _post(app, _call("AgentSessionEvent.created", payload))
     assert response.json() == UNREADABLE_SESSION
+    assert mda_declines(response.json()) == UNREADABLE_SESSION["decline"]
     prepare.assert_not_awaited()

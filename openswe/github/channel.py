@@ -22,7 +22,11 @@ from typing_extensions import TypedDict
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.mda_channels.auth import require_mda_channel
-from openswe.threads.router import adopt_channel_run, channel_run_starting
+from openswe.threads.router import (
+    adopt_channel_run,
+    channel_run_metadata,
+    channel_run_starting,
+)
 from openswe.threads.runtimes import RUNTIMES
 from openswe.webhooks import common
 from openswe.workspaces.routing import repo_is_routable
@@ -116,14 +120,19 @@ async def _prepare_run(
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
         thread_id,
-        {"assistant_id": "agent", "config": cast(JsonValue, run_config)},
+        {
+            "assistant_id": "agent",
+            "config": cast(JsonValue, run_config),
+            # So the attribution the run's hooks read rides in its run token.
+            "metadata": cast(JsonValue, run_config["metadata"]),
+        },
         # A channel thread has no Slack thread to link.
         thread_metadata={},
     )
     run: EndpointAnswer = {
-        "input": cast(JsonValue, prepared.input),
+        "input": cast(dict[str, AnswerJson], prepared.input),
         "context": cast(dict[str, AnswerJson], rewritten["context"]),
-        "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
+        "metadata": cast(dict[str, AnswerJson], channel_run_metadata(run_config["metadata"])),
     }
     if COMPLETION_WEBHOOK_URL:
         run["webhook"] = COMPLETION_WEBHOOK_URL
