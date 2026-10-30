@@ -5,8 +5,9 @@ Listing them fans out to ``/user/installations`` plus a paginated
 10s+ for users whose App is installed across hundreds of repos. The listing is
 cached per person in ``user_record``, where every replica sees it. The repo
 picker serves it stale-while-revalidate; ``repos.accessible_repo_full_names``,
-an authorization boundary, trusts it only briefly. Installation webhooks clear
-every listing.
+an authorization boundary, trusts it only briefly. Nothing clears a listing when
+an installation changes: MDA's GitHub channel receives no installation events, so
+``forget_cached_repos`` waits for them and a listing lives out its freshness.
 
 Keys are derived from the authenticated session login only, so a cached
 listing is never served to a different user.

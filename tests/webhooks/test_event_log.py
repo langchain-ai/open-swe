@@ -121,7 +121,7 @@ async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> Non
         {
             "type": "http",
             "method": "POST",
-            "path": "/webhooks/github",
+            "path": "/mda/channel-api/record_github_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }
@@ -293,7 +293,7 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
         {
             "type": "http",
             "method": "POST",
-            "path": "/webhooks/github",
+            "path": "/mda/channel-api/record_github_delivery",
             "query_string": b"",
             "headers": [(b"content-type", b"application/json")],
         }

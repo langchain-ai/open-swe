@@ -35,7 +35,7 @@ What a deployment needs:
 |---|---|
 | `LANGSMITH_API_KEY` | LangSmith → Settings → API Keys. LangGraph Platform injects it. |
 | A model provider key such as `ANTHROPIC_API_KEY`, or `LANGSMITH_GATEWAY_API_KEY` for the LangSmith LLM Gateway | Your provider, or a LangSmith key with `gateway:invoke` (step 4) |
-| `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
+| `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | The GitHub App you create in step 3 |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_APP_ID`, `SLACK_BOT_USER_ID`, `SLACK_BOT_USERNAME` | The Slack app you create in step 5 |
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
 | `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` | The GitHub organizations or users allowed to log in (step 6) |
@@ -157,7 +157,7 @@ Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.
 - **Callback URL**: `<URL>/dashboard/api/auth/callback`.
   GitHub Apps take several, one per line; for [local development](DEVELOPMENT.md) add `http://localhost:2024/dashboard/api/auth/callback`.
 - **Request user authorization (OAuth) during installation**: off
-- **Webhook URL**: `<URL>/webhooks/github`, **Webhook secret**: the output of `openssl rand -hex 32`, saved as `GITHUB_WEBHOOK_SECRET`
+- **Webhook URL**: the MDA deployment's `<deployment-url>/channels/github/events`, which `mda deploy` sets ([mda/README.md](../mda/README.md#github)), **Webhook secret**: the output of `openssl rand -hex 32`, which `mda deploy` hands the deployment (`MDA_GITHUB_WEBHOOK_SECRET`)
 - **Repository permissions**:
   - Contents: Read & write
   - Pull requests: Read & write
@@ -350,7 +350,6 @@ GITHUB_APP_ID=""                      # step 3
 GITHUB_APP_CLIENT_ID=""
 GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one line with \n between the PEM lines, or the multi-line value your platform accepts
-GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
 ALLOWED_GITHUB_ORGS=""               # required unless ALLOWED_GITHUB_USERS is set
 ALLOWED_GITHUB_USERS=""              # required unless ALLOWED_GITHUB_ORGS is set
@@ -668,8 +667,8 @@ Before upgrading a deployment that predates those imports, run an earlier releas
   A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
 - Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack.
   `mda deploy` subscribes the Linear app to the events its channel handles.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401.
-  Linear deliveries reach the backend only from the MDA deployment, which verifies them and signs its calls with `MDA_SERVICE_SECRET`, needed on both sides.
+- Webhook secrets are required: without `SLACK_SIGNING_SECRET`, every request to `/webhooks/slack` is rejected with 401.
+  GitHub and Linear deliveries reach the backend only from the MDA deployment, which verifies them and signs its calls with `MDA_SERVICE_SECRET`, needed on both sides.
 
 ### Thread credential scope
 

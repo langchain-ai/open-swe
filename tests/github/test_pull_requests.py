@@ -5,12 +5,13 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx2
 import pytest
 
-from openswe.github import pull_request_dashboard_routes, pull_requests, routes
+from openswe.github import channel as github_channel
+from openswe.github import pull_request_dashboard_routes, pull_requests
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.github.repositories import Repository
 from openswe.webhooks import common
 from scripts import sync_pull_request_descriptions
-from tests.conftest import post_signed_github_webhook
+from tests.github_channel import deliver_github_event
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -255,9 +256,8 @@ async def test_webhooks_sync_descriptions_without_auto_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await PullRequest(owner="lc", repo="repo", number=7, body="Old description").save()
-    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "description-sync-secret")
     monkeypatch.setattr(common, "get_client", lambda **kwargs: _client_returning())
-    monkeypatch.setattr(routes, "repo_is_routable", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_channel, "repo_is_routable", AsyncMock(return_value=True))
     monkeypatch.setattr(common, "is_repo_auto_review_enabled", AsyncMock(return_value=False))
     monkeypatch.setattr(common, "update_agent_pr_usage_from_webhook", AsyncMock())
     payload = {
@@ -265,10 +265,8 @@ async def test_webhooks_sync_descriptions_without_auto_review(
         "repository": {"owner": {"login": "lc"}, "name": "repo", "full_name": "lc/repo"},
         "pull_request": {"number": 7, "title": "Retitled widgets", "body": "New description"},
     }
-    response = await post_signed_github_webhook(
-        "pull_request", payload, secret="description-sync-secret"
-    )
-    assert response.status_code == 200
+    delivered = await deliver_github_event(monkeypatch, "pull_request", payload)
+    assert "track_pull_request_state" in delivered.work
     saved = await PullRequest.get("lc", "repo", 7)
     assert saved is not None and (saved.title, saved.body) == (
         "Retitled widgets",

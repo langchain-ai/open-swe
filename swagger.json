@@ -2083,33 +2083,6 @@
         "title": "EndpointAnswer",
         "type": "object"
       },
-      "EndpointEvent_str_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.\n\nExperimental: this may change in a minor release.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
       "EndpointThread": {
         "description": "The conversation's thread an endpoint request is about.\n\nExperimental: this may change in a minor release.",
         "properties": {
@@ -2462,23 +2435,6 @@
           "ready"
         ],
         "title": "GatewayStatus",
-        "type": "object"
-      },
-      "GitHubChannelCall": {
-        "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "GitHubChannelCall",
         "type": "object"
       },
       "GitHubEndpointActor": {
@@ -23127,53 +23083,6 @@
         ]
       }
     },
-    "/github/channel/events": {
-      "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
-        "operationId": "github_channel_event_github_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GitHubChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Github Channel Event Github Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Github Channel Event"
-      }
-    },
     "/health": {
       "get": {
         "operationId": "health_check_health_get",
@@ -23339,29 +23248,6 @@
           }
         },
         "summary": "Slack Channel Event"
-      }
-    },
-    "/webhooks/github": {
-      "post": {
-        "description": "Handle GitHub webhooks for issue and PR events that tag @open-swe.",
-        "operationId": "github_webhook_webhooks_github_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Github Webhook Webhooks Github Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Github Webhook"
       }
     },
     "/webhooks/rollout": {

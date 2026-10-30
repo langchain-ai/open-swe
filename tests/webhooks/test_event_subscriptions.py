@@ -82,7 +82,7 @@ async def _subscribe(workspace: dict[str, UUID], **fields: object) -> EventSubsc
 async def _github(event_type: str, payload: dict[str, JsonValue], delivery_id: str) -> None:
     body = json.dumps(payload).encode()
     await EventLog.record(
-        _request("/webhooks/github"),
+        _request("/mda/channel-api/record_github_delivery"),
         body,
         "github",
         event_type=event_type,

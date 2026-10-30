@@ -1,8 +1,6 @@
 """GitHub webhook comment utilities."""
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import re
 from collections.abc import Collection
@@ -24,7 +22,6 @@ __all__ = [
     "PrState",
     "build_pr_prompt",
     "derive_pr_state",
-    "describe_open_swe_tags",
     "extract_pr_context",
     "fetch_github_thread_participants",
     "fetch_issue_comments",
@@ -37,7 +34,6 @@ __all__ = [
     "post_github_comment",
     "react_to_github_comment",
     "sanitize_github_comment_body",
-    "verify_github_signature",
 ]
 
 _DEFAULT_OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
@@ -69,11 +65,6 @@ def mentions_open_swe(text: str | None) -> bool:
     return bool(text) and _OPEN_SWE_TAG_RE.search(text or "") is not None
 
 
-def describe_open_swe_tags() -> str:
-    """Human-readable handle list for ignore reasons in webhook responses."""
-    return " or ".join(OPEN_SWE_TAGS)
-
-
 UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
 UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
 _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
@@ -101,28 +92,6 @@ _GRAPHQL_REACTIONS: dict[str, str] = {
 }
 
 PAGINATED_MAX_PAGES = 50
-
-
-def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool:
-    """Verify the GitHub webhook signature (X-Hub-Signature-256).
-
-    Args:
-        body: Raw request body bytes.
-        signature: The X-Hub-Signature-256 header value.
-        secret: The webhook signing secret.
-
-    Returns:
-        True if signature is valid or no secret is configured.
-    """
-    if not secret:
-        logger.warning("GITHUB_WEBHOOK_SECRET is not configured — rejecting webhook request")
-        return False
-
-    if not signature:
-        return False
-
-    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
 
 
 def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> PrState:

@@ -70,7 +70,8 @@ _DEFAULTS = {
     # any PostgreSQL on 5432 works. Export POSTGRES_URI to point elsewhere.
     "POSTGRES_URI": "postgresql://postgres:postgres@localhost:5432/postgres",
     # Webhook signing + bot identity.
-    "GITHUB_WEBHOOK_SECRET": "test-github-secret",
+    # MDA's channels sign their calls to the backend with it.
+    "MDA_SERVICE_SECRET": "test-mda-service-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
     "RUN_COMPLETE_WEBHOOK_SECRET": "test-run-complete-secret",
     "SLACK_BOT_TOKEN": "xoxb-test-token",

@@ -217,7 +217,7 @@ ENV.var(
 ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
-    "signs each call its channels make to /mda/channel-api/* and /github/channel/* with it "
+    "signs each call its channels make to /mda/channel-api/* with it "
     "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
     "and GitHub channels.",
     secret=True,
@@ -286,7 +286,6 @@ ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
-ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",

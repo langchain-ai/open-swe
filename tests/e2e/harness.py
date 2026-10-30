@@ -12,6 +12,7 @@ and renders their state back as a user-facing UI.
 
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import sys
@@ -21,6 +22,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
+from types import ModuleType
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
@@ -80,7 +82,7 @@ from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
-GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
+MDA_SERVICE_SECRET = os.environ["MDA_SERVICE_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -395,7 +397,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
 
 @app.post("/control/github-event")
 async def control_github_event(request: Request) -> JSONResponse:
-    """Deliver a signed GitHub webhook to the real ``/webhooks/github`` route.
+    """Deliver a GitHub event as MDA's GitHub channel does, to the backend's channel API.
 
     The mirror of ``/mock/slack/action`` for the other side: CI and review
     events arrive asynchronously in production, and the only faithful way to
@@ -406,10 +408,8 @@ async def control_github_event(request: Request) -> JSONResponse:
     payload = body.get("payload")
     if not event or not isinstance(payload, dict):
         raise HTTPException(400, "An event name and payload object are required")
-    response = await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
     return JSONResponse(
-        {"status_code": response.status_code, "body": response.json()},
-        status_code=response.status_code,
+        await _deliver_github_event(event, payload, str(body.get("delivery") or ""))
     )
 
 
@@ -690,21 +690,28 @@ async def _deliver_slack_event(payload: dict[str, Any], retry_num: str = "") -> 
         return await client.post("/webhooks/slack", content=raw, headers=headers)
 
 
+def _github_channel() -> ModuleType:
+    """``tests/github_channel.py``: delivers as MDA's GitHub channel does."""
+    path = Path(__file__).parents[1] / "github_channel.py"
+    spec = importlib.util.spec_from_file_location("e2e_github_channel", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 async def _deliver_github_event(
     event: str, payload: dict[str, Any], delivery: str = ""
-) -> httpx2.Response:
-    """POST a signed GitHub webhook delivery to the real /webhooks/github route."""
-    raw = json.dumps(payload).encode()
-    signature = hmac.new(GITHUB_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
-    headers = {
-        "Content-Type": "application/json",
-        "X-GitHub-Event": event,
-        "X-GitHub-Delivery": delivery or str(uuid.uuid7()),
-        "X-Hub-Signature-256": f"sha256={signature}",
+) -> dict[str, Any]:
+    """Deliver a GitHub event as MDA's GitHub channel does, to the real channel API."""
+    delivered = await _github_channel().deliver_as_mda(
+        app, event, payload, secret=MDA_SERVICE_SECRET, delivery_id=delivery or None
+    )
+    return {
+        "work": list(delivered.work),
+        "issue_run": delivered.issue_run.model_dump(mode="json") if delivered.issue_run else None,
     }
-    transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://harness") as client:
-        return await client.post("/webhooks/github", content=raw, headers=headers)
 
 
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
