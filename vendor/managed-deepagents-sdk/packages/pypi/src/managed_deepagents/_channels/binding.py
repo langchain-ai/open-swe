@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         ChannelEvent,
         ChannelInfo,
         ChannelMessage,
+        ChannelReply,
         JsonValue,
         PostedChannelThread,
     )
@@ -48,6 +49,9 @@ class ChannelBinding(TypedDict):
     #: Absent for a binding read from the thread record: no message started the run.
     event: NotRequired[ChannelEvent]
     raw_event: NotRequired[JsonValue]
+    #: Whether this run posts its final answer to ``target``, over the channel's
+    #: ``reply``; absent, the channel's applies.
+    reply: NotRequired[ChannelReply]
 
 
 def binding_with_messages(

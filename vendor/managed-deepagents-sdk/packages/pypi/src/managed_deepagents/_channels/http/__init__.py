@@ -82,6 +82,9 @@ class HttpChannel(Channel):
         self.messaging = self._build_messaging if post is not None else None
         #: Internal: the notice a paused run posts as it ends (GitHub, Linear).
         self.paused_notice: PausedNotice | None = None
+        #: Internal: what is asked instead of ``input`` while the event's
+        #: conversation waits on a decision (GitHub, which tells its handler).
+        self.interrupted_input: HttpInput | None = None
         #: Internal: the ``mda/`` agent connections the channel's setup
         #: provides, such as ``mda/github-token``, so deploy knows them.
         self.agent_connections: list[str] = []
