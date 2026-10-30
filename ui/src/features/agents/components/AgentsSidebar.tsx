@@ -691,7 +691,10 @@ export function AgentsSidebar({
 
       {agentWorkspaceEnabled && (
         <AgentWorkspaceThreadList
-          items={allItems}
+          items={[
+            ...pinnedItems,
+            ...sortSidebarThreads(threadItems, "updated"),
+          ]}
           activeThreadId={activeThreadId}
           compact={prefs.compact}
           onNavigate={layout.closeOnMobile}
