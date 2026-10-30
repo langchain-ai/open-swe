@@ -1748,7 +1748,7 @@ async def capture_workspace_snapshot(
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
-            str(exc)[:1000],
+            (str(exc) or type(exc).__name__)[:1000],
         )
         raise
 
