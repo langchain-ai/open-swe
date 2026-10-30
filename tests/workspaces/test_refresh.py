@@ -142,13 +142,19 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_failed_capture_is_kept_in_the_event_log_with_its_cause_and_log() -> None:
-    """The record is overwritten by the next refresh; the event log is what stays queryable."""
-    backend = _backend(_Result("Updating repo", 0))
+@pytest.mark.parametrize(
+    "capture_error",
+    [None, TimeoutError(), RuntimeError("capture failed with opaque-build-credential")],
+)
+async def test_refresh_history_keeps_outcomes_without_raw_diagnostics(
+    capture_error: Exception | None,
+) -> None:
+    """Historical events must not copy arbitrary credentials from logs or exception messages."""
+    backend = _backend(_Result("Updating repo with opaque-build-credential", 0))
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
-        patch.object(refresh, "capture_workspace_snapshot", AsyncMock(side_effect=TimeoutError())),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock(side_effect=capture_error)),
         patch.object(event_log, "_ROTATED_AT", None),
     ):
         await WORKSPACES.create(
@@ -164,7 +170,11 @@ async def test_a_failed_capture_is_kept_in_the_event_log_with_its_cause_and_log(
         record = await WORKSPACES.get("base")
 
     assert record is not None
-    assert record.refresh_error == "TimeoutError"
+    status = "failed" if capture_error is not None else "success"
+    expected_error = (str(capture_error) or type(capture_error).__name__) if capture_error else None
+    assert record.refresh_error == expected_error
+    assert record.refresh_log is not None
+    assert "opaque-build-credential" in record.refresh_log
     async with transaction() as conn:
         rows = await conn.execute(
             text(
@@ -172,15 +182,16 @@ async def test_a_failed_capture_is_kept_in_the_event_log_with_its_cause_and_log(
             )
         )
         [(event_type, payload, workspace_id)] = rows.tuples().all()
-    assert event_type == "refresh.failed"
+    assert event_type == f"refresh.{status}"
     assert workspace_id == await WORKSPACES.id_for_slug("base")
-    assert payload["error"] == "TimeoutError"
+    assert "error" not in payload
+    assert "log_tail" not in payload
+    assert "opaque-build-credential" not in str(payload)
     assert [(step["label"], step["status"]) for step in payload["steps"]] == [
         ("boot", "success"),
         ("setup", "success"),
-        ("capture", "failed"),
+        ("capture", status),
     ]
-    assert "Updating repo" in payload["log_tail"]
 
 
 @pytest.mark.usefixtures("registry_db")

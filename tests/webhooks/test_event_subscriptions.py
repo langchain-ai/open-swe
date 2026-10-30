@@ -325,7 +325,11 @@ async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
 
     await EventLog.append(
         "workspace",
-        {"workspace_slug": "acme", "error": "TimeoutError", "log_tail": "Updating repo"},
+        {
+            "workspace_slug": "acme",
+            "error": "TimeoutError with opaque-error-credential",
+            "log_tail": "Updating repo with opaque-log-credential",
+        },
         event_type="refresh.failed",
         delivery_id="w-1",
         refs=EventRefs(workspace_id=workspace["workspace"]),
@@ -333,7 +337,9 @@ async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
 
     assert await _owed() == []
     (match,) = await EventMatch.owed("admin-thread")
-    assert "TimeoutError" in match.content
+    assert "refresh.failed" in match.content
+    assert "opaque-error-credential" not in match.content
+    assert "opaque-log-credential" not in match.content
     since = datetime.now(UTC) - timedelta(hours=1)
     assert await EventLog.kinds(since) == []
     assert [(kind.source, kind.event_type) for kind in await EventLog.kinds(since, admin=True)] == [

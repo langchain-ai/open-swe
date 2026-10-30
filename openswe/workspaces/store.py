@@ -714,7 +714,7 @@ class Workspace(BaseModel):
         return self.refresh_log.strip()[-chars:]
 
     def refresh_outcome(self) -> dict[str, JsonValue]:
-        """The settled refresh as an admin-only event-log payload, which outlives the next refresh."""
+        """Structured refresh history without raw script output or exception messages."""
         return {
             "workspace_slug": self.slug,
             "refresh_kind": self.refresh_kind,
@@ -723,8 +723,6 @@ class Workspace(BaseModel):
             "started_at": self.refresh_started_at,
             "finished_at": self.refresh_finished_at,
             "steps": [step.model_dump(mode="json") for step in self.refresh_steps],
-            "error": self.refresh_error,
-            "log_tail": self.refresh_log_tail(),
         }
 
     @property

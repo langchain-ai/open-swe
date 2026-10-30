@@ -253,14 +253,11 @@ class EventSummary(BaseModel):
     def _workspace(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
         """Open SWE's own workspace activity, e.g. a snapshot refresh settling."""
         slug = payload.get("workspace_slug")
-        error = payload.get("error")
-        log_tail = payload.get("log_tail")
         return cls(
             source="workspace",
             event_type=event.event_type,
             target=slug if isinstance(slug, str) else "",
             status=event.event_type.partition(".")[2],
-            body="\n\n".join(part for part in (error, log_tail) if isinstance(part, str) and part),
             trusted=True,
         )
 
