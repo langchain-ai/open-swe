@@ -1,41 +1,37 @@
-"""A run for a Linear agent session, prepared for the MDA channel that starts it.
+"""What only the backend knows about a Linear agent session turn, and the run it signs.
 
-MDA's Linear channel receives the event and starts the run on the session's own
-thread, so the conversation's reply, Stop and errors reach Linear. Each agent
-session is its own thread, so a second session on the same issue is a new
-conversation, with the issue's title. The backend decides everything else, as it
-does for its own runs: whether the author has signed in to Open SWE, which acts
-on GitHub as them; the repository, the workspace, the input, and the signed run
-token the run calls back with. The run carries the backend's run-complete
-webhook, which completes it as it does the backend's own runs; the channel reports
-its failures in the session.
+MDA's Linear channel reads the turn, picks the repository and workspace, writes
+the run's input and starts it on the session's own thread, so the conversation's
+reply, Stop and errors reach Linear. It asks here for Open SWE's data
+(``linear_session_facts``): whether the author has signed in to Open SWE, which
+acts on GitHub as them; what the session's thread already works in; the author's
+and the instance's default repositories; and which repositories Open SWE may work
+in. With its choice made, it asks for the run (``plan_linear_session``): the
+backend checks the author and the repository again, since the channel's choice
+gives no access, indexes the thread for the dashboard and signs the run's context,
+which carries the backend's run-complete webhook. Each agent session is its own
+thread, so a second session on the same issue is a new conversation, with the
+issue's title.
 """
 
-import asyncio
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Final, TypedDict, cast
+from typing import cast
 
-import httpx2
-from langchain_core.messages.content import create_text_block
-from managed_deepagents import (
-    EndpointAnswer,
-    LinearSessionCreatedPayload,
-    LinearSessionPromptedPayload,
+from pydantic import JsonValue
+from runtime_api.linear import (
+    AuthorStanding,
+    DeclineReason,
+    LinearSessionDeclined,
+    LinearSessionFacts,
+    LinearSessionFactsRequest,
+    LinearSessionRun,
+    LinearSessionStart,
+    PlanLinearSession,
+    RepositoryChoice,
+    RepositoryPolicy,
 )
-from managed_deepagents import JsonValue as AnswerJson
-from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from openswe.dashboard.oauth import build_settings_url
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
-from openswe.input_messages import (
-    PersonIdentity,
-    RunInput,
-    human_input,
-    system_input,
-    system_introduction,
-)
-from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.threads.router import (
     adopt_channel_run,
@@ -44,441 +40,171 @@ from openswe.threads.router import (
 )
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
-from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace
 
 #: The channel's name in run and thread metadata (``CHANNEL_METADATA_KEY``).
 LINEAR_CHANNEL = "linear"
-SESSION_EVENT_KEYS: frozenset[str] = frozenset(
-    {"AgentSessionEvent.created", "AgentSessionEvent.prompted"}
-)
 
 
-class LinearDecline(TypedDict):
-    """An answer that starts nothing and has MDA's Linear channel tell the session why."""
-
-    decline: str
+def _full_name(repo: dict[str, str] | None) -> str | None:
+    return f"{repo['owner']}/{repo['name']}" if repo else None
 
 
-NO_REPOSITORY: LinearDecline = {
-    "decline": (
-        "Which repository should I work in? Mention it as `repo:owner/name` or link it on "
-        "GitHub, or set a default repository in Open SWE settings."
-    )
-}
-UNREADABLE_SESSION: LinearDecline = {
-    "decline": (
-        "I couldn't read this Linear session, so I didn't start. Mention me on the issue "
-        "again; if it keeps happening, let your Open SWE admin know."
-    )
-}
+def _repo_config(full_name: str) -> dict[str, str]:
+    owner, name = full_name.split("/", 1)
+    return {"owner": owner, "name": name}
 
 
-def _sign_in(reason: common.AccountLinkReason) -> LinearDecline:
-    """Ask the author to sign in to Open SWE, which acts on GitHub as them.
+async def _author(email: str) -> tuple[User | None, AuthorStanding]:
+    """The Open SWE user with ``email``, and whether they can run as themselves on GitHub.
 
-    Without a dashboard URL configured the text names the settings page instead
-    of linking it, since the session must still be told why nothing started.
+    Linear only says who wrote a turn by email, so an author without one, or whose
+    email no Open SWE sign-in carries, must sign in, as Slack asks.
     """
-    settings_url = build_settings_url()
-    settings = f"[your Open SWE settings]({settings_url})" if settings_url else "Open SWE"
-    if reason == "revoked":
-        return {
-            "decline": (
-                "Your GitHub sign-in to Open SWE is no longer valid, so I can't work as you. "
-                f"Sign in with GitHub again in {settings}, then mention me again."
-            )
-        }
-    return {
-        "decline": (
-            "I don't know who you are in Open SWE yet, so I can't work as you. Sign in "
-            f"with GitHub in {settings}, using the same email as your Linear account, "
-            "then mention me again."
-        )
-    }
+    user = await User.for_email(email) if email else None
+    if user is None:
+        return None, "sign_in"
+    gap = await common.account_link_reason(user.github_login)
+    if gap is None:
+        return user, "signed_in"
+    return user, "sign_in_again" if gap == "revoked" else "sign_in"
 
 
-def _not_allowed(repo: Mapping[str, str]) -> LinearDecline:
-    return {
-        "decline": (
-            f"I'm not allowed to work in `{repo['owner']}/{repo['name']}`. Name a repository "
-            "Open SWE may work in, or ask your Open SWE admin to allow this one."
-        )
-    }
-
-
-_SESSION_PAYLOADS: Final[
-    Mapping[str, Callable[[object], LinearSessionCreatedPayload | LinearSessionPromptedPayload]]
-] = {
-    "AgentSessionEvent.created": TypeAdapter(LinearSessionCreatedPayload).validate_python,
-    "AgentSessionEvent.prompted": TypeAdapter(LinearSessionPromptedPayload).validate_python,
-}
-
-
-@dataclass(frozen=True)
-class LinearAuthor:
-    """Who wrote a session turn. Linear sends ``email`` too, which MDA's schema keeps."""
-
-    id: str = ""
-    name: str = ""
-    email: str = ""
-
-    @classmethod
-    def of(cls, person: Mapping[str, object] | None) -> LinearAuthor | None:
-        if not person:
-            return None
-        return cls(
-            id=str(person.get("id") or ""),
-            name=str(person.get("name") or ""),
-            email=str(person.get("email") or ""),
-        )
-
-    def identity(self) -> PersonIdentity:
-        key = self.id or self.email or self.name or "unknown"
-        person: PersonIdentity = {"id": f"linear:{key.replace(' ', '-')}"}
-        if self.name:
-            person["display_name"] = self.name
-        if self.email:
-            person["email"] = self.email
-        return person
-
-
-@dataclass(frozen=True)
-class _Issue:
-    id: str
-    identifier: str = ""
-    title: str = ""
-    description: str | None = None
-    url: str = ""
-
-    @classmethod
-    def of(cls, issue: Mapping[str, object]) -> _Issue:
-        description = issue.get("description")
-        return cls(
-            id=str(issue["id"]),
-            identifier=str(issue.get("identifier") or ""),
-            title=str(issue.get("title") or ""),
-            description=description if isinstance(description, str) else None,
-            url=str(issue.get("url") or ""),
-        )
-
-    def repository(self) -> dict[str, str] | None:
-        """The repository the issue names as ``repo:owner/name`` or a GitHub link."""
-        return common.extract_repo_from_text(
-            f"{self.title}\n{self.description or ''}",
-            default_owner=common.DEFAULT_REPO_OWNER,
-            explicit_only=True,
-        )
-
-
-class LinearSessionTurn:
-    """One turn of a Linear agent session: who asked what about which issue."""
-
-    def __init__(
-        self,
-        payload: LinearSessionCreatedPayload | LinearSessionPromptedPayload,
-        issue: Mapping[str, object],
-    ) -> None:
-        session = payload["agentSession"]
-        self.session_id = session["id"]
-        self.issue = _Issue.of(issue)
-        creator = LinearAuthor.of(cast(Mapping[str, object] | None, session.get("creator")))
-        actor = LinearAuthor.of(cast(Mapping[str, object] | None, payload.get("actor")))
-        if payload["action"] == "prompted":
-            # A reply in the session.
-            activity = cast(LinearSessionPromptedPayload, payload)["agentActivity"]
-            user = LinearAuthor.of(cast(Mapping[str, object] | None, activity.get("user")))
-            replier = activity.get("userId")
-            if user is None and replier and (creator is None or creator.id != replier):
-                # Someone other than the creator, named only by id: they sign in as
-                # themselves, never borrowing the creator's identity.
-                user = LinearAuthor(id=replier)
-            self.comment_id = activity.get("sourceCommentId") or ""
-            self.body = activity["content"].get("body") or ""
-            self.author = user or creator or actor or LinearAuthor()
-        else:
-            # The mention or delegation that opened it.
-            comment = session.get("comment")
-            self.comment_id = comment["id"] if comment else ""
-            self.body = (comment.get("body") if comment else None) or ""
-            self.author = creator or actor or LinearAuthor()
-
-    @classmethod
-    def parse(cls, key: str, payload: object) -> LinearSessionTurn | LinearDecline | None:
-        """The session turn an event carries, or None for any other Linear event.
-
-        The payload is checked against MDA's schema for the event; a session
-        payload that doesn't match it, or a session without its issue, has
-        nothing to work on, and the session is told so.
-        """
-        validate = _SESSION_PAYLOADS.get(key)
-        if validate is None:
-            return None
-        try:
-            validated = validate(payload)
-        except ValidationError as error:
-            common.logger.warning(
-                "Linear session event does not match MDA's schema; starting nothing",
-                extra={"linear_event": key, "error_count": error.error_count()},
-            )
-            return UNREADABLE_SESSION
-        issue = validated["agentSession"].get("issue")
-        if not issue:
-            common.logger.info(
-                "Linear session has no issue; starting nothing", extra={"linear_event": key}
-            )
-            return UNREADABLE_SESSION
-        return cls(validated, issue)
-
-    async def repository(
-        self, thread: common.ThreadRecord, author: User
-    ) -> tuple[dict[str, str], str | None] | LinearDecline:
-        """The repository the turn works in, when one is named, remembered or preferred.
-
-        A repository the turn names wins; then the one the session's thread already
-        works in, so a follow-up needn't name it again; then one the issue names;
-        then the author's and the workspace's defaults. With it, the workspace whose
-        personal default chose it, if one did. Otherwise what to tell the session.
-        """
-        repo = (
-            common.extract_repo_from_text(self.body, default_owner=common.DEFAULT_REPO_OWNER)
-            or thread.repo
-            or self.issue.repository()
-        )
-        workspace: str | None = None
-        if not repo:
-            try:
-                repo, workspace = await self._personal_default(author, thread.workspace)
-            except Exception:
-                common.logger.exception(
-                    "Reading a Linear user's default repository failed",
-                    extra={"linear_issue": self.issue.id},
-                )
-        if not repo:
-            repo = (await common.get_workspace_settings()).default_repo
-        if not repo:
-            common.logger.info(
-                "Linear session names no repository and none is a default; starting nothing",
-                extra={"linear_issue": self.issue.id},
-            )
-            return NO_REPOSITORY
-        if not common.is_repo_allowed(repo):
-            common.logger.warning(
-                "Linear session names a repository outside the allowlist",
-                extra={"linear_issue": self.issue.id},
-            )
-            return _not_allowed(repo)
-        return repo, workspace
-
-    @staticmethod
-    async def _personal_default(
-        author: User, thread_workspace: str | None
-    ) -> tuple[dict[str, str] | None, str | None]:
-        """The author's default for the thread's workspace, else their global one."""
-        workspace = thread_workspace or (await resolve_workspace(login=author.github_login)).slug
-        personal = await author.default_repo(workspace, fallback_global=False)
+async def _personal_default(user: User, thread_workspace: str | None) -> RepositoryChoice | None:
+    """The author's default for the thread's workspace, else their global one."""
+    try:
+        workspace = thread_workspace or (await resolve_workspace(login=user.github_login)).slug
+        personal = await user.default_repo(workspace, fallback_global=False)
         if personal:
-            return personal, workspace
-        return await author.default_repo(), None
+            return RepositoryChoice(
+                repository=f"{personal['owner']}/{personal['name']}", workspace=workspace
+            )
+        fallback = await user.default_repo()
+    except Exception:
+        common.logger.exception("Reading a Linear user's default repository failed")
+        return None
+    if not fallback:
+        return None
+    return RepositoryChoice(repository=f"{fallback['owner']}/{fallback['name']}")
 
-    async def _signed_in_author(self) -> User | LinearDecline:
-        """The Open SWE user who wrote the turn, if they can run as themselves on GitHub.
 
-        Linear only says who wrote it by email, so an author without one, or whose
-        email no Open SWE sign-in carries, is asked to sign in, as Slack asks.
-        """
-        user = await User.for_email(self.author.email) if self.author.email else None
-        reason: common.AccountLinkReason = "unlinked"
-        if user is not None:
-            gap = await common.account_link_reason(user.github_login)
-            if gap is None:
-                return user
-            reason = gap
+async def linear_session_facts(request: LinearSessionFactsRequest) -> LinearSessionFacts:
+    """What Open SWE knows about a session turn, for the channel to pick its repository."""
+    user, standing = await _author(request.author_email)
+    if user is None or standing != "signed_in":
         common.logger.info(
-            "Linear session author can't run as themselves; asking them to sign in",
+            "Linear session author can't run as themselves; the channel asks them to sign in",
             extra={
-                "linear_issue": self.issue.id,
-                "author_has_email": bool(self.author.email),
+                "author_has_email": bool(request.author_email),
                 "author_known": user is not None,
-                "account_link_reason": reason,
             },
         )
-        return _sign_in(reason)
-
-    async def prepare_run(self, thread_id: str) -> EndpointAnswer | LinearDecline:
-        """Index the session's thread and prepare the run for its author, or say why not."""
-        author = await self._signed_in_author()
-        if not isinstance(author, User):
-            return author
-        thread = await common.ThreadRecord.read(thread_id)
-        chosen = await self.repository(thread, author)
-        if not isinstance(chosen, tuple):
-            return chosen
-        repo, default_workspace = chosen
-        repository = f"{repo['owner']}/{repo['name']}"
-        title = self.issue.title or self.issue.identifier or "Linear issue"
-        description = self.issue.description or "No description"
-        login = author.github_login
-        workspace = (
-            thread.workspace or default_workspace or await common.workspace_for_repo_config(repo)
+        return LinearSessionFacts(
+            author=standing, settings_url=build_settings_url(), policy=_policy()
         )
+    # A thread it can't read fails the turn: read as new, it would move the session's
+    # repository.
+    thread = await common.ThreadRecord.read(str(request.thread_id))
+    return LinearSessionFacts(
+        author=standing,
+        settings_url=build_settings_url(),
+        thread_repository=_full_name(thread.repo),
+        thread_workspace=thread.workspace,
+        personal_default=await _personal_default(user, thread.workspace),
+        instance_default=_full_name((await common.get_workspace_settings()).default_repo),
+        policy=_policy(),
+    )
 
-        issue_prompt = prompt(
-            "runs/linear-issue",
-            repository=repository,
-            title=title,
-            triggered_by=self.author.name or None,
-            identifier=self.issue.identifier,
-            issue_id=self.issue.id,
-            ticket_url=self.issue.url,
-            description=description,
-        )
-        description_urls = common.extract_image_urls(description)
-        comment_urls = common.extract_image_urls(self.body)
-        images, model_override = await self._images(
-            [*description_urls, *comment_urls], login, workspace
-        )
 
-        linear_issue: dict[str, JsonValue] = {
-            "id": self.issue.id,
-            "title": title,
-            "url": self.issue.url,
-            "identifier": self.issue.identifier,
-            "triggering_user_name": self.author.name,
-        }
-        configurable: dict[str, JsonValue] = {
-            "repo": cast(dict[str, JsonValue], repo),
-            "linear_issue": linear_issue,
-            "user_email": self.author.email,
-            "source": "linear",
-            "workspace": workspace,
-            "environment": workspace,
-            "github_login": login,
-        }
-        if model_override:
-            configurable["agent_model_id"], configurable["agent_effort"] = model_override
+def _policy() -> RepositoryPolicy:
+    return RepositoryPolicy(
+        default_owner=common.DEFAULT_REPO_OWNER or None,
+        allowed_orgs=sorted(common.ALLOWED_GITHUB_ORGS),
+        allowed_repos=sorted(common.ALLOWED_GITHUB_REPOS),
+    )
 
-        # First, so the metadata write below doesn't create the thread on MDA.
-        await adopt_channel_run(thread_id, LINEAR_CHANNEL)
-        await common.upsert_agent_thread_metadata(
-            thread_id,
-            source="linear",
-            repo_config=repo,
-            github_login=login,
-            user_email=self.author.email,
-            title=title,
-            source_context=SourceContext.parse({"linear_issue": linear_issue}),
-            workspace=workspace,
-        )
 
-        run_config = await prepare_durable_run(
-            "agent",
-            {"configurable": configurable},
-            {**common.AGENT_VERSION_METADATA, CHANNEL_METADATA_KEY: LINEAR_CHANNEL},
-            source="linear",
+def _declined(
+    reason: DeclineReason, *, repository: str | None = None, settings_url: str | None = None
+) -> LinearSessionStart:
+    return LinearSessionStart(
+        answer=LinearSessionDeclined(
+            reason=reason, repository=repository, settings_url=settings_url
         )
-        rewritten = await RUNTIMES.mda_runtime.run_payload(
-            thread_id,
-            {
-                "assistant_id": "agent",
-                "config": cast(JsonValue, run_config),
-                # So the attribution the run's hooks read rides in its run token.
-                "metadata": cast(JsonValue, run_config["metadata"]),
-            },
-            # A channel thread has no Slack thread to link.
-            thread_metadata={},
-        )
-        prepared: EndpointAnswer = {
-            "input": cast(
-                dict[str, AnswerJson],
-                self._input(issue_prompt, repository, images, description_urls),
-            ),
-            "context": cast(dict[str, AnswerJson], rewritten["context"]),
-            "metadata": cast(dict[str, AnswerJson], channel_run_metadata(run_config["metadata"])),
-        }
-        if COMPLETION_WEBHOOK_URL:
-            prepared["webhook"] = COMPLETION_WEBHOOK_URL
-        await channel_run_starting(thread_id)
-        return prepared
+    )
 
-    async def _images(
-        self, urls: list[str], login: str, workspace: str | None
-    ) -> tuple[dict[str, dict[str, JsonValue]], tuple[str, str] | None]:
-        """Image blocks by URL, and the vision model to use when the configured one can't see."""
-        if not urls:
-            return {}, None
-        urls = common.dedupe_urls(urls)
-        override: tuple[str, str] | None = None
-        model_id = await common.resolve_agent_model_id(login, workspace=workspace)
-        if not common.model_supports_images(model_id):
-            override = common.default_vision_model_pair()
-        async with httpx2.AsyncClient(
-            transport=pooled_transport(), timeout=common.DEFAULT_HTTP_TIMEOUT
-        ) as client:
-            fetched = await asyncio.gather(*(common.fetch_image_block(url, client) for url in urls))
-        blocks = {
-            url: cast(dict[str, JsonValue], block)
-            for url, block in zip(urls, fetched, strict=True)
-            if block
-        }
-        return blocks, override
 
-    def _input(
-        self,
-        issue_prompt: str,
-        repository: str,
-        images: dict[str, dict[str, JsonValue]],
-        description_urls: list[str],
-    ) -> RunInput:
-        issue_blocks: list[dict[str, JsonValue]] = [
-            cast(dict[str, JsonValue], create_text_block(issue_prompt)),
-            *(images[url] for url in common.dedupe_urls(description_urls) if url in images),
-        ]
-        comment_images = [
-            images[url]
-            for url in common.dedupe_urls(common.extract_image_urls(self.body))
-            if url in images
-        ]
-        body: str | list[dict[str, JsonValue]] = (
-            [cast(dict[str, JsonValue], create_text_block(self.body)), *comment_images]
-            if comment_images
-            else self.body
+async def plan_linear_session(plan: PlanLinearSession) -> LinearSessionStart:
+    """Index the session's thread and sign its run, once the author and repository check out."""
+    turn = plan.turn
+    thread_id = str(turn.thread_id)
+    user, standing = await _author(turn.author.email)
+    if user is None or standing != "signed_in":
+        reason: DeclineReason = "sign_in_again" if standing == "sign_in_again" else "sign_in"
+        return _declined(reason, settings_url=build_settings_url())
+    repo = _repo_config(plan.repository)
+    if not common.is_repo_allowed(repo):
+        common.logger.warning(
+            "Linear session names a repository outside the allowlist",
+            extra={"linear_issue": turn.issue.id},
         )
-        return {
-            "messages": [
-                system_introduction(
-                    {
-                        "id": "system:linear-issue",
-                        "display_name": "Linear issue",
-                        "platform": "linear",
-                    }
-                ),
-                system_input(
-                    issue_blocks if len(issue_blocks) > 1 else issue_prompt,
-                    {
-                        "sender_id": "system:linear-issue",
-                        "surface": "linear",
-                        "kind": "system",
-                        "data": {
-                            "issue": {
-                                "id": self.issue.id,
-                                "identifier": self.issue.identifier,
-                                "url": self.issue.url,
-                                "repository": repository,
-                                "title": self.issue.title,
-                            }
-                        },
-                    },
-                ),
-                human_input(
-                    body,
-                    {
-                        "sender_id": self.author.identity()["id"],
-                        "surface": "linear",
-                        "kind": "human",
-                        "data": {"comment_id": self.comment_id, "session_id": self.session_id},
-                    },
-                ),
-            ]
-        }
+        return _declined("repository_not_allowed", repository=plan.repository)
+    login = user.github_login
+    workspace = plan.workspace or await common.workspace_for_repo_config(repo)
+    title = turn.issue.title or turn.issue.identifier or "Linear issue"
+    linear_issue: dict[str, JsonValue] = {
+        "id": turn.issue.id,
+        "title": title,
+        "url": turn.issue.url,
+        "identifier": turn.issue.identifier,
+        "triggering_user_name": turn.author.name,
+    }
+    configurable: dict[str, JsonValue] = {
+        "repo": cast(dict[str, JsonValue], repo),
+        "linear_issue": linear_issue,
+        "user_email": turn.author.email,
+        "source": "linear",
+        "workspace": workspace,
+        "environment": workspace,
+        "github_login": login,
+    }
+
+    # First, so the metadata write below doesn't create the thread on MDA.
+    await adopt_channel_run(thread_id, LINEAR_CHANNEL)
+    await common.upsert_agent_thread_metadata(
+        thread_id,
+        source="linear",
+        repo_config=repo,
+        github_login=login,
+        user_email=turn.author.email,
+        title=title,
+        source_context=SourceContext.parse({"linear_issue": linear_issue}),
+        workspace=workspace,
+    )
+    run_config = await prepare_durable_run(
+        "agent",
+        {"configurable": configurable},
+        {**common.AGENT_VERSION_METADATA, CHANNEL_METADATA_KEY: LINEAR_CHANNEL},
+        source="linear",
+    )
+    rewritten = await RUNTIMES.mda_runtime.run_payload(
+        thread_id,
+        {
+            "assistant_id": "agent",
+            "config": cast(JsonValue, run_config),
+            # So the attribution the run's hooks read rides in its run token.
+            "metadata": cast(JsonValue, run_config["metadata"]),
+        },
+        # A channel thread has no Slack thread to link.
+        thread_metadata={},
+    )
+    run = LinearSessionRun(
+        repository=plan.repository,
+        title=title,
+        context=cast(dict[str, JsonValue], rewritten["context"]),
+        metadata=channel_run_metadata(run_config["metadata"]),
+        webhook=COMPLETION_WEBHOOK_URL or None,
+    )
+    await channel_run_starting(thread_id)
+    return LinearSessionStart(answer=run)

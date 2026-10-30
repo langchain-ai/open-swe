@@ -1,12 +1,14 @@
-"""Linear, through Open SWE's app: mentioning or delegating an issue to it opens a session."""
+"""Linear, through Open SWE's app: mentioning or delegating an issue to it opens a session.
+
+The handlers run here: a session turn starts the coding agent's run on the
+session's thread (``rt.linear``); an issue event starts the Linear automations it
+fires, each on a thread of its own (``rt.linear_automations``). Every handled
+delivery goes to the backend's event log.
+"""
 
 from managed_deepagents import channels
-from rt.intake import backend_endpoint
-
-# The backend decides what each event starts: a session turn starts the run it
-# prepares; issue and comment events start nothing, and feed automations and the
-# event log.
-backend = backend_endpoint("/linear/channel/events")
+from rt.linear import record, start_session
+from rt.linear_automations import start_automations
 
 channel = channels.linear(
     app={
@@ -19,14 +21,14 @@ channel = channels.linear(
     # A new message in the session redirects the work in progress, as before.
     multitask_strategy="interrupt",
     # Issues other integrations create or change (GitHub sync, Sentry, ...) still feed
-    # automations and the event log; they start no run themselves. The channel always
-    # ignores the app's own changes, so its comments can't trigger it.
+    # automations and the event log. The channel always ignores the app's own changes,
+    # so its comments can't trigger it.
     ignore_bots=False,
     on_event={
-        "AgentSessionEvent.created": backend,
-        "AgentSessionEvent.prompted": backend,
-        "Issue.create": backend,
-        "Issue.update": backend,
-        "Comment.create": backend,
+        "AgentSessionEvent.created": start_session,
+        "AgentSessionEvent.prompted": start_session,
+        "Issue.create": start_automations,
+        "Issue.update": start_automations,
+        "Comment.create": record,
     },
 )

@@ -168,7 +168,7 @@ The HMR WebSocket connects straight to Vite's port; the UI's Vite config points 
 | `POST /github/channel/events` | The MDA deployment's GitHub channel asking what an issue mention starts |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /linear/channel/events` | The MDA deployment's Linear channel asking what a Linear event starts |
+| `POST /mda/channel-api/{endpoint}` | The MDA deployment's channels asking for what needs Open SWE's data (`runtime_api.linear`) |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |

@@ -223,7 +223,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     }
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
     notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_linear_notification", notify)
+    monkeypatch.setattr(completion, "_post_failure_reply", notify)
     task_messages, wakes = AsyncMock(), AsyncMock()
     monkeypatch.setattr(completion.TaskMessage, "deliver_to", task_messages)
     monkeypatch.setattr(completion.EventSubscription, "deliver_to", wakes)
@@ -238,7 +238,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     task_messages.assert_awaited_once_with("t1")
     wakes.assert_awaited_once_with("t1", "enqueue")
 
-    # A run the backend started on the same thread still gets its notice.
+    # A run the backend started on the same thread still goes to its failure reply.
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-2", "status": "error"}
     )

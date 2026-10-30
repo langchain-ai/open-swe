@@ -10,12 +10,10 @@ public address, as the backend reaches its own.
 """
 
 import asyncio
-import ipaddress
 import logging
 from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 from functools import partial
 from typing import Final
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
 from fastmcp import Client
@@ -37,6 +35,7 @@ from pydantic import JsonValue
 from runtime_api.catalog import McpServerSpec
 
 from rt.backend import OpenSweBackend
+from rt.public_http import PublicOrigin
 from rt.tools import called
 
 logger = logging.getLogger(__name__)
@@ -48,71 +47,6 @@ _RUNTIME: Final = "runtime"
 
 class McpServerError(ValueError):
     """A request the run refused to send to an MCP server; its message is ours."""
-
-
-def _origin(url: str) -> tuple[str, str | None, int]:
-    parsed = urlsplit(url)
-    return parsed.scheme, parsed.hostname, parsed.port or 443
-
-
-async def _public_addresses(host: str) -> list[str]:
-    infos = await asyncio.get_running_loop().getaddrinfo(host, None)
-    addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
-    if not addresses:
-        raise McpServerError("MCP server has no addresses")
-    for address in addresses:
-        try:
-            ip = ipaddress.ip_address(address)
-        except ValueError:
-            raise McpServerError("MCP server must resolve only to public addresses") from None
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if not ip.is_global:
-            raise McpServerError("MCP server must resolve only to public addresses")
-    return addresses
-
-
-class _PublicOrigin(httpx2.AsyncBaseTransport):
-    """Reaches only the server's own HTTPS origin, at an address checked as public.
-
-    The request goes to the checked address, so a second DNS answer cannot point it,
-    and the credential it carries, at a private host.
-    """
-
-    def __init__(self, url: str) -> None:
-        self._origin = _origin(url)
-        self._transport = httpx2.AsyncHTTPTransport(trust_env=False)
-
-    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        url = str(request.url)
-        parsed = urlsplit(url)
-        if parsed.scheme != "https" or _origin(url) != self._origin or not parsed.hostname:
-            raise McpServerError("MCP requests must stay on the server's HTTPS origin")
-        headers = request.headers.copy()
-        headers["Host"] = parsed.netloc
-        addresses = await _public_addresses(parsed.hostname)
-        for index, address in enumerate(addresses):
-            host = f"[{address}]" if ":" in address else address
-            pinned = httpx2.Request(
-                request.method,
-                urlunsplit(parsed._replace(netloc=f"{host}:{parsed.port or 443}")),
-                headers=headers,
-                stream=request.stream,
-                extensions={**request.extensions, "sni_hostname": parsed.hostname},
-            )
-            try:
-                return await self._transport.handle_async_request(pinned)
-            except (httpx2.ConnectError, httpx2.ConnectTimeout) as exc:
-                if index == len(addresses) - 1:
-                    raise
-                logger.info(
-                    "Trying an MCP server's next address",
-                    extra={"mcp_host": parsed.hostname, "error_type": type(exc).__name__},
-                )
-        raise httpx2.ConnectError("MCP server has no public addresses")
-
-    async def aclose(self) -> None:
-        await self._transport.aclose()
 
 
 def _http_client(
@@ -128,7 +62,7 @@ def _http_client(
         headers=headers,
         timeout=timeout or httpx2.Timeout(_TIMEOUT_SECONDS),
         auth=auth,
-        transport=_PublicOrigin(url),
+        transport=PublicOrigin(url, name="MCP server", error=McpServerError),
         follow_redirects=False,
         trust_env=False,
     )
