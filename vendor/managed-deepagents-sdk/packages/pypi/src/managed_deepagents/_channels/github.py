@@ -37,7 +37,6 @@ from managed_deepagents._channels.github_types import (
     SupportedEventKey,
 )
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
-from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventReceived,
@@ -55,7 +54,7 @@ from managed_deepagents._channels.http.provider import (
 from managed_deepagents._channels.http.studio import interrupted_notice, pending_decision
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.resolve_user import checked_resolve_user
-from managed_deepagents._channels.run_input import HandlerFailed, starts_on_conversation
+from managed_deepagents._channels.run_input import starts_on_conversation
 from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import set_log_attributes
 
@@ -95,8 +94,9 @@ def github_channel(
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
-            message, or state), or ``None`` to skip. A handler that raises fails
-            the delivery, which GitHub then shows as failed. While a thread waits on an
+            message, or state), or ``None`` to skip. MDA answers GitHub before it
+            asks the handler, so a handler may take longer than GitHub waits; one
+            that raises starts nothing, and its error is logged. While a thread waits on an
             interrupt, a run for that thread doesn't start and the issue or
             pull request is told to continue it in LangSmith Studio; runs on
             other threads still start. A handler may also be an
@@ -402,9 +402,8 @@ async def _parse(
         "target": target,
         "delivery_key": delivery_id,
     }
-    # An endpoint may take longer to answer than GitHub waits.
-    if is_endpoint_handler(handlers.get(key)):
-        message["background"] = True
+    # A handler may take longer to decide than GitHub waits, so GitHub hears first.
+    message["background"] = True
     return {
         "type": "message",
         "message": message,
@@ -419,10 +418,7 @@ async def _handler_input(
     raw_event: JsonValue | None,
     thread: GitHubChannelThread,
 ) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips.
-
-    A handler that raised fails the delivery (``HandlerFailed``).
-    """
+    """What the event's handler starts a run with; ``None`` when it skips or fails."""
     event = _event(raw_event)
     handler = None if event is None else handlers.get(event.key)
     if event is None or handler is None:
@@ -430,8 +426,6 @@ async def _handler_input(
     outcome = await run_event_handler(
         "GitHub", event.key, event.delivery_id, lambda: handler(event, thread)
     )
-    if outcome.type == "failed":
-        raise HandlerFailed
     return outcome.input
 
 

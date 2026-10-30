@@ -145,7 +145,7 @@ class TriggerMessageDecision:
 
 @dataclass(frozen=True)
 class TriggerMessageBackground:
-    """A decision that may take longer than Trigger Server waits, such as an event endpoint's.
+    """A decision that may take longer than Trigger Server waits, such as a handler's.
 
     Trigger Server then gets its answer first, and a failure is only logged.
     """

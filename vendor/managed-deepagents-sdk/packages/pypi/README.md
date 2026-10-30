@@ -562,8 +562,12 @@ A handler gets the `SlackMessageEvent` (`text`, `user_id`, `channel_id`,
 returns the run's input, as `agent.invoke` takes it, optionally with
 `context`, `metadata` and `webhook` as `(input, options)`, as the GitHub and
 Linear handlers do. `None` starts no run, and the app neither reacts nor
-replies. A handler that raises, or returns input the channel can't start,
-starts no run either; the error is logged without its message. The message's
+replies. Trigger Server gets its answer before MDA asks the handler, so a slow
+handler never times out the delivery. A handler that raises, or returns input
+the channel can't start, starts no run either; the error is logged without its
+message. To try a failing call again, retry it inside the handler with the
+backoff you choose; a delivery whose handler is still running or waiting when
+the deployment restarts is lost. The message's
 blocks and attachments are added to the handler's messages, and its files
 still reach `/workspace/attachments/`. Interrupt resumes don't go through
 `on_event`; a click on a button the agent posted does, as `"interaction"`: see
@@ -971,9 +975,10 @@ nothing. The App's own activity is what the agent does with the App's token,
 such as its comments, its pushes or a pull request it opened; set
 `include_own_events=True` to hand those to handlers too, with `event.from_app`
 set. A handler that answers comments or reviews then skips `event.from_app`,
-or the agent answers itself. The request awaits the configured callback and run creation before
-acknowledgment (an endpoint's is asked after; see "Asking your service what to
-start"); synchronous and async callbacks are supported. A handler returns
+or the agent answers itself. GitHub gets its answer first; then MDA asks the
+configured handler, a callback or an endpoint (see "Asking your service what to
+start"), and starts the run, so a slow handler never times out the delivery.
+Synchronous and async callbacks are supported. A handler returns
 what `agent.invoke` takes: a nonblank string (one user message), a message such
 as `HumanMessage(...)` with text or content blocks, state such as
 `{"messages": [...], "todos": []}`, or `(input, {"context": {...}, "metadata": {...}})`
@@ -989,10 +994,14 @@ The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
 backend signs for the thread.
 `None` skips without a thread or run.
-Other results are safely logged and start nothing. A handler that raises fails
-the delivery: MDA logs the error's type only and answers GitHub with an error, so
-the delivery shows as failed in the App's settings, to redeliver. Nothing
-started for it, so the redelivery asks the handler again.
+Other results are safely logged and start nothing. So does a handler that
+raises: GitHub already has its answer, so the delivery isn't failed; MDA logs
+the error's type only. Nor is a delivery whose run can't start, for example
+while the Agent Server is briefly unavailable: `on_finish` gets `failed` with
+reason `start`.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 Each issue or pull request has one thread, so the agent keeps the conversation:
 an issue, its comments, and a pull request with its reviews and review comments
@@ -1216,10 +1225,16 @@ replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
 
-A handler that raises fails the delivery, and Linear sends it again (after a
-minute, an hour and six hours), asking the handler again; the error is logged by
-type only. In an agent session it doesn't: the session hears at once that
-something went wrong, since its author waits.
+Linear gets its answer before MDA asks the handler, so a slow handler never
+times out the delivery. A handler that raises starts nothing, and Linear doesn't
+send the delivery again; the error is logged by type only. The same holds for a
+run that can't start, for example while the Agent Server is briefly
+unavailable: `on_finish` gets `failed` with reason `start`. In an agent session,
+the session hears at once that something went wrong, since its author waits;
+an issue gets no comment, since its handler may have skipped the event.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 `app` also names the app deploy asks the admin to create: `name` (2-80
 characters, without "Linear"; defaults to the agent's name), `description`,
