@@ -2,7 +2,7 @@
 
 A request is refused while the pull request is closed or a draft. People sign up from the card; after
 the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
-``openswe.human_review.picking``), waking an agent to pick when nobody qualifies. The
+``openswe.human_review.picking``), notifying the author when nobody qualifies. The
 pull request, when auto-merge is enabled, merges once every reviewer approves on
 GitHub, or once ``AUTO_MERGE_AFTER_HOURS`` have passed with at least one approval,
 and only while it is otherwise ready.
@@ -57,6 +57,7 @@ from openswe.human_review.picking import (
     ReviewerAvailability,
     Wait,
     choose_reviewer,
+    recent_contributors,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.jobs import queue
@@ -714,6 +715,17 @@ async def assign(
             return _failure(
                 f"@{github_login} opted out of automatic review picks; pick someone else."
             )
+        pr = request.pull_request
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            contributors = await recent_contributors(
+                pull.repo, pr.base_ref or None, await ChangedFile.of_pull(pull) or []
+            )
+        if github_login.lower() not in contributors:
+            return _failure(
+                f"@{github_login} is not a regular contributor to these files in the past 30 days. "
+                "Require at least three commits changing 20 or more relevant lines each; "
+                "do not fall back to minor contributors or inactive code owners."
+            )
         availability = await ReviewerAvailability.for_user(user)
         if availability.out_of_office is True:
             return _failure(f"@{github_login} is out of office; pick someone else.")
@@ -1174,7 +1186,7 @@ class Suggestion:
 async def start_auto_assign(
     request: HumanReviewRequest, *, asked: bool = False, trigger: PickTrigger | None = None
 ) -> AutoAssignResult:
-    """Pick a reviewer, waking an agent when nobody qualifies.
+    """Pick a reviewer, notifying the author when nobody qualifies.
 
     ``asked`` is someone requesting it now rather than the deadline passing. A
     ``trigger`` hands the pick to the agent owning the request's Slack thread,
@@ -1202,6 +1214,31 @@ async def start_auto_assign(
     return result
 
 
+async def _assignment_failed(request: HumanReviewRequest, *, area: Area | None = None) -> None:
+    pr = request.pull_request
+    scope = f" for {' '.join(area.handles)}" if area is not None else ""
+    text = (
+        f"Automatic reviewer assignment failed{scope} for <{pr.url}|{pr.label}>: "
+        "no suitable available regular contributor qualified from the past 30 days "
+        "(at least three commits changing 20 or more relevant lines each). "
+        "Please choose a reviewer yourself."
+    )
+    author = await User.for_login("github", pr.author) if pr.author else None
+    if author is not None and author.slack_user_id:
+        if await send_dm(author.slack_user_id, text, origin=request.dm_origin):
+            return
+        logger.warning(
+            "Could not DM author about failed reviewer assignment",
+            extra={"request_id": str(request.id)},
+        )
+    async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+        await pull.comment(
+            f"@{pr.author} Automatic reviewer assignment failed{scope}: no suitable available "
+            "regular contributor qualified from the past 30 days (at least three commits "
+            "changing 20 or more relevant lines each). Please choose a reviewer yourself."
+        )
+
+
 async def _auto_assign(
     request: HumanReviewRequest, *, asked: bool, trigger: PickTrigger | None
 ) -> AutoAssignResult:
@@ -1221,6 +1258,9 @@ async def _auto_assign(
     if isinstance(choice, Wait):
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
             return AutoAssignResult("waiting", choice.login, choice.until)
+        return AutoAssignResult("failed")
+    if choice is None:
+        await _assignment_failed(request)
         return AutoAssignResult("failed")
     if trigger is not None:
         woken = await _wake_picker(
@@ -1264,7 +1304,10 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
     suggestions: list[Suggestion] = []
     for area in open_areas:
         choice = await choose_reviewer(request, area=area)
-        suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
+        if choice is None:
+            await _assignment_failed(request, area=area)
+        else:
+            suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
     logger.info(
         "Asking for reviewers for the code owners an approval left",
         extra={
@@ -1273,6 +1316,8 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
             "code_owner_areas": [list(area.handles) for area in open_areas],
         },
     )
+    if not suggestions:
+        return
     trigger = PickTrigger("approved", tuple(approvers))
     if not await _wake_picker(request, asked=False, trigger=trigger, suggestions=suggestions):
         async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -1478,10 +1523,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     area = await _area_left_by(request, {p.github_login.lower() for p in idle})
     choice = await choose_reviewer(request, area=area)
     if choice is None:
-        logger.info(
-            "Nobody else can review, so an unaccepted pick stays",
-            extra={"request_id": str(request.id)},
-        )
+        await _assignment_failed(request, area=area)
         return "no_alternative"
     logger.info(
         "Rotating away from unaccepted reviewer picks",

@@ -713,6 +713,13 @@ class RepoClient:
             params["sha"] = ref
         return await self.get("commits", params)
 
+    async def commit(self, sha: str) -> dict[str, object]:
+        """A commit's changed files and statistics."""
+        payload = await self.get(f"commits/{quote(sha, safe='')}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the commit without an object")
+        return payload
+
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 

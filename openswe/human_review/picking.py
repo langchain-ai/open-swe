@@ -1,6 +1,7 @@
 """Deterministic reviewer picks: code owners and recent authors of the changed files.
 
-Candidates come from one CODEOWNERS area at a time, the one owning the most changed
+Candidates must have at least three commits changing 20 or more relevant lines each
+in the last 30 days. They come from one CODEOWNERS area at a time, the one owning the most changed
 files first. Each scores the changed files they own plus those they changed within
 ``HISTORY_WINDOW``, divided by one more than the open reviews they already have.
 Only people inside their work hours are picked; when nobody is, the pick waits
@@ -33,7 +34,9 @@ from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
-HISTORY_WINDOW = timedelta(days=90)
+HISTORY_WINDOW = timedelta(days=30)
+_MIN_SUBSTANTIAL_COMMITS = 3
+_MIN_CHANGED_LINES = 20
 HISTORY_MAX_FILES = 30
 _HISTORY_CONCURRENCY = 8
 WORK_START = time(9)
@@ -51,6 +54,7 @@ class _Login(BaseModel):
 class _Commit(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    sha: str
     author: _Login | None = None
 
 
@@ -245,34 +249,69 @@ class Coverage:
         return await cls.build(codeowners, [changed.filename for changed in files])
 
 
-async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:
+async def recent_contributors(
+    repo: RepoClient, ref: str | None, files: list[ChangedFile]
+) -> Counter[str]:
+    """Count relevant files touched by authors with at least three substantial recent commits."""
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
+    paths = {changed.filename for changed in files}
     gate = asyncio.Semaphore(_HISTORY_CONCURRENCY)
 
-    async def authors(path: str) -> set[str]:
+    async def history(path: str) -> list[_Commit]:
         async with gate:
             try:
-                commits = _COMMITS.validate_python(
-                    await repo.commits(path=path, since=since, ref=ref)
-                )
+                return _COMMITS.validate_python(await repo.commits(path=path, since=since, ref=ref))
             except httpx2.HTTPError, ValueError, ValidationError:
                 logger.warning(
                     "Could not read a changed file's history",
                     extra={"repository": repo.full_name, "path": path},
                     exc_info=True,
                 )
-                return set()
-        return {
-            commit.author.login.lower()
-            for commit in commits
-            if commit.author is not None and commit.author.type == "User"
-        }
+                return []
 
-    touched: Counter[str] = Counter()
-    for logins in await asyncio.gather(*(authors(f.filename) for f in busiest)):
-        touched.update(logins)
-    return touched
+    commits = {
+        commit.sha: commit
+        for file_history in await asyncio.gather(*(history(f.filename) for f in busiest))
+        for commit in file_history
+        if commit.author is not None and commit.author.type == "User"
+    }
+    counts = Counter(commit.author.login.lower() for commit in commits.values() if commit.author)
+
+    async def contribution(commit: _Commit) -> tuple[str, set[str]] | None:
+        if commit.author is None or counts[commit.author.login.lower()] < _MIN_SUBSTANTIAL_COMMITS:
+            return None
+        async with gate:
+            try:
+                changed = TypeAdapter(list[ChangedFile]).validate_python(
+                    (await repo.commit(commit.sha)).get("files", [])
+                )
+            except httpx2.HTTPError, ValueError, ValidationError:
+                logger.warning(
+                    "Could not read a commit's contribution",
+                    extra={"repository": repo.full_name, "sha": commit.sha},
+                    exc_info=True,
+                )
+                return None
+        relevant = [file for file in changed if file.filename in paths]
+        if sum(file.changed_lines for file in relevant) < _MIN_CHANGED_LINES:
+            return None
+        return commit.author.login.lower(), {file.filename for file in relevant}
+
+    substantial: Counter[str] = Counter()
+    touched: dict[str, set[str]] = {}
+    for item in await asyncio.gather(*(contribution(commit) for commit in commits.values())):
+        if item is not None:
+            login, changed_paths = item
+            substantial[login] += 1
+            touched.setdefault(login, set()).update(changed_paths)
+    return Counter(
+        {
+            login: len(changed_paths)
+            for login, changed_paths in touched.items()
+            if substantial[login] >= _MIN_SUBSTANTIAL_COMMITS
+        }
+    )
 
 
 async def choose_reviewer(
@@ -313,7 +352,7 @@ async def _choose_reviewer(
         return None
     ref = pr.base_ref or None
     codeowners, touched = await asyncio.gather(
-        CodeOwners.fetch(pull.repo, ref), _touched(pull.repo, ref, files)
+        CodeOwners.fetch(pull.repo, ref), recent_contributors(pull.repo, ref, files)
     )
     coverage = (
         await Coverage.build(codeowners, [changed.filename for changed in files])
@@ -333,7 +372,7 @@ async def _choose_reviewer(
         },
     )
     author = (pr.author or "").lower()
-    logins = sorted((owned.keys() | touched.keys()) - {author})
+    logins = sorted(touched.keys() - {author})
     users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
     taken = {p.user_id for p in request.participants if p.decision != "expired"}
     missed = {p.user_id for p in request.participants if p.decision == "expired"}
