@@ -1,13 +1,11 @@
 """What threads remember, and the prompt each workspace's curator distils from it.
 
-A personal memory applies to the runs of the person who saved it at once. Every
-memory also waits for the curator of the workspace it was saved in, which may fold
-what many people's threads learned into the workspace's prompt. The curator never
-reads a memory saved in a private thread unless its person agreed to share it.
+A personal memory applies to the runs of the person who saved it at once. A memory
+saved in a shared thread also waits for the curator of the workspace it was saved in,
+which may fold what many people's threads learned into the workspace's prompt. One
+saved in a private thread is held: the curator never reads it.
 """
 
-import hashlib
-import hmac
 from datetime import datetime
 from typing import Final, Literal, Self
 from uuid import UUID, uuid7
@@ -15,9 +13,9 @@ from uuid import UUID, uuid7
 from pydantic import BaseModel
 from sqlalchemy import ForeignKey, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, selectinload
 
-from openswe.config import ENV
+from openswe.dashboard.admin import is_admin
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.users.models import User
@@ -26,6 +24,8 @@ from openswe.workspaces.rows import WorkspaceRow
 Scope = Literal["personal", "workspace"]
 Status = Literal["pending", "held", "adopted", "declined"]
 Decision = Literal["adopted", "declined"]
+# The statuses the curator lists: it never sees a held memory.
+Decided = Literal["pending", "adopted", "declined"]
 Withdrawal = Literal["deleted", "requested"]
 
 # The thread metadata key naming the workspace a curator thread curates; nobody posts there.
@@ -62,21 +62,6 @@ class MemoryRow(Base):
         ForeignKey(User.id, ondelete="SET NULL"), default=None
     )
 
-    @property
-    def person_key(self) -> str | None:
-        """The same for every memory one person saved in one workspace, and nothing else.
-
-        Keyed by a server secret: the curator's thread is public, and a plain hash of ids
-        anyone can guess would name who saved each memory.
-        """
-        if self.created_by is None:
-            return None
-        secret = ENV.REMOTE_RUNTIME_TOKEN_SECRET.optional()
-        if not secret:
-            raise RuntimeError("REMOTE_RUNTIME_TOKEN_SECRET keys the curator's person keys")
-        message = f"memory-person:{self.workspace_id}:{self.created_by}".encode()
-        return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()[:16]
-
 
 class WorkspacePromptVersion(Base):
     __tablename__ = "workspace_prompt_version"
@@ -110,37 +95,53 @@ class PersonalMemory(BaseModel):
         return f"{self.body} (memory {self.id})"
 
 
+class Author(BaseModel):
+    """Who saved a memory in a shared thread, which everyone in it could already see."""
+
+    full_name: str
+    github_login: str
+    github_user_id: str
+    slack_user_id: str
+    # A configured admin, as a thread's ``person`` block calls them.
+    admin: bool
+
+    @classmethod
+    def of(cls, user: User) -> Self:
+        return cls(
+            full_name=user.display_name,
+            github_login=user.github_login,
+            github_user_id=user.github_user_id,
+            slack_user_id=user.slack_user_id,
+            admin=is_admin(user.email, login=user.github_login or None),
+        )
+
+
 class CuratedMemory(BaseModel):
-    """A memory as the curator sees it: never who saved it, and never what a private
-    thread said unless its person agreed to share it."""
+    """A memory as the curator sees it: only ever one saved in a shared thread."""
 
     id: UUID
     scope: Scope
     status: Status
     saved_at: datetime
-    # The same for every memory one person saved in this workspace, so the curator
-    # can count how many people say a thing without learning who they are.
-    person: str | None
-    from_private_thread: bool
-    # None for a memory from a private thread whose person kept it to themselves.
-    body: str | None
-    # Where the curator can look for evidence; None for a private thread.
+    # None once its author's account is gone, or for a run no person started.
+    author: Author | None
+    body: str
+    # Where it was saved, for the curator to read as evidence.
     thread_id: str | None
-    # Its person asked to take it back, even after it was adopted.
+    # Its author asked to take it back, even after it was adopted.
     withdrawal_requested: bool
 
     @classmethod
-    def of(cls, row: MemoryRow) -> Self:
+    def of(cls, row: MemoryRow, author: User | None) -> Self:
         return cls.model_validate(
             {
                 "id": row.id,
                 "scope": row.scope,
                 "status": row.status,
                 "saved_at": row.created_at,
-                "person": row.person_key,
-                "from_private_thread": row.from_private_thread,
-                "body": None if row.status == "held" else row.body,
-                "thread_id": None if row.from_private_thread else row.thread_id,
+                "author": None if author is None else Author.of(author),
+                "body": row.body,
+                "thread_id": row.thread_id,
                 "withdrawal_requested": row.withdrawal_requested,
             }
         )
@@ -171,15 +172,12 @@ class Memories:
         workspace: str | None,
         thread_id: str | None,
         from_private_thread: bool,
-        shared: bool,
     ) -> MemoryRow:
-        """Keep a memory; one from a private thread its person did not share is held from
-        the curator, and a workspace one never takes effect without it.
+        """Keep a memory; one from a private thread is held, so the curator never reads it.
 
-        A personal memory keeps the workspace it was saved in when there is one, for that
-        workspace's curator; a workspace memory needs it.
+        A personal memory keeps the workspace it was saved in when there is one; a
+        workspace memory needs it.
         """
-        held = from_private_thread and not shared
         async with postgres.session() as session:
             workspace_id = (
                 await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == workspace))
@@ -194,7 +192,7 @@ class Memories:
                 workspace_id=workspace_id,
                 thread_id=thread_id,
                 from_private_thread=from_private_thread,
-                status="held" if held else "pending",
+                status="held" if from_private_thread else "pending",
                 created_by=person,
                 updated_by=person,
             )
@@ -274,18 +272,34 @@ class Memories:
             withdrawn = await session.scalar(select(MemoryRow.id).where(*mine))
         return "requested" if withdrawn else None
 
-    async def for_curator(self, workspace: str, status: Status) -> list[CuratedMemory]:
+    async def for_curator(self, workspace: str, status: Decided) -> list[CuratedMemory]:
+        """The workspace's memories from shared threads with ``status``, oldest first, each
+        with its author."""
         async with postgres.session() as session:
-            rows = await session.scalars(
-                select(MemoryRow)
-                .where(
-                    MemoryRow.workspace_id == await self._workspace_id(session, workspace),
-                    MemoryRow.status == status,
+            rows = list(
+                await session.scalars(
+                    select(MemoryRow)
+                    .where(
+                        MemoryRow.workspace_id == await self._workspace_id(session, workspace),
+                        MemoryRow.from_private_thread.is_(False),
+                        MemoryRow.status == status,
+                    )
+                    .order_by(MemoryRow.created_at)
+                    .limit(_CURATOR_PAGE)
                 )
-                .order_by(MemoryRow.created_at)
-                .limit(_CURATOR_PAGE)
             )
-            return [CuratedMemory.of(row) for row in rows]
+            authors = {
+                user.id: user
+                for user in await session.scalars(
+                    select(User)
+                    .options(selectinload(User.identities))
+                    .where(User.id.in_({row.created_by for row in rows if row.created_by}))
+                )
+            }
+            return [
+                CuratedMemory.of(row, authors.get(row.created_by) if row.created_by else None)
+                for row in rows
+            ]
 
     async def pending_workspaces(self) -> list[str]:
         """The slugs of the workspaces with a memory their curator has not decided."""
@@ -306,6 +320,7 @@ class Memories:
                 .where(
                     MemoryRow.id == memory_id,
                     MemoryRow.workspace_id == await self._workspace_id(session, workspace),
+                    MemoryRow.from_private_thread.is_(False),
                     MemoryRow.status != "held",
                 )
                 .values(status=decision, decision_note=note, updated_at=func.clock_timestamp())

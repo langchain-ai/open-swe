@@ -87,6 +87,10 @@ class User(Base):
         return self._identity_field("slack", "external_id")
 
     @property
+    def github_user_id(self) -> str:
+        return self._identity_field("github", "external_id")
+
+    @property
     def slack_team_id(self) -> str:
         return self._identity_field("slack", "team_id")
 

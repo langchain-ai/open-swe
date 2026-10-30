@@ -1,7 +1,7 @@
 """Each workspace's curator: one long-lived system thread, woken daily while memories wait.
 
-The thread is public so anyone can follow what it decides; it never sees what a
-private thread said unless that thread's person shared it (``MEMORIES.for_curator``).
+The thread is public so anyone can follow what it decides: it only sees what shared
+threads remembered, and who saved it (``MEMORIES.for_curator``).
 """
 
 import logging

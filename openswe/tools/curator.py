@@ -13,7 +13,7 @@ _CURATOR = Policy(trusted="curator")
 
 @access(_CURATOR)
 async def list_memories(
-    status: Literal["pending", "held", "adopted", "declined"] = "pending",
+    status: Literal["pending", "adopted", "declined"] = "pending",
 ) -> dict[str, object]:
     """Implement the `list_memories` tool."""
     memories = await MEMORIES.for_curator(WorkspaceCurator.for_run().slug, status)

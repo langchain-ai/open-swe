@@ -25,9 +25,7 @@ _WORKSPACE = Policy(trusted="anywhere")
 @access(
     _WORKSPACE, per_call=lambda args: _PERSONAL if args.get("scope") == "personal" else _WORKSPACE
 )
-async def remember(
-    text: str, scope: Literal["personal", "workspace"], share_with_workspace: bool = False
-) -> dict[str, object]:
+async def remember(text: str, scope: Literal["personal", "workspace"]) -> dict[str, object]:
     """Implement the `remember` tool."""
     body = text.strip()
     if not body:
@@ -50,7 +48,6 @@ async def remember(
             workspace=cfg.workspace_slug,
             thread_id=cfg.thread_id,
             from_private_thread=(await resolve_access(cfg)).private,
-            shared=share_with_workspace,
         )
     except UnknownWorkspaceError:
         return {"ok": False, "error": "This thread has no workspace to remember it for."}
@@ -69,7 +66,7 @@ async def remember(
             else "once the workspace's curator adopts it, never sooner"
         ),
         **(
-            {"held": "Saved in a private thread and not shared: the curator will never see it."}
+            {"held": "Saved in a private thread: the curator never sees it."}
             if row.status == "held"
             else {}
         ),

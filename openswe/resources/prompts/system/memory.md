@@ -11,7 +11,7 @@ Open SWE remembers across threads at two scopes, and each reaches the model by a
   The curator folds what many people's threads independently support into the workspace's prompt, which every thread of the workspace opened since then starts with, under "What This Workspace Has Learned".
   Until it decides, a workspace memory a person saved in their own private thread also appears in their `person` block, marked as awaiting the curator, if they turned on Memory in Settings → Experiments.
 - **Taking back:** `forget` stops a personal memory at once and sends a workspace memory back to the curator as a withdrawal; the curator decides what leaves the workspace's prompt.
-- **Privacy:** the curator never reads what a private thread said unless its person agreed to share it, and never learns who saved a memory.
+- **Privacy:** the curator only reads workspace memories saved in shared threads, along with who saved each one; what a private thread remembers never reaches it.
   Its thread is public to read and closed to messages.
 
 Remember a lesson when you learned it the hard way and the next thread would otherwise rediscover it, and say why you believe it.

@@ -52,8 +52,7 @@ def upgrade() -> None:
     op.execute("COMMENT ON COLUMN memory.from_private_thread IS 'Saved in a private thread.'")
     op.execute(
         "COMMENT ON COLUMN memory.status IS 'The curator''s decision: pending until it decides; "
-        "held when saved in a private thread its person did not share, so the curator never "
-        "reads or decides it.'"
+        "held when saved in a private thread, which the curator never reads or decides.'"
     )
     op.execute(
         "COMMENT ON COLUMN memory.withdrawal_requested IS 'Its person asked to take a "
