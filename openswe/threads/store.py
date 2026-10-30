@@ -18,7 +18,12 @@ from typing import Final, NamedTuple
 import httpx
 from pydantic import JsonValue, TypeAdapter
 
-from openswe.agent_api.client import MDA_GRAPH_ID, mda_graph_for
+from openswe.agent_api.client import (
+    MDA_GRAPH_ID,
+    MDA_RUNTIME,
+    RUNTIME_METADATA_KEY,
+    mda_graph_for,
+)
 from openswe.dispatch import channel_of
 from openswe.threads import index
 from openswe.threads.index import IndexedThread
@@ -157,6 +162,23 @@ class ThreadStore:
             updated_at=local.updated_at,
         )
 
+    async def create(
+        self, thread_id: str, *, title: str, metadata: Mapping[str, JsonValue]
+    ) -> IndexedThread:
+        """A titled thread of the backend's own on MDA, unless ``thread_id`` is one already,
+        which keeps its metadata."""
+        if (known := await self.get(thread_id)) is not None:
+            return known
+        thread = await index.create(
+            thread_id,
+            runtime="mda",
+            metadata={**metadata, "title": title, RUNTIME_METADATA_KEY: MDA_RUNTIME},
+            if_exists="do_nothing",
+        )
+        await RUNTIMES.local.create(thread_id, thread.metadata)
+        await RUNTIMES.mda.create(thread_id, for_mda(thread.metadata))
+        return thread
+
     async def update(
         self, thread_id: str, metadata: Mapping[str, JsonValue]
     ) -> IndexedThread | None:
@@ -216,7 +238,9 @@ class ThreadStore:
                 write = await RUNTIMES.mda_runtime.channel_write(thread_id, user_id=user_id)
             except ChannelThreadError, httpx.HTTPError:
                 logger.warning(
-                    "Can't act on an MDA channel's thread", extra={"thread_id": thread_id}
+                    "Can't act on an MDA channel's thread",
+                    extra={"thread_id": thread_id},
+                    exc_info=True,
                 )
                 if method == "run.start":
                     return _json_reply(

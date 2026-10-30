@@ -66,10 +66,10 @@ def operation_connections(operation: str, config: RunnableConfig) -> list[Connec
     backend's settings name them.
 
     A person's own only when the run acts as one (``ACTING_USER_KEY``), whatever person it
-    is attributed to. Any other run has no person's principal: on a channel's thread it is
-    MDA's channel service principal (``mda:channel``), which reads no user connections,
-    and on any other thread the principal of the backend's own key, which all such runs
-    share, so a grant made there would serve every one of them.
+    is attributed to. Any other run has no person's principal: MDA starts it as a service
+    principal, MDA's channel one (``mda:channel``) on a channel's thread and the backend
+    key's own on any other, and MDA refuses user connections to a service principal, so
+    a grant there can be neither made nor read.
     """
     for_person = acting_user(config.get("metadata") or {}) is not None
     return [

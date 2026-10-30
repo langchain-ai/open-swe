@@ -374,15 +374,13 @@ async def _first_write(proxy: BoxProxy, runtime: Runtime, sandbox_id: str) -> No
                 or time.monotonic() + delay > deadline
             ):
                 logger.error(
-                    "Could not write the sandbox's proxy config, so the run ends: %s",
-                    _cause(exc),
-                    extra={"sandbox_id": sandbox_id},
+                    "Could not write the sandbox's proxy config, so the run ends",
+                    extra={"sandbox_id": sandbox_id, "cause": _cause(exc)},
                 )
                 raise
             logger.warning(
-                "Writing the sandbox's proxy config failed; retrying: %s",
-                _cause(exc),
-                extra={"sandbox_id": sandbox_id, "delay_seconds": delay},
+                "Writing the sandbox's proxy config failed; retrying",
+                extra={"sandbox_id": sandbox_id, "delay_seconds": delay, "cause": _cause(exc)},
             )
             await asyncio.sleep(delay)
         else:

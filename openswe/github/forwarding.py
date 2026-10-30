@@ -17,7 +17,7 @@ import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any, Final, Self
+from typing import Final, Self
 
 import httpx2
 from pydantic import BaseModel
@@ -175,7 +175,7 @@ async def forward_to_mda_channel(body: bytes, headers: Mapping[str, str]) -> Non
 async def react_lost(body: bytes, event_type: str) -> bool:
     """Leave a 😕 on the comment (or issue) a lost delivery came from; whether it landed."""
     try:
-        payload: Any = json.loads(body)
+        payload: object = json.loads(body)
     except ValueError:
         return False
     if not isinstance(payload, dict):

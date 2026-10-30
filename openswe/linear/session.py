@@ -11,9 +11,10 @@ webhook, which completes it as it does the backend's own runs; the channel repor
 its failures in the session.
 """
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, TypedDict, cast
+from typing import Final, TypedDict, cast
 
 import httpx2
 from langchain_core.messages.content import create_text_block
@@ -107,9 +108,11 @@ def _not_allowed(repo: Mapping[str, str]) -> LinearDecline:
     }
 
 
-_PAYLOADS: dict[str, TypeAdapter[Any]] = {
-    "AgentSessionEvent.created": TypeAdapter(LinearSessionCreatedPayload),
-    "AgentSessionEvent.prompted": TypeAdapter(LinearSessionPromptedPayload),
+_SESSION_PAYLOADS: Final[
+    Mapping[str, Callable[[object], LinearSessionCreatedPayload | LinearSessionPromptedPayload]]
+] = {
+    "AgentSessionEvent.created": TypeAdapter(LinearSessionCreatedPayload).validate_python,
+    "AgentSessionEvent.prompted": TypeAdapter(LinearSessionPromptedPayload).validate_python,
 }
 
 
@@ -150,13 +153,14 @@ class _Issue:
     url: str = ""
 
     @classmethod
-    def of(cls, issue: Mapping[str, Any]) -> _Issue:
+    def of(cls, issue: Mapping[str, object]) -> _Issue:
+        description = issue.get("description")
         return cls(
             id=str(issue["id"]),
-            identifier=issue.get("identifier") or "",
-            title=issue.get("title") or "",
-            description=issue.get("description"),
-            url=issue.get("url") or "",
+            identifier=str(issue.get("identifier") or ""),
+            title=str(issue.get("title") or ""),
+            description=description if isinstance(description, str) else None,
+            url=str(issue.get("url") or ""),
         )
 
     def repository(self) -> dict[str, str] | None:
@@ -174,7 +178,7 @@ class LinearSessionTurn:
     def __init__(
         self,
         payload: LinearSessionCreatedPayload | LinearSessionPromptedPayload,
-        issue: Mapping[str, Any],
+        issue: Mapping[str, object],
     ) -> None:
         session = payload["agentSession"]
         self.session_id = session["id"]
@@ -203,11 +207,11 @@ class LinearSessionTurn:
         payload that doesn't match it, or a session without its issue, has
         nothing to work on, and the session is told so.
         """
-        adapter = _PAYLOADS.get(key)
-        if adapter is None:
+        validate = _SESSION_PAYLOADS.get(key)
+        if validate is None:
             return None
         try:
-            validated = adapter.validate_python(payload)
+            validated = validate(payload)
         except ValidationError as error:
             common.logger.warning(
                 "Linear session event does not match MDA's schema; starting nothing",
@@ -417,14 +421,15 @@ class LinearSessionTurn:
         model_id = await common.resolve_agent_model_id(login, workspace=workspace)
         if not common.model_supports_images(model_id):
             override = common.default_vision_model_pair()
-        blocks: dict[str, dict[str, JsonValue]] = {}
         async with httpx2.AsyncClient(
             transport=pooled_transport(), timeout=common.DEFAULT_HTTP_TIMEOUT
         ) as client:
-            for url in urls:
-                block = await common.fetch_image_block(url, client)
-                if block:
-                    blocks[url] = cast(dict[str, JsonValue], block)
+            fetched = await asyncio.gather(*(common.fetch_image_block(url, client) for url in urls))
+        blocks = {
+            url: cast(dict[str, JsonValue], block)
+            for url, block in zip(urls, fetched, strict=True)
+            if block
+        }
         return blocks, override
 
     def _input(

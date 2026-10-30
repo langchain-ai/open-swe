@@ -103,7 +103,7 @@ FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
 CHANNEL_METADATA_KEY = "channel"
 
 
-def channel_of(metadata: Mapping[str, Any] | None) -> str | None:
+def channel_of(metadata: Mapping[str, object] | None) -> str | None:
     """The MDA channel ``metadata`` (a run's or a thread's) names, whatever the provider."""
     channel = (metadata or {}).get(CHANNEL_METADATA_KEY)
     return channel if isinstance(channel, str) and channel else None
@@ -370,7 +370,7 @@ async def _run_user_metadata(
 async def prepare_durable_run(
     assistant_id: str,
     config: LangGraphRunConfig | None,
-    metadata: dict[str, Any] | None,
+    metadata: Mapping[str, object] | None,
     *,
     source: str,
     as_sender: bool = False,

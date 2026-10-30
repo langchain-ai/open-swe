@@ -4,12 +4,13 @@ import hashlib
 import hmac
 import json
 from collections.abc import Callable
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock
 
 import httpx
 import httpx2
 import pytest
+from pydantic import JsonValue
 
 from openswe.github import forwarding
 from openswe.github import routes as github_routes
@@ -21,7 +22,7 @@ WEBHOOK_SECRET = "test-secret-for-webhook"
 REPO = {"name": "api", "owner": {"login": "acme"}, "private": True}
 
 
-def _issue(**fields: Any) -> dict[str, Any]:
+def _issue(**fields: JsonValue) -> dict[str, JsonValue]:
     return {
         "id": 101,
         "number": 7,
@@ -32,7 +33,7 @@ def _issue(**fields: Any) -> dict[str, Any]:
     }
 
 
-async def _deliver(event_type: str, payload: dict[str, Any]) -> tuple[httpx.Response, bytes]:
+async def _deliver(event_type: str, payload: dict[str, JsonValue]) -> tuple[httpx.Response, bytes]:
     from openswe.api.app import app
 
     body = json.dumps(payload, separators=(",", ":")).encode()
@@ -88,7 +89,7 @@ def intake(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     ],
 )
 async def test_an_issue_mention_goes_to_mda_exactly_as_github_sent_it(
-    intake: dict[str, AsyncMock], event_type: str, payload: dict[str, Any], message: str
+    intake: dict[str, AsyncMock], event_type: str, payload: dict[str, JsonValue], message: str
 ) -> None:
     response, body = await _deliver(event_type, payload)
 
@@ -142,9 +143,11 @@ def _mda(
         seen.append(request)
         return handler(request)
 
-    def client(**kwargs: Any) -> httpx2.AsyncClient:
-        assert kwargs["follow_redirects"] is False
-        return real_client(**kwargs)
+    def client(
+        *, transport: httpx2.AsyncBaseTransport, timeout: float, follow_redirects: bool
+    ) -> httpx2.AsyncClient:
+        assert follow_redirects is False
+        return real_client(transport=transport, timeout=timeout, follow_redirects=follow_redirects)
 
     monkeypatch.setattr(forwarding.httpx2, "AsyncClient", client)
     monkeypatch.setattr(forwarding, "pooled_transport", lambda: httpx2.MockTransport(recording))
@@ -264,7 +267,7 @@ async def test_the_forward_gives_up_after_its_attempts(
     ],
 )
 async def test_a_lost_delivery_leaves_a_confused_reaction_on_its_comment(
-    monkeypatch: pytest.MonkeyPatch, event_type: str, payload: dict[str, Any], subject: int
+    monkeypatch: pytest.MonkeyPatch, event_type: str, payload: dict[str, JsonValue], subject: int
 ) -> None:
     token = AsyncMock(return_value="app-token")
     react = AsyncMock(return_value=True)

@@ -2083,31 +2083,6 @@
         "title": "EndpointAnswer",
         "type": "object"
       },
-      "EndpointEvent_str_dict_str__Any__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
       "EndpointEvent_str_dict_str__JsonValue__": {
         "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
         "properties": {
@@ -2493,7 +2468,7 @@
         "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
         "properties": {
           "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__Any__"
+            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
           },
           "thread": {
             "$ref": "#/components/schemas/EndpointThread"
@@ -7540,7 +7515,9 @@
         "description": "What MDA's Slack channel POSTs: the event (MDA's ``SlackEndpointEvent``) and its thread.\n\nThe event stays a plain object here: its fields are read one by one below.",
         "properties": {
           "event": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
             "title": "Event",
             "type": "object"
           },

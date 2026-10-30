@@ -391,17 +391,6 @@ async def _connect_existing_sandbox(
                 workspace_slug,
                 github_proxy_permissions=github_proxy_permissions,
             )
-    # TODO(mda-debug): remove once channel runs get their GitHub proxy.
-    logger.info(
-        "mda-debug: configured the GitHub proxy on the thread's box",
-        extra={
-            "agent_thread_id": thread_id,
-            "sandbox_id": sandbox_backend.id,
-            "has_base_proxy_config": base_proxy_config is not None,
-            "proxy_repositories": list(github_proxy_repositories or []),
-            "proxy_written_by_mda": mda_writes_proxy,
-        },
-    )
     return sandbox_backend
 
 
@@ -625,17 +614,6 @@ async def ensure_sandbox_for_thread(
         )
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
-    # TODO(mda-debug): remove once channel runs get their GitHub proxy.
-    logger.info(
-        "mda-debug: ensure_sandbox_for_thread",
-        extra={
-            "agent_thread_id": thread_id,
-            "sandbox_id": sandbox_id,
-            "sandbox_owner": sandbox_metadata.get("sandbox_owner"),
-            "require_existing": require_existing,
-            "proxy_repositories": list(github_proxy_repositories or []),
-        },
-    )
     if sandbox_id is None:
         raise SandboxUnreachableError(
             thread_id,
@@ -728,17 +706,6 @@ async def bind_mda_sandbox(
     """
     raw = await get_sandbox_metadata(thread_id)
     metadata = ThreadMetadata.model_validate(raw)
-    # TODO(mda-debug): remove once channel runs get their GitHub proxy.
-    logger.info(
-        "mda-debug: bind_mda_sandbox",
-        extra={
-            "agent_thread_id": thread_id,
-            "sandbox_id": sandbox_id,
-            "bound_sandbox_id": metadata.sandbox_id,
-            "sandbox_owner": metadata.sandbox_owner,
-            "task_id": metadata.task_id,
-        },
-    )
     if metadata.task_id is not None:
         return
     if (

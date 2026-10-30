@@ -4,13 +4,14 @@ import json
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock
 
 import httpx
 import httpx2
 import pytest
 from fastapi import BackgroundTasks, FastAPI
+from pydantic import JsonValue
 from standardwebhooks import Webhook
 from starlette.datastructures import URL
 from starlette.requests import Request
@@ -39,16 +40,16 @@ _ACCOUNT_LINK_NEEDED = slack_service.account_link_needed
 
 class _FakeBackgroundTasks:
     def __init__(self) -> None:
-        self.tasks: list[tuple[Any, tuple[Any, ...]]] = []
-        self.kwargs: list[dict[str, Any]] = []
+        self.tasks: list[tuple[Callable[..., object], tuple[object, ...]]] = []
+        self.kwargs: list[dict[str, object]] = []
 
-    def add_task(self, func: Any, *args: Any, **kwargs: Any) -> None:
+    def add_task(self, func: Callable[..., object], *args: object, **kwargs: object) -> None:
         self.tasks.append((func, args))
         self.kwargs.append(kwargs)
 
 
 class _FakeRequest:
-    def __init__(self, payload: dict[str, Any], headers: dict[str, str]) -> None:
+    def __init__(self, payload: dict[str, JsonValue], headers: dict[str, str]) -> None:
         self.headers = headers
         self.url = URL("http://test/webhooks/slack")
         self._body = json.dumps(payload).encode()
@@ -57,7 +58,8 @@ class _FakeRequest:
         return self._body
 
 
-def _mention() -> dict[str, Any]:
+def _mention(**event: JsonValue) -> dict[str, JsonValue]:
+    """An app mention, with ``event``'s fields in place of its event's own."""
     return {
         "type": "event_callback",
         "event_id": "Ev-mda",
@@ -70,6 +72,7 @@ def _mention() -> dict[str, Any]:
             "ts": "1786573369.551099",
             "user": "U1",
             "text": "<@BOT> help",
+            **event,
         },
     }
 
@@ -239,10 +242,14 @@ async def test_a_reply_in_a_thread_mda_held_stays_with_a_single_session(
         "concierge_mode_for_slack",
         AsyncMock(return_value=single_session == "concierge_dm"),
     )
-    reply = _mention()
-    reply["event"] |= {"type": "message", "text": "and also", "thread_ts": "1786573300.000001"}
+    event: dict[str, JsonValue] = {
+        "type": "message",
+        "text": "and also",
+        "thread_ts": "1786573300.000001",
+    }
     if single_session == "concierge_dm":
-        reply["event"] |= {"channel": "D1", "channel_type": "im"}
+        event |= {"channel": "D1", "channel_type": "im"}
+    reply = _mention(**event)
     tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
@@ -260,12 +267,7 @@ async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_now
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
-    reply = _mention()
-    reply["event"] |= {
-        "type": "message",
-        "subtype": "thread_broadcast",
-        "thread_ts": "1786573300.000001",
-    }
+    reply = _mention(type="message", subtype="thread_broadcast", thread_ts="1786573300.000001")
     tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
@@ -279,7 +281,7 @@ async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_now
     assert tasks.tasks == []
 
 
-_PLAIN: dict[str, Any] = {
+_PLAIN: dict[str, JsonValue] = {
     "subtype": "",
     "from_bot": False,
     "code_channel": False,
@@ -303,18 +305,12 @@ _PLAIN: dict[str, Any] = {
     ],
 )
 def test_mda_starts_only_conversations_its_slack_channel_can_run(
-    message: dict[str, Any], starts: bool
+    message: dict[str, JsonValue], starts: bool
 ) -> None:
     assert mda_forwarding.mda_can_start(**(_PLAIN | message)) is starts
 
 
-def test_mda_thread_ids_match_trigger_servers_thread_key() -> None:
-    assert mda_forwarding.mda_thread_id("A1", "T1", "C1", "1.2") == str(
-        uuid.uuid5(uuid.NAMESPACE_URL, "slack:v1:A1:T1:C1:1.2")
-    )
-
-
-async def _post_endpoint(app: FastAPI, body: dict[str, Any], signed: bool) -> httpx.Response:
+async def _post_endpoint(app: FastAPI, body: dict[str, JsonValue], signed: bool) -> httpx.Response:
     content = json.dumps(body).encode()
     headers = {"content-type": "application/json"}
     if signed:

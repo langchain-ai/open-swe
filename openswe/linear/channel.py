@@ -11,7 +11,7 @@ Only the deployment, which holds Open SWE's shared secret, may call it.
 """
 
 import json
-from typing import Any, Final, Literal, cast, get_args
+from typing import Final, Literal, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -96,7 +96,7 @@ async def linear_channel_event(
     await _record(request, payload, delivery_id)
     if key in _AUTOMATION_KEYS:
         background_tasks.add_task(_launch_automations, payload, delivery_id)
-    turn = LinearSessionTurn.parse(key, cast(Any, payload))
+    turn = LinearSessionTurn.parse(key, payload)
     if turn is None:
         return None
     if thread.get("interrupted"):
