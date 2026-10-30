@@ -612,13 +612,17 @@ async def _handler_input(
         return outcome.input
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
-    # raised failed; one that returned nothing declined.
+    # raised failed; one that returned nothing declined, and an endpoint may
+    # say why.
     if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
             if outcome.type == "failed"
-            else {"type": "response", "body": "I'm not set up to work on this request."},
+            else {
+                "type": "response",
+                "body": outcome.decline or "I'm not set up to work on this request.",
+            },
         )
     return None
 

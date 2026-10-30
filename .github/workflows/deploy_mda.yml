@@ -155,6 +155,10 @@ jobs:
             echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_${ENVIRONMENT^^} secret to the backend's gateway key."
             exit 1
           fi
+          if [[ -z "$MDA_SERVICE_SECRET" ]]; then
+            echo "::error::Set the MDA_SERVICE_SECRET_${ENVIRONMENT^^} secret to the backend's MDA_SERVICE_SECRET: without it the backend refuses every channel call."
+            exit 1
+          fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # the gateway key it calls models with, the secret it signs its calls to the backend with,
           # and the commit its traces name as their revision.
