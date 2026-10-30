@@ -50,7 +50,7 @@ class AgentParts(RunParts):
         return cfg.offload_conversation or cfg.source == "incidents_agent"
 
     async def preparation(
-        self, config: RunnableConfig, settings: RunSettings, *, box: str | None
+        self, config: RunnableConfig, settings: RunSettings, *, sandbox_id: str | None
     ) -> list[AgentMiddleware] | None:
         turn = settings.agent
         if turn is None:
@@ -65,7 +65,7 @@ class AgentParts(RunParts):
             config,
             turn,
             repo_instructions=repo_instructions if isinstance(repo_instructions, str) else None,
-            box=None if turn.reaches_box else box,
+            sandbox_id=None if turn.reaches_sandbox else sandbox_id,
         )
         if not (turn.review_guide or turn.review_guide_closed):
             return [prepare]

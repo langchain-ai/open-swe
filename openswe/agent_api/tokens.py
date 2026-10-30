@@ -73,17 +73,17 @@ class AgentTurnSettings(BaseModel):
     bridge_client: BridgeClient | None = None
     # Why managed tool discovery failed while planning, which the prompt says.
     tool_discovery_failures: list[str] = []
-    # Whether the thread runs a review walkthrough, which pins its checkout in the box.
+    # Whether the thread runs a review walkthrough, which pins its checkout in the sandbox.
     review_guide: bool = False
     # Whether the thread had one that has closed: its guide stays, to retire its rules.
     review_guide_closed: bool = False
-    # Whether the thread is a task worker, which may use its coordinator's box only once
+    # Whether the thread is a task worker, which may use its coordinator's sandbox only once
     # the backend has checked it may.
     task_worker: bool = False
 
     @property
-    def reaches_box(self) -> bool:
-        """Whether preparing a turn connects to the thread's box even where MDA keeps it."""
+    def reaches_sandbox(self) -> bool:
+        """Whether preparing a turn connects to the thread's sandbox even where MDA keeps it."""
         return self.review_guide or self.task_worker
 
 

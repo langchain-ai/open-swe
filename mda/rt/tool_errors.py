@@ -1,6 +1,6 @@
-"""Tool errors from the calls this runtime runs in the box, as results the model can act on.
+"""Tool errors from the calls this runtime runs in the sandbox, as results the model can act on.
 
-A box that stopped answering, or never booted, is the exception: nothing the model
+A sandbox that stopped answering, or never booted, is the exception: nothing the model
 does next can succeed, so the backend tells the person, with why where known, and the
 run ends. The backend handles the errors of the tools it runs itself the same way.
 """
@@ -26,7 +26,7 @@ from langsmith.sandbox import (
 from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
 from rt.backend import OpenSweBackend
-from rt.box_setup import BoxUnavailableError
+from rt.sandbox_setup import SandboxUnavailableError
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -94,19 +94,19 @@ class ToolErrorMiddleware(AgentMiddleware):
         gone = SandboxGone(
             run_id=run_id(),
             sandbox_id=sandbox_id.group(0) if sandbox_id else None,
-            reason=str(exc) if isinstance(exc, BoxUnavailableError) else None,
+            reason=str(exc) if isinstance(exc, SandboxUnavailableError) else None,
         )
         self._backend.outbox.notify(SANDBOX_UNREACHABLE, gone)
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:
-    """Whether the box itself did not answer, or never booted, as opposed to a call that
+    """Whether the sandbox itself did not answer, or never booted, as opposed to a call that
     failed in it.
 
-    A reload left the command running, and a missing resource that is not the box
+    A reload left the command running, and a missing resource that is not the sandbox
     is a missing file.
     """
-    if isinstance(exc, BoxUnavailableError):
+    if isinstance(exc, SandboxUnavailableError):
         return True
     if isinstance(exc, SandboxConnectionError):
         return not isinstance(exc, SandboxServerReloadError)

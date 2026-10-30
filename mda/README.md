@@ -11,16 +11,16 @@ Every call is authenticated with the run token.
 
 - **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith box, one per thread.
   The catalog gives the options it is created with (the workspace snapshot, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
-  Before `prepare`, the run opens the box (`open_sandbox`), alongside reading its tool specs and sending what its outbox holds, and reports its name; the backend binds the thread to it (`sandbox_owner: mda`).
-  Each run readies the box it opened, and a box it replaces, with the bot's git identity and its work dir (`rt/box_setup.py`): one command in the background, which only a tool that may change a checkout waits for.
-  MDA runs no project hook as it creates or adopts a box.
-  The backend never connects to the box to prepare a turn, only for the work of an operation.
+  Before `prepare`, the run opens the sandbox (`open_sandbox`), alongside reading its tool specs and sending what its outbox holds, and reports its name; the backend binds the thread to it (`sandbox_owner: mda`).
+  Each run readies the sandbox it opened, and a sandbox it replaces, with the bot's git identity and its work dir (`rt/sandbox_setup.py`): one command in the background, which only a tool that may change a checkout waits for.
+  MDA runs no project hook as it creates or adopts a sandbox.
+  The backend never connects to the sandbox to prepare a turn, only for the work of an operation.
   The box's proxy config, which gives its commands their credentials, is written whole, so one side writes all of it.
-  The backend writes it with a GitHub token it mints for the thread, fresh again when the run's loop asks (`refresh_github_proxy`), and MDA leaves it alone (`_openswe_no_manage_proxy=True`), unless the catalog names the connection the box's GitHub rules carry (`SandboxSpec.github_proxy`, `runtime_api.sandbox_proxy`).
+  The backend writes it with a GitHub token it mints for the thread, fresh again when the run's loop asks (`refresh_github_proxy`), and MDA leaves it alone (`_openswe_no_manage_proxy=True`), unless the catalog names the connection the sandbox's GitHub rules carry (`SandboxSpec.github_proxy`, `runtime_api.sandbox_proxy`).
   The catalog names one where the backend's `MDA_GITHUB_PROXY_CONNECTION` does and the thread reaches the whole GitHub App installation, as that connection's token does.
   Reviewer and review scout threads, and threads an event or automation on a public repository started, are narrowed, so the backend keeps writing theirs.
   Where the catalog names one, MDA writes the config before each command it runs in the box: the two GitHub rules with the token it reads from `mda/github-token`, which Agent Auth renews, and the backend's own rules for the box, which it asks for once the box is open (`sandbox_proxy`): its tool channel's capability, and the workspace's own proxy rules, its cloud identity rules among them.
-  It writes it before `prepare` too, which waits for a new box to boot, retrying for up to three minutes, as long as the host takes to suspend an idle box, while the sandbox API takes no proxy config; a run that still cannot write it there ends, since the backend never writes it on that box.
+  It writes it before `prepare` too, which waits for a new sandbox to boot, retrying for up to three minutes, as long as the host takes to suspend an idle sandbox, while the sandbox API takes no proxy config; a run that still cannot write it there ends, since the backend never writes it on that sandbox.
   It writes it after a replacement, which starts with the proxy config the backend chose for it (a cloud identity applies only at create) and keeps it until that write lands, and every five minutes before a model or tool call, for the commands the backend runs in the box; a run resumed from an interrupt writes it before its first tool call.
   A backend that refuses `sandbox_proxy` (its setting no longer names the connection) writes the config itself, and MDA stops writing it for the rest of the run.
   `recreate_sandbox` on such a box comes back from the backend as what to replace it with; MDA replaces it under the same name (`replace_sandbox`, the old box stopped and kept renamed), and the backend reconnects through `sandbox_replaced`.
@@ -70,7 +70,7 @@ Every call is authenticated with the run token.
     It writes the graph state the loop reads.
     The run then reports its start (`run_started`), behind which the backend opens the transcript turn and records the thread's model and usage, none of which the first model call waits for.
     The reviewer and the scout still prepare from their plan;
-  - **Git evidence** (`rt/git_evidence.py`): the box's checkouts are fingerprinted (`rt/sandbox_scripts/git_trace.py`) as the turn starts and before a model call that follows a file or shell tool, each in the background; a tool that may change a checkout waits only for the turn's first fingerprint.
+  - **Git evidence** (`rt/git_evidence.py`): the sandbox's checkouts are fingerprinted (`rt/sandbox_scripts/git_trace.py`) as the turn starts and before a model call that follows a file or shell tool, each in the background; a tool that may change a checkout waits only for the turn's first fingerprint.
     With the pull requests the run's operations open, they name the turn's `ls_git_repo` and `ls_git_branch` in its trace, reconciled after the run ends, so neither the run's end nor the thread's next message waits for the last fingerprint or the trace's update.
     A turn whose tools changed nothing waits for no fingerprint;
   - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages), read as the catalog's `InboxSpec` says.

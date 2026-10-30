@@ -99,13 +99,13 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
-from rt.box_setup import box_setup
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import RemoteFiles
+from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
@@ -325,7 +325,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
-        # Asks for the thread's box before preparing, so the backend binds the thread to it,
+        # Asks for the thread's sandbox before preparing, so the backend binds the thread to it,
         # and waits for it to boot behind the run's other work.
         self._open_sandbox = open_sandbox
         self._boot_sandbox = boot_sandbox
@@ -388,25 +388,25 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         held = {**state.get(STATE_KEY, {}), **_held(update)}
         run = self._backend.run
         if self._in_box:
-            # A box MDA could not open is not asked for again here: the run's first tool
+            # A sandbox MDA could not open is not asked for again here: the run's first tool
             # call opens it, or says why it cannot.
             files = getattr(runtime, "backend", None) if opened else None
-            box_setup(run).start(files, self._boot_sandbox)
+            sandbox_setup(run).start(files, self._boot_sandbox)
         else:
-            # Without a box of MDA's, the thread's files are the backend's to reach.
+            # Without a sandbox of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)
-        turn_git(run).start(files, held.get("work_dir"), box_setup(run).booted)
+        turn_git(run).start(files, held.get("work_dir"), sandbox_setup(run).booted)
         return self._carrying(state, update)
 
     @property
     def _in_box(self) -> bool:
-        """Whether the run's files are in MDA's box, which it asks for before preparing."""
+        """Whether the run's files are in MDA's sandbox, which it asks for before preparing."""
         return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
 
     async def _before_agent(
         self, state: RunState, runtime: Runtime
     ) -> tuple[dict[str, object] | None, bool]:
-        """The update preparing the run makes, and whether the box is open, as far as
+        """The update preparing the run makes, and whether the sandbox is open, as far as
         this run tried."""
         trace = turn_trace(self._backend.run)
         trace.start(self._trace_metadata())
@@ -425,7 +425,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if state.get("open_swe_prepared_for") == invocation:
             await self._backend.run.load_tool_specs(run_id())
             return None, True
-        # Asking for the box takes a round trip; reading the tool specs needs none of it.
+        # Asking for the sandbox takes a round trip; reading the tool specs needs none of it.
         opening = asyncio.create_task(self._opened(runtime))
         try:
             await self._backend.run.load_tool_specs(run_id())

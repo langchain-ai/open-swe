@@ -175,7 +175,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Preparing a turn plans nothing, reaches no box MDA keeps and records nothing:
+    """Preparing a turn plans nothing, reaches no sandbox MDA keeps and records nothing:
     what the turn's start records waits for its ``run_started`` report."""
     from unittest.mock import AsyncMock, MagicMock
 
@@ -194,7 +194,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
         raise AssertionError("Preparing a turn never plans the run")
 
     def never_reached(thread_id: str) -> object:
-        raise AssertionError("Preparing a turn never reaches the box MDA keeps")
+        raise AssertionError("Preparing a turn never reaches the sandbox MDA keeps")
 
     bound = AsyncMock()
     updated = AsyncMock()
@@ -238,14 +238,14 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     prepared = await graph.api(
         run,
         "prepare",
-        {"run_id": "run-1", "messages": asked, "in_box": True, "sandbox_id": "box-1"},
+        {"run_id": "run-1", "messages": asked, "in_box": True, "sandbox_id": "sandbox-1"},
     )
 
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
     assert len(prompts) == 1
-    bound.assert_awaited_once_with("thread-1", "box-1", open_error=None, workspace_slug=None)
+    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()
 
@@ -321,7 +321,7 @@ async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The guide stays after a walkthrough closes, to tell the model its rules ended;
-    only an open one pins the checkout in the box."""
+    only an open one pins the checkout in the sandbox."""
     from unittest.mock import AsyncMock
 
     from openswe.agent_api import agent
@@ -332,12 +332,12 @@ async def test_a_closed_walkthroughs_next_turn_still_retires_its_rules(
     turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna", review_guide_closed=True)
 
     prepared = await agent.AgentParts().preparation(
-        {"configurable": {"thread_id": "thread-1"}}, RunSettings(agent=turn), box="box-1"
+        {"configurable": {"thread_id": "thread-1"}}, RunSettings(agent=turn), sandbox_id="sandbox-1"
     )
 
     assert prepared is not None
     assert any(isinstance(middleware, ReviewGuideMiddleware) for middleware in prepared)
-    assert not turn.reaches_box
+    assert not turn.reaches_sandbox
 
 
 async def test_task_context_rechecks_membership_and_cancellation(

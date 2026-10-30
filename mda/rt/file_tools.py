@@ -1,7 +1,7 @@
 """The run's file and shell tools, with the checks around them.
 
-They run in the thread's box, which MDA owns, or against the thread's files on the
-backend (``rt.remote_files``): where the box is not MDA's, such as a thread bridged
+They run in the thread's sandbox, which MDA owns, or against the thread's files on the
+backend (``rt.remote_files``): where the sandbox is not MDA's, such as a thread bridged
 to a person's machine, and on the paths the backend serves. Reads of the run's
 skills are answered from the skills this runtime keeps (``rt.skills``).
 
@@ -41,10 +41,10 @@ from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.backend import OpenSweBackend, RunLocal
-from rt.box_setup import box_setup
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.middleware import reported
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.sandbox_setup import sandbox_setup
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
 from rt.tools import run_id
@@ -253,9 +253,9 @@ class FileToolsMiddleware(AgentMiddleware):
         return request.override(tool_call={**request.tool_call, "args": arguments})
 
     async def _observed(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
-        """``handler`` once the box has booted; when the call may change a checkout, once the
-        box is ready and the turn's starting fingerprint taken."""
-        setup = box_setup(self._backend.run)
+        """``handler`` once the sandbox has booted; when the call may change a checkout, once the
+        sandbox is ready and the turn's starting fingerprint taken."""
+        setup = sandbox_setup(self._backend.run)
         if request.tool_call["name"] not in OBSERVED_TOOLS:
             await setup.booted()
             return await handler(request)

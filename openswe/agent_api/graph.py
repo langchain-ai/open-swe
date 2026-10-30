@@ -14,7 +14,7 @@ import (``runtime_api``):
   ``tool_specs``, ``search_tools`` and ``resolve_tool`` read
 - ``prepare`` readies the run's turn: its prompt, model and route, from what the
   token says starting the run decided (``RunSettings.agent``), without reaching the
-  box MDA keeps. The reviewer and the scout still prepare from their plan, the one
+  sandbox MDA keeps. The reviewer and the scout still prepare from their plan, the one
   call that plans the run again. What the turn's start records (its transcript turn,
   the thread's model and usage) is the ``run_started`` report, off the run's path
 - every other call is a ``TokenRun``, answered from the token and the request with
@@ -25,7 +25,7 @@ import (``runtime_api``):
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
   reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key, the work of the run's tools (``operation``,
-  ``check_shell``, the ``files`` calls), and the box MDA keeps
+  ``check_shell``, the ``files`` calls), and the sandbox MDA keeps
 - a run still served from its plan (``RunParts.legacy``: a requested offload, an
   incident; or a token from before operations were granted) has its phases (``before_model``, ``after_model``, ``after_agent``) and
   tool calls answered by ``RunSession``, as is ``record_evidence``
@@ -334,7 +334,7 @@ class RecordsRemoteTools(Protocol):
 
 
 async def _finish_git_identity(thread_id: str | None) -> None:
-    """Write the bot's git identity a box preparation connected to still has pending."""
+    """Write the bot's git identity a sandbox preparation connected to still has pending."""
     sandbox = SANDBOX_BACKENDS.get(thread_id or "")
     if sandbox is not None and sandbox.has_backend:
         backend = sandbox.current
@@ -1017,18 +1017,18 @@ class TokenRun:
         """Ready the run's turn from its token and the conversation; None where the graph
         still prepares from its plan.
 
-        Nothing here waits on the box MDA keeps: the run readies the box it opened, and
-        its loop keeps the box's GitHub token fresh (``refresh_github_proxy``).
+        Nothing here waits on the sandbox MDA keeps: the run readies the sandbox it opened, and
+        its loop keeps the sandbox's GitHub token fresh (``refresh_github_proxy``).
         """
         started = datetime.now(UTC)
         preparation = await self.parts.preparation(
-            self.config, self.run.settings, box=request.sandbox_id
+            self.config, self.run.settings, sandbox_id=request.sandbox_id
         )
         if preparation is None:
             return None
         if request.in_box:
-            # MDA opened the box before preparing; the thread is bound to it from here on.
-            # A thread with no box to work in ends the run once the person knows why.
+            # MDA opened the sandbox before preparing; the thread is bound to it from here on.
+            # A thread with no sandbox to work in ends the run once the person knows why.
             try:
                 await bind_mda_sandbox(
                     self.run.thread_id,
@@ -1047,7 +1047,7 @@ class TokenRun:
         async def prepared(runtime: Runtime) -> Prepared:
             result = await run_hooks(preparation, "before_agent", state, runtime)
             await _finish_git_identity(self.run.thread_id)
-            # A box the backend connected to, such as a bridged machine, got a fresh token.
+            # A sandbox the backend connected to, such as a bridged machine, got a fresh token.
             expires_at = proxy_token_set_since(self.run.thread_id, started)
             return Prepared(
                 **result.model_dump(),

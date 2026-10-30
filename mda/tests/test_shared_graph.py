@@ -54,10 +54,10 @@ from managed_deepagents.sandbox import SandboxDefinition, SandboxReplacement
 from pydantic import BaseModel, JsonValue
 from rt import backend as rt_backend
 from rt.backend import Run, current_run
-from rt.box_setup import BoxUnavailableError
 from rt.managed_sandbox import PROXY_WRITE_BACKOFF_SECONDS, definition, opened_sandbox
 from rt.outbox import Outbox
 from rt.run_tools import ModelHandler, RunCodeInterpreter
+from rt.sandbox_setup import SandboxUnavailableError
 from runtime_api.catalog import (
     Catalog,
     LoopRules,
@@ -302,14 +302,14 @@ async def test_every_run_and_read_shares_one_graph_and_calls_the_backend_as_itse
 async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
 ) -> None:
-    """The graph is compiled once, yet each run asks for its own thread's box before it
-    prepares, and its shell reaches that box, with the options its own catalog gives."""
+    """The graph is compiled once, yet each run asks for its own thread's sandbox before it
+    prepares, and its shell reaches that sandbox, with the options its own catalog gives."""
     opened: set[tuple[object, object]] = set()
 
     def claim(sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object) -> str:
         thread_id = ((config or {}).get("configurable") or {}).get("thread_id")
         opened.add((thread_id, sandbox.options.get("snapshot_id")))
-        return f"box-{thread_id}"
+        return f"sandbox-{thread_id}"
 
     def resolve(
         sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
@@ -339,7 +339,7 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
     )
 
     assert second.nodes["model"] is first.nodes["model"]
-    assert prepared == [("box-thread-1", None), ("box-thread-2", None)]
+    assert prepared == [("sandbox-thread-1", None), ("sandbox-thread-2", None)]
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
 
 
@@ -365,7 +365,7 @@ async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_report
         attempts.append(thread_id)
         if failures[thread_id]:
             raise failures[thread_id].pop(0)
-        return f"box-{thread_id}"
+        return f"sandbox-{thread_id}"
 
     monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", claim)
     monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", MagicMock(spec=StateBackend))
@@ -380,20 +380,20 @@ async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_report
 
     assert attempts == ["thread-1", "thread-1", "thread-1", "thread-2"]
     assert prepared == [
-        ("box-thread-1", None),
+        ("sandbox-thread-1", None),
         (None, "SandboxAuthenticationError: Invalid api_key=[redacted]"),
     ]
 
 
-async def test_a_box_that_never_boots_ends_the_run_at_its_first_shell_call_with_why(
+async def test_a_sandbox_that_never_boots_ends_the_run_at_its_first_shell_call_with_why(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
 ) -> None:
-    """The run prepares with the box it asked for, before the box boots; the first call that
-    needs the box finds it failed, and the backend hears why so it can tell the person."""
+    """The run prepares with the sandbox it asked for, before the sandbox boots; the first call that
+    needs the sandbox finds it failed, and the backend hears why so it can tell the person."""
     unreachable: list[JsonValue] = []
-    # Where the box's checkouts are, so the turn's git baseline is taken.
+    # Where the sandbox's checkouts are, so the turn's git baseline is taken.
     monkeypatch.setitem(_PREPARE_UPDATE, "work_dir", "/workspace")
-    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", lambda *args: "box-thread-1")
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", lambda *args: "sandbox-thread-1")
     monkeypatch.setattr(
         mda_runtime,
         "_resolve_managed_sandbox",
@@ -413,16 +413,16 @@ async def test_a_box_that_never_boots_ends_the_run_at_its_first_shell_call_with_
         agent, "_DEFAULT_MODEL", _calling(ToolCall(name="execute", args={"command": "ls"}, id="c"))
     )
 
-    with pytest.raises(BoxUnavailableError):
+    with pytest.raises(SandboxUnavailableError):
         await _run(
             InMemoryStore(),
             "thread-1",
             _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a")),
         )
 
-    assert prepared == [("box-thread-1", None)]
+    assert prepared == [("sandbox-thread-1", None)]
     assert unreachable == ["ResourceCreationError: Image pull failed"]
-    # Only the boot opens the box: nothing reaches for it again, which would make another.
+    # Only the boot opens the sandbox: nothing reaches for it again, which would make another.
     assert opened.call_count == 1
 
 
@@ -636,7 +636,7 @@ def proxy_writes(
             return ExecuteResponse(output="ok", exit_code=0)
 
         box = MagicMock(spec=StateBackend)
-        box.id = f"box-{thread_id}"
+        box.id = f"sandbox-{thread_id}"
         box.aexecute = AsyncMock(side_effect=execute)
         # Where MDA's cache keeps the box, which its proxy config write names.
         mda_runtime._managed_sandboxes[f"thread:{thread_id}"] = mda_runtime._ManagedSandboxEntry(
@@ -655,7 +655,7 @@ def proxy_writes(
         mda_runtime,
         "_claim_managed_sandbox",
         lambda sandbox, config, *args: (
-            f"box-{((config or {}).get('configurable') or {}).get('thread_id')}"
+            f"sandbox-{((config or {}).get('configurable') or {}).get('thread_id')}"
         ),
     )
     monkeypatch.setattr(mda_sandbox_proxy, "patch_sandbox_proxy_config", patch)
@@ -689,7 +689,7 @@ async def test_mda_writes_the_whole_proxy_config_before_the_run_prepares(
     basic = base64.b64encode(b"x-access-token:app-token").decode()
     assert proxy_writes == [
         (
-            "box-thread-1",
+            "sandbox-thread-1",
             {
                 "rules": [
                     {
@@ -778,8 +778,8 @@ async def test_a_run_writes_its_boxs_proxy_config_again_until_the_sandbox_api_ta
     )
 
     assert sleep.await_count == 1
-    assert [name for name, _ in proxy_writes] == ["box-thread-1"]
-    assert prepared == [("box-thread-1", None)]
+    assert [name for name, _ in proxy_writes] == ["sandbox-thread-1"]
+    assert prepared == [("sandbox-thread-1", None)]
     hooks = [hook for hook, _, _ in backend_calls]
     # The backend's part, asked for once, is kept for the second try.
     assert hooks.count("sandbox_proxy") == 1
@@ -822,9 +822,9 @@ def replacements(
     ) -> tuple[StateBackend, SandboxReplacement]:
         replaced.append(replacement)
         box = MagicMock(spec=StateBackend)
-        box.id = "box-thread-1"
+        box.id = "sandbox-thread-1"
         return box, SandboxReplacement(
-            old_name="box-thread-1-old-0a1b", new_name="box-thread-1", old_stopped=True
+            old_name="sandbox-thread-1-old-0a1b", new_name="sandbox-thread-1", old_stopped=True
         )
 
     monkeypatch.setattr(mda_runtime, "_replace_managed_sandbox", replace)
@@ -874,7 +874,7 @@ async def test_a_replacement_box_is_created_with_the_backends_rules_then_written
         "sandbox_proxy",
         "proxy_config",
     ]
-    assert [name for name, _ in proxy_writes] == ["box-thread-1", "box-thread-1"]
+    assert [name for name, _ in proxy_writes] == ["sandbox-thread-1", "sandbox-thread-1"]
     assert proxy_writes[1][1] == proxy_writes[0][1]
 
 
@@ -914,7 +914,7 @@ async def test_a_replacement_mda_cannot_write_on_keeps_the_config_it_was_created
     assert len(asked) == 2
     assert "ls" in box_commands
     # Only the write before the run prepared, on the old box.
-    assert [name for name, _ in proxy_writes] == ["box-thread-1"]
+    assert [name for name, _ in proxy_writes] == ["sandbox-thread-1"]
 
 
 @pytest.mark.parametrize("code_mode", [False, True])

@@ -8,7 +8,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx2
-from runtime_api import box
+from runtime_api import sandbox_setup
 
 from openswe.analytics.identity import DisplayNameSource
 from openswe.input_messages import PersonIdentity
@@ -34,8 +34,8 @@ _TOKEN_IDENTITY_CACHE_TTL = timedelta(hours=1)
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
-OPEN_SWE_BOT_NAME = box.GIT_NAME
-OPEN_SWE_BOT_EMAIL = box.GIT_EMAIL
+OPEN_SWE_BOT_NAME = sandbox_setup.GIT_NAME
+OPEN_SWE_BOT_EMAIL = sandbox_setup.GIT_EMAIL
 
 PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
 PR_ATTRIBUTION_DEFAULT_URL = "https://github.com/langchain-ai/open-swe"

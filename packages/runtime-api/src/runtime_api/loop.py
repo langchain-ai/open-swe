@@ -43,7 +43,7 @@ class RunCall(RunRequest):
 
 
 class Prepare(RunCall):
-    # Whether the runtime keeps the thread's box, and the box it opened before preparing;
+    # Whether the runtime keeps the thread's sandbox, and the sandbox it opened before preparing;
     # None when it could not.
     in_box: bool = False
     sandbox_id: str | None = None
@@ -164,7 +164,7 @@ class ScoutPlanEnd(RunRequest):
 class SandboxGone(RunRequest):
     # The box a tool found gone, when its error named it.
     sandbox_id: str | None = None
-    # Why, when the box never booted, secrets removed.
+    # Why, when the sandbox never booted, secrets removed.
     reason: str | None = None
 
 

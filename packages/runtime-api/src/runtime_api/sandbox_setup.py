@@ -1,4 +1,4 @@
-"""The thread's box as both sides ready it: where its checkouts live and who commits in them."""
+"""The thread's sandbox as both sides ready it: where its checkouts live and who commits in them."""
 
 from typing import Final
 

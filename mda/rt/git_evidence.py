@@ -1,6 +1,6 @@
 """The repositories and branches a turn's work touched, for its trace's git metadata.
 
-The checkouts under the run's work dir are fingerprinted in the thread's box
+The checkouts under the run's work dir are fingerprinted in the thread's sandbox
 (``sandbox_scripts/git_trace.py``): once as the turn starts, and again before a
 model call that follows a file or shell tool, each in the background. A tool that
 may change a checkout first waits for the starting fingerprint, so that never sees
@@ -24,14 +24,14 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from runtime_api.operations import PullRequestHead
 
 from rt.backend import Run, RunLocal
-from rt.box_script import BoxScript
-from rt.box_setup import BoxUnavailableError
+from rt.sandbox_script import SandboxScript
+from rt.sandbox_setup import SandboxUnavailableError
 
 logger = logging.getLogger(__name__)
 
 # The file and shell tools that may change a checkout.
 OBSERVED_TOOLS: Final = frozenset({"execute", "write_file", "edit_file", "delete"})
-_SCRIPT: Final = BoxScript("git_trace.py")
+_SCRIPT: Final = SandboxScript("git_trace.py")
 
 
 class GitTarget(BaseModel):
@@ -72,7 +72,7 @@ class TurnGit:
     own (``turn_git``)."""
 
     def __init__(self) -> None:
-        self._box: SandboxBackendProtocol | None = None
+        self._sandbox: SandboxBackendProtocol | None = None
         self._root = ""
         self._baseline: asyncio.Task[GitSnapshot | None] | None = None
         self._fingerprinting: asyncio.Task[None] | None = None
@@ -87,13 +87,13 @@ class TurnGit:
         booted: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Fingerprint the checkouts under ``root`` in the thread's ``files`` as the turn
-        starts, in the background, once ``booted`` says the box has booted."""
+        starts, in the background, once ``booted`` says the sandbox has booted."""
         self._observed = []
         self._changed_at = None
         if not isinstance(files, SandboxBackendProtocol) or not isinstance(root, str) or not root:
             self._baseline = None
             return
-        self._box, self._root = files, root
+        self._sandbox, self._root = files, root
         self._baseline = asyncio.ensure_future(self._first_fingerprint(booted))
 
     async def changing(self) -> None:
@@ -161,19 +161,19 @@ class TurnGit:
         if booted is not None:
             try:
                 await booted()
-            except BoxUnavailableError:
-                # Reaching for a box that never booted would open another; the run's
-                # first call that needs the box reports it.
-                logger.warning("No git evidence: the thread's box never booted")
+            except SandboxUnavailableError:
+                # Reaching for a sandbox that never booted would open another; the run's
+                # first call that needs the sandbox reports it.
+                logger.warning("No git evidence: the thread's sandbox never booted")
                 return None
         return await self._fingerprint()
 
     async def _fingerprint(self) -> GitSnapshot | None:
-        if self._box is None:
+        if self._sandbox is None:
             return None
         try:
             snapshot = GitSnapshot.model_validate(
-                await _SCRIPT.run(self._box, {"root": self._root})
+                await _SCRIPT.run(self._sandbox, {"root": self._root})
             )
         except Exception:
             logger.warning("Could not fingerprint the turn's checkouts", exc_info=True)

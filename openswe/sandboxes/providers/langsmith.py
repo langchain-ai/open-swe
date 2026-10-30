@@ -60,7 +60,7 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-# How long connecting to a box still booting waits for it: as long as MDA's own first use
+# How long connecting to a sandbox still booting waits for it: as long as MDA's own first use
 # waits, retries included.
 SANDBOX_BOOT_TIMEOUT_SECONDS = 90
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
@@ -297,7 +297,7 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
 
 
 async def _booted_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
-    """The sandbox once it has booted: MDA asks for a thread's box without waiting for it."""
+    """The sandbox once it has booted: MDA asks for a thread's sandbox without waiting for it."""
     sandbox = await client.get_sandbox(name=sandbox_id)
     if sandbox.status != "provisioning":
         return sandbox

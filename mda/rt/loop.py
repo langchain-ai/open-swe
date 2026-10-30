@@ -1,7 +1,7 @@
 """Open SWE's middleware around each model call, run here as the catalog's ``LoopRules`` say.
 
 Before each call it ends the run where a rule says to, adds the thread's task
-context, keeps the box's GitHub proxy fresh, picks the call's route and model, and
+context, keeps the sandbox's GitHub proxy fresh, picks the call's route and model, and
 assembles its system prompt and tool list. After an answer that calls no tool, it
 asks again for the reply or CLI result the run owes. When the run ends, it asks
 for the graph's own end-of-run work and reports the end, neither of which the run

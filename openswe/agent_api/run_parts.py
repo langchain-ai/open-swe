@@ -41,9 +41,9 @@ class RunParts:
         config: RunnableConfig,  # noqa: ARG002
         settings: RunSettings,  # noqa: ARG002
         *,
-        box: str | None,  # noqa: ARG002
+        sandbox_id: str | None,  # noqa: ARG002
     ) -> Sequence[AgentMiddleware] | None:
-        """What readies a turn of the run, which MDA opened ``box`` for; None where the
+        """What readies a turn of the run, which MDA opened ``sandbox`` for; None where the
         graph still prepares from its plan."""
         return None
 

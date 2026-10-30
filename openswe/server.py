@@ -26,7 +26,7 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
-from runtime_api import box
+from runtime_api import sandbox_setup
 from runtime_api.catalog import (
     SEARCH_TOOLS,
     CliResultRules,
@@ -1126,8 +1126,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     """Ready an agent run's turn: its prompt, model and route, and who it speaks with.
 
     Built from what starting the run decided (``AgentTurnSettings``), so preparing a turn
-    plans nothing. A thread whose box MDA keeps (``box``, its name) is not reached here:
-    its work dir is the box's own, and MDA readied the box as it opened it.
+    plans nothing. A thread whose sandbox MDA keeps (``sandbox``, its name) is not reached here:
+    its work dir is the sandbox's own, and MDA readied the sandbox as it opened it.
     """
 
     def __init__(
@@ -1136,7 +1136,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         turn: AgentTurnSettings,
         *,
         repo_instructions: str | None,
-        box: str | None = None,
+        sandbox_id: str | None = None,
     ) -> None:
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
@@ -1144,7 +1144,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._config = config
         self._turn = turn
         self._thread_id = cfg.thread_id
-        self._box = box
+        self._sandbox_id = sandbox_id
         self._bridge_client = turn.bridge_client
         self._saved_requested_model = turn.saved_requested_model
         self._requested_models = (
@@ -1292,7 +1292,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     async def _attach_sandbox(
         self, identity: asyncio.Task[CollaboratorIdentity | None], bound: Mapping[str, object]
     ) -> tuple[CollaboratorIdentity | None, SandboxBackendProtocol]:
-        """Connect to the box the thread is ``bound`` to, alongside ``identity``."""
+        """Connect to the sandbox the thread is ``bound`` to, alongside ``identity``."""
         sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
         sandbox_proxy.follow(bound.get("sandbox_id"))
         sandbox_task = asyncio.create_task(
@@ -1441,9 +1441,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
         bound = await get_sandbox_metadata(self._thread_id)
-        if self._box is not None and not slack_files_pending(bound):
+        if self._sandbox_id is not None and not slack_files_pending(bound):
             triggering_user_identity = await triggering_user_identity_task
-            work_dir, bridged = box.WORK_DIR, False
+            work_dir, bridged = sandbox_setup.WORK_DIR, False
         else:
             triggering_user_identity, sandbox_backend = await self._attach_sandbox(
                 triggering_user_identity_task, bound

@@ -23,7 +23,7 @@ if not sandbox_service.REAL:
     def _stand_in_claim(
         _sandbox: object, *, scope_key: str, **_kwargs: object
     ) -> mda_runtime._SandboxClaim:
-        # A stand-in box is ready at once; its first use opens it under the same name.
+        # A stand-in sandbox is ready at once; its first use opens it under the same name.
         name = sandbox_service.mda_box_name(scope_key)
         return mda_runtime._SandboxClaim(None, None, adopted=False, host_name=name)
 

@@ -92,7 +92,9 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         route_models={"fast": ("openai:gpt-6-luna", "low")},
         offers_requested_models=True,
     )
-    middleware = server.PrepareAgentRunMiddleware(config, turn, repo_instructions=None, box="box-1")
+    middleware = server.PrepareAgentRunMiddleware(
+        config, turn, repo_instructions=None, sandbox_id="sandbox-1"
+    )
     return Handoff(middleware, settings, store)
 
 
