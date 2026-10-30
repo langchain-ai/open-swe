@@ -11,11 +11,13 @@ Args:
   Order by your own judgment of what the author most needs to fix first; severity is an input, not the rule.
   Pass ``[]`` when there are none.
   A ranking with missing, unknown, or repeated IDs publishes nothing and returns ``expected_finding_ids`` so you can rank that exact set.
-- description_review: Required outside eval mode. The dedicated description reviewer's verified verdict: exact full `head_sha`, current `title`, current `body` (empty string if absent), and `issues` (a list of evidence-backed material inaccuracies or omissions, empty when clean).
+- description_review: Required outside eval mode.
+  The dedicated description reviewer's verified verdict: exact full `head_sha`, current `title`, current `body` (empty string if absent), and `issues` (a list of evidence-backed material inaccuracies or omissions, empty when clean).
   The tool rechecks the live PR text and head before publication and rejects stale verdicts.
   Nonempty issues submit a real `REQUEST_CHANGES` review even with no inline findings or approval policy, and prevent automatic approval.
   An empty issues list dismisses only this reviewer's marked description change requests, never human or unrelated reviews, without approving the PR.
-  Description verdicts publish on re-reviews even with no new inline findings. Eval mode never submits change requests.
+  Description verdicts publish on re-reviews even with no new inline findings.
+  Eval mode never submits change requests.
 - assessment: Optional structured advisory approval assessment with the full ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high), ``decision`` (``would_approve`` or ``needs_human_review``), and a short ``explanation`` (up to 1500 characters).
   Include it after completing a review only when the reviewer instructions include an approval policy, and assess against that policy.
   The commit must match the live reviewed head.

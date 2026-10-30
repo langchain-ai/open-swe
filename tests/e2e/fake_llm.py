@@ -1756,6 +1756,83 @@ def build_script() -> list[StepSpec]:
     return list(SCRIPT_LIBRARY["implement"])
 
 
+def _description_review_message(messages: list[BaseMessage]) -> AIMessage | None:
+    systems = "\n".join(_text(m.content) for m in messages if isinstance(m, SystemMessage))
+    humans = "\n".join(_text(m.content) for m in messages if isinstance(m, HumanMessage))
+    if "You are the PR description reviewer." in systems:
+        tools = [m for m in messages if isinstance(m, ToolMessage)]
+        if not tools:
+            return AIMessage(
+                content="Inspecting the complete change.",
+                tool_calls=[
+                    {
+                        "name": "execute",
+                        "args": {
+                            "command": f"git -C {os.environ['E2E_SANDBOX_ROOT']}/demo fetch origin main && git -C {os.environ['E2E_SANDBOX_ROOT']}/demo diff origin/main...HEAD"
+                        },
+                        "id": "description-full-diff",
+                    }
+                ],
+            )
+        if "TIMEOUT_SECONDS = 60" not in _text(tools[-1].content):
+            raise RuntimeError(
+                f"Description reviewer did not read the full change: {_text(tools[-1].content)}"
+            )
+        verdict = json.loads(humans.split("E2E_DESCRIPTION_VERDICT:")[-1])
+        return AIMessage(content=json.dumps(verdict))
+    match = re.search(r"Review GitHub pull request `fakeorg/demo#(\d+)`", systems)
+    if match is None:
+        return None
+    turn_start = max(
+        (index for index, message in enumerate(messages) if isinstance(message, HumanMessage)),
+        default=-1,
+    )
+    results = [m for m in messages[turn_start + 1 :] if isinstance(m, ToolMessage)]
+    published = next((m for m in reversed(results) if m.name == "publish_review"), None)
+    if published is not None and '"success": true' in _text(published.content).lower():
+        return AIMessage(content="Description review published.")
+    delegated = next((m for m in reversed(results) if m.name == "task"), None)
+    if delegated is not None:
+        verdict = json.loads(_text(delegated.content))
+        return AIMessage(
+            content="Publishing the verified description verdict.",
+            tool_calls=[
+                {
+                    "name": "publish_review",
+                    "args": {"ranking": [], "description_review": verdict},
+                    "id": f"publish-description-{len(messages)}",
+                }
+            ],
+        )
+    response = httpx.get(f"{FAKE_GITHUB_API}/repos/fakeorg/demo/pulls/{match[1]}")
+    response.raise_for_status()
+    pull = response.json()
+    verdict = {
+        "head_sha": pull["head"]["sha"],
+        "title": pull["title"],
+        "body": pull["body"],
+        "issues": []
+        if "60 seconds" in pull["body"]
+        else [
+            "The description omits the behavior change: settings.py:1 adds "
+            "TIMEOUT_SECONDS = 60. Describe the new 60-second timeout."
+        ],
+    }
+    return AIMessage(
+        content="Delegating the full-diff description check.",
+        tool_calls=[
+            {
+                "name": "task",
+                "args": {
+                    "subagent_type": "description-reviewer",
+                    "description": "E2E_DESCRIPTION_VERDICT:" + json.dumps(verdict),
+                },
+                "id": f"delegate-description-{len(messages)}",
+            }
+        ],
+    )
+
+
 class FakeScriptedChatModel(BaseChatModel):
     """Returns the next scripted AIMessage based on how far the loop has run."""
 
@@ -1793,6 +1870,9 @@ class FakeScriptedChatModel(BaseChatModel):
                     return ChatResult(generations=[ChatGeneration(message=AIMessage(content=""))])
                 LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
+        description = _description_review_message(messages)
+        if description is not None:
+            return ChatResult(generations=[ChatGeneration(message=description)])
         humans = _script_humans(messages)
         context = ScriptContext(
             first_text=_text(humans[0].content) if humans else "",

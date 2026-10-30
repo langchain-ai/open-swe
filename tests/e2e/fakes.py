@@ -768,13 +768,22 @@ def submit_review(
     pull["reviews"].append(review)
     for comment in comments or []:
         _add_review_comment(pull, review, author=author, payload=comment)
-    _refresh_review_decision(pull)
+    refresh_review_decision(pull)
     return review
 
 
-def _refresh_review_decision(pull: dict[str, Any]) -> None:
-    if any(item["state"] == "APPROVED" for item in pull["reviews"]):
-        pull["review_decision"] = "APPROVED"
+def refresh_review_decision(pull: dict[str, Any]) -> None:
+    latest: dict[str, str] = {}
+    for review in pull["reviews"]:
+        if review["state"] in {"APPROVED", "CHANGES_REQUESTED"}:
+            latest[review["author"]] = review["state"]
+    pull["review_decision"] = (
+        "CHANGES_REQUESTED"
+        if "CHANGES_REQUESTED" in latest.values()
+        else "APPROVED"
+        if "APPROVED" in latest.values()
+        else "REVIEW_REQUIRED"
+    )
 
 
 def pending_review(pull: dict[str, Any], author: str) -> dict[str, Any] | None:
@@ -805,7 +814,7 @@ def submit_pending_review(
         body=body or review["body"],
         submitted_at=github_timestamp(),
     )
-    _refresh_review_decision(pull)
+    refresh_review_decision(pull)
     return 200, review
 
 
@@ -999,6 +1008,8 @@ def merge_pull(
         return 405, {"message": "Draft pull requests cannot be merged"}
     if sha and sha != pull["head_sha"]:
         return 409, {"message": "Head branch was modified. Review and try the merge again."}
+    if pull.get("review_decision") == "CHANGES_REQUESTED":
+        return 405, {"message": "Changes have been requested"}
     if not pull["mergeable"]:
         return 405, {"message": "Pull request is not mergeable"}
     pull["merged"] = True
