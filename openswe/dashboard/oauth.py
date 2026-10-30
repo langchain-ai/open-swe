@@ -41,7 +41,7 @@ STATE_COOKIE_NAME = "osw_oauth_state"
 AUTH_PATH = "/dashboard/api/auth"
 GITHUB_CALLBACK_PATH = f"{AUTH_PATH}/callback"
 MCP_SIGN_IN_CALLBACK_PATH = f"{AUTH_PATH}/mcp/callback"
-DESKTOP_APP_ORIGIN = "open-swe://app"
+_DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
@@ -519,7 +519,7 @@ def require_same_origin(request: HTTPConnection) -> None:
     allowed = allowed_dashboard_origins()
     if not allowed:
         return
-    allowed.add(DESKTOP_APP_ORIGIN)
+    allowed.add(_DESKTOP_APP_ORIGIN)
     request_base_origin = _origin_of(str(request.base_url))
     if request_base_origin:
         allowed.add(request_base_origin)
