@@ -19,11 +19,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck, InboxSpec, LoopRules
+from runtime_api.catalog import FileCheck, InboxSpec, LoopRules, McpServerSpec
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
-from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
@@ -48,9 +47,7 @@ def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
         )
     return ToolDescription(
         name=name,
-        description=tool.description
-        + "\n\n"
-        + prompt("tools/mcp-provenance", provenance=provenance.model_dump_json()),
+        description=f"{tool.description}\n\n{provenance.note()}",
         parameters=tool_parameters(tool),
         mcp_provenance=provenance,
     )
@@ -110,6 +107,8 @@ class ToolSurface:
     excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
     integration_names: list[str] = field(default_factory=list)
+    # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
+    mcp_servers: Sequence[McpServerSpec] = ()
     # What a model loop running elsewhere needs from the graph: its own middleware,
     # in order, and the models and subagents the factory picked.
     middleware: Sequence[AgentMiddleware] = ()

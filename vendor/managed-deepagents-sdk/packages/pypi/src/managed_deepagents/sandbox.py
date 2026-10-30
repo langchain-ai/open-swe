@@ -197,6 +197,11 @@ async def replace_sandbox(
     return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
 
 
+def is_per_thread(options: Mapping[str, object]) -> bool:
+    """Whether the box is a thread's own, whose work a failure must never abandon."""
+    return options.get("_openswe_per_thread") is True
+
+
 def owning_thread(options: Mapping[str, object]) -> str | None:
     """The thread whose box a definition uses, when not the run's own."""
     thread_id = options.get("_openswe_thread_id")
@@ -221,11 +226,6 @@ def without_box(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
     """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
     backend = sandbox.options.get("_openswe_without_box")
     return backend if isinstance(backend, SandboxBackendProtocol) else None
-
-
-def is_per_thread(options: Mapping[str, object]) -> bool:
-    """Whether the thread keeps one box whatever a dynamic selection's options."""
-    return options.get("_openswe_per_thread") is True
 
 
 def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:

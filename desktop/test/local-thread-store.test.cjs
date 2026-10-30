@@ -45,6 +45,26 @@ test("keeps a thread's bridge and checkout across restarts, privately", (t) => {
   assert.throws(() => store.create({ id: "thread-1", cwd: "/tmp/other" }));
 });
 
+test("task folders are distinct, persistent and retained when history is removed", (t) => {
+  const fixture = temporaryStore(t);
+  const store = fixture.create();
+  const first = store.createTask("10000000-0000-4000-8000-000000000001");
+  const second = store.createTask("10000000-0000-4000-8000-000000000002");
+  assert.notEqual(first.cwd, second.cwd);
+  fs.writeFileSync(path.join(first.cwd, "report.txt"), "keep me");
+  const reloaded = fixture.create();
+  assert.equal(reloaded.taskRoot(reloaded.get(first.id)), first.cwd);
+  reloaded.delete(first.id);
+  assert.equal(
+    fs.readFileSync(path.join(first.cwd, "report.txt"), "utf8"),
+    "keep me",
+  );
+  assert.throws(() => store.createTask("../../outside"));
+  fs.rmSync(second.cwd, { recursive: true });
+  fs.symlinkSync(path.dirname(second.cwd), second.cwd);
+  assert.equal(store.taskRoot(second), null);
+});
+
 test("remembers a created worktree after the thread moves off it", (t) => {
   const fixture = temporaryStore(t);
   const store = fixture.create();

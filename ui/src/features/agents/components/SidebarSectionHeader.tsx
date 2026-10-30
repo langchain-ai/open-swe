@@ -28,12 +28,14 @@ export function SidebarSectionHeader({
   onToggleCollapsed,
   menu,
   action,
+  headingClassName,
 }: {
   label: string
   collapsed?: boolean
   onToggleCollapsed?: () => void
   menu?: ReactNode
   action?: ReactNode
+  headingClassName?: string
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   const Heading = onToggleCollapsed ? "button" : "div"
@@ -44,7 +46,10 @@ export function SidebarSectionHeader({
         type={onToggleCollapsed ? "button" : undefined}
         onClick={onToggleCollapsed}
         aria-expanded={onToggleCollapsed ? !collapsed : undefined}
-        className="flex min-w-0 flex-1 items-center gap-space-1 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-space-1 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary",
+          headingClassName
+        )}
       >
         <span className="min-w-0 truncate">{label}</span>
         <Caret

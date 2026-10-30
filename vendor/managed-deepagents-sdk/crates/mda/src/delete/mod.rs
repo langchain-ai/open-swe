@@ -41,15 +41,15 @@ use crate::cli_output::show_wordmark_intro;
 use crate::command::CommandCompletion;
 use crate::deploy::channel_setup::{self, ChannelTeardown};
 use crate::deploy::helpers::{
-    bake_snapshot_list_prefix, deployment_runtime_url, is_deployment_bake_snapshot,
-    is_deployment_sandbox, sandbox_name_prefixes, sandbox_registry_name,
+    bake_snapshot_list_prefix, is_deployment_bake_snapshot, is_deployment_sandbox,
+    sandbox_name_prefixes, sandbox_registry_name,
 };
 use crate::deploy::langsmith_context::{LangSmithContext, WORKSPACE_FLAG_HINT};
 use crate::deploy::{
-    agent_target, delete_managed_crons, ensure_project, env_file, find_target_deployment,
-    resolve_api_key, step,
+    agent_environment, agent_target, delete_managed_crons, ensure_project, env_file,
+    find_target_deployment, live_deployment, resolve_api_key, step,
 };
-use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
+use crate::error::{categorized, is_cancellation, ErrorCategory, Failure};
 use crate::install::Installation;
 use crate::langsmith::{self, AgentEnvironment, ContextHubClient, DeploymentAgent};
 use crate::naming::normalize_name;
@@ -70,6 +70,8 @@ pub struct DeleteOptions {
     pub workspace_id: Option<String>,
     /// Host backend URL override.
     pub host_url: Option<String>,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
     /// Skip the confirmation prompt.
     pub yes: bool,
 }
@@ -161,10 +163,10 @@ pub fn run(opts: DeleteOptions) -> Result<CommandCompletion> {
             Ok(CommandCompletion::Cancelled)
         }
         Err(err) => {
-            let category = category_of(&err);
+            let failure = Failure::of(&err);
             otel_logger::error(&err);
             outro_cancel(format!("{err:#}"))?;
-            Ok(CommandCompletion::Failed(category))
+            Ok(CommandCompletion::Failed(failure))
         }
     }
 }
@@ -175,9 +177,9 @@ fn run_session(
     project: &project::Project,
     root: &Path,
 ) -> Result<CommandCompletion> {
-    let env_path = root.join(".env");
+    let env_path = env_file::project_env_path(root, opts.env_file.as_deref());
     let env_vars = env_file::parse_env_file(&env_path);
-    let ctx = LangSmithContext::resolve(
+    let ctx = LangSmithContext::resolve_verified(
         &env_vars,
         opts.host_url.as_deref(),
         opts.workspace_id.as_deref(),
@@ -189,17 +191,18 @@ fn run_session(
         Some(name) => normalize_name(name)?,
         None => agent_config::agent_assistant_id(project)?,
     };
-    let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
+    let environment = agent_environment(opts.agent_environment, &env_vars)?;
+    let (name, deployment_agent) = agent_target(base_name, environment)?;
     update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
 
     let client = ctx.client()?;
     let context_client = ctx.context_hub_client()?;
 
     let mut plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
+    update_facts(|facts| facts.deployment.deployment_id = plan.deployment_id.clone());
     if let Some(deployment_id) = plan.deployment_id.clone() {
         resolve_channel_connections(&mut plan, &client, &env_vars, &deployment_id);
     }
-    update_facts(|facts| facts.deployment.deployment_id = plan.deployment_id.clone());
     if plan.is_empty() {
         // Everything else is gone, but an unreadable sandbox list means we
         // cannot claim teardown is complete — sandboxes may still be running.
@@ -342,10 +345,16 @@ fn resolve_plan(
         .as_ref()
         .and_then(|deployment| deployment.get("id")?.as_str())
         .map(str::to_string);
+    // List responses are trimmed, so a live deployment can appear with an id
+    // but no runtime URL. Missing the URL would silently skip the cron sweep
+    // and leave the schedules firing for the whole teardown window, which is
+    // the case this command exists to prevent, so `live_deployment` asks for
+    // the full deployment. `None` means there is nothing to sweep, or that the
+    // lookup failed, which [`delete_crons`] already treats as best-effort.
     let deployment_url = deployment
         .as_ref()
-        .zip(deployment_id.as_deref())
-        .and_then(|(deployment, id)| resolve_runtime_url(client, deployment, id));
+        .and_then(|deployment| live_deployment(client, deployment).ok().flatten())
+        .map(|(_, url)| url);
     match &deployment_id {
         Some(id) => sp.stop(format!("Found deployment {id}")),
         None => sp.stop(format!("No deployment named '{name}'")),
@@ -462,29 +471,6 @@ fn resolve_plan(
         channel_connections: None,
         channel_lookup_error: None,
     })
-}
-
-/// Find the Agent Server URL to sweep crons on, preferring the list response
-/// and falling back to the full deployment object.
-///
-/// List responses are trimmed, so a live deployment can appear here with an id
-/// but no runtime URL. Missing the URL would silently skip the cron sweep and
-/// leave the schedules firing for the whole teardown window, which is the case
-/// this command exists to prevent, so it is worth a second request to rule out.
-///
-/// `None` means there is genuinely nothing to sweep — a deployment that never
-/// finished building has no Agent Server — or that the lookup failed, which
-/// [`delete_crons`] already treats as best-effort.
-fn resolve_runtime_url(
-    client: &langsmith::Client,
-    listed_deployment: &serde_json::Value,
-    deployment_id: &str,
-) -> Option<String> {
-    if let Some(url) = deployment_runtime_url(listed_deployment) {
-        return Some(url);
-    }
-    let deployment = client.get_deployment(deployment_id).ok()?;
-    deployment_runtime_url(&deployment)
 }
 
 /// Select the Context Hub repos owned by the deployment `name`, ordered so
@@ -747,7 +733,7 @@ fn delete_context_hub_repos(context_client: &ContextHubClient, repos: &[String])
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deploy::helpers::find_deployment_by_name;
+    use crate::deploy::helpers::{deployment_runtime_url, find_deployment_by_name};
 
     fn handles(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()

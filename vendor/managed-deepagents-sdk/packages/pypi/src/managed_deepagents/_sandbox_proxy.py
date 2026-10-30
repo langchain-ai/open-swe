@@ -7,7 +7,6 @@ import base64
 import contextvars
 import hashlib
 import json
-import os
 from collections.abc import Coroutine, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
@@ -24,6 +23,7 @@ from managed_deepagents._connections import (
     CredentialAuthorizationRequiredError,
     is_connection_reference,
 )
+from managed_deepagents._langsmith_env import resolve_langsmith_endpoint
 from managed_deepagents.sandbox import ConnectionHeader, SandboxDefinition
 
 if TYPE_CHECKING:
@@ -160,17 +160,12 @@ def patch_sandbox_proxy_config(
 
     kwargs = _sandbox_client_kwargs(sandbox)
     headers = dict(cast("Mapping[str, str]", kwargs.get("headers") or {}))
-    api_key = kwargs.get("api_key") or os.environ.get("LANGCHAIN_API_KEY")
+    api_key = kwargs.get("api_key")
     if isinstance(api_key, str):
         headers["X-Api-Key"] = api_key
     endpoint = _configured_sandbox_api_endpoint()
     if endpoint is None:
-        base = (
-            os.environ.get("LANGSMITH_ENDPOINT")
-            or os.environ.get("LANGCHAIN_ENDPOINT")
-            or "https://api.smith.langchain.com"
-        )
-        endpoint = f"{base.rstrip('/')}/v2/sandboxes"
+        endpoint = f"{resolve_langsmith_endpoint().rstrip('/')}/v2/sandboxes"
     httpx = import_module("httpx")
     try:
         with httpx.Client(timeout=30, follow_redirects=False) as client:
