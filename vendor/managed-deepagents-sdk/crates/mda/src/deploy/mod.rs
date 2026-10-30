@@ -24,6 +24,7 @@
 //! 7. Poll the revision status with a live spinner until it settles.
 //! 8. Reconcile Managed Deep Agent schedules through Agent Server cron APIs.
 
+mod api_key_check;
 mod archive;
 pub(crate) mod bake;
 pub(crate) mod channel_app;
@@ -49,18 +50,20 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use clap::ValueEnum;
 use cliclack::{confirm, log, outro, outro_cancel, password, spinner, ProgressBar};
 
 use crate::agent_config;
+use crate::channel::ChannelKind;
 use crate::cli_output::{note_links, note_links_with_section, show_wordmark_intro};
 use crate::command::CommandCompletion;
-use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
+use crate::error::{categorized, is_cancellation, ErrorCategory, Failure};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::{
     self, is_cli_session_api_key, lookup_env_file, lookup_env_or_process, note_session_api_key,
     require_str, resolve_preferred_env, ApiKey, ConnectionSummary, ContextHubClient,
-    DeploymentAgent, Login, RepoOwnership, GATEWAY_API_KEY_ENV, REMOVED_API_KEY_ENVS,
+    DeploymentAgent, KeyCheck, Login, RepoOwnership, GATEWAY_API_KEY_ENV, REMOVED_API_KEY_ENVS,
 };
 use crate::naming::{normalize_name, validate_agent_id};
 use crate::telemetry::stage::Stage;
@@ -68,10 +71,14 @@ use crate::telemetry::{self, otel_logger, refresh_identity, update_facts, Deploy
 use crate::{compile, connection, dependencies, project};
 
 pub use crate::langsmith::{AgentEnvironment, DeploymentType, API_KEY_ENV};
+pub(crate) use api_key_check::{
+    is_refusal, require_user_key, verify_api_key, ApiKeySource, ResolvedApiKey, UserKeyCheckpoint,
+};
+pub use env_file::resolve_env_file_flag;
 pub(crate) use helpers::{resolve_https_public_api_url, PublicApiUrl, MDA_HANDOFF_SECRET_ENV};
 
 use bake::{bake_recipe, RecipeSpec};
-use channel_setup::{ChannelSetup, SetupTarget};
+use channel_setup::{is_settled, ChannelSetup, SetupTarget};
 use context_hub::{
     apply_context_sync, link_context_repo_to_agent, prepare_context_sync, ConflictResolution,
     ContextSection,
@@ -79,12 +86,12 @@ use context_hub::{
 use helpers::{
     clear_recipe_snapshot_secret, deployment_is_managed_deep_agent,
     deployment_managed_deep_agent_marker, deployment_runtime_url, deployment_status_url,
-    deployment_tenant_id, ensure_assistant_id_secret, ensure_cors_allow_origins,
-    ensure_deployment_name_secret, ensure_langsmith_url_secret, ensure_public_api_url,
-    ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret, find_agent_deployment,
-    find_deployment_by_name, find_deployment_id_by_name, is_failed_status, is_interrupted_status,
-    is_request_timeout, is_terminal_status, secrets_from_env, set_mda_handoff_secret,
-    set_workspace_id_secret, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
+    deployment_tenant_id, dropped_reserved_env_vars, ensure_assistant_id_secret,
+    ensure_cors_allow_origins, ensure_deployment_name_secret, ensure_langsmith_url_secret,
+    ensure_public_api_url, ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret,
+    find_agent_deployment, find_deployment_by_name, find_deployment_id_by_name, is_failed_status,
+    is_interrupted_status, is_request_timeout, is_reserved_env_var, is_terminal_status,
+    secrets_from_env, set_mda_handoff_secret, set_workspace_id_secret, WORKSPACE_ID_ENV,
 };
 use langsmith_context::{resolve_workspace_id, LangSmithEndpoints, WORKSPACE_FLAG_HINT};
 
@@ -134,6 +141,8 @@ pub struct DeployOptions {
     pub yes: bool,
     /// Maximum time to wait for a deployment revision to reach a terminal status.
     pub wait_timeout: Duration,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
 }
 
 /// Run the deploy command end-to-end.
@@ -148,11 +157,16 @@ pub fn run(opts: DeployOptions) -> Result<CommandCompletion> {
     let interrupt = Interrupt::install()?;
     ensure_project(&opts.path)?;
     let installation = Installation::from_env()?;
-    let project = installation.load_project(&opts.path)?;
+    let project = installation
+        .load_project(&opts.path)?
+        .without_env_file(opts.env_file.as_deref());
     let root = project.root.as_path();
 
     show_wordmark_intro()?;
     log::info(format!("Project: {}", root.display()))?;
+    if let Some(env_file) = &opts.env_file {
+        log::info(format!("Env file: {}", env_file.display()))?;
+    }
 
     let mut client = None;
     match run_session(
@@ -169,10 +183,10 @@ pub fn run(opts: DeployOptions) -> Result<CommandCompletion> {
             Ok(CommandCompletion::Cancelled)
         }
         Err(err) => {
-            let category = category_of(&err);
+            let failure = Failure::of(&err);
             otel_logger::error(&err);
             report_session_failure(&err, client.as_ref())?;
-            Ok(CommandCompletion::Failed(category))
+            Ok(CommandCompletion::Failed(failure))
         }
     }
 }
@@ -217,23 +231,43 @@ fn run_session(
         Some(n) => normalize_name(n)?,
         None => assistant_id.clone(),
     };
-    let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
+    let env_path = env_file::project_env_path(root, opts.env_file.as_deref());
+    let env_vars = env_file::parse_env_file(&env_path);
+    let environment = agent_environment(opts.agent_environment, &env_vars)?;
+    let (name, deployment_agent) = agent_target(base_name, environment)?;
     update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
 
-    let env_path = root.join(".env");
-    let env_vars = env_file::parse_env_file(&env_path);
     let endpoints = LangSmithEndpoints::resolve(&env_vars, opts.host_url.as_deref());
     let image_source = image::select_image_source(
         image::requires_external_image(&endpoints.host_url),
         opts.push_to.as_deref(),
     )?;
-    let api_key = resolve_api_key(&env_vars, &env_path, &endpoints.platform_api_url)?;
+    let ResolvedApiKey {
+        api_key,
+        source: key_source,
+    } = resolve_api_key(&env_vars, &env_path, &endpoints.platform_api_url)?;
     let workspace_id =
         resolve_workspace_id(&env_vars, opts.workspace_id.as_deref(), WORKSPACE_FLAG_HINT)?;
     let ctx = endpoints.with_auth(api_key, workspace_id);
     let platform_api_url = ctx.platform_api_url();
     let workspace_id = &ctx.workspace_id;
 
+    if env_vars
+        .get(AGENT_ID_ENV)
+        .is_some_and(|value| !value.is_empty())
+    {
+        log::warning(format!(
+            "Not uploading {AGENT_ID_ENV}. The deployment name is the agent ID."
+        ))?;
+    }
+    let dropped = dropped_reserved_env_vars(&env_vars);
+    if !dropped.is_empty() {
+        log::warning(format!(
+            "Not uploading {} from {}. LangSmith sets these on the deployment itself.",
+            dropped.join(", "),
+            env_path.display()
+        ))?;
+    }
     let mut secrets = secrets_from_env(&env_vars);
     set_mda_handoff_secret(&mut secrets, &random_handoff_secret());
     // Scope the runtime to the same workspace the deploy clients use,
@@ -253,7 +287,12 @@ fn run_session(
     ensure_cors_allow_origins(&mut secrets, &env_vars);
 
     let client: &langsmith::Client = client_slot.insert(ctx.client()?);
+    // Before anything else uses the key: LangSmith refuses a bad one with a
+    // 403 that would otherwise read as whichever entitlement was checked first.
+    let key_check = verify_api_key(client, &key_source, workspace_id.as_deref())?;
     let dashboard_url = client.dashboard_url().ok();
+    // Channel notices link to the agent's thread in this environment's
+    // LangSmith Studio, the same UI deploy prints as the dashboard.
     if let Some(url) = &dashboard_url {
         ensure_langsmith_url_secret(&mut secrets, url);
     }
@@ -279,7 +318,7 @@ fn run_session(
     let mut workspace_keys = WorkspaceSecretKeys::Unloaded;
     ensure_model_api_key(
         agent.model.as_deref(),
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         client,
@@ -295,6 +334,7 @@ fn run_session(
     // agent deploys but is unusable.
     ensure_ingress_secret(
         project,
+        &env_path,
         &env_vars,
         &secrets,
         client,
@@ -302,14 +342,28 @@ fn run_session(
         &mut workspace_keys,
     )?;
 
+    // Trigger Server refuses a key with no user when it sets up a Slack channel,
+    // and that only happens once the deployment is live. Read the channel from
+    // source so this runs before the Context Hub sync changes what a running
+    // deployment serves; a channel this misses is checked once compile emits it.
+    let slack_channel_checked = compile::declares_slack_channel(project)?;
+    if slack_channel_checked {
+        require_user_key(
+            client,
+            &key_source,
+            trigger_channels::PROVIDER_LABEL,
+            UserKeyCheckpoint::Preflight,
+        )?;
+    }
+
     // A sandbox declaration with no recipe never hits the sandbox API during
     // bake, so this has to run as a preflight. After Context Hub sync it would
     // leave remote state changed on an org that cannot run the agent.
     if compile::project_uses_sandbox(project)? {
         ensure_sandbox_api_endpoint_secret(&mut secrets, platform_api_url);
-        client.ensure_sandbox_access().context(
-            "project declares a managed sandbox, but sandbox access is unavailable for this organization",
-        )?;
+        client
+            .ensure_sandbox_access()
+            .map_err(|err| explain_sandbox_access_error(err, key_check))?;
     }
 
     // One decision for the whole deploy: the same value the generated entry hands
@@ -328,7 +382,7 @@ fn run_session(
     // overwrites a same-name Context Hub repo or LangSmith deployment, so make
     // that explicit. Deliberately after the preflights above — a deploy that
     // cannot succeed should never ask the question.
-    if !confirm_first_deploy_collisions(
+    let existing_deployment = match confirm_first_deploy_collisions(
         client,
         &context_client,
         &name,
@@ -336,9 +390,12 @@ fn run_session(
         &image_source,
         opts.yes,
     )? {
-        outro_cancel("Cancelled — existing resources left unchanged.")?;
-        return Ok(CommandCompletion::Cancelled);
-    }
+        DeployGate::Proceed(existing_deployment) => existing_deployment,
+        DeployGate::Cancelled => {
+            outro_cancel("Cancelled — existing resources left unchanged.")?;
+            return Ok(CommandCompletion::Cancelled);
+        }
+    };
 
     // -- 3. Sync deploy-owned context to Context Hub -----------------------
     interrupt.check()?;
@@ -399,22 +456,63 @@ fn run_session(
         &mcp_connections,
     )?;
     warn_unprovided_reserved_connections(&connector_requirements, &channel_requirements)?;
-    let channel_setup = ChannelSetup::prepare(
+    let mut channel_setup = ChannelSetup::prepare(
         &channel_requirements,
-        opts.wait,
         &project.root,
         &project.files,
         project.language,
         &assistant_id,
     )?;
+    // Before the channel preflight, whose own Trigger Server lookup would be
+    // refused for the same reason with a less useful message.
+    if channel_setup.trigger().is_some() && !slack_channel_checked {
+        require_user_key(
+            client,
+            &key_source,
+            trigger_channels::PROVIDER_LABEL,
+            UserKeyCheckpoint::AfterContextSync,
+        )?;
+    }
+    // The deployment being updated, as the collision check found it, and its
+    // ID and Agent Server URL once it has one — read only when a channel
+    // needs them.
+    let channel_deployment = existing_deployment
+        .as_ref()
+        .filter(|_| channel_setup.needs_live_url());
+    let live_existing_deployment = channel_deployment
+        .map(|deployment| live_deployment(client, deployment))
+        .transpose()?
+        .flatten();
     channel_setup.preflight(
         client,
-        || find_target_deployment(client, &name, deployment_agent.as_ref()),
+        channel_deployment.and_then(|deployment| deployment.get("id")?.as_str()),
+        live_existing_deployment
+            .as_ref()
+            .map(|(_, agent_server_url)| agent_server_url.as_str()),
         &env_vars,
+        channel_app::is_interactive(),
     )?;
+    // Channels already set up on the deployment being updated are set up
+    // again before the upload (step 4c); the revision it serves has their
+    // ingress. Any other channel waits for the new revision (step 7): the
+    // running one may have none, and its events would be lost until the
+    // build finished. A first deploy has no URL, so all of them wait.
+    let early_channels = match &live_existing_deployment {
+        Some((deployment_id, _)) => {
+            let statuses = channel_setup.statuses(client, deployment_id, &env_vars);
+            let settled: Vec<ChannelKind> = statuses
+                .iter()
+                .filter(|(_, status)| is_settled(status))
+                .map(|(kind, _)| *kind)
+                .collect();
+            channel_setup.take(&settled)
+        }
+        None => channel_setup.take(&[]),
+    };
+    ensure_channels_allow_no_wait(&channel_setup.kinds(), opts.wait)?;
 
     ensure_connector_requirements_secrets(
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         client,
@@ -423,7 +521,7 @@ fn run_session(
         &mut workspace_keys,
     )?;
     ensure_channel_requirements_secrets(
-        project,
+        &env_path,
         &env_vars,
         &secrets,
         client,
@@ -431,6 +529,21 @@ fn run_session(
         &channel_requirements,
         &mut workspace_keys,
     )?;
+
+    // -- 4c. Set up the channels the running revision already serves ------
+    // Its Agent Server URL stays the same across revisions, so a channel
+    // that can no longer be set up stops the deploy before anything is
+    // uploaded.
+    if let Some((deployment_id, agent_server_url)) = &live_existing_deployment {
+        early_channels.set_up(&SetupTarget {
+            client,
+            agent_server_url,
+            deployment_id,
+            assistant_id: &assistant_id,
+            project_root: &project.root,
+            env_vars: &env_vars,
+        })?;
+    }
 
     let external_image = match image_source {
         image::ImageSource::InternalSource => None,
@@ -454,15 +567,26 @@ fn run_session(
             client,
             &name,
             deployment_agent.as_ref(),
+            existing_deployment.as_ref(),
             image_uri,
             &secrets,
         )?
     } else {
         let deployment_id = match &deployment_agent {
-            Some(agent) => {
-                resolve_or_create_agent_deployment(client, agent, opts.deployment_type, &secrets)?
-            }
-            None => resolve_or_create_deployment(client, &name, opts.deployment_type, &secrets)?,
+            Some(agent) => resolve_or_create_agent_deployment(
+                client,
+                agent,
+                existing_deployment.as_ref(),
+                opts.deployment_type,
+                &secrets,
+            )?,
+            None => resolve_or_create_deployment(
+                client,
+                &name,
+                existing_deployment.as_ref(),
+                opts.deployment_type,
+                &secrets,
+            )?,
         };
         (deployment_id, None)
     };
@@ -595,6 +719,46 @@ fn run_session(
     Ok(CommandCompletion::Succeeded)
 }
 
+/// The ID and Agent Server URL of `deployment`, an existing deployment as
+/// listed, once it has an Agent Server; `None` before its first build.
+pub(crate) fn live_deployment(
+    client: &langsmith::Client,
+    deployment: &serde_json::Value,
+) -> Result<Option<(String, String)>> {
+    let Some(id) = deployment.get("id").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    // Listings may leave the URL out; the deployment itself has it.
+    let url = match deployment_runtime_url(deployment) {
+        Some(url) => Some(url),
+        None => deployment_runtime_url(
+            &client
+                .get_deployment(id)
+                .with_context(|| format!("failed to read deployment {id}"))?,
+        ),
+    };
+    Ok(url.map(|url| (id.to_string(), url)))
+}
+
+/// Refuse `mda deploy --no-wait` while channels wait for the new revision
+/// (step 7): a first deploy's, and those not set up on the deployment yet.
+/// Channels already set up are set up before the upload (step 4c), so they
+/// need not wait.
+fn ensure_channels_allow_no_wait(waiting: &[ChannelKind], wait: bool) -> Result<()> {
+    if wait {
+        return Ok(());
+    }
+    let labels: Vec<_> = waiting.iter().map(|kind| kind.label()).collect();
+    let channels = match labels.split_last() {
+        None => return Ok(()),
+        Some((last, [])) => format!("a {last} channel"),
+        Some((last, rest)) => format!("{} and {last} channels", rest.join(", ")),
+    };
+    bail!(
+        "An agent with {channels} not set up yet cannot be deployed with --no-wait: a channel is set up once the new revision is live, the first that can receive its events. Run `mda deploy` without --no-wait this time; once the channels are set up, later deploys can use --no-wait."
+    );
+}
+
 fn require_trigger_registration_url(
     agent_server_url: Option<String>,
     has_trigger_channel: bool,
@@ -712,6 +876,37 @@ fn collision_decision(
     ))
 }
 
+const AGENT_ID_ENV: &str = "LANGSMITH_AGENT_ID";
+const AGENT_ENVIRONMENT_ENV: &str = "LANGSMITH_AGENT_ENVIRONMENT";
+
+/// `--agent-environment`, else `LANGSMITH_AGENT_ENVIRONMENT` from `.env`.
+pub(crate) fn agent_environment(
+    flag: Option<AgentEnvironment>,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<Option<AgentEnvironment>> {
+    if flag.is_some() {
+        return Ok(flag);
+    }
+    let Some(value) = env_vars
+        .get(AGENT_ENVIRONMENT_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    if let Ok(environment) = AgentEnvironment::from_str(value, false) {
+        return Ok(Some(environment));
+    }
+    let possible = AgentEnvironment::value_variants()
+        .iter()
+        .map(|environment| environment.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "invalid value '{value}' for {AGENT_ENVIRONMENT_ENV} in .env [possible values: {possible}]"
+    )
+}
+
 /// In agent mode the deployment name is the agent ID. Returns the name of the
 /// deploy-owned resources (see [`DeploymentAgent::resource_name`]) and the agent.
 pub(crate) fn agent_target(
@@ -766,6 +961,15 @@ fn with_managed_marker(
     }
 }
 
+/// Whether the deploy goes ahead past the first-deploy gate.
+enum DeployGate {
+    /// Go ahead, updating this deployment, or creating one when `None`. The
+    /// gate's lookup is the deploy's only one: later steps reuse it.
+    Proceed(Option<serde_json::Value>),
+    /// The developer declined to overwrite same-name resources.
+    Cancelled,
+}
+
 fn confirm_first_deploy_collisions(
     client: &langsmith::Client,
     context_client: &ContextHubClient,
@@ -773,7 +977,7 @@ fn confirm_first_deploy_collisions(
     agent: Option<&DeploymentAgent>,
     image_source: &image::ImageSource,
     yes: bool,
-) -> Result<bool> {
+) -> Result<DeployGate> {
     let sp = spinner();
     sp.start(format!("Checking for existing resources named '{name}'"));
     let existing_deployment = step(
@@ -804,7 +1008,7 @@ fn confirm_first_deploy_collisions(
         .is_some_and(deployment_is_managed_deep_agent)
     {
         sp.stop("Existing Managed Deep Agent deployment found");
-        return Ok(true);
+        return Ok(DeployGate::Proceed(existing_deployment));
     }
     // A repo `mda deploy` created is not a collision even on a first deploy —
     // most often it is the leftover of an earlier deploy that failed after the
@@ -822,7 +1026,7 @@ fn confirm_first_deploy_collisions(
         context_hub_repo == RepoOwnership::Foreign,
     );
     if collisions == FirstDeployCollisions::default() {
-        return Ok(true);
+        return Ok(DeployGate::Proceed(existing_deployment));
     }
     if collisions.context_hub_repo {
         log::warning(format!(
@@ -839,14 +1043,19 @@ fn confirm_first_deploy_collisions(
         ))?;
     }
     match collision_decision(name, &collisions, yes, std::io::stdin().is_terminal())? {
-        CollisionDecision::Proceed => return Ok(true),
+        CollisionDecision::Proceed => return Ok(DeployGate::Proceed(existing_deployment)),
         CollisionDecision::Prompt => {}
     }
-    Ok(confirm(format!(
+    let overwrite = confirm(format!(
         "Overwrite existing resources for '{name}' and continue?"
     ))
     .initial_value(false)
-    .interact()?)
+    .interact()?;
+    Ok(if overwrite {
+        DeployGate::Proceed(existing_deployment)
+    } else {
+        DeployGate::Cancelled
+    })
 }
 
 fn sync_context_hub(
@@ -1098,32 +1307,27 @@ fn bake_env_vars(
 ) -> std::collections::BTreeMap<String, String> {
     env_vars
         .iter()
-        .filter(|(name, value)| !value.is_empty() && !RESERVED_ENV_VARS.contains(&name.as_str()))
+        .filter(|(name, value)| !value.is_empty() && !is_reserved_env_var(name))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect()
 }
 
-/// Look up a LangSmith deployment by name, or create one when missing.
+/// The ID of `existing`, the deployment named `name` as the collision check
+/// found it, or of a new one created when there is none.
 fn resolve_or_create_deployment(
     client: &langsmith::Client,
     name: &str,
+    existing: Option<&serde_json::Value>,
     deployment_type: DeploymentType,
     secrets: &[langsmith::Secret],
 ) -> Result<String> {
-    let sp = spinner();
-    sp.start(format!("Looking up deployment '{name}'"));
-    let listed = step(
-        &sp,
-        "Could not reach LangSmith",
-        client.list_deployments(name),
-    )?;
-    match find_deployment_id_by_name(&listed, name) {
+    match existing.and_then(|deployment| deployment.get("id")?.as_str()) {
         Some(id) => {
-            sp.stop(format!("Found existing deployment {id}"));
-            Ok(id)
+            log::step(format!("Found existing deployment {id}"))?;
+            Ok(id.to_string())
         }
         None => {
-            sp.stop("No existing deployment — creating a new one");
+            log::step("No existing deployment — creating a new one")?;
             let sp = spinner();
             sp.start(format!("Creating deployment '{name}'"));
             match client.create_deployment(name, deployment_type, secrets) {
@@ -1164,14 +1368,16 @@ fn resolve_or_create_deployment(
     }
 }
 
+/// The ID of `existing`, the agent's deployment as the collision check found
+/// it, or of a new one created when there is none.
 fn resolve_or_create_agent_deployment(
     client: &langsmith::Client,
     agent: &DeploymentAgent,
+    existing: Option<&serde_json::Value>,
     deployment_type: DeploymentType,
     secrets: &[langsmith::Secret],
 ) -> Result<String> {
-    let listed = client.list_agent_deployments(agent)?;
-    let deployment = match find_agent_deployment(&listed) {
+    let deployment = match existing {
         Some(deployment) => deployment.clone(),
         None => client.create_agent_deployment(agent, deployment_type, secrets)?,
     };
@@ -1180,49 +1386,24 @@ fn resolve_or_create_agent_deployment(
     require_str(&deployment, "id", "agent deployment")
 }
 
+/// Like [`resolve_or_create_deployment`] for an external image; also returns
+/// the created deployment, whose creation already set the image.
 fn resolve_or_create_external_deployment(
     client: &langsmith::Client,
     name: &str,
     agent: Option<&DeploymentAgent>,
+    existing: Option<&serde_json::Value>,
     image_uri: &str,
     secrets: &[langsmith::Secret],
 ) -> Result<(String, Option<serde_json::Value>)> {
-    let sp = spinner();
-    sp.start("Checking for an existing deployment");
-    let existing = match agent {
-        Some(agent) => {
-            let listed = step(
-                &sp,
-                "Could not check existing deployments",
-                client.list_agent_deployments(agent),
-            )?;
-            find_agent_deployment(&listed).cloned()
-        }
-        None => {
-            let listed = step(
-                &sp,
-                "Could not check existing deployments",
-                client.list_deployments(name),
-            )?;
-            find_deployment_by_name(&listed, name).cloned()
-        }
-    };
-
     if let Some(existing) = existing {
-        let id = step(
-            &sp,
-            "Existing deployment has no id",
-            require_str(&existing, "id", "existing deployment"),
-        )?;
-        if let Err(err) = ensure_external_deployment_source(name, &existing) {
-            sp.error("Existing deployment uses a different source type");
-            return Err(err);
-        }
-        sp.stop(format!("Found deployment {id}"));
+        let id = require_str(existing, "id", "existing deployment")?;
+        ensure_external_deployment_source(name, existing)?;
+        log::step(format!("Found deployment {id}"))?;
         return Ok((id, None));
     }
 
-    sp.stop("No existing deployment — creating a new one");
+    log::step("No existing deployment — creating a new one")?;
     let sp = spinner();
     sp.start(format!("Creating deployment '{name}'"));
     let created = step(
@@ -1368,7 +1549,7 @@ fn export_langsmith_api_key(key: &str) {
 /// it does `MDA_*`: a sync that cannot find the key in the project file would
 /// delete it, and the resolver would write it straight back — two mtime bumps
 /// on the file LangGraph watches, so an extra server restart per rebuild.
-pub(crate) fn is_cli_session_env_entry(project_root: &Path, key: &str, value: &str) -> bool {
+pub(crate) fn is_cli_session_env_entry(project_env: &Path, key: &str, value: &str) -> bool {
     if key != API_KEY_ENV && key != GATEWAY_API_KEY_ENV {
         return false;
     }
@@ -1376,7 +1557,7 @@ pub(crate) fn is_cli_session_env_entry(project_root: &Path, key: &str, value: &s
     if value.is_empty() {
         return false;
     }
-    let env_vars = env_file::parse_env_file(&env_file::project_env_persist_path(project_root));
+    let env_vars = env_file::parse_env_file(project_env);
     let platform = LangSmithEndpoints::resolve(&env_vars, None).platform_api_url;
     is_cli_session_api_key(value, &platform)
 }
@@ -1439,26 +1620,26 @@ fn apply_langsmith_api_key(
 /// staged / project `.env`, CLI sign-in cache, then (on a TTY when `required`)
 /// paste or browser login.
 ///
-/// Pasted keys are written to the project `.env`; a shell-exported key is too,
-/// but only when the project has none, so it never overwrites the project's.
+/// Pasted keys are written to `project_env` (see
+/// [`env_file::project_env_persist_path`]); a shell-exported key is too, but
+/// only when that file has none, so it never overwrites the project's.
 /// Device-login / cached PATs are session-scoped: process env and the staged
 /// build `.env` only, so an expired PAT cannot stick in the project file.
 pub(crate) fn ensure_project_langsmith_api_key(
-    project_root: &Path,
+    project_env: &Path,
     staged_env_dir: Option<&Path>,
     required: bool,
 ) -> Result<()> {
-    let project_env = env_file::project_env_persist_path(project_root);
-    let mut env_vars = env_file::parse_env_file(&project_env);
+    let mut env_vars = env_file::parse_env_file(project_env);
     let platform = LangSmithEndpoints::resolve(&env_vars, None).platform_api_url;
 
     // The shell wins over staged and project `.env` keys, like every other CLI
     // setting.
     if let Some(key) = langsmith_api_key_from_shell(&platform) {
-        let project_vars = env_file::parse_env_file(&project_env);
+        let project_vars = env_file::parse_env_file(project_env);
         crate::langsmith::warn_if_shell_shadows_env_file(API_KEY_ENV, &key, &project_vars);
         let seed_project = lookup_env_file(API_KEY_ENV, &project_vars).is_none();
-        apply_langsmith_api_key(&key, &project_env, staged_env_dir, seed_project)?;
+        apply_langsmith_api_key(&key, project_env, staged_env_dir, seed_project)?;
         return Ok(());
     }
 
@@ -1480,10 +1661,10 @@ pub(crate) fn ensure_project_langsmith_api_key(
                 }
                 mirror_gateway_api_key(&staged_path, &key)?;
                 if !is_session
-                    && lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(&project_env))
+                    && lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(project_env))
                         .is_some()
                 {
-                    mirror_gateway_api_key(&project_env, &key)?;
+                    mirror_gateway_api_key(project_env, &key)?;
                 }
                 return Ok(());
             }
@@ -1492,16 +1673,16 @@ pub(crate) fn ensure_project_langsmith_api_key(
         }
     }
 
-    if let Some(key) = lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(&project_env)) {
+    if let Some(key) = lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(project_env)) {
         if is_cli_session_api_key(&key, &platform) {
             // A prior restage wrote a session PAT into the project file. Strip it
             // (and a matching gateway alias) so cache/login can refresh.
-            env_file::remove_env_key(&project_env, API_KEY_ENV)?;
-            clear_gateway_session_key(&project_env, &key)?;
+            env_file::remove_env_key(project_env, API_KEY_ENV)?;
+            clear_gateway_session_key(project_env, &key)?;
         } else {
             // Already durable in the project file — stage + fill gateway alias.
-            apply_langsmith_api_key(&key, &project_env, staged_env_dir, false)?;
-            mirror_gateway_api_key(&project_env, &key)?;
+            apply_langsmith_api_key(&key, project_env, staged_env_dir, false)?;
+            mirror_gateway_api_key(project_env, &key)?;
             return Ok(());
         }
     }
@@ -1516,14 +1697,14 @@ pub(crate) fn ensure_project_langsmith_api_key(
             && Login::for_api_url(&platform).cached_api_key().as_deref() == Some(key.as_str())
         {
             note_session_api_key(&key);
-            apply_langsmith_api_key(&key, &project_env, staged_env_dir, false)?;
+            apply_langsmith_api_key(&key, project_env, staged_env_dir, false)?;
             return Ok(());
         }
     }
 
     if let Some(key) = Login::for_api_url(&platform).cached_api_key() {
         note_session_api_key(&key);
-        apply_langsmith_api_key(&key, &project_env, staged_env_dir, false)?;
+        apply_langsmith_api_key(&key, project_env, staged_env_dir, false)?;
         let where_loaded = staged_env_dir
             .map(|dir| format!("staged env under {}", dir.display()))
             .unwrap_or_else(|| "the process environment".to_string());
@@ -1537,14 +1718,14 @@ pub(crate) fn ensure_project_langsmith_api_key(
         return Ok(());
     }
 
-    let api_key = resolve_api_key(&env_vars, &project_env, &platform)?;
+    let api_key = resolve_api_key(&env_vars, project_env, &platform)?.api_key;
     let key = api_key.as_str();
     // `resolve_api_key` already wrote pasted keys to the project `.env`. Device
     // login only caches a short-lived PAT — stage it, do not make it durable.
     let pasted_into_project =
-        lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(&project_env)).is_some();
+        lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(project_env)).is_some();
     if pasted_into_project {
-        mirror_gateway_api_key(&project_env, key)?;
+        mirror_gateway_api_key(project_env, key)?;
         if let Some(out_dir) = staged_env_dir {
             let staged = out_dir.join(".env");
             env_file::set_env_key(&staged, API_KEY_ENV, key)?;
@@ -1552,18 +1733,73 @@ pub(crate) fn ensure_project_langsmith_api_key(
         }
     } else {
         note_session_api_key(key);
-        apply_langsmith_api_key(key, &project_env, staged_env_dir, false)?;
+        apply_langsmith_api_key(key, project_env, staged_env_dir, false)?;
     }
     Ok(())
+}
+
+/// Check the key `mda dev` staged for its server, failing as [`verify_api_key`]
+/// does when LangSmith refuses it. No staged key is not an error here: the
+/// caller decides whether one is required.
+pub(crate) fn verify_staged_langsmith_api_key(
+    project_env: &Path,
+    staged_env_dir: &Path,
+) -> Result<()> {
+    let staged_env = env_file::parse_env_file(&staged_env_dir.join(".env"));
+    let Some(key) = lookup_env_file(API_KEY_ENV, &staged_env)
+        .or_else(|| lookup_env_or_process(API_KEY_ENV, &BTreeMap::new()))
+    else {
+        return Ok(());
+    };
+    let env_vars = env_file::parse_env_file(project_env);
+    let endpoints = LangSmithEndpoints::resolve(&env_vars, None);
+    let source = ApiKeySource::of_staged_key(
+        &key,
+        is_cli_session_api_key(&key, &endpoints.platform_api_url),
+        lookup_env_file(API_KEY_ENV, &env_vars).as_deref(),
+        project_env,
+    );
+    let workspace_id = resolve_workspace_id(&env_vars, None, "")?;
+    let ctx = endpoints.with_auth(ApiKey::new(key), workspace_id);
+    verify_api_key(&ctx.client()?, &source, ctx.workspace_id.as_deref())?;
+    Ok(())
+}
+
+/// Name a failed sandbox preflight. A refusal only means the organization lacks
+/// sandbox access once the key itself is known good; otherwise the key is just
+/// as likely the cause, and saying "unavailable for this organization" would
+/// send the developer chasing a plan they may already have.
+fn explain_sandbox_access_error(err: anyhow::Error, key_check: KeyCheck) -> anyhow::Error {
+    const WITHOUT_SANDBOX: &str =
+        "remove the project's `sandbox/` directory to deploy without a sandbox";
+    if is_refusal(&err) && key_check != KeyCheck::Accepted {
+        return err.context(format!(
+            "LangSmith refused the managed sandbox preflight, and the API key could not be \
+             checked first. Confirm {API_KEY_ENV} is valid for this LangSmith endpoint \
+             (LANGSMITH_ENDPOINT); if it is, this organization lacks sandbox access, so \
+             {WITHOUT_SANDBOX}"
+        ));
+    }
+    err.context(format!(
+        "project declares a managed sandbox, but sandbox access is unavailable for this \
+         organization ({WITHOUT_SANDBOX})"
+    ))
 }
 
 /// Fails when nothing matches. `delete` calls [`find_deployment_id_by_name`]
 /// directly instead, because a missing deployment is a normal teardown outcome
 /// there rather than an error.
 pub(crate) fn resolve_deployment_id(client: &langsmith::Client, name: &str) -> Result<String> {
-    let listed = client
-        .list_deployments(name)
-        .context("failed to reach LangSmith")?;
+    let listed = client.list_deployments(name).map_err(|err| {
+        if is_refusal(&err) {
+            err.context(format!(
+                "LangSmith refused to list deployments with this {API_KEY_ENV}; check that the \
+                 key can read deployments in this workspace"
+            ))
+        } else {
+            err.context("failed to reach LangSmith")
+        }
+    })?;
     match find_deployment_id_by_name(&listed, name) {
         Some(id) => Ok(id),
         None => {
@@ -1592,20 +1828,22 @@ pub(crate) fn resolve_deployment_id(client: &langsmith::Client, name: &str) -> R
 /// `platform_api_url` is the LangSmith platform origin device login must use
 /// (same installation as Fleet / workspace APIs). Resolve it with
 /// [`resolve_platform_api_url`] before calling.
+///
+/// Makes no request to check the key; pass the result to [`verify_api_key`]
+/// once a client exists.
 pub(crate) fn resolve_api_key(
     env_vars: &std::collections::BTreeMap<String, String>,
     env_path: &Path,
     platform_api_url: &str,
-) -> Result<ApiKey> {
-    if let Some(key) = resolve_preferred_env(
-        API_KEY_ENV,
-        REMOVED_API_KEY_ENVS,
-        None,
-        env_vars,
-        |key| std::env::var(key).ok(),
-        " instead (same value, renamed)",
-    )? {
-        return Ok(ApiKey::new(key));
+) -> Result<ResolvedApiKey> {
+    if let Some(key) = env_api_key(env_vars)? {
+        return Ok(ResolvedApiKey {
+            api_key: ApiKey::new(key),
+            source: ApiKeySource::of_env_key(
+                lookup_env_or_process(API_KEY_ENV, &BTreeMap::new()).is_some(),
+                env_path,
+            ),
+        });
     }
 
     let login = Login::for_api_url(platform_api_url);
@@ -1613,7 +1851,10 @@ pub(crate) fn resolve_api_key(
         // So later steps and `mda dev` children inherit the session key.
         note_session_api_key(&key);
         std::env::set_var("LANGSMITH_API_KEY", &key);
-        return Ok(ApiKey::new(key));
+        return Ok(ResolvedApiKey {
+            api_key: ApiKey::new(key),
+            source: ApiKeySource::SignIn,
+        });
     }
 
     if !std::io::stdin().is_terminal() {
@@ -1635,10 +1876,16 @@ pub(crate) fn resolve_api_key(
         .mask('•')
         .allow_empty()
         .interact()?;
-    match prompt_api_key_choice(&key) {
-        ApiKeyPromptChoice::Authorize => authorize_with_device_login(platform_api_url),
-        ApiKeyPromptChoice::ApiKey(key) => persist_api_key(env_path, &key),
-    }
+    Ok(match prompt_api_key_choice(&key) {
+        ApiKeyPromptChoice::Authorize => ResolvedApiKey {
+            api_key: authorize_with_device_login(platform_api_url)?,
+            source: ApiKeySource::SignIn,
+        },
+        ApiKeyPromptChoice::ApiKey(key) => ResolvedApiKey {
+            api_key: persist_api_key(env_path, &key)?,
+            source: ApiKeySource::EnvFile(env_path.to_path_buf()),
+        },
+    })
 }
 
 /// A client for the key [`resolve_api_key`] would find without prompting:
@@ -1646,21 +1893,17 @@ pub(crate) fn resolve_api_key(
 /// or a setting is invalid. Makes no request.
 pub(crate) fn client_without_prompt(
     env_vars: &std::collections::BTreeMap<String, String>,
-    host_url: &str,
-    platform_api_url: &str,
+    endpoints: LangSmithEndpoints,
     workspace_id: Option<&str>,
 ) -> Option<langsmith::Client> {
     let key = env_api_key(env_vars)
         .ok()?
-        .or_else(|| Login::for_api_url(platform_api_url).cached_api_key())?;
-    let workspace_id = langsmith_context::resolve_workspace_id(env_vars, workspace_id, "").ok()?;
-    langsmith_context::LangSmithEndpoints {
-        host_url: host_url.to_string(),
-        platform_api_url: platform_api_url.to_string(),
-    }
-    .with_auth(ApiKey::new(key), workspace_id)
-    .client()
-    .ok()
+        .or_else(|| Login::for_api_url(&endpoints.platform_api_url).cached_api_key())?;
+    let workspace_id = resolve_workspace_id(env_vars, workspace_id, "").ok()?;
+    endpoints
+        .with_auth(ApiKey::new(key), workspace_id)
+        .client()
+        .ok()
 }
 
 /// `LANGSMITH_API_KEY` from the env file, then the process env. Errors when
@@ -1740,6 +1983,7 @@ fn prompt_api_key_choice(input: &str) -> ApiKeyPromptChoice {
 /// must be positively confirmed.
 fn ensure_ingress_secret(
     project: &project::Project,
+    env_path: &Path,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
@@ -1753,7 +1997,7 @@ fn ensure_ingress_secret(
 
     ensure_required_secret(
         compile::INGRESS_SECRET_ENV,
-        project,
+        env_path,
         env_vars,
         secrets,
         client,
@@ -1766,7 +2010,7 @@ fn ensure_ingress_secret(
 
 /// Ensure connector provider secrets from compiled requirements' `requiredEnv`.
 fn ensure_connector_requirements_secrets(
-    project: &project::Project,
+    env_path: &Path,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
@@ -1781,7 +2025,7 @@ fn ensure_connector_requirements_secrets(
     for key_env in compile::required_env_from_connector_requirements(connector_requirements) {
         ensure_required_secret(
             &key_env,
-            project,
+            env_path,
             env_vars,
             secrets,
             client,
@@ -1974,7 +2218,7 @@ fn format_missing_connections(missing: &[(&str, &str)]) -> String {
 
 /// Ensure channel provider secrets from compiled requirements' `requiredEnv`.
 fn ensure_channel_requirements_secrets(
-    project: &project::Project,
+    env_path: &Path,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
@@ -1993,7 +2237,7 @@ fn ensure_channel_requirements_secrets(
     for key_env in required {
         ensure_required_secret(
             &key_env,
-            project,
+            env_path,
             env_vars,
             secrets,
             client,
@@ -2049,7 +2293,7 @@ fn channel_secret_policy(
 )]
 fn ensure_required_secret(
     key_env: &str,
-    project: &project::Project,
+    env_path: &Path,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
@@ -2061,7 +2305,7 @@ fn ensure_required_secret(
         return Ok(());
     }
 
-    let env = project.root.join(".env");
+    let env = env_path;
     let sp = spinner();
     sp.start(format!("Checking that {key_env} is configured"));
 
@@ -2125,7 +2369,7 @@ fn model_api_key_requirement_for_deploy(
 /// Provider Secrets because local deployment secrets never reach the Gateway.
 fn ensure_model_api_key(
     model: Option<&str>,
-    project: &project::Project,
+    env_path: &Path,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
@@ -2145,7 +2389,7 @@ fn ensure_model_api_key(
             bail!(missing_model_api_key_message(
                 model,
                 key_env,
-                &project.root.join(".env"),
+                env_path,
                 "then deploy again.",
             ));
         }
@@ -2757,20 +3001,55 @@ mod tests {
     use super::bake::BakePhase;
     use super::image::ImageSource;
     use super::{
-        agent_target, bake_spinner_message, channel_secret_policy, claim_secret_from_local_sources,
-        collision_decision, deployment_id_status_record, deployment_links, display_revision_status,
+        agent_environment, agent_target, bake_spinner_message, channel_secret_policy,
+        claim_secret_from_local_sources, collision_decision, deployment_id_status_record,
+        deployment_links, display_revision_status, ensure_channels_allow_no_wait,
         ensure_external_deployment_source, ensure_model_api_key,
-        ensure_requested_deployment_source, first_deploy_collisions, http_channel_links,
-        managed_cron_ids, missing_local_model_api_key, missing_user_owned_mcp_connections,
-        model_api_key_requirement_for_deploy, poll_failure_limit_reached, prompt_api_key_choice,
-        require_trigger_registration_url, schedule_cron_request, schedule_reconcile_warning,
-        schedules_summary, validate_workspace_connections_for_manifest, ApiKeyPromptChoice,
-        CollisionDecision, FirstDeployCollisions, WorkspaceSecretKeys, BAKE_SPINNER_TITLE,
+        ensure_requested_deployment_source, explain_sandbox_access_error, first_deploy_collisions,
+        http_channel_links, managed_cron_ids, missing_local_model_api_key,
+        missing_user_owned_mcp_connections, model_api_key_requirement_for_deploy,
+        poll_failure_limit_reached, prompt_api_key_choice, require_trigger_registration_url,
+        schedule_cron_request, schedule_reconcile_warning, schedules_summary,
+        validate_workspace_connections_for_manifest, ApiKeyPromptChoice, CollisionDecision,
+        FirstDeployCollisions, WorkspaceSecretKeys, AGENT_ENVIRONMENT_ENV, BAKE_SPINNER_TITLE,
     };
+    use crate::channel::ChannelKind;
     use crate::compile;
     use crate::error::{category_of, ErrorCategory};
-    use crate::langsmith::{AgentEnvironment, Client, ConnectionSummary, Secret};
+    use crate::langsmith::{AgentEnvironment, Client, ConnectionSummary, KeyCheck, Secret};
     use crate::project::{Language, Project};
+
+    fn sandbox_forbidden() -> anyhow::Error {
+        anyhow::anyhow!(crate::langsmith::ApiError {
+            status: reqwest::StatusCode::FORBIDDEN,
+            detail: r#"{"error":"Forbidden"}"#.to_string(),
+        })
+    }
+
+    #[test]
+    fn a_sandbox_refusal_for_a_verified_key_is_an_organization_permission() {
+        let err = explain_sandbox_access_error(sandbox_forbidden(), KeyCheck::Accepted);
+
+        assert_eq!(
+            format!("{err:#}"),
+            "project declares a managed sandbox, but sandbox access is unavailable for this \
+             organization (remove the project's `sandbox/` directory to deploy without a \
+             sandbox): {\"error\":\"Forbidden\"} (HTTP 403)"
+        );
+        assert_eq!(category_of(&err), ErrorCategory::Permission);
+    }
+
+    #[test]
+    fn a_sandbox_refusal_for_an_unverified_key_does_not_blame_the_organization() {
+        let message = format!(
+            "{:#}",
+            explain_sandbox_access_error(sandbox_forbidden(), KeyCheck::Unverified)
+        );
+
+        assert!(!message.contains("unavailable for this organization"));
+        assert!(message.contains("LANGSMITH_API_KEY is valid"));
+        assert!(message.contains("remove the project's `sandbox/` directory"));
+    }
 
     fn test_project(root: PathBuf) -> Project {
         Project {
@@ -2935,7 +3214,7 @@ mod tests {
 
         ensure_model_api_key(
             None,
-            &project,
+            &project.root.join(".env"),
             &BTreeMap::new(),
             &[],
             &test_client(),
@@ -2960,7 +3239,7 @@ mod tests {
 
         let error = ensure_model_api_key(
             Some("langsmith:openai/gpt-5.5"),
-            &project,
+            &project.root.join(".env"),
             &env,
             &[],
             &test_client(),
@@ -2980,7 +3259,7 @@ mod tests {
 
         let error = ensure_model_api_key(
             Some("langsmith:openai/gpt-5.5"),
-            &project,
+            &project.root.join(".env"),
             &BTreeMap::new(),
             &[],
             &test_client(),
@@ -3029,7 +3308,7 @@ mod tests {
 
         ensure_model_api_key(
             Some("langsmith:openai/gpt-5.5"),
-            &project,
+            &project.root.join(".env"),
             &env,
             &[],
             &test_client(),
@@ -3049,7 +3328,7 @@ mod tests {
 
         let error = ensure_model_api_key(
             Some("langsmith:openai/gpt-5.5"),
-            &project,
+            &project.root.join(".env"),
             &env,
             &[],
             &test_client(),
@@ -3074,7 +3353,7 @@ mod tests {
 
         ensure_model_api_key(
             Some("openai:gpt-5.5"),
-            &project,
+            &project.root.join(".env"),
             &env,
             &[],
             &test_client(),
@@ -3095,7 +3374,7 @@ mod tests {
         let mut workspace_keys = WorkspaceSecretKeys::Unloaded;
         ensure_model_api_key(
             Some("openai:gpt-5.5"),
-            &project,
+            &project.root.join(".env"),
             &BTreeMap::new(),
             &secrets,
             &test_client(),
@@ -3120,7 +3399,7 @@ mod tests {
             let env = BTreeMap::from([(key.into(), String::new())]);
             let error = ensure_model_api_key(
                 Some(model),
-                &project,
+                &project.root.join(".env"),
                 &env,
                 &[],
                 &test_client(),
@@ -3145,7 +3424,7 @@ mod tests {
             let was_unloaded = matches!(workspace_keys, WorkspaceSecretKeys::Unloaded);
             let error = ensure_model_api_key(
                 Some("openai:gpt-5.5"),
-                &project,
+                &project.root.join(".env"),
                 &BTreeMap::new(),
                 &[],
                 &test_client(),
@@ -3255,6 +3534,23 @@ mod tests {
         let (name, agent) = agent_target("support".into(), None).unwrap();
         assert_eq!(name, "support");
         assert!(agent.is_none());
+    }
+
+    #[test]
+    fn agent_environment_defaults_to_the_env_file_and_the_flag_wins() {
+        let env = BTreeMap::from([(AGENT_ENVIRONMENT_ENV.to_string(), "staging".to_string())]);
+        assert_eq!(
+            agent_environment(None, &env).unwrap(),
+            Some(AgentEnvironment::Staging)
+        );
+        assert_eq!(
+            agent_environment(Some(AgentEnvironment::Production), &env).unwrap(),
+            Some(AgentEnvironment::Production)
+        );
+        assert_eq!(agent_environment(None, &BTreeMap::new()).unwrap(), None);
+
+        let env = BTreeMap::from([(AGENT_ENVIRONMENT_ENV.to_string(), "local".to_string())]);
+        assert!(agent_environment(None, &env).is_err());
     }
 
     #[test]
@@ -3719,6 +4015,41 @@ mod tests {
     }
 
     #[test]
+    fn no_wait_deploys_when_no_channel_waits_for_the_new_revision() {
+        ensure_channels_allow_no_wait(&[], false).unwrap();
+        ensure_channels_allow_no_wait(&[ChannelKind::Slack], true).unwrap();
+    }
+
+    #[test]
+    fn no_wait_is_refused_while_a_channel_waits_for_the_new_revision() {
+        let error = ensure_channels_allow_no_wait(&[ChannelKind::Slack], false)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "An agent with a Slack channel not set up yet cannot be deployed with --no-wait: a channel is set up once the new revision is live, the first that can receive its events. Run `mda deploy` without --no-wait this time; once the channels are set up, later deploys can use --no-wait."
+        );
+    }
+
+    #[test]
+    fn no_wait_refusal_names_every_waiting_channel() {
+        let error = ensure_channels_allow_no_wait(
+            &[ChannelKind::Slack, ChannelKind::GitHub, ChannelKind::Linear],
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.starts_with(
+                "An agent with Slack, GitHub and Linear channels not set up yet cannot be deployed with --no-wait"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn deployment_links_lists_agent_server_and_dashboard() {
         assert_eq!(
             deployment_links(
@@ -3869,7 +4200,8 @@ mod tests {
         let previous = std::env::var("LANGSMITH_API_KEY").ok();
         std::env::set_var("LANGSMITH_API_KEY", "lsv2_pt_from_shell");
         let result = std::panic::catch_unwind(|| {
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap()
+            super::ensure_project_langsmith_api_key(&root.path().join(".env"), Some(&out_dir), true)
+                .unwrap()
         });
         match previous {
             Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
@@ -3912,7 +4244,8 @@ mod tests {
         let previous = std::env::var("LANGSMITH_API_KEY").ok();
         std::env::set_var("LANGSMITH_API_KEY", "lsv2_pt_shell_override");
         let result = std::panic::catch_unwind(|| {
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap()
+            super::ensure_project_langsmith_api_key(&root.path().join(".env"), Some(&out_dir), true)
+                .unwrap()
         });
         match previous {
             Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
@@ -3952,14 +4285,24 @@ mod tests {
         std::env::remove_var("LANGSMITH_API_KEY");
         let result = std::panic::catch_unwind(|| {
             // Exports the `.env` key into this process, as a dev watch run does.
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+            super::ensure_project_langsmith_api_key(
+                &root.path().join(".env"),
+                Some(&out_dir),
+                true,
+            )
+            .unwrap();
             std::fs::write(
                 root.path().join(".env"),
                 "LANGSMITH_API_KEY=lsv2_pt_after_edit\n",
             )
             .unwrap();
             std::fs::write(out_dir.join(".env"), "OPENAI_API_KEY=test\n").unwrap();
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+            super::ensure_project_langsmith_api_key(
+                &root.path().join(".env"),
+                Some(&out_dir),
+                true,
+            )
+            .unwrap();
         });
         match previous {
             Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
@@ -3997,7 +4340,7 @@ mod tests {
                 "LANGSMITH_API_KEY=lsv2_pt_pasted_then_edited\n",
             )
             .unwrap();
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+            super::ensure_project_langsmith_api_key(&project_env, Some(&out_dir), true).unwrap();
         });
         match previous {
             Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
@@ -4035,7 +4378,8 @@ mod tests {
         let previous = std::env::var("LANGSMITH_API_KEY").ok();
         std::env::set_var("LANGSMITH_API_KEY", "lsv2_pt_gateway");
         let result = std::panic::catch_unwind(|| {
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap()
+            super::ensure_project_langsmith_api_key(&root.path().join(".env"), Some(&out_dir), true)
+                .unwrap()
         });
         match previous {
             Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
@@ -4097,7 +4441,12 @@ mod tests {
 
         let result = std::panic::catch_unwind(|| {
             // First resolve loads the cache into process + staged.
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+            super::ensure_project_langsmith_api_key(
+                &root.path().join(".env"),
+                Some(&out_dir),
+                true,
+            )
+            .unwrap();
             // Simulate watch restage wiping the staged session key (project has none).
             std::fs::write(
                 out_dir.join(".env"),
@@ -4105,7 +4454,12 @@ mod tests {
             )
             .unwrap();
             // Second resolve must not treat the process-exported PAT as durable.
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap();
+            super::ensure_project_langsmith_api_key(
+                &root.path().join(".env"),
+                Some(&out_dir),
+                true,
+            )
+            .unwrap();
         });
 
         match previous_key {
@@ -4172,7 +4526,8 @@ mod tests {
         std::env::remove_var("LANGSMITH_API_KEY");
 
         let result = std::panic::catch_unwind(|| {
-            super::ensure_project_langsmith_api_key(root.path(), Some(&out_dir), true).unwrap()
+            super::ensure_project_langsmith_api_key(&root.path().join(".env"), Some(&out_dir), true)
+                .unwrap()
         });
 
         match previous_key {
@@ -4215,7 +4570,7 @@ mod tests {
         std::env::remove_var("LANGSMITH_API_KEY");
         std::fs::write(root.path().join(".env"), "LANGSMITH_API_KEY=\n").unwrap();
 
-        super::ensure_project_langsmith_api_key(root.path(), None, false).unwrap();
+        super::ensure_project_langsmith_api_key(&root.path().join(".env"), None, false).unwrap();
 
         let env = crate::deploy::env_file::parse_env_file(&root.path().join(".env"));
         assert_eq!(env.get("LANGSMITH_API_KEY").map(String::as_str), Some(""));

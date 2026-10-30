@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
+from runtime_api.connections import ConnectionRef
 
 from openswe.mcp import MCPConnection, runtime
 from openswe.mcp.models import MCPScope
@@ -200,3 +201,45 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     tool = (await runtime.load_mcp_tools(workspace, user))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+@pytest.mark.parametrize("personal_connection", [False, True])
+async def test_a_server_read_through_an_mda_connection_is_the_mda_runs_by_tier_precedence(
+    remote, personal_connection
+):
+    workspace = source(
+        ("workspace_mcps",),
+        {
+            "linear": record(connection=ConnectionRef(slug="open-swe-mcp-linear", owner="agent")),
+            # A shared server never reads a person's own connection.
+            "notes": record(
+                "notes", connection=ConnectionRef(slug="open-swe-mcp-notes", owner="user")
+            ),
+            # Nor a credential Open SWE or a channel reads for itself, saved before the rule.
+            "github": record(
+                "github", connection=ConnectionRef(slug="mda/github-token", owner="agent")
+            ),
+        },
+    )
+    user = source(
+        ("user_mcps", "alice"),
+        {
+            "linear": record(
+                url="https://personal.example/mcp",
+                connection=ConnectionRef(slug="open-swe-mcp-linear", owner="user")
+                if personal_connection
+                else None,
+            )
+        },
+    )
+    loaded = await runtime.load_mcp_tools(workspace, user)
+    if personal_connection:
+        assert loaded == []
+        assert [
+            (server.url, server.connection.owner, server.tools) for server in loaded.runtime_servers
+        ] == [("https://personal.example/mcp", "user", {"search": "mcp_linear_search"})]
+    else:
+        assert [(await tool.ainvoke({}))[0]["text"] for tool in loaded] == [
+            "https://personal.example/mcp"
+        ]
+        assert loaded.runtime_servers == []
