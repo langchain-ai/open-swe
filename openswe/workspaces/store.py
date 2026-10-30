@@ -61,6 +61,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
+from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.cloud_identity import validate_access_delegation, validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
@@ -712,6 +713,18 @@ class Workspace(BaseModel):
             return None
         return self.refresh_log.strip()[-chars:]
 
+    def refresh_outcome(self) -> dict[str, JsonValue]:
+        """Structured refresh history without raw script output or exception messages."""
+        return {
+            "workspace_slug": self.slug,
+            "refresh_kind": self.refresh_kind,
+            "refresh_run_id": self.refresh_run_id,
+            "snapshot_id": self.snapshot_id if self.refresh_status == "success" else None,
+            "started_at": self.refresh_started_at,
+            "finished_at": self.refresh_finished_at,
+            "steps": [step.model_dump(mode="json") for step in self.refresh_steps],
+        }
+
     @property
     def instructions(self) -> str | None:
         return self.prompt.strip() or None
@@ -801,7 +814,18 @@ class RefreshAttempt:
     async def settle(
         self, status: RefreshStatus, *, log: str | None = None, error: str | None = None
     ) -> None:
-        await WORKSPACES.mark_refresh_settled(self.slug, status, log=log, error=error, attempt=self)
+        record = await WORKSPACES.mark_refresh_settled(
+            self.slug, status, log=log, error=error, attempt=self
+        )
+        if record is None:
+            return
+        await EventLog.append(
+            "workspace",
+            record.refresh_outcome(),
+            event_type=f"refresh.{record.refresh_status}",
+            delivery_id=f"{record.slug}:{record.refresh_started_at}",
+            refs=EventRefs(workspace_id=await WORKSPACES.id_for_slug(record.slug)),
+        )
 
 
 class WorkspaceStore:
@@ -1748,7 +1772,7 @@ async def capture_workspace_snapshot(
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
-            str(exc)[:1000],
+            (str(exc) or type(exc).__name__)[:1000],
         )
         raise
 
