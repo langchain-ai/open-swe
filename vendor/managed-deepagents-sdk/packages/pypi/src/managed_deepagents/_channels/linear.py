@@ -82,6 +82,7 @@ from managed_deepagents._channels.linear_types import (
     LinearTeam,
 )
 from managed_deepagents._channels.resolve_user import checked_resolve_user
+from managed_deepagents._channels.run_input import HandlerFailed
 from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._log import logger
 
@@ -126,7 +127,9 @@ def linear_channel(
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
-            message, or state), or ``None`` to skip. A handler may also be an
+            message, or state), or ``None`` to skip. A handler that raises fails
+            the delivery, which Linear sends again, except in an agent session,
+            which hears at once. A handler may also be an
             endpoint, a URL or an ``httpx.Request`` carrying headers: MDA POSTs it
             the event and its thread, and starts the run it answers with.
         app: The Linear app ``mda deploy`` sets up; team allowlist.
@@ -630,7 +633,11 @@ async def _handler_input(
     raw_event: JsonValue | None,
     thread: LinearChannelThread,
 ) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips or fails."""
+    """What the event's handler starts a run with; ``None`` when it skips.
+
+    A handler that raised fails the delivery (``HandlerFailed``), except in an
+    agent session, whose author waits: they hear it at once.
+    """
     event = _event(raw_event)
     if event is None:
         return None
@@ -644,11 +651,15 @@ async def _handler_input(
     )
     if outcome.type == "input":
         return outcome.input
+    is_session = isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent)
+    if outcome.type == "failed" and not is_session:
+        raise HandlerFailed
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
     # raised failed; one that returned nothing declined, and an endpoint may
-    # say why.
-    if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
+    # say why. Its author hears now: a retry minutes later would start work
+    # they may have moved on from.
+    if is_session:
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
