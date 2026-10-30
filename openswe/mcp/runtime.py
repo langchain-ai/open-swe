@@ -7,7 +7,7 @@ import logging
 import re
 import weakref
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -60,11 +60,16 @@ class MCPTools(list[BaseTool]):
 
     @property
     def catalog_note(self) -> str:
-        return (
-            "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(self.failures)))
-            if self.failures
-            else ""
-        )
+        return catalog_note(self.failures)
+
+
+def catalog_note(failures: Sequence[str]) -> str:
+    """What the system prompt says of managed tool discovery that ``failures`` broke."""
+    return (
+        "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(failures)))
+        if failures
+        else ""
+    )
 
 
 def _backoff_failure(error: BaseException) -> bool:

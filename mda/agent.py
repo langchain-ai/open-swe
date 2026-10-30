@@ -7,7 +7,7 @@ it works out as it starts the run names the run's operations, subagents, models,
 sandbox and the rules of its loop. This runtime's own middleware runs the loop
 around each model call as those rules say (``rt.loop``), asking the backend only for
 what needs its data or credentials. The file and shell tools are this runtime's own,
-in the thread's box or against its files on the backend (``rt.file_tools``). The run
+in the thread's sandbox or against its files on the backend (``rt.file_tools``). The run
 token in the context authenticates every call.
 
 None of that is built into the graph but the run's models. Each graph is built once
@@ -16,7 +16,7 @@ per process from what is the same for every run that plays it on the same models
 of a thread's state. A run reads its catalog when it starts, and its tools and
 middleware read it per call from the run in progress (``rt.backend.current_run``):
 the operations each model call is offered and each tool call runs (``rt.run_tools``),
-the model a call is routed to, the box (``rt.managed_sandbox``), the skills and the
+the model a call is routed to, the sandbox (``rt.managed_sandbox``), the skills and the
 loop.
 
 The same agent runs as the async ``general-purpose`` subagent, the graph
@@ -49,7 +49,8 @@ from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ManagedSandboxMiddleware,
-    box,
+    booted_sandbox,
+    declared_sandbox,
     opened_sandbox,
 )
 from rt.middleware import (
@@ -259,7 +260,12 @@ def _parts(graph: Graph) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, opened_sandbox, read_ahead=[skill_files.list_ahead]),
+            BackendRunMiddleware(
+                backend,
+                opened_sandbox,
+                booted_sandbox,
+                read_ahead=[skill_files.list_ahead],
+            ),
             managed_sandbox,
             *reports,
             files,
@@ -285,8 +291,8 @@ def _parts(graph: Graph) -> _Parts:
         subagents=subagents,
         middleware=middleware,
         worker_middleware=[*middleware, AsyncWorkerLaunchMiddleware(backend)],
-        # A run without MDA's box keeps the graph's own files where its file tools are.
-        sandbox=box(
+        # A run without MDA's sandbox keeps the graph's own files where its file tools are.
+        sandbox=declared_sandbox(
             RunArtifacts(backend, run_id, lambda: backend.run.catalog.files.artifacts_root)
         ),
     )
@@ -316,10 +322,10 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
         replicate_traces=False,
         model=inputs.agent_model(),
         context_schema=RunContext,
-        # The thread's box, for the file and shell tools run in it and for MDA's own use
+        # The thread's sandbox, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
-        # same box. Which box, and whether a run has one, is the run's catalog's: a
-        # worker's catalog is its coordinator's, so it shares the coordinator's box.
+        # same sandbox. Which sandbox, and whether a run has one, is the run's catalog's: a
+        # worker's catalog is its coordinator's, so it shares the coordinator's sandbox.
         sandbox=parts.sandbox,
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],

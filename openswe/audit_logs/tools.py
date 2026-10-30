@@ -47,12 +47,15 @@ async def _enrich(entry: AuditLog, *, thread_workspace: bool) -> None:
 
 
 def audit_tool(
-    *, reads: Collection[str] = (), target_workspace: str | None = None
+    *,
+    reads: Collection[str] = (),
+    read_key: str = "action",
+    target_workspace: str | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Record a tool's outcome, including refusals returned by its access policy.
 
-    Calls whose ``action`` is one of ``reads`` change nothing and are not
-    recorded. ``target_workspace`` names the argument holding the workspace the
+    Calls whose ``read_key`` argument is one of ``reads`` change nothing and are
+    not recorded. ``target_workspace`` names the argument holding the workspace the
     call acts on, which the entry is filed under instead of the thread's.
     """
 
@@ -65,7 +68,7 @@ def audit_tool(
         async def audited(*args: P.args, **kwargs: P.kwargs) -> R:
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()
-            if bound.arguments.get("action") in reads:
+            if bound.arguments.get(read_key) in reads:
                 return await fn(*args, **kwargs)
             entry = AuditLog(
                 operation_name=operation_name,
