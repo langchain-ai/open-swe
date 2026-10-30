@@ -47,6 +47,37 @@ const pr: OpenPullRequest = {
   unresolvedThreads: 1,
 }
 
+it("keeps status errors in a popover and retries without starting work", async () => {
+  const status = vi
+    .spyOn(api, "pullRequestThreadStatus")
+    .mockRejectedValueOnce(new Error("Couldn’t reach the server."))
+    .mockResolvedValue({ running: false })
+  const fix = vi.spyOn(api, "fixPullRequest")
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <PullRequestThreadAction pr={pr} login="me" actions={["fix-conflicts"]} />
+    </QueryClientProvider>
+  )
+
+  const unavailable = await screen.findByRole("button", {
+    name: "Fix conflicts unavailable",
+  })
+  expect(screen.queryByText("Couldn’t reach the server.")).toBeNull()
+  fireEvent.click(unavailable)
+  expect(await screen.findByText("Couldn’t reach the server.")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+  const ready = await screen.findByRole("button", {
+    name: "Fix conflicts",
+  })
+  expect(ready.hasAttribute("disabled")).toBe(false)
+  expect(status).toHaveBeenCalledTimes(2)
+  expect(fix).not.toHaveBeenCalled()
+})
+
 it("blocks the sibling action as soon as one is queued", async () => {
   vi.spyOn(api, "pullRequestThreadStatus").mockResolvedValue({
     running: false,
