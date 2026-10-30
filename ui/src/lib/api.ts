@@ -313,6 +313,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -326,7 +327,7 @@ export interface Profile {
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
-  experimental_monitor?: boolean | null
+  experimental_memory?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -347,7 +348,7 @@ export interface ProfileUpdate {
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
-  experimental_monitor?: boolean | null
+  experimental_memory?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

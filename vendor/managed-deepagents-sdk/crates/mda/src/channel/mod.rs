@@ -1,4 +1,7 @@
-//! Scaffold external messaging channels in an initialized project.
+//! Scaffold external messaging channels in an initialized project, and set
+//! them up for its deployment (see [`setup`]).
+
+pub mod setup;
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -10,16 +13,66 @@ use crate::cli_output::{show_sequence, SequenceItem};
 use crate::project::{self, Language};
 
 /// A first-party channel `mda channels init` and `mda init --channel` can
-/// scaffold.
+/// scaffold, and `mda channels setup` can set up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ChannelKind {
     /// Slack, written as `channels/slack.{ts,py}`.
     Slack,
-    /// GitHub, written as `channels/github.{ts,py}`.
+    /// GitHub (experimental), written as `channels/github.{ts,py}`.
     #[value(name = "github")]
     GitHub,
-    /// Linear, written as `channels/linear.{ts,py}`.
+    /// Linear (experimental), written as `channels/linear.{ts,py}`.
     Linear,
+}
+
+impl ChannelKind {
+    /// The provider's name, as messages show it.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Slack => "Slack",
+            Self::GitHub => "GitHub",
+            Self::Linear => "Linear",
+        }
+    }
+
+    /// The channel's name on the command line.
+    pub(crate) fn command(self) -> &'static str {
+        match self {
+            Self::Slack => "slack",
+            Self::GitHub => "github",
+            Self::Linear => "linear",
+        }
+    }
+
+    /// Whether the channel may still change in a minor release.
+    pub(crate) fn is_experimental(self) -> bool {
+        matches!(self, Self::GitHub | Self::Linear)
+    }
+
+    /// What the CLI says when a user adds or sets up an experimental channel.
+    pub(crate) fn experimental_warning(self) -> Option<String> {
+        self.is_experimental().then(|| {
+            format!(
+                "The {} channel is experimental and may change in a minor release.",
+                self.label()
+            )
+        })
+    }
+}
+
+/// Warn once for each experimental channel in `kinds`.
+pub fn warn_experimental(kinds: &[ChannelKind]) -> Result<()> {
+    let mut warned = Vec::new();
+    for kind in kinds {
+        if warned.contains(kind) {
+            continue;
+        }
+        warned.push(*kind);
+        if let Some(warning) = kind.experimental_warning() {
+            cliclack::log::warning(warning)?;
+        }
+    }
+    Ok(())
 }
 
 struct InitSummary<'a> {
@@ -51,14 +104,15 @@ fn init_summary(kind: ChannelKind, path: &Path) -> InitSummary<'_> {
 /// Show the added channel and its deployment next step.
 pub fn show_added(kind: ChannelKind, path: &Path) -> Result<()> {
     let summary = init_summary(kind, path);
-    show_sequence(&[SequenceItem::section(
-        summary.title,
-        [
-            summary.path.display().to_string(),
-            String::new(),
-            summary.next_step.to_string(),
-        ],
-    )])
+    let mut lines = vec![
+        summary.path.display().to_string(),
+        String::new(),
+        summary.next_step.to_string(),
+    ];
+    if let Some(warning) = kind.experimental_warning() {
+        lines.push(warning);
+    }
+    show_sequence(&[SequenceItem::section(summary.title, lines)])
 }
 
 /// Create the channel definition for `kind` in the project rooted at `root`.
@@ -225,7 +279,17 @@ fn ensure_channels_directory(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use clap::ValueEnum;
+
     use super::*;
+
+    #[test]
+    fn channel_commands_match_the_cli_names() {
+        for kind in ChannelKind::value_variants() {
+            let value = kind.to_possible_value().unwrap();
+            assert_eq!(kind.command(), value.get_name());
+        }
+    }
 
     /// What `managed_deepagents` exports, so a scaffold can't import a name
     /// the package renamed.
@@ -348,6 +412,27 @@ mod tests {
                 "GitHub channel added",
                 "The next deploy sets up a GitHub App for your agent.",
             )
+        );
+    }
+
+    #[test]
+    fn only_github_and_linear_are_experimental() {
+        assert_eq!(
+            ChannelKind::value_variants()
+                .iter()
+                .map(|kind| kind.experimental_warning())
+                .collect::<Vec<_>>(),
+            [
+                None,
+                Some(
+                    "The GitHub channel is experimental and may change in a minor release."
+                        .to_string()
+                ),
+                Some(
+                    "The Linear channel is experimental and may change in a minor release."
+                        .to_string()
+                ),
+            ]
         );
     }
 

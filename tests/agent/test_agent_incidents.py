@@ -132,7 +132,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
             item for item in result["middleware"] if isinstance(item, ExcludeToolsMiddleware)
         )._excluded
         assert INCIDENT_AUTOMATIC_EXCLUDED_TOOLS <= excluded
-    assert not {"save_user_instructions", "save_user_skill", "read_user_settings"} & names
+    assert not {"save_user_skill", "read_user_settings"} & names
     assert result["skills"] == ["/organization-skills/", "/bundled-skills/"]
     middleware = result["middleware"]
     assert {

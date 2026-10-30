@@ -39,6 +39,7 @@ use crate::deploy::channel_app::{
     self, agent_auth, env_app_notice, find_connection, is_interactive, override_value, AppSlugs,
     SetupUi, WaitTick, AGENT_AUTH_URL_ENV,
 };
+use crate::deploy::channel_setup::ChannelStatus;
 use crate::error::is_cancellation;
 use crate::github::{validate_login, PrivateKeyPem};
 use crate::interrupt::Interrupt;
@@ -329,17 +330,18 @@ pub(crate) fn setup(
 /// Check, before anything is deployed, that GitHub App setup will be able to
 /// finish. Malformed or incomplete CLI-only env vars always fail here.
 /// Without a terminal, setup that would need an answer nobody can give fails
-/// here too, instead of after the deployment is live. `deployment_id` is the
-/// existing deployment, if any.
+/// here too, before anything is uploaded. `deployment_id` is the existing
+/// deployment, if any, and `runtime_url` its Agent Server URL once it has one.
+/// `interactive` says whether setup can ask in a terminal.
 pub(crate) fn preflight(
     client: &langsmith::Client,
     channel: &GitHubChannel,
     deployment_id: Option<&str>,
     runtime_url: Option<&str>,
     env_vars: &BTreeMap<String, String>,
+    interactive: bool,
 ) -> Result<()> {
     let app_env = app_env(env_vars)?;
-    let interactive = is_interactive();
     if interactive || channel.handled.is_empty() {
         return Ok(());
     }
@@ -355,8 +357,8 @@ pub(crate) fn preflight(
     if let Some(problem) = unattended_setup_problem(connection.as_ref(), &app_env) {
         bail!(problem);
     }
-    // A brought App whose webhook points elsewhere would fail the deploy
-    // once it is live; say so before anything is uploaded.
+    // A brought App whose webhook points elsewhere would fail setup; say so
+    // before anything is uploaded.
     let Some(connection) = connection.filter(|connection| connection.installed) else {
         return Ok(());
     };
@@ -368,7 +370,7 @@ pub(crate) fn preflight(
     if !webhook_needs_consent(&connection, &expected) {
         return Ok(());
     }
-    // A failed check is left to setup, which reports it after the deploy.
+    // A failed check is left to setup, which reports it.
     if let GitHubSyncOutcome::Synced(status) = agent_auth.github_app_report(&connection.app.id) {
         if let Some(current) = status.app.webhook_url.as_deref() {
             let kept = override_value(WEBHOOK_ELSEWHERE_ENV, env_vars);
@@ -381,6 +383,84 @@ pub(crate) fn preflight(
         }
     }
     Ok(())
+}
+
+/// Where the channel's setup stands for the deployment, read without
+/// changing anything.
+pub(crate) fn status(
+    client: &langsmith::Client,
+    channel: &GitHubChannel,
+    deployment_id: &str,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<ChannelStatus> {
+    if channel.handled.is_empty() {
+        return Ok(ChannelStatus::NoApp);
+    }
+    let agent_auth = agent_auth(client, env_vars)?;
+    let connection = lookup_app_connection(&agent_auth, deployment_id)?;
+    let status = app_status(connection.as_ref());
+    let Some(connection) = connection.filter(|_| status == ChannelStatus::Ready) else {
+        return Ok(status);
+    };
+    // Agent Auth knows the App was installed; only GitHub knows whether an
+    // installation still delivers events, e.g. after an admin suspended it.
+    installation_status(agent_auth.github_app_report(&connection.app.id))
+}
+
+/// Whether GitHub still delivers the App's events: an installation that is
+/// not suspended. A report GitHub could not give is an error, not `Ready`.
+fn installation_status(report: GitHubSyncOutcome) -> Result<ChannelStatus> {
+    let needs = |message: String| Ok(ChannelStatus::NeedsSetup(message));
+    let status = match report {
+        GitHubSyncOutcome::Synced(status) => status,
+        GitHubSyncOutcome::Unavailable(reason) => {
+            bail!("could not ask GitHub about the App: {reason}")
+        }
+        GitHubSyncOutcome::MissingCredentials | GitHubSyncOutcome::NotCreated => {
+            return needs("Agent Auth has no GitHub App for this deployment.".to_string());
+        }
+        GitHubSyncOutcome::InvalidCredentials => {
+            return needs("GitHub rejected the GitHub App's stored credentials.".to_string());
+        }
+    };
+    if !active_installations(&status).is_empty() {
+        return Ok(ChannelStatus::Ready);
+    }
+    let suspended: Vec<&str> = status
+        .installations
+        .iter()
+        .map(|installation| installation.account.login.as_str())
+        .collect();
+    if suspended.is_empty() {
+        return needs(format!("GitHub App {} is not installed.", status.app.slug));
+    }
+    needs(format!(
+        "The installation of GitHub App {} on {} is suspended, so it receives no events. An owner unsuspends it in the installation's settings on GitHub.",
+        status.app.slug,
+        channel_app::join_names(&suspended)
+    ))
+}
+
+fn app_status(connection: Option<&AppConnection>) -> ChannelStatus {
+    let needs = |message: &str| ChannelStatus::NeedsSetup(message.to_string());
+    let Some(connection) = connection else {
+        return needs("No GitHub App is set up for this deployment yet.");
+    };
+    if !connection.installed {
+        return match connection.state {
+            GitHubAppState::Pending => needs("The GitHub App was not created on GitHub yet."),
+            GitHubAppState::Created | GitHubAppState::External => {
+                needs("The GitHub App is not installed yet.")
+            }
+        };
+    }
+    if connection.state == GitHubAppState::External && !connection.webhook_secret_stored {
+        return needs("The GitHub App is installed, but Agent Auth has no webhook secret for it.");
+    }
+    if !connection.bot_id_stored {
+        return needs("The GitHub App is installed, but its bot ID is not stored yet.");
+    }
+    ChannelStatus::Ready
 }
 
 /// Whether moving the App's webhook to `expected` takes it from a receiver
@@ -639,6 +719,16 @@ fn app_holder(
         }
     }
     Ok(None)
+}
+
+/// Why a deploy without a terminal leaves an App with the deployment that
+/// holds it: moving it is only offered in a terminal.
+fn app_held_elsewhere(app_id: &str, deployment_id: &str) -> String {
+    format!(
+        "GitHub App {app_id} is connected to deployment {deployment_id} and stays there. Run \
+         `mda channels setup github` or `mda deploy` in a terminal to move it to this \
+         deployment, or use another GitHub App."
+    )
 }
 
 /// Agent Auth refused the App because another of its apps holds it.
@@ -1297,6 +1387,9 @@ impl LiveSetup<'_> {
                  workspace. Use another App, or remove that app's connection first."
             );
         };
+        if !self.interactive {
+            bail!(app_held_elsewhere(app_id, &deployment_id));
+        }
         // Agent Auth uninstalls the App when it lets go of it, so the
         // installation is made again once the App is here.
         let moved = cliclack::confirm(format!(

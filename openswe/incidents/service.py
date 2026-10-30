@@ -28,7 +28,7 @@ from openswe.incidents.records import (
 )
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
-from openswe.slack.http import SlackClient
+from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, required_slack_value, slack_error
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.time import now_iso
 
@@ -199,36 +199,31 @@ def _last_operation(policy: IncidentPolicy) -> dict[str, Any]:
 
 async def get_settings() -> dict[str, Any]:
     policy = await get_policy()
-    app_id = ENV.SLACK_APP_ID.get()
+    app_id = required_slack_value(ENV.SLACK_APP_ID)
     connection: dict[str, Any] = {
-        "slack_configured": bool(ENV.SLACK_BOT_TOKEN.get()),
         "workspace_id": policy.workspace_id,
-        "slack_app_id": app_id or policy.slack_app_id,
+        "slack_app_id": app_id,
         "required_scopes_present": None,
         "verified_at": None,
         "error": None,
     }
-    if connection["slack_configured"]:
-        try:
-            auth, scopes = await _auth_test()
-            team_id = str(auth.get("team_id") or "")
-            if team_id:
-                connection["workspace_id"] = team_id
-            if policy.workspace_id and team_id != policy.workspace_id:
-                connection["error"] = "Slack installation belongs to a different workspace."
-            else:
-                connection["verified_at"] = now_iso()
-            if scopes is not None:
-                connection["required_scopes_present"] = REQUIRED_SLACK_SCOPES.issubset(scopes)
-                if not connection["required_scopes_present"]:
-                    connection["error"] = "Slack installation is missing required Incidents scopes."
-        except Exception:
-            connection["error"] = "Slack verification failed; check installation and permissions."
-    if not app_id:
-        connection["error"] = (
-            connection["error"] or "Set SLACK_APP_ID to the installed Slack app ID."
-        )
-    elif policy.slack_app_id and app_id != policy.slack_app_id:
+    try:
+        auth, scopes = await _auth_test()
+        team_id = str(auth.get("team_id") or "")
+        if team_id:
+            connection["workspace_id"] = team_id
+        if policy.workspace_id and team_id != policy.workspace_id:
+            connection["error"] = "Slack installation belongs to a different workspace."
+        else:
+            connection["verified_at"] = now_iso()
+        if scopes is not None:
+            connection["required_scopes_present"] = REQUIRED_SLACK_SCOPES.issubset(scopes)
+            if not connection["required_scopes_present"]:
+                connection["error"] = "Slack installation is missing required Incidents scopes."
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning("Slack verification failed", extra={"slack_error": slack_error(exc)})
+        connection["error"] = "Slack verification failed; check installation and permissions."
+    if policy.slack_app_id and app_id != policy.slack_app_id:
         connection["error"] = (
             connection["error"] or "SLACK_APP_ID differs from the app bound to this policy."
         )
@@ -263,11 +258,7 @@ async def update_settings(
         if candidate.model not in SUPPORTED_MODEL_IDS:
             raise HTTPException(422, "Unsupported incident model")
     if candidate.enabled:
-        app_id = ENV.SLACK_APP_ID.get()
-        if not app_id:
-            raise HTTPException(
-                422, "Set SLACK_APP_ID to the installed Slack app ID before enabling Incidents"
-            )
+        app_id = required_slack_value(ENV.SLACK_APP_ID)
         try:
             auth, _ = await _auth_test()
         except Exception as exc:

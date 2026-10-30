@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
+from openswe import completion
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
 from openswe.run_config import RunConfig
 from openswe.slack import client as slack_utils
@@ -209,6 +210,62 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     assert [method for method, _ in slack_api.calls] == [
         "chat.postMessage",
         "conversations.replies",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "reason_code"),
+    [("error", "provider_rate_limited"), ("error", None), ("timeout", None)],
+)
+async def test_a_notice_is_not_repeated_while_the_thread_still_ends_with_it(
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    reason_code: str | None,
+) -> None:
+    thread: list[dict[str, object]] = [{"ts": "1.0", "text": "Fix it"}]
+
+    def handle(method: str, params: dict[str, object], _headers: object):
+        if method == "chat.postMessage":
+            blocks = params.get("blocks")
+            message = {
+                "ts": f"{len(thread) + 1}.0",
+                "text": params["text"],
+                "blocks": json.loads(blocks) if isinstance(blocks, str) else blocks or [],
+            }
+            thread.append(message)
+            return 200, {"ok": True, "ts": message["ts"], "message": message}, {}
+        parent = thread[0] | {"latest_reply": thread[-1]["ts"]}
+        found = [m for m in [parent, *thread[1:]] if m["ts"] == params.get("oldest", "1.0")]
+        return 200, {"ok": True, "messages": found}, {}
+
+    slack_api.handler = handle
+    monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
+    metadata = {
+        "source": "slack",
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    sandbox = slack_utils.SlackNotice("sandbox_unreachable", "Sandbox stopped responding")
+
+    for _ in range(2):
+        assert await slack_utils.post_slack_thread_reply("C1", "1.0", sandbox.key, notice=sandbox)
+        assert await completion._post_failure_reply(
+            "t1", metadata, "error", reason_code="sandbox_unreachable"
+        )
+    assert [message["text"] for message in thread] == ["Fix it", sandbox.key]
+
+    for _ in range(2):
+        assert await completion._post_failure_reply("t1", metadata, status, reason_code)
+    thread.append({"ts": "9.0", "text": "@Open SWE stop please"})
+    assert await completion._post_failure_reply("t1", metadata, status, reason_code)
+
+    failure = completion._failure_text(status, reason_code=reason_code)
+    assert [message["text"] for message in thread] == [
+        "Fix it",
+        sandbox.key,
+        failure,
+        "@Open SWE stop please",
+        failure,
     ]
 
 

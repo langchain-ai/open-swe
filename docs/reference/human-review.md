@@ -22,6 +22,21 @@ The value is a channel name or id.
 It is read from the pull request's head commit, falling back to the default branch when the head has no settings file.
 The `request_human_review` tool accepts a `channel` that overrides it or stands in when the repository sets none.
 
+PR authors must have an Open SWE account or be one of Open SWE's own bots.
+To also accept specific GitHub users or apps, add their exact logins to `reviewAllowedAuthors`:
+
+```json
+{
+  "reviewChannel": "#eng-reviews",
+  "reviewAllowedAuthors": ["langsmith-engine[bot]"]
+}
+```
+
+Logins match case-insensitively; wildcards are not supported.
+The allow-list is read only from the repository's default branch, never from the PR head, and unreadable or invalid settings block unregistered authors.
+It only permits requesting standard human review; it does not grant an Open SWE account or trusted-comment status, bypass draft or closed-PR checks, or relax merge requirements.
+`EXTRA_INTERNAL_BOT_LOGINS` controls trusted comments separately and does not grant review eligibility.
+
 For monorepos, add ordered path rules:
 
 ```json
@@ -43,6 +58,37 @@ Files count equally, including tests.
 The selected channel gets one canonical request, which stays there once posted.
 Explicit channel overrides still take precedence.
 Expedited cards use the same routing for their broadcast destination.
+
+### Supplementary reviews
+
+A repository can ask for specialist reviews, such as design or security, alongside engineering review.
+Configure them on the default branch:
+
+```json
+{
+  "supplementaryReviews": [
+    {
+      "id": "design",
+      "label": "Design review",
+      "team": "langchain-ai/product-design",
+      "paths": ["smith-frontend/src/*"],
+      "exclude": ["*.test.*", "*/__tests__/*"],
+      "criteria": "New or redesigned screens, flows, navigation, or substantial layout and interaction changes. Not tests, refactors, or tiny styling tweaks."
+    }
+  ]
+}
+```
+
+- `id` is a unique lowercase slug; `label` names the review in notifications.
+- `team` is a GitHub `organization/team-slug`.
+- `paths` and `exclude` use the same glob matching as review channel rules; a file counts when it matches `paths` and no `exclude` pattern.
+- `criteria` is what the assessment judges the pull request against.
+
+When standard or posted review starts, each policy whose paths the pull request touches gets an isolated, unlisted assessment.
+If the criteria are met, an available team member is rotated in (least recently assigned for that policy, within working hours, honoring out-of-office and opt-outs) and notified through a GitHub review request and comment, the review's Slack thread, and a DM.
+Supplementary reviews never replace the engineering request's owning thread or summary, and a supplementary reviewer's approval does not count as engineering approval unless they also own the code or signed up as an engineering reviewer.
+Agents can also ask for one with `request_human_review`'s `supplementary_review` and `supplementary_review_reason`.
+Settings use the default branch's cached configuration; changes can take 30 minutes to refresh.
 
 Workspace admins can override the two-hour auto-assignment wait through `PUT /dashboard/api/workspaces/{workspace}/settings` with `human_review_auto_assign_minutes` (a positive integer; `null` inherits the instance setting).
 The instance default can be set through `PUT /dashboard/api/settings`.

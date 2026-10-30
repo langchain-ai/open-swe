@@ -771,7 +771,7 @@ async def test_list_threads_resolves_slack_reply_link(
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     lookup = AsyncMock(return_value="thread-1")
-    monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(threads_tool, "lookup_slack_link_thread_id", lookup)
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
     get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "messages": []})
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
@@ -788,7 +788,7 @@ async def test_list_threads_resolves_slack_reply_link(
         "channel_id": "C123",
         "thread_ts": "1788425314.774339",
     }
-    lookup.assert_awaited_once_with("C123", "1788425314.774339")
+    lookup.assert_awaited_once_with(locator)
     get_dashboard_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
