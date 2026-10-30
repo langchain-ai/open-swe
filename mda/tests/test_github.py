@@ -17,12 +17,12 @@ from pydantic import BaseModel
 from rt.github_routes import Route, route
 from runtime_api.endpoint import Endpoint
 from runtime_api.github import (
-    PLAN_GITHUB_ISSUE_RUN,
+    ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
-    RUN_GITHUB_WORK,
+    ActOnGitHubDelivery,
+    GitHubDeliveryActed,
     GitHubDeliveryFacts,
     GitHubIssueRun,
-    GitHubWorkAccepted,
     PlannedGitHubIssueRun,
 )
 
@@ -328,10 +328,9 @@ class _Backend:
         self.calls.append((endpoint.name, request, msg_id))
         if endpoint is RECORD_GITHUB_DELIVERY:
             return self.facts
-        if endpoint is RUN_GITHUB_WORK:
-            return GitHubWorkAccepted()
-        assert endpoint is PLAN_GITHUB_ISSUE_RUN
-        return self.planned
+        assert endpoint is ACT_ON_GITHUB_DELIVERY
+        asked = cast(ActOnGitHubDelivery, request).issue_run is not None
+        return GitHubDeliveryActed(issue_run=self.planned if asked else None)
 
     def called[Request: BaseModel](self, endpoint: Endpoint[Request, Any]) -> list[Request]:
         return [cast(Request, request) for name, request, _ in self.calls if name == endpoint.name]
@@ -374,15 +373,16 @@ async def test_an_issue_mention_starts_the_planned_run_on_the_issues_thread(
             "webhook": "https://backend.example/webhooks/run-complete",
         },
     )
+    # Two calls: log it and learn the facts, then act.
     assert [msg_id for *_, msg_id in backend.calls] == [
         "msg_delivery-1_record",
-        "msg_delivery-1_work",
-        "msg_delivery-1_issue_run",
+        "msg_delivery-1_act",
     ]
-    [work] = backend.called(RUN_GITHUB_WORK)
-    assert work.work == ["launch_automations"]
-    [plan] = backend.called(PLAN_GITHUB_ISSUE_RUN)
-    assert (str(plan.thread_id), plan.waiting, plan.event) == (_THREAD.id, False, "issues")
+    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert act.work == ["launch_automations"]
+    assert act.event == "issues"
+    assert act.issue_run is not None
+    assert (str(act.issue_run.thread_id), act.issue_run.waiting) == (_THREAD.id, False)
 
 
 async def test_a_mention_while_the_thread_waits_only_points_to_the_decision(
@@ -396,8 +396,8 @@ async def test_a_mention_while_the_thread_waits_only_points_to_the_decision(
     )
 
     assert started == github.ACTS_WHILE_WAITING
-    [plan] = backend.called(PLAN_GITHUB_ISSUE_RUN)
-    assert plan.waiting is True
+    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert act.issue_run is not None and act.issue_run.waiting is True
 
 
 async def test_a_mention_the_backend_refuses_starts_nothing(backend: _Backend) -> None:
@@ -414,9 +414,8 @@ async def test_pull_request_work_is_the_backends_and_starts_no_run_here(
     )
 
     assert started is None
-    [work] = backend.called(RUN_GITHUB_WORK)
-    assert (work.work, work.mentioned) == (["route_comment"], True)
-    assert backend.called(PLAN_GITHUB_ISSUE_RUN) == []
+    [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
+    assert (act.work, act.mentioned, act.issue_run) == (["route_comment"], True, None)
 
 
 async def test_a_delivery_that_starts_nothing_is_only_logged(backend: _Backend) -> None:

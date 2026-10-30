@@ -2,13 +2,15 @@
 
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from pydantic import JsonValue
-from runtime_api.github import RECORD_GITHUB_DELIVERY
+from runtime_api.github import ACT_ON_GITHUB_DELIVERY, RECORD_GITHUB_DELIVERY, ActOnGitHubDelivery
+from standardwebhooks import Webhook
 
 from openswe import dispatch
 from openswe.agent_api.tokens import verify_runtime_token
@@ -126,6 +128,28 @@ async def test_only_calls_mda_signed_are_answered(app: FastAPI) -> None:
         )
 
     assert response.status_code == 401
+
+
+async def test_a_call_that_starts_nothing_is_refused(app: FastAPI) -> None:
+    content = ActOnGitHubDelivery.model_construct(
+        event="issues", delivery_id="delivery-1", payload={}, work=[], issue_run=None
+    ).model_dump_json()
+    now = datetime.now(tz=UTC)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            ACT_ON_GITHUB_DELIVERY.path,
+            content=content,
+            headers={
+                "content-type": "application/json",
+                "webhook-id": "msg_1",
+                "webhook-timestamp": str(int(now.timestamp())),
+                "webhook-signature": Webhook(SERVICE_SECRET).sign("msg_1", now, content),
+            },
+        )
+
+    assert response.status_code == 422
 
 
 async def test_a_delivery_is_logged_with_what_open_swe_knows_of_its_repository(

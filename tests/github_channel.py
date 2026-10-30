@@ -23,13 +23,12 @@ import pytest
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.github import (
-    PLAN_GITHUB_ISSUE_RUN,
+    ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
-    RUN_GITHUB_WORK,
+    ActOnGitHubDelivery,
     GitHubDelivery,
     GitHubDeliveryFacts,
-    GitHubWork,
-    PlanGitHubIssueRun,
+    GitHubIssueRunRequest,
     PlannedGitHubIssueRun,
 )
 from standardwebhooks import Webhook
@@ -116,29 +115,26 @@ async def deliver_as_mda(
             client, RECORD_GITHUB_DELIVERY, delivery, f"msg_{delivery_id}_record", secret
         )
         routed = MDA_ROUTES.route(event_type, delivery.payload, facts, from_app=from_app)
-        if routed.work:
-            await _call(
-                client,
-                RUN_GITHUB_WORK,
-                GitHubWork(
-                    **delivery.model_dump(), work=list(routed.work), mentioned=routed.mentioned
-                ),
-                f"msg_{delivery_id}_work",
-                secret,
-            )
         planned = None
-        if routed.issue_run:
-            planned = await _call(
+        if routed.work or routed.issue_run:
+            issue_run = (
+                GitHubIssueRunRequest(thread_id=thread_id or uuid.uuid4(), waiting=waiting)
+                if routed.issue_run
+                else None
+            )
+            acted = await _call(
                 client,
-                PLAN_GITHUB_ISSUE_RUN,
-                PlanGitHubIssueRun(
+                ACT_ON_GITHUB_DELIVERY,
+                ActOnGitHubDelivery(
                     **delivery.model_dump(),
-                    thread_id=thread_id or uuid.uuid4(),
-                    waiting=waiting,
+                    work=list(routed.work),
+                    mentioned=routed.mentioned,
+                    issue_run=issue_run,
                 ),
-                f"msg_{delivery_id}_issue_run",
+                f"msg_{delivery_id}_act",
                 secret,
             )
+            planned = acted.issue_run
     return GitHubDelivered(facts=facts, work=tuple(routed.work), issue_run=planned)
 
 

@@ -4,10 +4,10 @@ Open SWE's GitHub App delivers its webhooks to the MDA deployment's GitHub
 channel, which verifies each delivery and decides there what it starts. It asks
 here only for what needs Open SWE's data, its App or its signing key: to log each
 delivery and say what Open SWE knows about its repository
-(``record_github_delivery``); to run the work it chose, as the backend's own webhook
-ran it (``run_github_work``); and the run an ``@openswe`` mention on an issue starts
-on the channel's thread (``plan_github_issue_run``). Each run carries the backend's
-run-complete webhook.
+(``record_github_delivery``); then, in one call (``act_on_github_delivery``), to run
+the work it chose, as the backend's own webhook ran it, and to plan the run an
+``@openswe`` mention on an issue starts on the channel's thread. Each run carries
+the backend's run-complete webhook.
 """
 
 import json
@@ -18,13 +18,13 @@ from typing import Any, Final, cast
 
 from pydantic import JsonValue
 from runtime_api.github import (
+    ActOnGitHubDelivery,
     GitHubDelivery,
+    GitHubDeliveryActed,
     GitHubDeliveryFacts,
     GitHubIssueRun,
-    GitHubWork,
-    GitHubWorkAccepted,
+    GitHubIssueRunRequest,
     GitHubWorkName,
-    PlanGitHubIssueRun,
     PlannedGitHubIssueRun,
 )
 
@@ -133,7 +133,7 @@ async def _route_comment(payload: _Payload, event: str, *, mentioned: bool) -> N
         await service.process_github_pr_comment(payload, event, agent_thread_id=agent_thread_id)
 
 
-def _tasks(work: GitHubWork) -> dict[GitHubWorkName, Callable[[], Awaitable[object]]]:
+def _tasks(work: ActOnGitHubDelivery) -> dict[GitHubWorkName, Callable[[], Awaitable[object]]]:
     payload = cast(_Payload, work.payload)
     event, delivery_id = work.event, work.delivery_id
     return {
@@ -160,7 +160,7 @@ def _tasks(work: GitHubWork) -> dict[GitHubWorkName, Callable[[], Awaitable[obje
 
 
 async def _run(
-    name: GitHubWorkName, task: Callable[[], Awaitable[object]], work: GitHubWork
+    name: GitHubWorkName, task: Callable[[], Awaitable[object]], work: ActOnGitHubDelivery
 ) -> None:
     # One piece failing doesn't keep the delivery's others from running.
     try:
@@ -176,13 +176,13 @@ async def _run(
         )
 
 
-async def run_github_work(call: ChannelCall, work: GitHubWork) -> GitHubWorkAccepted:
-    """Run the work after answering, in the order given, once per delivery: MDA sends a
-    call again after an answer it didn't get."""
+async def _accept_work(call: ChannelCall, work: ActOnGitHubDelivery) -> None:
+    """Run the work after answering, in the order given, once per delivery: GitHub sends
+    a delivery again when someone redelivers it."""
     if postgres.configured() and not await event_claims.claim(
         _WORK_CLAIMS, work.delivery_id, ttl=_WORK_CLAIM_TTL
     ):
-        return GitHubWorkAccepted()
+        return
     tasks = _tasks(work)
     for name in dict.fromkeys(work.work):
         call.background.add_task(_run, name, tasks[name], work)
@@ -194,10 +194,9 @@ async def run_github_work(call: ChannelCall, work: GitHubWork) -> GitHubWorkAcce
             "github_work": list(work.work),
         },
     )
-    return GitHubWorkAccepted()
 
 
-async def _prepare_run(plan: PlanGitHubIssueRun, thread_id: str) -> GitHubIssueRun | None:
+async def _prepare_run(plan: ActOnGitHubDelivery, thread_id: str) -> GitHubIssueRun | None:
     prepared = await service.prepare_github_issue_run(
         cast(_Payload, plan.payload),
         plan.event,
@@ -237,8 +236,8 @@ async def _prepare_run(plan: PlanGitHubIssueRun, thread_id: str) -> GitHubIssueR
     return run
 
 
-async def plan_github_issue_run(
-    _call: ChannelCall, plan: PlanGitHubIssueRun
+async def _plan_issue_run(
+    plan: ActOnGitHubDelivery, request: GitHubIssueRunRequest
 ) -> PlannedGitHubIssueRun:
     """The run an ``@openswe`` mention on an issue starts on the channel's thread.
 
@@ -247,7 +246,7 @@ async def plan_github_issue_run(
     and signs the run. While the thread waits it only says whether Open SWE acts.
     """
     payload = cast(_Payload, plan.payload)
-    thread_id = str(plan.thread_id)
+    thread_id = str(request.thread_id)
     fields = {"github_event": plan.event, "github_delivery": plan.delivery_id}
     if plan.event == "issue_comment":
         sender_login = str((payload.get("sender") or {}).get("login") or "")
@@ -255,13 +254,24 @@ async def plan_github_issue_run(
             return _no_run("Sender is not a registered Open SWE user", **fields)
     if not await _gated(payload, plan.event):
         return _no_run("The public-repo gate refused the sender", **fields)
-    if plan.waiting:
+    if request.waiting:
         # Nothing starts while the thread waits; no reaction or metadata either.
         return PlannedGitHubIssueRun(starts=True)
     run = await _prepare_run(plan, thread_id)
     if run is None:
         return _no_run("no run prepared", **fields, agent_thread_id=thread_id)
     return PlannedGitHubIssueRun(starts=True, run=run)
+
+
+async def act_on_github_delivery(
+    call: ChannelCall, act: ActOnGitHubDelivery
+) -> GitHubDeliveryActed:
+    """Take the work the channel chose for a delivery, and plan an issue mention's run."""
+    if act.work:
+        await _accept_work(call, act)
+    if act.issue_run is None:
+        return GitHubDeliveryActed()
+    return GitHubDeliveryActed(issue_run=await _plan_issue_run(act, act.issue_run))
 
 
 def _no_run(reason: str, **fields: str) -> PlannedGitHubIssueRun:

@@ -2,7 +2,7 @@ from typing import Any
 
 import httpx
 import pytest
-from runtime_api.github import RUN_GITHUB_WORK
+from runtime_api.github import ACT_ON_GITHUB_DELIVERY
 
 from openswe.api.app import app
 from openswe.github import webhook as github
@@ -41,7 +41,7 @@ async def test_ci_work_still_requires_mdas_signature(monkeypatch: pytest.MonkeyP
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            RUN_GITHUB_WORK.path,
+            ACT_ON_GITHUB_DELIVERY.path,
             json={
                 "event": "check_run",
                 "delivery_id": "delivery-1",

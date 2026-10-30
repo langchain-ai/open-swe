@@ -2,11 +2,11 @@
 
 Every delivery goes to the backend's event log (``record_github_delivery``), which
 answers what Open SWE knows about its repository. This side decides what the
-delivery starts (``rt.github_routes``): the backend's work, such as a review, a CI
-wakeup or a pull request comment's run, which the backend runs once per delivery
-(``run_github_work``); and for an ``@openswe`` mention on an issue, the coding
-agent's run on the issue's conversation, which the backend checks and signs
-(``plan_github_issue_run``).
+delivery starts (``rt.github_routes``), and tells the backend in one call
+(``act_on_github_delivery``): the backend's work, such as a review, a CI wakeup or a
+pull request comment's run, which the backend runs once per delivery; and for an
+``@openswe`` mention on an issue, the coding agent's run on the issue's
+conversation, which the backend checks and signs. So a delivery takes at most two calls.
 """
 
 from typing import Final, cast
@@ -21,12 +21,11 @@ from managed_deepagents import (
 )
 from pydantic import JsonValue
 from runtime_api.github import (
-    PLAN_GITHUB_ISSUE_RUN,
+    ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
-    RUN_GITHUB_WORK,
+    ActOnGitHubDelivery,
     GitHubDelivery,
-    GitHubWork,
-    PlanGitHubIssueRun,
+    GitHubIssueRunRequest,
 )
 
 from rt.github_routes import route
@@ -50,22 +49,25 @@ async def on_event[Payload: GitHubPayload](
         RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
     )
     routed = route(event.name, delivery.payload, facts, from_app=event.from_app)
-    if routed.work:
-        await ask_backend(
-            RUN_GITHUB_WORK,
-            GitHubWork(**delivery.model_dump(), work=list(routed.work), mentioned=routed.mentioned),
-            msg_id=f"msg_{event.delivery_id}_work",
-        )
-    if not routed.issue_run:
+    if not routed.work and not routed.issue_run:
         return None
-    planned = await ask_backend(
-        PLAN_GITHUB_ISSUE_RUN,
-        PlanGitHubIssueRun(
-            **delivery.model_dump(), thread_id=UUID(thread.id), waiting=thread.interrupted
-        ),
-        msg_id=f"msg_{event.delivery_id}_issue_run",
+    issue_run = (
+        GitHubIssueRunRequest(thread_id=UUID(thread.id), waiting=thread.interrupted)
+        if routed.issue_run
+        else None
     )
-    if not planned.starts:
+    acted = await ask_backend(
+        ACT_ON_GITHUB_DELIVERY,
+        ActOnGitHubDelivery(
+            **delivery.model_dump(),
+            work=list(routed.work),
+            mentioned=routed.mentioned,
+            issue_run=issue_run,
+        ),
+        msg_id=f"msg_{event.delivery_id}_act",
+    )
+    planned = acted.issue_run
+    if planned is None or not planned.starts:
         return None
     run = planned.run
     if run is None:

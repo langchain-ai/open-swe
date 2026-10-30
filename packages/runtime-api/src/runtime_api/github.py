@@ -8,17 +8,19 @@ answers only what needs its data, its GitHub App or its signing key:
 - ``record_github_delivery``: logs the delivery, and says whether a workspace owns
   its repository, whether the allowlist takes it, whether automatic review is on
   for it, and the handles that mention Open SWE.
-- ``run_github_work``: runs the work the channel chose for the delivery (a review,
-  a CI wakeup, a pull request comment's run, ...), once per delivery, after it answers.
-- ``plan_github_issue_run``: the run an ``@openswe`` mention on an issue starts on
-  the issue's conversation, or none.
+- ``act_on_github_delivery``: runs the work the channel chose for the delivery (a
+  review, a CI wakeup, a pull request comment's run, ...), once per delivery, after
+  it answers; and for an ``@openswe`` mention on an issue, plans the run it starts
+  on the issue's conversation.
+
+So a delivery takes at most two calls.
 """
 
 import json
-from typing import Final, Literal
+from typing import Final, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, JsonValue, field_validator
+from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
 
 from runtime_api.endpoint import CHANNEL_API_PREFIX, Endpoint
 
@@ -83,21 +85,28 @@ type GitHubWorkName = Literal[
 ]
 
 
-class GitHubWork(GitHubDelivery):
-    work: list[GitHubWorkName] = Field(min_length=1)
-    # Whether the comment ``route_comment`` routes mentions Open SWE.
-    mentioned: bool = False
+class GitHubIssueRunRequest(BaseModel):
+    """An ``@openswe`` mention on an issue: plan the run it starts on the issue's thread."""
 
-
-class GitHubWorkAccepted(BaseModel):
-    """The backend took the work; it runs it after answering, as it did for its webhook."""
-
-
-class PlanGitHubIssueRun(GitHubDelivery):
     # The issue's conversation thread, which the channel starts the run on.
     thread_id: UUID
     # The thread waits on an interrupt: the backend only says whether Open SWE would act.
     waiting: bool = False
+
+
+class ActOnGitHubDelivery(GitHubDelivery):
+    """What the channel decided a delivery starts."""
+
+    work: list[GitHubWorkName] = []
+    # Whether the comment ``route_comment`` routes mentions Open SWE.
+    mentioned: bool = False
+    issue_run: GitHubIssueRunRequest | None = None
+
+    @model_validator(mode="after")
+    def _acts(self) -> Self:
+        if not self.work and self.issue_run is None:
+            raise ValueError("a delivery that starts nothing needs no call")
+        return self
 
 
 class GitHubIssueRun(BaseModel):
@@ -115,6 +124,13 @@ class PlannedGitHubIssueRun(BaseModel):
     run: GitHubIssueRun | None = None
 
 
+class GitHubDeliveryActed(BaseModel):
+    """The backend took the work, which it runs after answering, as it did for its webhook."""
+
+    # The issue's run, when the call asked for one.
+    issue_run: PlannedGitHubIssueRun | None = None
+
+
 RECORD_GITHUB_DELIVERY: Final = Endpoint(
     "record_github_delivery",
     GitHubDelivery,
@@ -124,19 +140,12 @@ RECORD_GITHUB_DELIVERY: Final = Endpoint(
     delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )
-RUN_GITHUB_WORK: Final = Endpoint(
-    "run_github_work",
-    GitHubWork,
-    GitHubWorkAccepted,
+ACT_ON_GITHUB_DELIVERY: Final = Endpoint(
+    "act_on_github_delivery",
+    ActOnGitHubDelivery,
+    GitHubDeliveryActed,
     seconds=60.0,
-    # Claimed once per delivery ID, so a repeat starts nothing again.
-    delivery="idempotent",
-    prefix=CHANNEL_API_PREFIX,
-)
-PLAN_GITHUB_ISSUE_RUN: Final = Endpoint(
-    "plan_github_issue_run",
-    PlanGitHubIssueRun,
-    PlannedGitHubIssueRun,
-    seconds=60.0,
+    # The work is claimed once per delivery ID, but planning an issue's run reacts to
+    # the comment and indexes the thread, so a call isn't sent again blindly.
     prefix=CHANNEL_API_PREFIX,
 )
