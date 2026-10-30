@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
 import posixpath
 import shlex
@@ -37,8 +38,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDic
 
 import httpx
 import websockets
-from deepagents.backends import CompositeBackend
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends import CompositeBackend, StateBackend
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.async_subagents import (
     AsyncSubAgent,
     _forwarded_context,
@@ -47,7 +48,7 @@ from deepagents.middleware.async_subagents import (
     _trace_headers,
 )
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import AgentState, OmitFromInput
+from langchain.agents.middleware.types import AgentState, OmitFromInput, PrivateStateAttr
 from langchain.tools import BaseTool, tool
 from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
 from langchain_core.messages.content import create_text_block
@@ -56,7 +57,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk import get_client
-from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient
+from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient, ResourceNotFoundError
 from langsmith.utils import get_env_var
 from pydantic import TypeAdapter, ValidationError
 from stagehand import BrowserContext, Page, Stagehand, get_extension_archive, local_browser
@@ -73,6 +74,7 @@ from stagehand_middleware.facade.tools import sanitize_error_message
 
 from managed_deepagents._channels.assistant_text import MDA_NOTIFICATION_KEY
 from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001 - tool annotations
+from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
 from managed_deepagents.identity import ManagedServerInfo
 from managed_deepagents.runtime import (
     _LazyManagedSandboxBackend,
@@ -86,22 +88,20 @@ if TYPE_CHECKING:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
 
 T = TypeVar("T")
+_Content = TypeVar("_Content", bound=str | list[Any])  # what a tool returns the model
 Scope = Literal["thread", "user"]
 
 #: The client and the browser's extension must match; ``mda`` pins this in deployments.
 STAGEHAND_VERSION = "4.3.0"
-_WORKSPACE = "/workspace"  # where run code's screenshots land in the sandbox
+_WORKSPACE = "/workspace"  # where run code's screenshots land in the agent's files
 _INSTRUCTIONS = (
     # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
     "These tools are named browser_run, browser_snapshot and browser_screenshot: "
     "call those wherever this text or an error names run, snapshot or screenshot.\n"
-    f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox: "
+    f"Screenshots that run code saves go to {_WORKSPACE} in your files: "
     f"`await page.screenshot({{ path: 'shots/a.png' }})` saves {_WORKSPACE}/shots/a.png."
 )
-_SCREENSHOT_PATH = (
-    "Only if you have a sandbox: also save the image to this absolute path in it, "
-    "creating its folder, e.g. to publish it."
-)
+_SCREENSHOT_PATH = "Also save the image to this absolute path in your files, creating its folder."
 _LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost
     "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
@@ -123,7 +123,7 @@ recording, the viewport is {_RECORD_VIEWPORT[0]}x{_RECORD_VIEWPORT[1]}, and each
 pause between your calls plays for at most {_RECORD_MAX_HOLD_S:g}s.
 A recording also ends, and is saved, when the run ends or you hand the browser to
 the user: it never shows what they do. It stops at
-{_RECORD_MAX_S // 60} minutes."""
+{_RECORD_MAX_S // 60} minutes. It needs a sandbox to save in."""
 _HANDOFF_LINK_TTL_S = 900  # how long the link a user gets for a handoff works
 #: The graph `mda` builds beside the agent, whose run waits out a handoff.
 HANDOFF_WATCHER_GRAPH = "mda-browser-handoff"
@@ -145,6 +145,13 @@ _WAKE_TEXT: dict[BrowserHandoffStatus, str] = {
     "ended": "The browser handoff ended. Take a snapshot to see whether the user finished.",
 }
 _RELEASE_AFTER_S = 60.0  # a run that raises or interrupts never reaches aafter_agent
+#: Without a sandbox a saved file lives in thread state, which every later checkpoint carries.
+_MAX_SAVED_BYTES = 5_000_000
+_REPLACED = (  # before what the call returned, once the thread's browser was made again
+    "This is a new browser: the one you used before is gone. It started on a blank page, "
+    "signed out of everything, and nothing you or the user did in the old one carried over."
+)
+_LOST = "error: the browser was deleted, so the recording is lost."
 _LOG = logging.getLogger("mda.browser")
 
 
@@ -166,10 +173,18 @@ class PendingBrowserHandoff(TypedDict):
     """When the user's link runs out, in epoch seconds."""
 
 
+def _latest(_: str | None, new: str | None) -> str | None:
+    return new
+
+
 class BrowserState(AgentState):
-    """The thread's handoff that waits on the user, as deepagents keeps its async tasks."""
+    """The thread's handoff that waits on the user, as deepagents keeps its async tasks,
+    and the browser it last used."""
 
     mda_browser_handoff: Annotated[NotRequired[PendingBrowserHandoff | None], OmitFromInput]
+    mda_browser: Annotated[NotRequired[str | None], PrivateStateAttr, _latest]
+    """The browser sandbox's id: one made again under the same name has a new one.
+    Calls side by side may each write it."""
 
 
 @dataclass
@@ -179,11 +194,21 @@ class _Session:
     tools: StagehandFacadeTools
     artifacts: str  # where the facade writes run code's screenshots
     browser: str  # the browser's name, which a later generation may have replaced
+    box: str | None = None  # the browser sandbox's id, which a browser made again changes
     closing: bool = False  # run code called `browser.close()`: released after the call
     # The sandbox whose localhost the browser shares. By handle, not name: one MDA
     # replaces mid-run keeps its name but gets a new handle.
     shared: SandboxBackendProtocol | None = None
     local_url: str = ""  # this window's CDP inside the browser sandbox, for the recorder
+
+    @property
+    def disconnected(self) -> bool:
+        """Whether the client lost Chrome, as when browserd restarts it: for good.
+
+        Stagehand closes its client once the connection ends, with no public way to ask.
+        """
+        client = self.stagehand._rpc_client  # noqa: SLF001
+        return client is not None and client._closed  # noqa: SLF001
 
     async def close(self) -> None:
         # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
@@ -211,8 +236,9 @@ class _Take:
 
     browser: str  # the browser's name, whose sandbox records
     folder: str  # where the recorder keeps the take, in that sandbox
-    runtime: ManagedToolRuntime  # whose sandbox the recording is saved to
+    backend: BackendProtocol  # the sandbox the recording is saved to
     path: str | None  # where `start` said to save it
+    box: str | None  # the browser sandbox's id: the take is lost with it
 
 
 # By browser key and window: a user's threads record their own windows.
@@ -267,20 +293,28 @@ async def _release_when_idle(key: str) -> None:
 
 class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
     """Give the agent Stagehand's tools, named ``browser_run``, ``browser_snapshot`` and so on,
-    plus ``browser_handoff`` to hand the browser over and ``browser_record`` for a video."""
+    plus ``browser_handoff`` to hand the browser over and ``browser_record`` for a video.
+
+    Without a sandbox, files save to ``backend``, the agent's own, where its file tools look.
+    """
 
     name = "mda-browser"
     state_schema = BrowserState
 
-    def __init__(self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600) -> None:
+    def __init__(
+        self,
+        *,
+        scope: Scope = "thread",
+        idle_ttl_seconds: int = 600,
+        backend: BackendProtocol | None = None,
+    ) -> None:
         super().__init__()
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
+        self.backend = backend if backend is not None else StateBackend()
         self.tools = self._tools()
         self._arguments = {tool.name: set(tool.args) for tool in self.tools}
         self._instructions = f"{facade_instructions()}\n\n{_INSTRUCTIONS}"
-        if scope == "thread":
-            self._instructions += f" {_LOCALHOST_NOTE}"
 
     def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
         """The LangSmith browser this run's browser tools use, whether or not it exists yet.
@@ -296,42 +330,51 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
 
     async def _call(  # noqa: C901 - one flat chain of error handling
         self, runtime: ManagedToolRuntime, fn: Callable[[_Session], Awaitable[T]]
-    ) -> T | str:
-        """Run ``fn`` on the run's session. Errors go to the model; nothing is retried.
+    ) -> tuple[T | str, str | None]:
+        """Run ``fn`` on the run's session, and say which browser sandbox it ran on.
+        Errors go to the model; nothing is retried.
 
         While the user has the window, the agent waits.
         """
         # The handoff is asked about here too: after a restart no watcher says it ended.
         if (pending := _pending(runtime.state)) and await _handoff_status(pending) is None:
-            return f"error: {_WITH_USER}"
+            return f"error: {_WITH_USER}", None
         try:
             key, window = self._where(runtime)
         except RuntimeError as err:
-            return f"error: {err}"
+            return f"error: {err}", None
+        box = None
         async with _LOCKS.setdefault(key, asyncio.Lock()):
             try:
-                if (session := _SESSIONS.get(key)) and session.window != window:
-                    await _release(key)  # another of the user's threads: move windows
+                if (session := _SESSIONS.get(key)) and (
+                    session.window != window or session.disconnected
+                ):
+                    await _release(key)  # another of the user's threads, or Chrome restarted
                 if key not in _SESSIONS:
                     _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
-                return await fn(_SESSIONS[key])
+                box = _SESSIONS[key].box
+                return await fn(_SESSIONS[key]), box
             except StagehandFacadeInputError as err:
-                return f"error: {err}"
+                return f"error: {err}", box
             except StagehandFacadeExecutionError as err:  # thrown by run code
-                return f"error: {err.name}: {err}"
+                return f"error: {err.name}: {err}", box
             except Exception as err:  # noqa: BLE001 - reported to the model
                 # The connection may be dead, unless the browser answered or the facade
                 # turned away run code that does not parse, with a plain SyntaxError.
                 if not isinstance(err, RPCError | SyntaxError):
                     await _release(key)
-                return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
+                return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}", box
             finally:
                 if (session := _SESSIONS.get(key)) and session.closing:
                     await _release(key)
                 if pending := _RELEASES.pop(key, None):
                     pending.cancel()
                 _RELEASES[key] = asyncio.create_task(_release_when_idle(key))
+
+    def _files(self, runtime: ManagedToolRuntime) -> BackendProtocol:
+        """The run's sandbox, or the agent's own files."""
+        return runtime.backend if runtime.backend is not None else self.backend
 
     def _where(self, runtime: ManagedToolRuntime | Runtime) -> tuple[str, str]:
         """The run's browser key and window; ``RuntimeError`` without a thread or user."""
@@ -383,10 +426,11 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
     ) -> ModelResponse[object]:
         """Append the facade's instructions to the system message, as their own block."""
         system = request.system_message
-        blocks = [
-            *(system.content_blocks if system else []),
-            create_text_block(self._instructions),
-        ]
+        text = self._instructions
+        # A user's browser serves several threads, whose sandboxes cannot all be localhost.
+        if self.scope == "thread" and getattr(request.runtime, "backend", None) is not None:
+            text += f" {_LOCALHOST_NOTE}"
+        blocks = [*(system.content_blocks if system else []), create_text_block(text)]
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
 
     async def _hand_to_user(
@@ -407,7 +451,9 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             async with _LOCKS.setdefault(key, asyncio.Lock()):
                 await _release(key)
                 try:
-                    browser, window_id, url = await _hand_over(key, window, self.idle_ttl_seconds)
+                    browser, window_id, url, box = await _hand_over(
+                        key, window, self.idle_ttl_seconds
+                    )
                 except Exception as err:  # noqa: BLE001 - reported to the model
                     failed = f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
                     return _with_recording(failed, ended)
@@ -425,17 +471,18 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         # What clients such as Studio show the user: the ask, and a link that lets
         # whoever holds it drive the window, for 15 minutes.
         handoff = {"type": "browser_handoff", "message": reason, "url": url}
+        text, noted = _note_box(runtime.state, box, _with_recording(_HANDED_OVER, ended))
         reply = ToolMessage(
-            _with_recording(_HANDED_OVER, ended),
+            text,
             artifact=handoff,
-            name="browser_handoff",
+            name=f"{BROWSER_TOOL_PREFIX}handoff",
             tool_call_id=runtime.tool_call_id,
         )
-        return Command(update={"mda_browser_handoff": pending, "messages": [reply]})
+        return Command(update={"mda_browser_handoff": pending, **noted, "messages": [reply]})
 
     async def _record(  # noqa: PLR0911 - one return per refusal
         self, runtime: ManagedToolRuntime, action: Literal["start", "stop"], path: str | None
-    ) -> list[dict[str, str]] | str:
+    ) -> Command | list[dict[str, str]] | str:
         """Start or stop recording the run's window; a ``path`` that can't be saved does neither."""
         try:
             where = self._where(runtime)
@@ -447,12 +494,13 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             return f"error: {path} not saved: give an absolute path. Still recording."
         async with _LOCKS.setdefault(where, asyncio.Lock()):
             if action == "start":
-                if runtime.backend is None:
+                if (backend := runtime.backend) is None:
                     return (
-                        "error: this agent has no sandbox to save a recording in. "
-                        "Recording not started."
+                        "error: browser_record needs a sandbox to save recordings in, "
+                        "and this run has none. Screenshots still save."
                     )
-                return await self._call(runtime, lambda s: _start_take(s, where, runtime, path))
+                ran = await self._call(runtime, lambda s: _start_take(s, where, backend, path))
+                return _reply(runtime, f"{BROWSER_TOOL_PREFIX}record", *ran)
             if (take := _TAKES.pop(where, None)) is None:
                 return (
                     "error: not recording. A recording ends when the run ends or you "
@@ -487,7 +535,7 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         def advertised(name: str) -> Callable[[Callable[..., Awaitable[object]]], BaseTool]:
             entry = facade[name]
             return tool(
-                f"browser_{name}",
+                f"{BROWSER_TOOL_PREFIX}{name}",
                 description=entry["description"],
                 args_schema=entry["inputSchema"],
             )
@@ -497,24 +545,25 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             runtime: ManagedToolRuntime,
             code: str | None = None,
             actions: list[dict[str, Any]] | None = None,
-        ) -> str:
+        ) -> Command | str:
             async def go(session: _Session) -> str:
                 try:
                     value = await session.tools.run(code=code, actions=actions)
                 finally:  # code that threw may have saved some first
-                    saved = await _save_artifacts(runtime, Path(session.artifacts))
+                    saved = await _save_artifacts(self._files(runtime), Path(session.artifacts))
                 return "\n".join([json.dumps(value, default=str), *saved])
 
-            return await self._call(runtime, go)
+            return _reply(runtime, f"{BROWSER_TOOL_PREFIX}run", *await self._call(runtime, go))
 
         @advertised("snapshot")
         async def snapshot(
             runtime: ManagedToolRuntime,
             includeIframes: bool = True,  # noqa: N803 - the facade's name
-        ) -> str:
-            return await self._call(
+        ) -> Command | str:
+            ran = await self._call(
                 runtime, lambda s: s.tools.snapshot(include_iframes=includeIframes)
             )
+            return _reply(runtime, f"{BROWSER_TOOL_PREFIX}snapshot", *ran)
 
         @advertised("screenshot")
         async def screenshot(
@@ -523,18 +572,21 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             type: Literal["png", "jpeg"] = "png",
             quality: float | None = None,
             path: str | None = None,
-        ) -> list[dict[str, str]] | str:
-            shot = await self._call(
+        ) -> Command | list[dict[str, str]] | str:
+            shot, box = await self._call(
                 runtime,
                 lambda s: s.tools.screenshot(full_page=fullPage, type=type, quality=quality),
             )
             if isinstance(shot, str):
-                return shot
+                return _reply(runtime, f"{BROWSER_TOOL_PREFIX}screenshot", shot, box)
             text = "Screenshot of the current page."
             if path:
-                text += " " + await _save(runtime, path, base64.b64decode(shot["data"]))
+                data = base64.b64decode(shot["data"])
+                text += " " + await _save(self._files(runtime), path, data)
             image = {"type": "image", "url": f"data:{shot['mimeType']};base64,{shot['data']}"}
-            return [{"type": "text", "text": text}, image]
+            return _reply(
+                runtime, "browser_screenshot", [{"type": "text", "text": text}, image], box
+            )
 
         @tool
         async def browser_handoff(
@@ -548,12 +600,12 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             """
             return await self._hand_to_user(runtime, reason)
 
-        @tool("browser_record", description=_RECORD_DESCRIPTION)
+        @tool(f"{BROWSER_TOOL_PREFIX}record", description=_RECORD_DESCRIPTION)
         async def record(
             runtime: ManagedToolRuntime,
             action: Literal["start", "stop"],
             path: str | None = None,
-        ) -> list[dict[str, str]] | str:
+        ) -> Command | list[dict[str, str]] | str:
             return await self._record(runtime, action, path)
 
         return [run, snapshot, screenshot, browser_handoff, record]
@@ -561,6 +613,35 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
 
 def _pending(state: BrowserState | Mapping[str, Any] | None) -> PendingBrowserHandoff | None:
     return state.get("mda_browser_handoff") if isinstance(state, Mapping) else None
+
+
+def _note_box(
+    state: object, box: str | None, content: str | list[Any]
+) -> tuple[str | list[Any], dict[str, str]]:
+    """What a call on browser sandbox ``box`` returns, and the update that notes ``box``.
+
+    A box the thread hasn't used is noted; if it used another, it was deleted, and the
+    model reads so first.
+    """
+    used = state.get("mda_browser") if isinstance(state, Mapping) else None
+    if box is None or box == used:
+        return content, {}
+    if used is not None:
+        replaced = {"type": "text", "text": _REPLACED}
+        content = f"{_REPLACED}\n{content}" if isinstance(content, str) else [replaced, *content]
+    return content, {"mda_browser": box}
+
+
+def _reply(
+    runtime: ManagedToolRuntime, name: str, content: _Content, box: str | None
+) -> Command | _Content:
+    """Tool ``name``'s reply to a call on browser sandbox ``box``, noting ``box`` in state
+    if new."""
+    said, noted = _note_box(runtime.state, box, content)
+    if not noted:
+        return content
+    message = ToolMessage(said, name=name, tool_call_id=runtime.tool_call_id)
+    return Command(update={**noted, "messages": [message]})
 
 
 async def _start_watcher(runtime: ManagedToolRuntime, pending: PendingBrowserHandoff) -> None:
@@ -694,22 +775,27 @@ async def _finish_take(take: _Take, path: str | None) -> list[dict[str, str]] | 
     Returns what was saved and the first and last frames, for the model to check.
     """
     try:
-        reply, (video, timeline, first, last) = await _stop_take(take)
+        stopped = await _stop_take(take)
     except Exception as err:  # noqa: BLE001 - reported to the model
+        if _deleted(err):
+            return _LOST
         return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
+    if stopped is None:
+        return _LOST
+    reply, (video, timeline, first, last) = stopped
     default = f"{_RECORDINGS}/{time.strftime('%Y%m%d-%H%M%S')}.mp4"
     path = path or default
-    saved = await _save(take.runtime, path, video)
+    saved = await _save(take.backend, path, video)
     if saved.startswith("error:"):
         # The browser's sandbox no longer has the take, so try once more, under recordings/.
         missed = sanitize_error_message(saved.removeprefix("error: "))
-        moved = await _save(take.runtime, default, video)
+        moved = await _save(take.backend, default, video)
         if moved.startswith("error:"):
             return f"error: {missed}. The recording is lost."
         saved = moved if path == default else f"{missed}. {moved[:-1]} instead."
         path = default
-    beside = f"{posixpath.splitext(posixpath.normpath(path))[0]}.json"
-    noted = await _save(take.runtime, beside, timeline)
+    beside = f"{posixpath.splitext(_normpath(path))[0]}.json"
+    noted = await _save(take.backend, beside, timeline)
     text = f"{saved[:-1]}: {reply['seconds']:.0f}s, {len(video) / 1e6:.1f} MB. {noted}"
     if reply["early"]:
         text += f" {reply['early']}"
@@ -729,10 +815,10 @@ def _unexpected(arguments: list[str]) -> str:
     return f"error: unexpected argument{'s' if len(arguments) > 1 else ''} {names}."
 
 
-async def _save_artifacts(runtime: ManagedToolRuntime, root: Path) -> list[str]:
+async def _save_artifacts(backend: BackendProtocol, root: Path) -> list[str]:
     """Move what the facade saved under ``root`` to the same relative path in /workspace."""
     files = await asyncio.to_thread(_take_files, root)
-    return [await _save(runtime, f"{_WORKSPACE}/{rel}", data) for rel, data in files]
+    return [await _save(backend, f"{_WORKSPACE}/{rel}", data) for rel, data in files]
 
 
 def _take_files(root: Path) -> list[tuple[str, bytes]]:
@@ -744,21 +830,43 @@ def _take_files(root: Path) -> list[tuple[str, bytes]]:
     return sorted(files)
 
 
-async def _save(runtime: ManagedToolRuntime, path: str, data: bytes) -> str:
-    """Write ``data`` to absolute ``path`` in the agent's sandbox, creating its folder."""
-    backend = runtime.backend
-    if backend is None:
-        return f"error: {path} not saved: this agent has no sandbox."
+async def _save(backend: BackendProtocol, path: str, data: bytes) -> str:
+    """Write ``data`` to absolute ``path`` in ``backend``, creating its folder."""
     if not posixpath.isabs(path):
         return f"error: {path} not saved: give an absolute path."
-    path = posixpath.normpath(path)
+    path = _normpath(path)
+    if mount := _mount(backend, path):
+        return (
+            f"error: {path} not saved: {mount} is not for saved files. Save it under {_WORKSPACE}."
+        )
+    sandbox = isinstance(backend, SandboxBackendProtocol)
+    if not sandbox and len(data) > _MAX_SAVED_BYTES:
+        mb = math.ceil(len(data) / 1e5) / 10
+        return (
+            f"error: {path} not saved: {mb:.1f} MB is over the 5 MB limit for files saved "
+            "without a sandbox. Take a viewport screenshot instead of a full page."
+        )
     try:
-        if isinstance(backend, SandboxBackendProtocol):
+        if sandbox:
             await backend.aexecute(f"mkdir -p -- {shlex.quote(posixpath.dirname(path))}")
         [result] = await backend.aupload_files([(path, data)])
     except Exception as err:  # noqa: BLE001 - reported to the model
         return f"error: {path} not saved: {type(err).__name__}: {err}"
     return f"error: {path} not saved: {result.error}" if result.error else f"Saved {path}."
+
+
+def _normpath(path: str) -> str:
+    """Absolute ``path`` with one leading slash, as Node normalizes it; POSIX keeps two."""
+    return "/" + posixpath.normpath(path).lstrip("/")
+
+
+def _mount(backend: BackendProtocol, path: str) -> str | None:
+    """The Context Hub mount ``path`` is in, such as ``/skills``: read-only, or read by every
+    later run."""
+    if not isinstance(backend, CompositeBackend):
+        return None
+    mounts = (prefix.rstrip("/") for prefix, _ in backend.sorted_routes)
+    return next((mount for mount in mounts if f"{path}/".startswith(f"{mount}/")), None)
 
 
 def _browser_key(info: object, thread: str, scope: Scope) -> str:
@@ -844,15 +952,12 @@ async def _usable_browser(
     """
     for generation in range(_BROWSER_GENERATIONS):
         name = _browser_name(key, generation)
+        await _create(api, browsers, name, idle_ttl_seconds)
         try:
-            # HiDPI renders at twice the resolution, so a person watching or driving
-            # the window sees it sharp; it can only be chosen at creation.
-            create = {"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": True}
-            await api.post(browsers, json=create)
-        except httpx.HTTPStatusError as err:
-            if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
-                raise
-        box = await sandboxes.get_sandbox(name)
+            box = await sandboxes.get_sandbox(name)
+        except ResourceNotFoundError:  # it finished deleting since: its name is free
+            await _create(api, browsers, name, idle_ttl_seconds)
+            box = await sandboxes.get_sandbox(name)
         if box.status in _UNUSABLE:
             continue
         if box.status == "stopped":
@@ -860,6 +965,18 @@ async def _usable_browser(
         return name, box
     msg = "could not find or create a usable browser"
     raise RuntimeError(msg)
+
+
+async def _create(api: httpx.AsyncClient, browsers: str, name: str, idle_ttl_seconds: int) -> None:
+    """Create browser ``name``, unless it exists."""
+    try:
+        # HiDPI renders at twice the resolution, so a person watching or driving the
+        # window sees it sharp; it can only be chosen at creation.
+        create = {"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": True}
+        await api.post(browsers, json=create)
+    except httpx.HTTPStatusError as err:
+        if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
+            raise
 
 
 # --- LangSmith: create the browser, put Stagehand's extension on it, connect -------
@@ -925,14 +1042,16 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
     try:
-        return await _connect(key, window_name, name, cdp_url, local_url, headers)
+        return await _connect(key, window_name, name, cdp_url, local_url, headers, box=box.id)
     except Exception as err:
         if "already initialized" not in str(err):
             raise
     # A client that never closed (a crash, another replica) left its claim in the
-    # extension; reinstalling it clears the claim without restarting Chrome.
-    await _reinstall_extension(cdp_url, headers)
-    return await _connect(key, window_name, name, cdp_url, local_url, headers)
+    # extension; reloading it clears the claim without restarting Chrome.
+    # Known limit: two live clients of one browser (two replicas, user scope) take it from
+    # each other; the loser fails a call (~13 s RPC timeout) and reopens, never on the wrong window.
+    await _reload_extension(cdp_url, headers)
+    return await _connect(key, window_name, name, cdp_url, local_url, headers, box=box.id)
 
 
 async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, Any]:
@@ -944,11 +1063,13 @@ async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, 
     return (await api.post(f"{browser}/attachments", json=body)).json()
 
 
-async def _hand_over(key: str, window_name: str, idle_ttl_seconds: int) -> tuple[str, str, str]:
+async def _hand_over(
+    key: str, window_name: str, idle_ttl_seconds: int
+) -> tuple[str, str, str, str | None]:
     """Give the user ``key``'s window, creating either as needed.
 
-    Returns the browser's name, the window's id, and a short-lived link the user
-    drives it with.
+    Returns the browser's name, the window's id, a short-lived link the user drives it
+    with, and the browser sandbox's id.
     """
     url, headers = _api()
     browsers = f"{url}/browsers"
@@ -956,13 +1077,13 @@ async def _hand_over(key: str, window_name: str, idle_ttl_seconds: int) -> tuple
         httpx.AsyncClient(headers=headers, timeout=90, event_hooks={"response": [_raise]}) as api,
         AsyncSandboxClient(api_key=headers["X-Api-Key"], headers=headers) as sandboxes,
     ):
-        name, _ = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
+        name, box = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
         window = await _window(api, f"{browsers}/{name}", window_name)
         window_api = f"{browsers}/{name}/attachments/{window['id']}"
         await api.post(f"{window_api}/controller", json={"controller": "user"})
         body = {"ttl_seconds": _HANDOFF_LINK_TTL_S, "embed_origins": await _embed_origins(api)}
         link = (await api.post(f"{window_api}/links", json=body)).json()["act_url"]
-    return name, window["id"], link
+    return name, window["id"], link, box.id
 
 
 async def _share_localhost(name: str, sandbox: str) -> None:
@@ -1001,7 +1122,14 @@ async def _raise(response: httpx.Response) -> None:
 
 
 async def _connect(
-    key: str, window: str, browser_name: str, cdp_url: str, local_url: str, headers: dict[str, str]
+    key: str,
+    window: str,
+    browser_name: str,
+    cdp_url: str,
+    local_url: str,
+    headers: dict[str, str],
+    *,
+    box: str | None = None,
 ) -> _Session:
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
@@ -1025,7 +1153,7 @@ async def _connect(
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
     tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts, browser_name, local_url=local_url)
+    return _Session(window, stagehand, tools, artifacts, browser_name, box, local_url=local_url)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:
@@ -1052,7 +1180,7 @@ async def _install_extension(box: AsyncSandbox) -> None:
 
 
 async def _start_take(
-    session: _Session, where: tuple[str, str], runtime: ManagedToolRuntime, path: str | None
+    session: _Session, where: tuple[str, str], backend: BackendProtocol, path: str | None
 ) -> str:
     """Record the newest tab of the session's window, beside Chrome in its sandbox.
 
@@ -1073,7 +1201,7 @@ async def _start_take(
         except RuntimeError as err:  # the recorder's own; the client is fine
             await _remove_take(box, folder)
             return f"error: {sanitize_error_message(str(err))}"
-    _TAKES[where] = _Take(session.browser, folder, runtime, path)
+    _TAKES[where] = _Take(session.browser, folder, backend, path, box.id)
     width, height = _RECORD_VIEWPORT
     return (
         f"Recording. The viewport is {width}x{height} until you stop, "
@@ -1081,14 +1209,16 @@ async def _start_take(
     )
 
 
-async def _stop_take(take: _Take) -> tuple[_StopReply, list[bytes]]:
+async def _stop_take(take: _Take) -> tuple[_StopReply, list[bytes]] | None:
     """Stop ``take``, wait while the recorder encodes it, and download it.
 
     Returns the recorder's reply, then the video, its timeline, and its first and last
-    frames.
+    frames; None if its browser was deleted and made again, without the take.
     """
     stop = _recorder_command(take.folder, "stop")
     async with _browser_box(take.browser) as box:
+        if box.id != take.box:
+            return None
         try:
             reply = await _recorder(box, stop, _RECORDER_STOP_TIMEOUT_S, _STOP_REPLY)
             files = [
@@ -1098,6 +1228,11 @@ async def _stop_take(take: _Take) -> tuple[_StopReply, list[bytes]]:
         finally:
             await _remove_take(box, take.folder)  # the take holds what the tab showed
     return reply, files
+
+
+def _deleted(err: Exception) -> bool:
+    """Whether ``err`` says the browser's sandbox is gone."""
+    return isinstance(err, ResourceNotFoundError) and err.resource_type == "sandbox"
 
 
 async def _remove_take(box: AsyncSandbox, folder: str) -> None:
@@ -1158,23 +1293,23 @@ def _recorder_command(folder: str, action: str, *args: str) -> str:
     return f"PYTHONPATH={shlex.quote(_RECORDER_PACKAGES_DIR)} {_RECORDER_PYTHON} {words}"
 
 
-async def _reinstall_extension(cdp_url: str, headers: dict[str, str]) -> None:
-    """Uninstall Stagehand's extension and load it again over CDP."""
+async def _reload_extension(cdp_url: str, headers: dict[str, str]) -> None:
+    """Load Stagehand's extension again over CDP, which reloads it in place.
+
+    Not uninstalled first: Chrome uninstalls over CDP only an extension loaded over
+    CDP, and browserd loads it otherwise when Chrome starts.
+    """
     async with asyncio.timeout(30), websockets.connect(cdp_url, additional_headers=headers) as ws:
-
-        async def cdp(id_: int, method: str, **params: object) -> dict[str, Any]:
-            await ws.send(json.dumps({"id": id_, "method": method, "params": params}))
-            while (reply := json.loads(await ws.recv())).get("id") != id_:
-                pass  # events share the socket
-            if "error" in reply:
-                msg = f"CDP {method} failed: {reply['error']}"
-                raise RuntimeError(msg)
-            return reply.get("result", {})
-
-        for extension in (await cdp(0, "Extensions.getExtensions"))["extensions"]:
-            if extension["name"] == "Stagehand Runtime":
-                await cdp(1, "Extensions.uninstall", id=extension["id"])
-        await cdp(2, "Extensions.loadUnpacked", path=_EXTENSION_DIR)
+        await ws.send(
+            json.dumps(
+                {"id": 0, "method": "Extensions.loadUnpacked", "params": {"path": _EXTENSION_DIR}}
+            )
+        )
+        while (reply := json.loads(await ws.recv())).get("id") != 0:
+            pass  # events share the socket
+        if "error" in reply:
+            msg = f"CDP Extensions.loadUnpacked failed: {reply['error']}"
+            raise RuntimeError(msg)
 
 
 async def _window_port(box: AsyncSandbox, window_id: str) -> int:

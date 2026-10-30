@@ -19,6 +19,9 @@ use anyhow::{bail, Context, Result};
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{Declaration, Expression, Statement};
 
+use clap::ValueEnum;
+
+use crate::channel::ChannelKind;
 use crate::project::{Language, Project};
 use crate::python_extract::{run_python_extractor, scripts};
 use crate::typescript::{
@@ -33,11 +36,6 @@ const CHANNELS_NS: &str = "channels";
 
 /// First-party channel factories that mount Events ingress.
 const INGRESS_CHANNEL_PROVIDERS: [&str; 3] = ["slack", "github", "linear"];
-
-/// First-party channels that may still change in a minor release, with their
-/// display names.
-const EXPERIMENTAL_CHANNEL_PROVIDERS: [(&str, &str); 2] =
-    [("github", "GitHub"), ("linear", "Linear")];
 
 /// What the exported `channel` binding resolves to, as far as compile can tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,12 +185,14 @@ pub(super) fn scan_exported_channels(project: &Project) -> Result<ChannelScan> {
 
 /// One build warning per declared experimental channel provider.
 pub(super) fn experimental_channel_warnings(providers: &BTreeSet<String>) -> Vec<String> {
-    EXPERIMENTAL_CHANNEL_PROVIDERS
-        .into_iter()
-        .filter(|(provider, _)| providers.contains(*provider))
-        .map(|(provider, name)| {
+    ChannelKind::value_variants()
+        .iter()
+        .filter(|kind| kind.is_experimental() && providers.contains(kind.command()))
+        .map(|kind| {
             format!(
-                "the {name} channel (`channels.{provider}`) is experimental and may change in a minor release"
+                "the {} channel (`channels.{}`) is experimental and may change in a minor release",
+                kind.label(),
+                kind.command()
             )
         })
         .collect()

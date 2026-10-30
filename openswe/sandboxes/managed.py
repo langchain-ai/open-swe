@@ -30,6 +30,7 @@ class ManagedSandbox(BaseModel):
     its proxy config."""
 
     create: LangSmithCreateOptions
+    sandbox_id: str | None = None
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
     # The connection MDA fills the box's GitHub proxy from, as it writes all of the box's
@@ -80,6 +81,7 @@ class ManagedSandbox(BaseModel):
         return cls(
             create=config.langsmith_options(),
             thread_id=owner,
+            sandbox_id=metadata.sandbox_id if owner or metadata.sandbox_owner == "mda" else None,
             # The box's own thread decides: a worker's coordinator.
             github_proxy=await mda_github_proxy(
                 owner or thread_id, box_metadata, github_repositories, github_permissions

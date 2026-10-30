@@ -27,6 +27,7 @@ from managed_deepagents._channels.resolve_user import (
     post_reply,
     resolve_channel_user,
     sender_principal_id,
+    user_resolution,
 )
 from managed_deepagents._channels.run_input import (
     HandlerFailed,
@@ -38,6 +39,7 @@ from managed_deepagents._channels.run_input import (
 from managed_deepagents._channels.runtime import is_json_value, json_copy
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from langgraph_sdk.schema import MultitaskStrategy
@@ -191,6 +193,10 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
         return _error(500, "channel user resolution failed")
     principal_id = user["id"] if user is not None and user["type"] == "principal" else None
     user_id = principal_id or sender_id or message["user_id"]
+    # Ingress copies this onto the runs it starts, for their telemetry.
+    set_log_attributes(
+        {"user_resolution": user_resolution(user, ran_as_sender=sender_id is not None)}
+    )
     content = message.get("content")
     thread_id = message["thread_id"].lower()
     source_thread_key = _source_thread_key(ctx["name"], thread_id)
@@ -323,6 +329,7 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
         label=label,
         accepted={"status": "accepted", "deliveryId": delivery_id},
         response=result.get("response"),
+        waiter=waiter,
     )
 
 
@@ -353,6 +360,7 @@ async def _start_and_answer(
     label: str,
     accepted: dict[str, str],
     response: Response | None,
+    waiter: _ThreadWaiter,
 ) -> Response:
     """Start the message's run and answer the provider.
 
@@ -366,11 +374,14 @@ async def _start_and_answer(
             if outcome is not None:
                 follow_up(outcome)
 
+        waiter.answered = True
         _ingress.schedule_ingress_work(start_in_background, label=label)
         return response or JSONResponse(accepted, status_code=202)
     outcome = await start_first()
     if outcome is None:
         return _error(500, "channel run could not be started")
+    # A busy thread's message starts later, after this answer.
+    waiter.answered = True
     follow_up(outcome)
     skipped = _skipped(outcome)
     return response or JSONResponse(
@@ -650,11 +661,14 @@ async def _prepare_runs(
         result = await _resolve(
             input_(_copied_message(message), None if raw_event is None else json_copy(raw_event))
         )
-    except HandlerFailed:
-        # An event handler that raised fails the delivery, so the provider may send it again.
-        raise
-    except Exception as error:  # noqa: BLE001
-        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
+    except Exception as error:
+        # An event handler that raised (``HandlerFailed``) fails the delivery while the
+        # provider still waits for its answer, which then is an error. Once answered,
+        # as an endpoint's or a busy thread's message is, it starts nothing.
+        if not isinstance(error, HandlerFailed):
+            logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
+        elif not waiter.answered:
+            raise
         return []
     try:
         runs = normalize_run_inputs(result, run_channel)
@@ -882,12 +896,15 @@ def _skipped(outcome: StartedIngressRun | SkippedIngressRun) -> str | None:
 class _ThreadWaiter:
     """A message in this process that may still wait for its thread."""
 
-    __slots__ = ("cancelled", "dropped")
+    __slots__ = ("answered", "cancelled", "dropped")
 
     def __init__(self) -> None:
         self.cancelled = False
         self.dropped = False
         """Set when a cancel dropped the message while its input was decided."""
+        self.answered = False
+        """Set once the provider has its answer: a handler that raises can no
+        longer fail the delivery, so it starts nothing, as it did before."""
 
 
 _thread_waiters: dict[str, set[_ThreadWaiter]] = {}
@@ -1012,8 +1029,8 @@ async def _prepare(
 
     Asked here only when its runs weren't planned before the start, as when
     reading the conversation failed. An event handler that raised
-    (``HandlerFailed``) fails the delivery instead: it reaches the start, which
-    answers the provider with an error.
+    (``HandlerFailed``) fails the delivery instead, while the provider still
+    waits for its answer (``_prepare_runs``).
     """
     runs = await _prepare_runs(
         channel, message, raw_event, waiter, RunChannel(name=name, provider=channel.kind)

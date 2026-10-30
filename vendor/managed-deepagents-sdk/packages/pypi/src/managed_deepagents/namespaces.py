@@ -100,6 +100,7 @@ class _LangSmithSandboxArgs(BaseModel):
 
 def define_sandbox(
     *,
+    _openswe_per_thread: bool = False,
     _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
@@ -134,6 +135,7 @@ def define_sandbox(
         {
             key: value
             for key, value in {
+                "_openswe_per_thread": _openswe_per_thread or None,
                 "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,

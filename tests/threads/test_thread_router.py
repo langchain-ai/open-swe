@@ -941,7 +941,9 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     from openswe.webhooks import common
 
     harness = _Harness(monkeypatch)
-    await router.adopt_channel_run(THREAD, channel)
+    # A private conversation, of the person who reviews its PR.
+    private = {"visibility": "private", "owner_type": "user", "owner_login": "ada"}
+    await router.adopt_channel_run(THREAD, channel, metadata={"source": channel, **private})
 
     def reads(request: httpx.Request) -> httpx.Response:
         harness.read.append((request.method, request.url.path))
@@ -952,12 +954,9 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     harness.runtimes.mda_runtime._read_http = httpx.AsyncClient(
         base_url=harness.runtimes.mda_runtime.url, transport=httpx.MockTransport(reads)
     )
-    monkeypatch.setattr(
-        harness.runtimes.mda,
-        "reads",
-        LangGraphClient(harness.runtimes.mda_runtime._read_http),
-        raising=False,
-    )
+    # The conversation's state is read as MDA's runtime reads it.
+    reader = runtimes._MdaThreads(harness.runtimes.mda_runtime)
+    monkeypatch.setattr(harness.runtimes.mda, "state", reader.state, raising=False)
     # MDA creates the PR's thread as the backend's own, through the recorded transport.
     mda = harness.runtimes.mda_runtime
     monkeypatch.setattr(mda, "sdk", lambda: LangGraphClient(mda._http))
@@ -1017,6 +1016,8 @@ async def test_pr_feedback_on_a_channel_conversation_continues_on_the_pr_thread(
     assert "Rename the helper" in json.dumps(messages[len(_CHANNEL_CONVERSATION) :])
     pr_metadata = (await index.get(pr_thread)).metadata  # type: ignore[union-attr]
     assert pr_metadata["continues_thread"] == THREAD
+    # Its history stays as private on the PR's thread.
+    assert {key: pr_metadata.get(key) for key in private} == private
     # The channel's thread got no run, and the review its 👀 only once one started.
     assert all(f"/threads/{THREAD}/runs" not in path for path, _ in harness.forwarded)
     react.assert_awaited_once()

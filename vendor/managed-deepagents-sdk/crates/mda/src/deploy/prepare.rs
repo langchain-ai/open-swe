@@ -27,7 +27,7 @@ use reqwest::header::HeaderValue;
 use serde_json::{json, Value};
 
 use super::helpers::{
-    deployment_is_managed_deep_agent, secrets_from_env, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
+    deployment_is_managed_deep_agent, is_reserved_env_var, secrets_from_env, WORKSPACE_ID_ENV,
 };
 use super::langsmith_context::LangSmithContext;
 use super::{
@@ -41,7 +41,7 @@ use super::{
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
 use crate::command::CommandCompletion;
-use crate::error::{categorized, category_of, ErrorCategory};
+use crate::error::{categorized, ErrorCategory, Failure};
 use crate::install::Installation;
 use crate::langsmith::{
     self, require_str, resolve_preferred_env, ApiKey, ContextHubClient, RepoOwnership, API_KEY_ENV,
@@ -103,7 +103,7 @@ pub fn run(opts: PrepareOptions) -> Result<CommandCompletion> {
         Err(err) => {
             otel_logger::error(&err);
             show_sequence(&failed_items(&project, &err))?;
-            Ok(CommandCompletion::Failed(category_of(&err)))
+            Ok(CommandCompletion::Failed(Failure::of(&err)))
         }
     }
 }
@@ -281,7 +281,6 @@ fn run_inner(
     // Validation only: setup needs the live deployment.
     let channel_setup = ChannelSetup::prepare(
         &channel_requirements,
-        true,
         &project.root,
         &project.files,
         project.language,
@@ -348,7 +347,7 @@ fn read_env_json(path: &Path) -> Result<BTreeMap<String, String>> {
         .into_iter()
         // Deployment owners set these secrets; never let them steer where the
         // runner's platform credential is sent.
-        .filter(|(key, _)| !RESERVED_ENV_VARS.contains(&key.as_str()))
+        .filter(|(key, _)| !is_reserved_env_var(key))
         .map(|(key, value)| match value {
             Value::String(text) => Ok((key, text)),
             _ => bail!("env var {key} must be a string"),

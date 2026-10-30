@@ -5003,18 +5003,6 @@
             ],
             "title": "Experimental Fleet"
           },
-          "experimental_monitor": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Monitor"
-          },
           "pr_failure_reactions": {
             "anyOf": [
               {

@@ -21,7 +21,6 @@ fn channel(sessions: bool) -> LinearChannel {
     });
     prepare(
         &ChannelRequirements::from([("linear".to_string(), manifest)]),
-        true,
         "triage-agent",
         std::path::Path::new("."),
         &[],
@@ -327,7 +326,6 @@ fn fills_in_the_configured_name_and_description() {
     });
     let channel = prepare(
         &ChannelRequirements::from([("linear".to_string(), manifest)]),
-        true,
         "triage-agent",
         std::path::Path::new("."),
         &[],
@@ -942,4 +940,54 @@ fn finds_an_earlier_mdas_connections_without_an_app() {
         lookup_app_connection(&agent_auth(&base), "dep-1").unwrap(),
         None
     );
+}
+
+#[test]
+fn app_status_is_ready_only_with_an_active_grant_and_its_secret() {
+    let status = |connection: Option<AppConnection>| app_status(connection.as_ref());
+    let needs = |status: ChannelStatus| matches!(status, ChannelStatus::NeedsSetup(_));
+
+    assert!(needs(status(None)));
+    assert!(needs(status(owned("app", "conn", AgentGrant::Missing))));
+    assert_eq!(
+        status(owned("app", "conn", AgentGrant::Revoked)),
+        ChannelStatus::NeedsSetup(REVOKED_GRANT.to_string())
+    );
+    assert_eq!(
+        status(owned("app", "conn", AgentGrant::AuthorizationRequired)),
+        ChannelStatus::NeedsSetup(LAPSED_GRANT.to_string())
+    );
+    assert!(needs(status(legacy("conn", None, AgentGrant::Active))));
+    assert!(needs(status(owned(
+        "app",
+        "conn",
+        AgentGrant::Unknown("paused".into())
+    ))));
+    assert_eq!(
+        status(owned("app", "conn", AgentGrant::Active)),
+        ChannelStatus::Ready
+    );
+    assert_eq!(
+        status(legacy("conn", Some("secret"), AgentGrant::Active)),
+        ChannelStatus::Ready
+    );
+}
+
+/// What a deploy without a terminal would hit is checked as such even when a
+/// terminal is attached, so `mda channels setup` in one reports what CI hits.
+#[test]
+fn preflight_follows_the_terminal_it_is_given() {
+    // Unroutable: neither check needs the network before a deployment exists.
+    let client = agent_auth("http://127.0.0.1:9");
+    let channel = channel(true);
+    let no_env = BTreeMap::new();
+
+    let unattended = preflight(&client, &channel, None, &no_env, false)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        unattended.contains("without a terminal deploy cannot ask for it"),
+        "{unattended}"
+    );
+    preflight(&client, &channel, None, &no_env, true).unwrap();
 }

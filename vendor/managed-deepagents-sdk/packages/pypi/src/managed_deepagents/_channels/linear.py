@@ -85,6 +85,7 @@ from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.run_input import HandlerFailed
 from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.http.endpoint import EventEndpoint
@@ -330,6 +331,7 @@ async def _parse(
     delivery_id = receipt["delivery_id"]
     record = receipt["payload"]
     key = f"{record['type']}.{record['action']}"
+    set_log_attributes({"provider_event_type": key})
     logger.info(
         "linear receipt %s",
         json.dumps(

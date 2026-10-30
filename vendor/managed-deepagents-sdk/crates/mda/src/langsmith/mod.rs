@@ -56,7 +56,7 @@ pub(crate) use trigger_server::TransientSetupError;
 pub(crate) use trigger_server::{
     is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
     ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
-    SlackCustomerApp, SlackManager, SlackTriggerMode,
+    SlackCustomerApp, SlackManager, SlackTriggerMode, TriggerChannel,
 };
 pub use workspaces::DeployTarget;
 pub(crate) use workspaces::{AuthIdentity, KeyCheck};
@@ -245,21 +245,24 @@ pub struct Secret {
     pub value: String,
 }
 
-/// Deployment type accepted by `mda deploy --deployment-type` and forwarded to
-/// the LangSmith host backend.
+/// Deployment type accepted by `mda deploy --deployment-type`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum DeploymentType {
     #[default]
+    Serverless,
+    #[value(alias = "prod")]
+    Dedicated,
+    #[value(hide = true)]
     Dev,
-    Prod,
 }
 
 impl DeploymentType {
     /// Wire value sent to the LangSmith host backend.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Serverless => "dev_zero",
+            Self::Dedicated => "prod",
             Self::Dev => "dev",
-            Self::Prod => "prod",
         }
     }
 }

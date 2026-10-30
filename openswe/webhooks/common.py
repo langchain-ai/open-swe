@@ -454,7 +454,7 @@ async def _is_sender_allowed_for_public_repo(payload: dict[str, Any]) -> bool:
 
     sender = payload.get("sender") or {}
     sender_login = sender.get("login", "") or ""
-    if sender_login in INTERNAL_BOT_LOGINS:
+    if sender_login.lower() in INTERNAL_BOT_LOGINS:
         return True
 
     if not sender_login:
@@ -855,6 +855,15 @@ class ThreadRecord:
                 return cls(exists=False, metadata={})
             raise
         return cls(exists=True, metadata=thread_metadata(thread))
+
+    @property
+    def started(self) -> bool:
+        """Whether a turn ran here: not a new thread, nor the stub of a claimed conversation.
+
+        A conversation claimed for an MDA channel has a stub, with provisional visibility,
+        until its first run writes the thread's metadata.
+        """
+        return self.exists and self.metadata.get(PROVISIONAL_VISIBILITY_KEY) is not True
 
     def authorize(self, github_login: str) -> JsonObject:
         """Reject a private-thread follow-up from someone who may not prompt it."""

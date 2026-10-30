@@ -281,6 +281,54 @@ async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_now
     assert tasks.tasks == []
 
 
+async def test_an_edit_in_mdas_conversation_is_ignored_and_says_why(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owned = AsyncMock(return_value=_MDA_THREAD)
+    monkeypatch.setattr(mda_forwarding, "owned_thread", owned)
+    claim = AsyncMock(return_value=True)
+    monkeypatch.setattr(webhook_common, "claim_slack_event", claim)
+    message = {"type": "message", "user": "U1", "ts": "1786573369.551099"}
+    edit = _mention(
+        type="message",
+        subtype="message_changed",
+        ts="1786573400.000000",
+        event_ts="1786573400.000000",
+        message={**message, "text": "<@BOT> help, fixed"},
+        previous_message={**message, "text": "<@BOT> help"},
+    )
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(edit, dict(_SLACK_HEADERS))), cast(BackgroundTasks, tasks)
+    )
+
+    assert response == {
+        "status": "ignored",
+        "reason": "MDA's Slack channel doesn't take message edits",
+    }
+    owned.assert_awaited_once_with("C1", "1786573369.551099")
+    claim.assert_not_awaited()
+    assert tasks.tasks == []
+
+
+@pytest.mark.parametrize(
+    ("exists", "metadata", "started"),
+    [
+        (False, {}, False),
+        (True, {"visibility": "private", webhook_common.PROVISIONAL_VISIBILITY_KEY: True}, False),
+        (True, {"visibility": "private", webhook_common.PROVISIONAL_VISIBILITY_KEY: None}, True),
+        (True, {}, True),
+    ],
+    ids=["new", "claimed-stub", "first-run-written", "legacy"],
+)
+def test_a_claimed_conversations_stub_has_not_started(
+    exists: bool, metadata: dict[str, JsonValue], started: bool
+) -> None:
+    """So the message that opens it is still the first mention."""
+    assert webhook_common.ThreadRecord(exists=exists, metadata=metadata).started is started
+
+
 _PLAIN: dict[str, JsonValue] = {
     "subtype": "",
     "from_bot": False,

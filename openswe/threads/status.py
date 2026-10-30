@@ -3,7 +3,8 @@
 Starting a run marks its thread busy. What the run left behind (idle, an
 interrupt waiting on a person, an error) is the runtime's to say, so the
 run-complete webhook asks it, and a reconcile job asks again for any thread
-still marked busy long after a webhook should have come.
+still marked busy long after a webhook should have come. A run that froze while
+still reporting itself running is failed by ``openswe.threads.stalls``.
 """
 
 import logging

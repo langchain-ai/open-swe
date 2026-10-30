@@ -44,7 +44,7 @@ pub(crate) mod test_support;
 #[path = "tests.rs"]
 mod tests;
 
-pub(crate) use discovery::{find_sandbox_entry, read_setup_script};
+pub(crate) use discovery::{declares_slack_channel, find_sandbox_entry, read_setup_script};
 pub use identity::IdentitySummary;
 pub(crate) use identity::{
     identity_requires_ingress_secret, read_identity_summary, INGRESS_SECRET_ENV,

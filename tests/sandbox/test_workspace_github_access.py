@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import httpx2
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 from runtime_api.connections import ConnectionRef
 
 from openswe.agent_api.graph import RemoteGraph, managed_sandbox
@@ -99,7 +100,12 @@ def github(
     monkeypatch.setattr(
         lifecycle,
         "connect_existing_sandbox",
-        AsyncMock(return_value=MagicMock(id="sandbox", aexecute=AsyncMock())),
+        AsyncMock(
+            return_value=MagicMock(
+                id="sandbox",
+                aexecute=AsyncMock(return_value=ExecuteResponse(output="", exit_code=0)),
+            )
+        ),
     )
     monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
     # The thread is bound to the box MDA opened for its run.
@@ -127,7 +133,9 @@ async def _connect(
     The base proxy config is the workspace's, which the backend records when it binds
     the thread to MDA's box.
     """
-    backend = MagicMock(id="sandbox", aexecute=AsyncMock())
+    backend = MagicMock(
+        id="sandbox", aexecute=AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
+    )
     config = await lifecycle.SandboxCreateConfig.resolve(workspace_slug)
     await lifecycle._refresh_github_proxy(
         backend,
@@ -432,7 +440,9 @@ async def test_reconnect_gives_an_existing_sandbox_the_installation_token(
     cached: bool,
 ) -> None:
     monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
-    backend = MagicMock(id="sandbox", aexecute=AsyncMock())
+    backend = MagicMock(
+        id="sandbox", aexecute=AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
+    )
     monkeypatch.setattr(
         lifecycle,
         "get_sandbox_metadata",
