@@ -18,7 +18,7 @@ from openswe.dashboard.options import available_requested_models, normalize_mode
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.database import postgres
-from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.prompts import prompt
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
@@ -397,6 +397,9 @@ def _worker_metadata(
             GITHUB_TOKEN_REPOSITORIES_KEY,
             PARTICIPANT_LOGINS_KEY,
             PARTICIPANT_EMAILS_KEY,
+            # MDA creates a channel conversation's workers as that conversation's own,
+            # so the backend acts on them in it, as on the coordinator.
+            CHANNEL_METADATA_KEY,
         )
         if key in values
     }
