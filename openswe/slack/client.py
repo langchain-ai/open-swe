@@ -568,7 +568,6 @@ async def _post_slack_message_with_ts(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     reply_broadcast: bool = False,
-    login: str | None = None,
 ) -> str:
     from openswe.slack.code_channels import is_code_channel_session
 
@@ -880,7 +879,6 @@ async def post_slack_thread_reply_with_ts(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
     reply_broadcast: bool = False,
-    login: str | None = None,
 ) -> str:
     """Post a reply in a Slack thread and return its timestamp."""
     from openswe.slack.code_channels import is_code_channel_session
@@ -898,7 +896,6 @@ async def post_slack_thread_reply_with_ts(
         unfurl_media=unfurl_media,
         blocks=blocks,
         reply_broadcast=reply_broadcast,
-        login=login,
     )
 
 
@@ -929,7 +926,6 @@ async def post_slack_top_level_message_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
-    login: str | None = None,
 ) -> str:
     """Post a top-level Slack message and return its timestamp."""
     return await _post_slack_message_with_ts(
@@ -938,7 +934,6 @@ async def post_slack_top_level_message_with_ts(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
-        login=login,
     )
 
 
@@ -1088,7 +1083,6 @@ async def update_slack_message(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
-    login: str | None = None,
 ) -> None:
     """Update a Slack message."""
     text, blocks = await pr_review_links(text, blocks)
