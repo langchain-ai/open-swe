@@ -12,19 +12,21 @@ missing ids degrade dedupe instead of silencing failure replies.
 
 Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
 the backend hands the channel with the run. A channel that answers failures in its
-own conversation gets no failure reply from here, and a channel run starts no
-follow-up pickup. Task messages and event wakes that arrived during it are
-delivered as after any run: the backend starts those runs on the channel's thread
-through MDA's trusted ingress.
+own conversation gets no failure reply from here. Follow-ups steered into it,
+task messages and event wakes that arrived during it are picked up as after any
+run: the backend starts those runs on the channel's thread through MDA's trusted
+ingress.
 """
 
 import hmac
 import logging
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.messages import convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
+from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
 from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
@@ -34,7 +36,11 @@ from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
-from openswe.slack.client import post_slack_thread_reply
+from openswe.slack.client import (
+    SANDBOX_UNREACHABLE_NOTICE,
+    SlackNotice,
+    post_slack_thread_reply,
+)
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
@@ -63,8 +69,12 @@ _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
 _CONSECUTIVE_FAILURES = "consecutive_failed_runs"
+_RUN_FAILED_NOTICE = "run_failed"
 # A thread that keeps failing would otherwise post one notice per run, forever.
 _MAX_CONSECUTIVE_FAILURE_REPLIES = 3
+# One failure reply per run, however many of its webhook and the stalled-run sweep race.
+_FAILURE_REPLY_CLAIM = "run_failure_reply"
+_FAILURE_REPLY_CLAIM_TTL = timedelta(days=2)
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
@@ -104,12 +114,14 @@ _REASON_TEXT = {
     "sandbox_unreachable": "the run lost its sandbox",
     "backend_interrupted": "the connection to the Open SWE backend was interrupted",
     "step_limit": "the run hit its step limit",
+    "run_stalled": "the run stopped responding",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
     "backend_interrupted": "Re-trigger the run to try again.",
+    "run_stalled": "Send your message again to retry.",
 }
 
 
@@ -169,11 +181,21 @@ async def _post_failure_reply(
         if location is not None:
             trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
+            notice = SlackNotice(
+                _RUN_FAILED_NOTICE,
+                _failure_text(status, reason_code=reason_code),
+                quiet_after=(
+                    frozenset({SANDBOX_UNREACHABLE_NOTICE})
+                    if reason_code == "sandbox_unreachable"
+                    else frozenset()
+                ),
+            )
             return await post_slack_thread_reply(
                 location[0],
                 location[1],
                 slack_text,
                 agent_thread_id=thread_id,
+                notice=notice,
             )
         return False
 
@@ -496,13 +518,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
-    if (
-        status == "success"
-        and channel is None
-        and not (
-            isinstance(payload_metadata, dict)
-            and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
-        )
+    if status == "success" and not (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
     ):
         pickup_allowed = True
         if is_worker:
@@ -602,15 +619,27 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
         return {"status": "ignored", "reason": "repeated failures"}
 
+    claim_key = f"{thread_id}:{run_id}" if run_id is not None else None
+    if claim_key is not None and not await event_claims.claim(
+        _FAILURE_REPLY_CLAIM, claim_key, ttl=_FAILURE_REPLY_CLAIM_TTL
+    ):
+        return {"status": "ignored", "reason": "failure reply already posted for run"}
     error_message = error.get("message") if isinstance(error, dict) else error
-    posted = await _post_failure_reply(
-        thread_id,
-        metadata,
-        status,
-        reason_code,
-        invocation_id=_invocation_id(payload),
-        terminal_error=error_message if isinstance(error_message, str) else None,
-    )
+    try:
+        posted = await _post_failure_reply(
+            thread_id,
+            metadata,
+            status,
+            reason_code,
+            invocation_id=_invocation_id(payload),
+            terminal_error=error_message if isinstance(error_message, str) else None,
+        )
+    except BaseException:
+        if claim_key is not None:
+            await event_claims.release(_FAILURE_REPLY_CLAIM, claim_key)
+        raise
+    if not posted and claim_key is not None:
+        await event_claims.release(_FAILURE_REPLY_CLAIM, claim_key)
     if not posted and not reported:
         return {"status": "ignored", "reason": "no reply posted"}
 

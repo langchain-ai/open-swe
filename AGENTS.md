@@ -62,8 +62,9 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
 - The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself.
   Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
-- Don't add new uses of `langgraph_client` in the backend.
+- Don't add new uses of the LangGraph SDK client (`langgraph_client`, `get_client`, `LangGraphClient`) in the backend.
   Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state.
+  Read and change threads, their metadata included, through `THREADS` (`openswe/threads/store.py`).
   Existing uses are legacy, not a pattern to copy.
 - Don't use the LangGraph Store (`client.store`) for state; keep it in PostgreSQL tables.
 - New tables share one shape: an `id uuid` primary key (`uuid7()`, set in Python); `created_at` and `updated_at` (`timestamptz NOT NULL DEFAULT clock_timestamp()`, `updated_at` set again on every write); and `created_by` and `updated_by` (`uuid REFERENCES users (id) ON DELETE SET NULL`: the person whose action caused the write, NULL for system, API-key and workflow writes).

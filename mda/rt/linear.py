@@ -132,7 +132,13 @@ class SessionTurn:
         if isinstance(event, LinearSessionPromptedEvent):
             # A reply in the session.
             activity = event.payload["agentActivity"]
-            author = _person(activity.get("user")) or creator or actor
+            replier = _person(activity.get("user"))
+            replier_id = activity.get("userId")
+            if replier is None and replier_id and (creator is None or creator.id != replier_id):
+                # Someone other than the creator, named only by id: they sign in as
+                # themselves, never borrowing the creator's identity.
+                replier = LinearPerson(id=replier_id)
+            author = replier or creator or actor
             comment_id = activity.get("sourceCommentId") or ""
             body = activity["content"].get("body") or ""
         else:

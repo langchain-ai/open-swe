@@ -57,6 +57,7 @@ from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.resolve_user import checked_resolve_user
 from managed_deepagents._channels.run_input import HandlerFailed, starts_on_conversation
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.http.endpoint import EventEndpoint
@@ -355,6 +356,7 @@ async def _parse(
     # Events without an action, such as `push`, are keyed by their name.
     action = record.get("action")
     key = cast("SupportedEventKey", event if action is None else f"{event}.{action}")
+    set_log_attributes({"provider_event_type": key})
     if handlers.get(key) is None:
         return {"type": "ignore", "response": response}
 

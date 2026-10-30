@@ -39,7 +39,11 @@ from managed_deepagents._channels.reactions import (
     ReactionChoice,
     resolve_reaction_emoji,
 )
-from managed_deepagents._channels.resolve_user import post_reply, resolve_channel_user
+from managed_deepagents._channels.resolve_user import (
+    post_reply,
+    resolve_channel_user,
+    user_resolution,
+)
 from managed_deepagents._channels.run_input import run_start_options
 from managed_deepagents._channels.trigger.client import (
     LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV,
@@ -617,6 +621,8 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         return _json_response({"error": "channel user resolution failed"}, status_code=500)
     if user is not None and user["type"] == "principal":
         user_id = user["id"]
+    # Ingress copies this onto the runs it starts, for their telemetry.
+    set_log_attributes({"user_resolution": user_resolution(user, ran_as_sender=actor is not None)})
     # resolve_user's answer when it holds back the run the delivery would start.
     withheld = None if user is None or user["type"] == "principal" else user
 

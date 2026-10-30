@@ -2,7 +2,6 @@
 
 import httpx
 import pytest
-from langgraph_sdk.client import LangGraphClient
 
 from openswe.threads import runtimes
 
@@ -20,14 +19,10 @@ async def test_reads_say_studio_and_writes_do_not(mda: runtimes.MdaRuntime) -> N
     assert mda.http.headers["x-api-key"] == "lsv2_test"
 
 
-async def test_the_sdk_reads_as_studio_and_writes_as_the_backend(
-    mda: runtimes.MdaRuntime,
-) -> None:
-    reads = mda.read_sdk().http.client.headers
+async def test_the_sdk_writes_as_the_backend(mda: runtimes.MdaRuntime) -> None:
     writes = mda.sdk().http.client.headers
-    assert reads["x-auth-scheme"] == "langsmith"
     assert "x-auth-scheme" not in writes
-    assert reads["x-api-key"] == writes["x-api-key"] == "lsv2_test"
+    assert writes["x-api-key"] == "lsv2_test"
 
 
 async def test_thread_reads_and_writes_take_their_own_clients(
@@ -37,21 +32,36 @@ async def test_thread_reads_and_writes_take_their_own_clients(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.method, request.url.path, request.headers.get("x-auth-scheme")))
+        if request.url.path == "/threads/search":
+            return httpx.Response(200, json=[])
         return httpx.Response(200, json={"thread_id": "t1", "metadata": {}, "values": {}})
 
-    def client(sdk_client: LangGraphClient) -> LangGraphClient:
-        http = sdk_client.http.client
-        sdk_client.http.client = httpx.AsyncClient(
+    def mocked(http: httpx.AsyncClient) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             base_url=http.base_url, headers=http.headers, transport=httpx.MockTransport(handler)
         )
-        return sdk_client
 
-    threads = runtimes._SdkThreads(client(mda.sdk()), client(mda.read_sdk()))
+    threads = runtimes._MdaThreads(mda)
+    threads.reads = mocked(threads.reads)
+    threads.client.http.client = mocked(threads.client.http.client)
 
     await threads.get("t1")
+    await threads.indexed("t1")
+    await threads.state("t1")
     await threads.update("t1", {"title": "x"})
 
     assert seen == [
         ("GET", "/threads/t1", "langsmith"),
+        ("POST", "/threads/search", "langsmith"),
+        ("GET", "/threads/t1/state", "langsmith"),
         ("PATCH", "/threads/t1", None),
     ]
+
+
+async def test_a_missing_thread_reads_as_none(mda: runtimes.MdaRuntime) -> None:
+    threads = runtimes._MdaThreads(mda)
+    threads.reads = httpx.AsyncClient(
+        base_url=mda.url, transport=httpx.MockTransport(lambda _: httpx.Response(404))
+    )
+
+    assert await threads.get("t1") is None

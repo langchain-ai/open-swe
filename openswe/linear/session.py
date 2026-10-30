@@ -56,19 +56,6 @@ def _repo_config(full_name: str) -> dict[str, str]:
     return {"owner": owner, "name": name}
 
 
-async def _thread(thread_id: str) -> common.ThreadRecord:
-    """The session's thread as its earlier turns left it; a failed read starts afresh."""
-    try:
-        return await common.ThreadRecord.read(thread_id)
-    except Exception:
-        common.logger.warning(
-            "Reading a Linear session's thread failed; resolving it as new",
-            exc_info=True,
-            extra={"agent_thread_id": thread_id},
-        )
-        return common.ThreadRecord(exists=False, metadata={})
-
-
 async def _author(email: str) -> tuple[User | None, AuthorStanding]:
     """The Open SWE user with ``email``, and whether they can run as themselves on GitHub.
 
@@ -116,7 +103,9 @@ async def linear_session_facts(request: LinearSessionFactsRequest) -> LinearSess
         return LinearSessionFacts(
             author=standing, settings_url=build_settings_url(), policy=_policy()
         )
-    thread = await _thread(str(request.thread_id))
+    # A thread it can't read fails the turn: read as new, it would move the session's
+    # repository.
+    thread = await common.ThreadRecord.read(str(request.thread_id))
     return LinearSessionFacts(
         author=standing,
         settings_url=build_settings_url(),

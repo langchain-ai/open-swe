@@ -53,9 +53,9 @@ use crate::compile::{self, CompileSummary, IdentitySummary, MemoryDecision};
 use crate::dependencies;
 use crate::deploy::bake::bake_recipe;
 use crate::deploy::helpers::{
-    sandbox_api_endpoint, LANGSMITH_ENDPOINT_ENV, MDA_ASSISTANT_ID_ENV, MDA_DEPLOYMENT_NAME_ENV,
-    MDA_PUBLIC_API_URL_ENV, MDA_SANDBOX_API_ENDPOINT_ENV, MDA_SANDBOX_RECIPE_SNAPSHOT_ENV,
-    RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
+    is_reserved_env_var, sandbox_api_endpoint, LANGSMITH_ENDPOINT_ENV, MDA_ASSISTANT_ID_ENV,
+    MDA_DEPLOYMENT_NAME_ENV, MDA_PUBLIC_API_URL_ENV, MDA_SANDBOX_API_ENDPOINT_ENV,
+    MDA_SANDBOX_RECIPE_SNAPSHOT_ENV, WORKSPACE_ID_ENV,
 };
 use crate::deploy::langsmith_context::{LangSmithContext, LangSmithEndpoints};
 use crate::deploy::{self, resolve_https_public_api_url, PublicApiUrl};
@@ -2146,7 +2146,7 @@ fn ensure_dev_sandbox_recipe(
 
     let bake_env: std::collections::BTreeMap<String, String> = env
         .iter()
-        .filter(|(name, value)| !value.is_empty() && !RESERVED_ENV_VARS.contains(&name.as_str()))
+        .filter(|(name, value)| !value.is_empty() && !is_reserved_env_var(name))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
 

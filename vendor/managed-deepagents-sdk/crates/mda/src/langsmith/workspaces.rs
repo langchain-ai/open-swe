@@ -126,6 +126,12 @@ impl Client {
         self.clone().with_timeout(timeout).ok()?.auth_identity()
     }
 
+    /// The key's identity for a preflight, bounded by [`LOOKUP_TIMEOUT`] like
+    /// [`Self::check_api_key`].
+    pub(crate) fn preflight_identity(&self) -> Option<AuthIdentity> {
+        self.auth_identity_within(LOOKUP_TIMEOUT)
+    }
+
     /// Best-effort identity lookup; errors leave optional metadata unknown.
     pub(crate) fn auth_identity(&self) -> Option<AuthIdentity> {
         let mut metadata: AuthIdentity = serde_json::from_value(

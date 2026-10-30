@@ -16,6 +16,7 @@ from managed_deepagents import (
     LinearSessionCreatedEvent,
     LinearSessionCreatedPayload,
     LinearSessionPromptedEvent,
+    LinearSessionPromptedPayload,
 )
 from managed_deepagents._channels.http.endpoint import EndpointDeclined
 from managed_deepagents._channels.http.types import ChannelName
@@ -229,6 +230,45 @@ async def test_a_reply_in_the_session_is_the_repliers_turn(backend: _Backend) ->
         "and the docs",
         "comment-2",
     )
+
+
+@pytest.mark.parametrize(
+    ("activity", "author_id", "author_email"),
+    [
+        ({"userId": "user-2"}, "user-2", ""),
+        ({"userId": "user-1"}, "user-1", "ada@example.com"),
+        ({}, "user-1", "ada@example.com"),
+    ],
+    ids=["someone-else-by-id", "the-creator-by-id", "no-one-named"],
+)
+def test_a_reply_named_only_by_id_never_borrows_the_creators_identity(
+    activity: dict[str, object], author_id: str, author_email: str
+) -> None:
+    event = LinearSessionPromptedEvent(
+        delivery_id="delivery-1",
+        organization_id="org-1",
+        issue_id="issue-1",
+        session_id="session-1",
+        payload=TypeAdapter(LinearSessionPromptedPayload).validate_python(
+            {
+                "type": "AgentSessionEvent",
+                "action": "prompted",
+                "organizationId": "org-1",
+                "webhookTimestamp": 1_700_000_000_000,
+                "agentSession": _created().payload["agentSession"],
+                "agentActivity": {
+                    "content": {"type": "prompt", "body": "and the docs"},
+                    **activity,
+                },
+            }
+        ),
+    )
+
+    turn = linear.SessionTurn.of(event, _THREAD.id)
+
+    # Without an email, someone other than the creator is asked to sign in.
+    assert turn is not None
+    assert (turn.turn.author.id, turn.turn.author.email) == (author_id, author_email)
 
 
 _PERSONAL = RepositoryChoice(repository="ada/personal", workspace="ada-space")

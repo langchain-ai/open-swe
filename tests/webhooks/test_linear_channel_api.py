@@ -165,6 +165,21 @@ async def test_a_session_turns_facts_are_what_open_swe_knows(
 
 
 @pytest.mark.asyncio
+async def test_a_session_thread_it_cant_read_fails_the_turn(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never read as a new thread, which would move the session's repository."""
+    _signed_in(monkeypatch)
+    monkeypatch.setattr(
+        session.common.ThreadRecord, "read", AsyncMock(side_effect=httpx.ReadTimeout("slow"))
+    )
+
+    body = {"thread_id": _THREAD, "author_email": "ada@example.com"}
+    with pytest.raises(httpx.ReadTimeout):
+        await _post(app, LINEAR_SESSION_FACTS.path, body)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("known", "standing"),
     [(False, "sign_in"), (True, "sign_in_again")],

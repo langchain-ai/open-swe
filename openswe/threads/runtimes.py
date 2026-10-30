@@ -17,8 +17,9 @@ import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from types import MappingProxyType
-from typing import Final
+from typing import Final, Literal
 
 import httpx
 from langgraph_sdk import get_client
@@ -94,6 +95,25 @@ class _ErroredThread(BaseModel):
     error: _RunError | None = None
 
 
+type RunStatus = Literal["pending", "running", "success", "error", "timeout", "interrupted"]
+
+
+class MdaRun(BaseModel):
+    """A run as MDA reports it."""
+
+    run_id: str
+    status: RunStatus
+    created_at: datetime
+    metadata: dict[str, JsonValue] = {}
+
+    @property
+    def active(self) -> bool:
+        return self.status in ("pending", "running")
+
+
+_runs = TypeAdapter(list[MdaRun])
+
+
 class ChannelThreadError(RuntimeError):
     """A thread an MDA channel owns that the backend can't act on: no owner, or no secret."""
 
@@ -124,24 +144,27 @@ class ChannelWrite:
 
 
 class _SdkThreads:
-    """A runtime reached through the LangGraph SDK: ``client`` writes, ``reads`` reads."""
+    """A runtime reached through the LangGraph SDK."""
 
-    def __init__(self, client: LangGraphClient, reads: LangGraphClient | None = None) -> None:
+    def __init__(self, client: LangGraphClient) -> None:
         self.client = client
-        self.reads = reads or client
 
     async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
         try:
-            return _object.validate_python(dict(await self.reads.threads.get(thread_id)))
+            return _object.validate_python(dict(await self.client.threads.get(thread_id)))
         except NotFoundError:
             return None
 
     async def indexed(self, thread_id: str) -> IndexedThread | None:
         """The thread as the index keeps it, read without its values."""
-        found = await self.reads.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
+        found = await self.client.threads.search(ids=[thread_id], limit=1, select=INDEXED_FIELDS)
         return next(
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
+
+    async def state(self, thread_id: str) -> dict[str, JsonValue]:
+        """The thread's current state here."""
+        return _object.validate_python(dict(await self.client.threads.get_state(thread_id)))
 
     async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
         await self.client.threads.create(
@@ -206,12 +229,6 @@ class MdaRuntime:
     def sdk(self) -> LangGraphClient:
         """For writes, scoped to the threads the backend owns."""
         return get_client(url=self.url, api_key=mda_runtime_api_key())
-
-    def read_sdk(self) -> LangGraphClient:
-        """For reads, of any thread on the deployment."""
-        return get_client(
-            url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
-        )
 
     async def channel_write(self, thread_id: str, *, user_id: str | None = None) -> ChannelWrite:
         """What lets the backend start, answer and stop runs on a thread an MDA channel owns.
@@ -306,13 +323,22 @@ class MdaRuntime:
         thread = await index.get(thread_id)
         if thread is None or not thread.stopped_since(starting_ms):
             return
+        logger.info(
+            "Interrupting a run its thread was stopped while it started",
+            extra={"thread_id": thread_id, "run_id": run_id},
+        )
+        # A stop that came once MDA had the run may have cancelled it already.
+        await self.cancel(thread_id, run_id)
+
+    async def cancel(self, thread_id: str, run_id: str) -> bool:
+        """Interrupt the run; ``False`` when MDA refused or could not be reached."""
         extra = {"thread_id": thread_id, "run_id": run_id}
-        logger.info("Interrupting a run its thread was stopped while it started", extra=extra)
         try:
+            thread = await index.get(thread_id)
             # A channel's thread is stopped as the backend acting in its conversation.
             write = (
                 await self.channel_write(thread_id)
-                if dispatch.channel_of(thread.metadata) is not None
+                if thread is not None and dispatch.channel_of(thread.metadata) is not None
                 else ChannelWrite()
             )
             response = await self.http.post(
@@ -321,14 +347,33 @@ class MdaRuntime:
                 headers=write.headers,
             )
         except httpx.HTTPError, ChannelThreadError:
-            logger.warning("Could not interrupt a stopped run", extra=extra, exc_info=True)
-            return
+            logger.warning("Could not interrupt an MDA run", extra=extra, exc_info=True)
+            return False
         if response.is_error:
-            # A stop that came once MDA had the run may have cancelled it already.
             logger.warning(
-                "Could not interrupt a stopped run",
+                "Could not interrupt an MDA run",
                 extra={**extra, "status_code": response.status_code},
             )
+            return False
+        return True
+
+    async def run(self, thread_id: str, run_id: str) -> MdaRun | None:
+        response = await self.http.get(f"/threads/{thread_id}/runs/{run_id}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return MdaRun.model_validate(response.json())
+
+    async def active_runs(self, thread_id: str) -> list[MdaRun]:
+        """The thread's unfinished runs in the order they hold it: running, then pending oldest first."""
+        active: list[MdaRun] = []
+        for status in ("running", "pending"):
+            response = await self.http.get(
+                f"/threads/{thread_id}/runs", params={"status": status, "limit": 10}
+            )
+            response.raise_for_status()
+            active += sorted(_runs.validate_python(response.json()), key=lambda run: run.created_at)
+        return active
 
     async def run_payload(
         self,
@@ -456,6 +501,39 @@ class MdaRuntime:
         }
 
 
+class _MdaThreads(_SdkThreads):
+    """MDA's runtime: SDK writes, as the backend; reads over :attr:`MdaRuntime.read_http`.
+
+    So the backend reads the threads an MDA channel owns too, and writes only its own.
+    """
+
+    def __init__(self, runtime: MdaRuntime) -> None:
+        super().__init__(runtime.sdk())
+        self.reads = runtime.read_http
+
+    async def get(self, thread_id: str) -> dict[str, JsonValue] | None:
+        response = await self.reads.get(f"/threads/{thread_id}")
+        if response.status_code == httpx.codes.NOT_FOUND:
+            return None
+        response.raise_for_status()
+        return _object.validate_python(response.json())
+
+    async def indexed(self, thread_id: str) -> IndexedThread | None:
+        response = await self.reads.post(
+            "/threads/search", json={"ids": [thread_id], "limit": 1, "select": INDEXED_FIELDS}
+        )
+        response.raise_for_status()
+        found = response.json()
+        return next(
+            (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
+        )
+
+    async def state(self, thread_id: str) -> dict[str, JsonValue]:
+        response = await self.reads.get(f"/threads/{thread_id}/state")
+        response.raise_for_status()
+        return _object.validate_python(response.json())
+
+
 class Runtimes:
     """This deployment's Agent Server, and the MDA deployment."""
 
@@ -476,8 +554,7 @@ class Runtimes:
 
     @property
     def mda(self) -> _SdkThreads:
-        runtime = self.mda_runtime
-        return _SdkThreads(runtime.sdk(), runtime.read_sdk())
+        return _MdaThreads(self.mda_runtime)
 
     def runs_on(self, runtime: Runtime) -> _SdkThreads:
         return self.mda if runtime == "mda" else self.local

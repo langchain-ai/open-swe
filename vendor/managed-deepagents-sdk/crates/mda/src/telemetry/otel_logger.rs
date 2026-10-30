@@ -639,7 +639,7 @@ pub(super) mod tests {
     fn the_completion_record_matches_command_completed() {
         let logs = capture(no_facts, || {
             record_completion(CommandCompletion::Succeeded);
-            record_completion(CommandCompletion::Failed(ErrorCategory::Deployment));
+            record_completion(CommandCompletion::Failed(ErrorCategory::Deployment.into()));
         });
 
         assert_eq!(attribute(&logs[0], "outcome"), text("success"));

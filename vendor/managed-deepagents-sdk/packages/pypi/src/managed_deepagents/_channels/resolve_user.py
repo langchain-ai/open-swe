@@ -268,6 +268,20 @@ async def resolve_channel_user(
     return {"type": "principal", "id": principal_id}
 
 
+UserResolution: TypeAlias = Literal["application_resolved", "agent_auth_principal", "channel"]
+"""How ingress chose a run's user: ``application_resolved`` when ``resolve_user``
+mapped the sender to one of the app's users, ``agent_auth_principal`` when the
+sender ran as their own Agent Auth principal, else ``channel``."""
+
+
+def user_resolution(user: ChannelUser | None, *, ran_as_sender: bool) -> UserResolution:
+    if user is not None and user["type"] == "principal":
+        return "application_resolved"
+    if ran_as_sender:
+        return "agent_auth_principal"
+    return "channel"
+
+
 # Whether the fallback without Agent Auth was logged already.
 _logged_sender_fallback = False
 

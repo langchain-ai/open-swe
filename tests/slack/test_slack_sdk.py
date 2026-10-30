@@ -1,13 +1,64 @@
 import asyncio
 import threading
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
 from openswe.slack import http
+from openswe.slack.breakout_destination import BreakoutDestination
+from openswe.slack.channels import PAYLOAD_TTL, SlackChannel
 from openswe.slack.client import remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "SLACK_APP_ID",
+        "SLACK_BOT_USER_ID",
+        "SLACK_BOT_USERNAME",
+    ],
+)
+@pytest.mark.parametrize("value", [None, "   "])
+async def test_app_refuses_to_start_with_missing_slack_configuration(
+    monkeypatch: pytest.MonkeyPatch, variable: str, value: str | None
+) -> None:
+    from openswe.api.app import app, lifespan
+
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("MDA_RUNTIME_URL", "http://127.0.0.1:2025")
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-runtime-secret")
+    for name in (
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "SLACK_APP_ID",
+        "SLACK_BOT_USER_ID",
+        "SLACK_BOT_USERNAME",
+    ):
+        monkeypatch.setenv(name, "test-value")
+    if value is None:
+        monkeypatch.delenv(variable)
+    else:
+        monkeypatch.setenv(variable, value)
+
+    with pytest.raises(http.SlackConfigurationError, match=f"{variable} is required"):
+        async with lifespan(app):
+            pytest.fail("A deployment without Slack started")
+
+
+async def test_message_lookup_does_not_hide_missing_slack_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.slack.client import fetch_slack_message_by_ts
+
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    with pytest.raises(http.SlackConfigurationError, match="SLACK_BOT_TOKEN is required"):
+        await fetch_slack_message_by_ts("C1", "1.0")
 
 
 async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
@@ -74,6 +125,76 @@ _PUBLIC_CHANNEL = {
         "is_pending_ext_shared": False,
     },
 }
+
+
+@pytest.mark.parametrize("stale", [False, True])
+@pytest.mark.parametrize("private", [False, True])
+async def test_breakout_uses_fresh_channel_cache(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, stale: bool, private: bool
+) -> None:
+    channel = SlackChannel(
+        id="C2",
+        payload={
+            "id": "C2",
+            "is_channel": True,
+            "is_private": private,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        },
+    )
+    channel.fetched_at = datetime.now(UTC) - (PAYLOAD_TTL if stale else timedelta())
+    source = SlackChannel(id="C1", payload={**channel.payload, "is_private": False})
+    source.fetched_at = channel.fetched_at
+    monkeypatch.setattr(
+        SlackChannel,
+        "_row",
+        AsyncMock(side_effect=lambda channel_id: source if channel_id == "C1" else channel),
+    )
+    if stale:
+        slack_api.respond({"ok": False, "error": "channel_not_found"})
+
+    error = await BreakoutDestination("C2", "engineering").channel_error("C1")
+
+    if stale:
+        assert error is not None and "Could not find or access" in error
+        assert len(slack_api.calls) == 1
+    else:
+        assert (error is not None) is private
+        assert not slack_api.calls
+
+
+@pytest.mark.parametrize("failed_channel", ["C1", "C2"])
+@pytest.mark.parametrize(
+    "status,code,headers,retry_after",
+    [
+        (429, "ratelimited", {"Retry-After": "12"}, 12),
+        (200, "channel_not_found", {}, None),
+    ],
+)
+async def test_breakout_distinguishes_unavailable_channel_verification(
+    slack_api: SlackAPI,
+    failed_channel: str,
+    status: int,
+    code: str,
+    headers: dict[str, str],
+    retry_after: int | None,
+) -> None:
+    if failed_channel == "C2":
+        slack_api.respond(_PUBLIC_CHANNEL)
+    slack_api.respond({"ok": False, "error": code}, status=status, headers=headers)
+
+    error = await BreakoutDestination("C2", "engineering").channel_error("C1")
+
+    assert error is not None
+    assert f"<#{failed_channel}>" in error
+    if retry_after is not None:
+        assert "temporarily unavailable" in error
+        assert f"Try again in {retry_after} seconds" in error
+        assert "make sure Open SWE has access" not in error
+    else:
+        assert "Could not find or access" in error
+        assert "make sure Open SWE has access" in error
+        assert "Try again" not in error
 
 
 async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool_access):  # noqa: ANN001

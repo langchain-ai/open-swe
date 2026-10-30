@@ -48,7 +48,7 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
         "resolve_and_validate",
         lambda url: (urlparse(url).hostname, ["1.1.1.1"]),
     )
-    monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "test-slack-token")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(slack_client, "SLACK_FILE_DOWNLOAD_MAX_BYTES", 3)
     return responses, requests
 
@@ -212,8 +212,9 @@ async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
 @pytest.mark.asyncio
 async def test_download_slack_file_requires_a_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
     from openswe.slack import client as slack_client
+    from openswe.slack.http import SlackConfigurationError
 
-    monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
 
-    with pytest.raises(slack_client.SlackFileDownloadError, match="missing_slack_bot_token"):
+    with pytest.raises(SlackConfigurationError, match="SLACK_BOT_TOKEN is required"):
         await slack_client.download_slack_file("https://files.slack.com/a/x.zip")

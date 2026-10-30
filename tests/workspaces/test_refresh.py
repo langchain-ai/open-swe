@@ -30,9 +30,6 @@ def _scripts_run(backend: MagicMock) -> list[str]:
     return bodies
 
 
-# --- script command (sync) ---
-
-
 # --- refresh ---
 
 

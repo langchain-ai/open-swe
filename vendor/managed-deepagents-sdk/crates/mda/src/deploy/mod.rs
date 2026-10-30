@@ -54,9 +54,10 @@ use clap::ValueEnum;
 use cliclack::{confirm, log, outro, outro_cancel, password, spinner, ProgressBar};
 
 use crate::agent_config;
+use crate::channel::ChannelKind;
 use crate::cli_output::{note_links, note_links_with_section, show_wordmark_intro};
 use crate::command::CommandCompletion;
-use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
+use crate::error::{categorized, is_cancellation, ErrorCategory, Failure};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::{
@@ -70,12 +71,14 @@ use crate::telemetry::{self, otel_logger, refresh_identity, update_facts, Deploy
 use crate::{compile, connection, dependencies, project};
 
 pub use crate::langsmith::{AgentEnvironment, DeploymentType, API_KEY_ENV};
-pub(crate) use api_key_check::{is_refusal, verify_api_key, ApiKeySource, ResolvedApiKey};
+pub(crate) use api_key_check::{
+    is_refusal, require_user_key, verify_api_key, ApiKeySource, ResolvedApiKey, UserKeyCheckpoint,
+};
 pub use env_file::resolve_env_file_flag;
 pub(crate) use helpers::{resolve_https_public_api_url, PublicApiUrl, MDA_HANDOFF_SECRET_ENV};
 
 use bake::{bake_recipe, RecipeSpec};
-use channel_setup::{ChannelSetup, SetupTarget};
+use channel_setup::{is_settled, ChannelSetup, SetupTarget};
 use context_hub::{
     apply_context_sync, link_context_repo_to_agent, prepare_context_sync, ConflictResolution,
     ContextSection,
@@ -83,12 +86,12 @@ use context_hub::{
 use helpers::{
     clear_recipe_snapshot_secret, deployment_is_managed_deep_agent,
     deployment_managed_deep_agent_marker, deployment_runtime_url, deployment_status_url,
-    deployment_tenant_id, ensure_assistant_id_secret, ensure_cors_allow_origins,
-    ensure_deployment_name_secret, ensure_langsmith_url_secret, ensure_public_api_url,
-    ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret, find_agent_deployment,
-    find_deployment_by_name, find_deployment_id_by_name, is_failed_status, is_interrupted_status,
-    is_request_timeout, is_terminal_status, secrets_from_env, set_mda_handoff_secret,
-    set_workspace_id_secret, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
+    deployment_tenant_id, dropped_reserved_env_vars, ensure_assistant_id_secret,
+    ensure_cors_allow_origins, ensure_deployment_name_secret, ensure_langsmith_url_secret,
+    ensure_public_api_url, ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret,
+    find_agent_deployment, find_deployment_by_name, find_deployment_id_by_name, is_failed_status,
+    is_interrupted_status, is_request_timeout, is_reserved_env_var, is_terminal_status,
+    secrets_from_env, set_mda_handoff_secret, set_workspace_id_secret, WORKSPACE_ID_ENV,
 };
 use langsmith_context::{resolve_workspace_id, LangSmithEndpoints, WORKSPACE_FLAG_HINT};
 
@@ -180,10 +183,10 @@ pub fn run(opts: DeployOptions) -> Result<CommandCompletion> {
             Ok(CommandCompletion::Cancelled)
         }
         Err(err) => {
-            let category = category_of(&err);
+            let failure = Failure::of(&err);
             otel_logger::error(&err);
             report_session_failure(&err, client.as_ref())?;
-            Ok(CommandCompletion::Failed(category))
+            Ok(CommandCompletion::Failed(failure))
         }
     }
 }
@@ -255,6 +258,14 @@ fn run_session(
     {
         log::warning(format!(
             "Not uploading {AGENT_ID_ENV}. The deployment name is the agent ID."
+        ))?;
+    }
+    let dropped = dropped_reserved_env_vars(&env_vars);
+    if !dropped.is_empty() {
+        log::warning(format!(
+            "Not uploading {} from {}. LangSmith sets these on the deployment itself.",
+            dropped.join(", "),
+            env_path.display()
         ))?;
     }
     let mut secrets = secrets_from_env(&env_vars);
@@ -331,6 +342,20 @@ fn run_session(
         &mut workspace_keys,
     )?;
 
+    // Trigger Server refuses a key with no user when it sets up a Slack channel,
+    // and that only happens once the deployment is live. Read the channel from
+    // source so this runs before the Context Hub sync changes what a running
+    // deployment serves; a channel this misses is checked once compile emits it.
+    let slack_channel_checked = compile::declares_slack_channel(project)?;
+    if slack_channel_checked {
+        require_user_key(
+            client,
+            &key_source,
+            trigger_channels::PROVIDER_LABEL,
+            UserKeyCheckpoint::Preflight,
+        )?;
+    }
+
     // A sandbox declaration with no recipe never hits the sandbox API during
     // bake, so this has to run as a preflight. After Context Hub sync it would
     // leave remote state changed on an org that cannot run the agent.
@@ -357,7 +382,7 @@ fn run_session(
     // overwrites a same-name Context Hub repo or LangSmith deployment, so make
     // that explicit. Deliberately after the preflights above — a deploy that
     // cannot succeed should never ask the question.
-    if !confirm_first_deploy_collisions(
+    let existing_deployment = match confirm_first_deploy_collisions(
         client,
         &context_client,
         &name,
@@ -365,9 +390,12 @@ fn run_session(
         &image_source,
         opts.yes,
     )? {
-        outro_cancel("Cancelled — existing resources left unchanged.")?;
-        return Ok(CommandCompletion::Cancelled);
-    }
+        DeployGate::Proceed(existing_deployment) => existing_deployment,
+        DeployGate::Cancelled => {
+            outro_cancel("Cancelled — existing resources left unchanged.")?;
+            return Ok(CommandCompletion::Cancelled);
+        }
+    };
 
     // -- 3. Sync deploy-owned context to Context Hub -----------------------
     interrupt.check()?;
@@ -428,19 +456,60 @@ fn run_session(
         &mcp_connections,
     )?;
     warn_unprovided_reserved_connections(&connector_requirements, &channel_requirements)?;
-    let channel_setup = ChannelSetup::prepare(
+    let mut channel_setup = ChannelSetup::prepare(
         &channel_requirements,
-        opts.wait,
         &project.root,
         &project.files,
         project.language,
         &assistant_id,
     )?;
+    // Before the channel preflight, whose own Trigger Server lookup would be
+    // refused for the same reason with a less useful message.
+    if channel_setup.trigger().is_some() && !slack_channel_checked {
+        require_user_key(
+            client,
+            &key_source,
+            trigger_channels::PROVIDER_LABEL,
+            UserKeyCheckpoint::AfterContextSync,
+        )?;
+    }
+    // The deployment being updated, as the collision check found it, and its
+    // ID and Agent Server URL once it has one — read only when a channel
+    // needs them.
+    let channel_deployment = existing_deployment
+        .as_ref()
+        .filter(|_| channel_setup.needs_live_url());
+    let live_existing_deployment = channel_deployment
+        .map(|deployment| live_deployment(client, deployment))
+        .transpose()?
+        .flatten();
     channel_setup.preflight(
         client,
-        || find_target_deployment(client, &name, deployment_agent.as_ref()),
+        channel_deployment.and_then(|deployment| deployment.get("id")?.as_str()),
+        live_existing_deployment
+            .as_ref()
+            .map(|(_, agent_server_url)| agent_server_url.as_str()),
         &env_vars,
+        channel_app::is_interactive(),
     )?;
+    // Channels already set up on the deployment being updated are set up
+    // again before the upload (step 4c); the revision it serves has their
+    // ingress. Any other channel waits for the new revision (step 7): the
+    // running one may have none, and its events would be lost until the
+    // build finished. A first deploy has no URL, so all of them wait.
+    let early_channels = match &live_existing_deployment {
+        Some((deployment_id, _)) => {
+            let statuses = channel_setup.statuses(client, deployment_id, &env_vars);
+            let settled: Vec<ChannelKind> = statuses
+                .iter()
+                .filter(|(_, status)| is_settled(status))
+                .map(|(kind, _)| *kind)
+                .collect();
+            channel_setup.take(&settled)
+        }
+        None => channel_setup.take(&[]),
+    };
+    ensure_channels_allow_no_wait(&channel_setup.kinds(), opts.wait)?;
 
     ensure_connector_requirements_secrets(
         &env_path,
@@ -460,6 +529,21 @@ fn run_session(
         &channel_requirements,
         &mut workspace_keys,
     )?;
+
+    // -- 4c. Set up the channels the running revision already serves ------
+    // Its Agent Server URL stays the same across revisions, so a channel
+    // that can no longer be set up stops the deploy before anything is
+    // uploaded.
+    if let Some((deployment_id, agent_server_url)) = &live_existing_deployment {
+        early_channels.set_up(&SetupTarget {
+            client,
+            agent_server_url,
+            deployment_id,
+            assistant_id: &assistant_id,
+            project_root: &project.root,
+            env_vars: &env_vars,
+        })?;
+    }
 
     let external_image = match image_source {
         image::ImageSource::InternalSource => None,
@@ -483,15 +567,26 @@ fn run_session(
             client,
             &name,
             deployment_agent.as_ref(),
+            existing_deployment.as_ref(),
             image_uri,
             &secrets,
         )?
     } else {
         let deployment_id = match &deployment_agent {
-            Some(agent) => {
-                resolve_or_create_agent_deployment(client, agent, opts.deployment_type, &secrets)?
-            }
-            None => resolve_or_create_deployment(client, &name, opts.deployment_type, &secrets)?,
+            Some(agent) => resolve_or_create_agent_deployment(
+                client,
+                agent,
+                existing_deployment.as_ref(),
+                opts.deployment_type,
+                &secrets,
+            )?,
+            None => resolve_or_create_deployment(
+                client,
+                &name,
+                existing_deployment.as_ref(),
+                opts.deployment_type,
+                &secrets,
+            )?,
         };
         (deployment_id, None)
     };
@@ -622,6 +717,46 @@ fn run_session(
     }
     outro(format!("Deployed '{name}' to LangSmith."))?;
     Ok(CommandCompletion::Succeeded)
+}
+
+/// The ID and Agent Server URL of `deployment`, an existing deployment as
+/// listed, once it has an Agent Server; `None` before its first build.
+pub(crate) fn live_deployment(
+    client: &langsmith::Client,
+    deployment: &serde_json::Value,
+) -> Result<Option<(String, String)>> {
+    let Some(id) = deployment.get("id").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    // Listings may leave the URL out; the deployment itself has it.
+    let url = match deployment_runtime_url(deployment) {
+        Some(url) => Some(url),
+        None => deployment_runtime_url(
+            &client
+                .get_deployment(id)
+                .with_context(|| format!("failed to read deployment {id}"))?,
+        ),
+    };
+    Ok(url.map(|url| (id.to_string(), url)))
+}
+
+/// Refuse `mda deploy --no-wait` while channels wait for the new revision
+/// (step 7): a first deploy's, and those not set up on the deployment yet.
+/// Channels already set up are set up before the upload (step 4c), so they
+/// need not wait.
+fn ensure_channels_allow_no_wait(waiting: &[ChannelKind], wait: bool) -> Result<()> {
+    if wait {
+        return Ok(());
+    }
+    let labels: Vec<_> = waiting.iter().map(|kind| kind.label()).collect();
+    let channels = match labels.split_last() {
+        None => return Ok(()),
+        Some((last, [])) => format!("a {last} channel"),
+        Some((last, rest)) => format!("{} and {last} channels", rest.join(", ")),
+    };
+    bail!(
+        "An agent with {channels} not set up yet cannot be deployed with --no-wait: a channel is set up once the new revision is live, the first that can receive its events. Run `mda deploy` without --no-wait this time; once the channels are set up, later deploys can use --no-wait."
+    );
 }
 
 fn require_trigger_registration_url(
@@ -826,6 +961,15 @@ fn with_managed_marker(
     }
 }
 
+/// Whether the deploy goes ahead past the first-deploy gate.
+enum DeployGate {
+    /// Go ahead, updating this deployment, or creating one when `None`. The
+    /// gate's lookup is the deploy's only one: later steps reuse it.
+    Proceed(Option<serde_json::Value>),
+    /// The developer declined to overwrite same-name resources.
+    Cancelled,
+}
+
 fn confirm_first_deploy_collisions(
     client: &langsmith::Client,
     context_client: &ContextHubClient,
@@ -833,7 +977,7 @@ fn confirm_first_deploy_collisions(
     agent: Option<&DeploymentAgent>,
     image_source: &image::ImageSource,
     yes: bool,
-) -> Result<bool> {
+) -> Result<DeployGate> {
     let sp = spinner();
     sp.start(format!("Checking for existing resources named '{name}'"));
     let existing_deployment = step(
@@ -864,7 +1008,7 @@ fn confirm_first_deploy_collisions(
         .is_some_and(deployment_is_managed_deep_agent)
     {
         sp.stop("Existing Managed Deep Agent deployment found");
-        return Ok(true);
+        return Ok(DeployGate::Proceed(existing_deployment));
     }
     // A repo `mda deploy` created is not a collision even on a first deploy —
     // most often it is the leftover of an earlier deploy that failed after the
@@ -882,7 +1026,7 @@ fn confirm_first_deploy_collisions(
         context_hub_repo == RepoOwnership::Foreign,
     );
     if collisions == FirstDeployCollisions::default() {
-        return Ok(true);
+        return Ok(DeployGate::Proceed(existing_deployment));
     }
     if collisions.context_hub_repo {
         log::warning(format!(
@@ -899,14 +1043,19 @@ fn confirm_first_deploy_collisions(
         ))?;
     }
     match collision_decision(name, &collisions, yes, std::io::stdin().is_terminal())? {
-        CollisionDecision::Proceed => return Ok(true),
+        CollisionDecision::Proceed => return Ok(DeployGate::Proceed(existing_deployment)),
         CollisionDecision::Prompt => {}
     }
-    Ok(confirm(format!(
+    let overwrite = confirm(format!(
         "Overwrite existing resources for '{name}' and continue?"
     ))
     .initial_value(false)
-    .interact()?)
+    .interact()?;
+    Ok(if overwrite {
+        DeployGate::Proceed(existing_deployment)
+    } else {
+        DeployGate::Cancelled
+    })
 }
 
 fn sync_context_hub(
@@ -1158,32 +1307,27 @@ fn bake_env_vars(
 ) -> std::collections::BTreeMap<String, String> {
     env_vars
         .iter()
-        .filter(|(name, value)| !value.is_empty() && !RESERVED_ENV_VARS.contains(&name.as_str()))
+        .filter(|(name, value)| !value.is_empty() && !is_reserved_env_var(name))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect()
 }
 
-/// Look up a LangSmith deployment by name, or create one when missing.
+/// The ID of `existing`, the deployment named `name` as the collision check
+/// found it, or of a new one created when there is none.
 fn resolve_or_create_deployment(
     client: &langsmith::Client,
     name: &str,
+    existing: Option<&serde_json::Value>,
     deployment_type: DeploymentType,
     secrets: &[langsmith::Secret],
 ) -> Result<String> {
-    let sp = spinner();
-    sp.start(format!("Looking up deployment '{name}'"));
-    let listed = step(
-        &sp,
-        "Could not reach LangSmith",
-        client.list_deployments(name),
-    )?;
-    match find_deployment_id_by_name(&listed, name) {
+    match existing.and_then(|deployment| deployment.get("id")?.as_str()) {
         Some(id) => {
-            sp.stop(format!("Found existing deployment {id}"));
-            Ok(id)
+            log::step(format!("Found existing deployment {id}"))?;
+            Ok(id.to_string())
         }
         None => {
-            sp.stop("No existing deployment — creating a new one");
+            log::step("No existing deployment — creating a new one")?;
             let sp = spinner();
             sp.start(format!("Creating deployment '{name}'"));
             match client.create_deployment(name, deployment_type, secrets) {
@@ -1224,14 +1368,16 @@ fn resolve_or_create_deployment(
     }
 }
 
+/// The ID of `existing`, the agent's deployment as the collision check found
+/// it, or of a new one created when there is none.
 fn resolve_or_create_agent_deployment(
     client: &langsmith::Client,
     agent: &DeploymentAgent,
+    existing: Option<&serde_json::Value>,
     deployment_type: DeploymentType,
     secrets: &[langsmith::Secret],
 ) -> Result<String> {
-    let listed = client.list_agent_deployments(agent)?;
-    let deployment = match find_agent_deployment(&listed) {
+    let deployment = match existing {
         Some(deployment) => deployment.clone(),
         None => client.create_agent_deployment(agent, deployment_type, secrets)?,
     };
@@ -1240,49 +1386,24 @@ fn resolve_or_create_agent_deployment(
     require_str(&deployment, "id", "agent deployment")
 }
 
+/// Like [`resolve_or_create_deployment`] for an external image; also returns
+/// the created deployment, whose creation already set the image.
 fn resolve_or_create_external_deployment(
     client: &langsmith::Client,
     name: &str,
     agent: Option<&DeploymentAgent>,
+    existing: Option<&serde_json::Value>,
     image_uri: &str,
     secrets: &[langsmith::Secret],
 ) -> Result<(String, Option<serde_json::Value>)> {
-    let sp = spinner();
-    sp.start("Checking for an existing deployment");
-    let existing = match agent {
-        Some(agent) => {
-            let listed = step(
-                &sp,
-                "Could not check existing deployments",
-                client.list_agent_deployments(agent),
-            )?;
-            find_agent_deployment(&listed).cloned()
-        }
-        None => {
-            let listed = step(
-                &sp,
-                "Could not check existing deployments",
-                client.list_deployments(name),
-            )?;
-            find_deployment_by_name(&listed, name).cloned()
-        }
-    };
-
     if let Some(existing) = existing {
-        let id = step(
-            &sp,
-            "Existing deployment has no id",
-            require_str(&existing, "id", "existing deployment"),
-        )?;
-        if let Err(err) = ensure_external_deployment_source(name, &existing) {
-            sp.error("Existing deployment uses a different source type");
-            return Err(err);
-        }
-        sp.stop(format!("Found deployment {id}"));
+        let id = require_str(existing, "id", "existing deployment")?;
+        ensure_external_deployment_source(name, existing)?;
+        log::step(format!("Found deployment {id}"))?;
         return Ok((id, None));
     }
 
-    sp.stop("No existing deployment — creating a new one");
+    log::step("No existing deployment — creating a new one")?;
     let sp = spinner();
     sp.start(format!("Creating deployment '{name}'"));
     let created = step(
@@ -2882,15 +3003,17 @@ mod tests {
     use super::{
         agent_environment, agent_target, bake_spinner_message, channel_secret_policy,
         claim_secret_from_local_sources, collision_decision, deployment_id_status_record,
-        deployment_links, display_revision_status, ensure_external_deployment_source,
-        ensure_model_api_key, ensure_requested_deployment_source, explain_sandbox_access_error,
-        first_deploy_collisions, http_channel_links, managed_cron_ids, missing_local_model_api_key,
+        deployment_links, display_revision_status, ensure_channels_allow_no_wait,
+        ensure_external_deployment_source, ensure_model_api_key,
+        ensure_requested_deployment_source, explain_sandbox_access_error, first_deploy_collisions,
+        http_channel_links, managed_cron_ids, missing_local_model_api_key,
         missing_user_owned_mcp_connections, model_api_key_requirement_for_deploy,
         poll_failure_limit_reached, prompt_api_key_choice, require_trigger_registration_url,
         schedule_cron_request, schedule_reconcile_warning, schedules_summary,
         validate_workspace_connections_for_manifest, ApiKeyPromptChoice, CollisionDecision,
         FirstDeployCollisions, WorkspaceSecretKeys, AGENT_ENVIRONMENT_ENV, BAKE_SPINNER_TITLE,
     };
+    use crate::channel::ChannelKind;
     use crate::compile;
     use crate::error::{category_of, ErrorCategory};
     use crate::langsmith::{AgentEnvironment, Client, ConnectionSummary, KeyCheck, Secret};
@@ -3888,6 +4011,41 @@ mod tests {
         assert_eq!(
             require_trigger_registration_url(Some("https://agent.example".into()), true).unwrap(),
             Some("https://agent.example".into())
+        );
+    }
+
+    #[test]
+    fn no_wait_deploys_when_no_channel_waits_for_the_new_revision() {
+        ensure_channels_allow_no_wait(&[], false).unwrap();
+        ensure_channels_allow_no_wait(&[ChannelKind::Slack], true).unwrap();
+    }
+
+    #[test]
+    fn no_wait_is_refused_while_a_channel_waits_for_the_new_revision() {
+        let error = ensure_channels_allow_no_wait(&[ChannelKind::Slack], false)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "An agent with a Slack channel not set up yet cannot be deployed with --no-wait: a channel is set up once the new revision is live, the first that can receive its events. Run `mda deploy` without --no-wait this time; once the channels are set up, later deploys can use --no-wait."
+        );
+    }
+
+    #[test]
+    fn no_wait_refusal_names_every_waiting_channel() {
+        let error = ensure_channels_allow_no_wait(
+            &[ChannelKind::Slack, ChannelKind::GitHub, ChannelKind::Linear],
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.starts_with(
+                "An agent with Slack, GitHub and Linear channels not set up yet cannot be deployed with --no-wait"
+            ),
+            "{error}"
         );
     }
 
