@@ -182,7 +182,10 @@ class _IssuedUrls:
         hosts = {urlsplit(url).hostname for url in self.urls}
         if any(
             len(url) >= _ISSUED_URL_MIN_LENGTH
-            and url not in self.urls
+            and not any(
+                url.startswith(issued) and not url[len(issued) :].strip("*_")
+                for issued in self.urls
+            )
             and urlsplit(url).hostname in hosts
             for url in _urls(text)
         ):

@@ -301,11 +301,24 @@ async def test_a_reply_links_a_tool_issued_url_exactly_as_issued(
     assert answered.content == kept
 
 
+@pytest.mark.parametrize("emphasis", ["*", "**", "_", "__"])
+async def test_an_emphasized_issued_url_does_not_warn(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, emphasis: str
+) -> None:
+    written = f"{emphasis}{_ISSUED_URL}{emphasis}"
+
+    with caplog.at_level(logging.WARNING, logger="rt.model_calls"):
+        answered = await _answered(AIMessage(content=written), monkeypatch)
+
+    assert answered.content == written
+    assert not [record for record in caplog.records if record.name == "rt.model_calls"]
+
+
 async def test_a_changed_issued_url_is_left_and_logged_without_it(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     changed = f"{_ISSUED_URL[:445]}{'H' if _ISSUED_URL[445] != 'H' else 'J'}{_ISSUED_URL[446:]}"
-    written = f"[Watch the recording]({changed})"
+    written = f"**{changed}**"
 
     with caplog.at_level(logging.WARNING, logger="rt.model_calls"):
         answered = await _answered(AIMessage(content=written), monkeypatch)
