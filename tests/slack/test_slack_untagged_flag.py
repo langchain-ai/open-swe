@@ -272,11 +272,18 @@ async def test_pr_links_are_recorded_without_starting_runs(
     message_kind: Literal["root", "reply", "bot", "edit", "blocks"],
 ) -> None:
     monkeypatch.setattr(slack_routes, "watch_post", AsyncMock())
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setenv("DASHBOARD_ALLOWED_ORIGINS", "")
     payload = _message_payload(
         "<http://www.github.com/Other/Repo/pull/12/files|PR> "
         "https://github.com/other/repo/pull/12#discussion "
         "https://github.com/other/repo/pull/13 "
-        "https://github.com.evil/other/repo/pull/99",
+        "<https://openswe.example.com/agents/reviews/Other/Repo/12|review> "
+        "https://openswe.example.com/agents/reviews/other/repo/14?tab=files#diff "
+        "https://untrusted.example.com/agents/reviews/other/repo/98 "
+        "https://user@openswe.example.com/agents/reviews/other/repo/97 "
+        "https://github.com.evil/other/repo/pull/99 "
+        "https://[malformed",
         "Ev-pr-link",
     )
     payload["team_id"] = "T1"
@@ -308,6 +315,7 @@ async def test_pr_links_are_recorded_without_starting_runs(
     assert {link.pr_url for link in links} == {
         "https://github.com/other/repo/pull/12",
         "https://github.com/other/repo/pull/13",
+        "https://github.com/other/repo/pull/14",
     }
     assert all(
         link.team_id == "T1"
@@ -323,13 +331,20 @@ async def test_pr_links_are_recorded_without_starting_runs(
     )
     async with postgres.session() as session:
         links = (await session.scalars(select(SlackPullRequestLink))).all()
-    assert len(links) == 4
+    assert len(links) == 6
     assert {link.team_id for link in links} == {"T1", "T2"}
 
 
 @pytest.mark.parametrize("handled_by", ["", "kitchen", "solo_followup"])
+@pytest.mark.parametrize(
+    "pr_url",
+    [
+        "https://github.com/lc/repo/pull/7",
+        "https://openswe.example.com/agents/reviews/lc/repo/7",
+    ],
+)
 async def test_a_newly_linked_pull_request_is_offered_for_review_once(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch, handled_by: str
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, handled_by: str, pr_url: str
 ) -> None:
     monkeypatch.setattr(slack_routes, "watch_post", AsyncMock())
     monkeypatch.setattr(
@@ -340,7 +355,8 @@ async def test_a_newly_linked_pull_request_is_offered_for_review_once(
         "allow_solo_thread_followup",
         AsyncMock(return_value=handled_by == "solo_followup"),
     )
-    payload = _message_payload("can someone look at https://github.com/lc/repo/pull/7", "Ev-pr")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    payload = _message_payload(f"can someone look at {pr_url}", "Ev-pr")
     payload["team_id"] = "T1"
     background_tasks = _FakeBackgroundTasks()
 
