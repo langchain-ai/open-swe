@@ -100,7 +100,7 @@ class Actor:
         owner = await metadata.owner()
         is_owner = owner.id == user.id
         access_metadata = metadata.json_metadata() | {
-            "owner_login": self.login if is_owner else metadata.owner_login
+            "owner_login": self.login if is_owner else metadata.owner_subject(owner)
         }
         if not is_owner and not (
             allow_participants and f"user:{user.id}" in participant_ids(access_metadata)
@@ -221,7 +221,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
     }
     if metadata.owner_type != "system":
         owner = await metadata.owner()
-        login = metadata.owner_login or owner.github_login
+        login = metadata.owner_subject(owner)
         if not login:
             raise PermissionError("Task delivery requires the owner's identity")
         identity = ThreadIdentity(login)

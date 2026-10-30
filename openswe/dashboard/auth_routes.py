@@ -37,6 +37,7 @@ from openswe.dashboard.oauth import (
     issue_session,
     issue_state,
     new_state_nonce,
+    optional_session,
     rebind_session,
     redeem_desktop_handoff,
     sanitize_redirect_to,
@@ -243,7 +244,12 @@ async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, objec
 
 
 @router.post("/auth/logout")
-async def auth_logout() -> Response:
+async def auth_logout(request: Request) -> Response:
+    session = optional_session(request)
+    if session is not None:
+        principal = DashboardPrincipal.from_session(session)
+        if principal.provider == "langsmith":
+            await LangSmithLogin().logout(principal.subject)
     response = Response(status_code=204)
     secure, samesite = cookie_security()
     response.delete_cookie(COOKIE_NAME, path="/", samesite=samesite, secure=secure)

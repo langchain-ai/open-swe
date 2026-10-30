@@ -1,5 +1,6 @@
 """LangSmith login and live organization authorization for independent accounts."""
 
+import logging
 import secrets
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -27,7 +28,9 @@ from openswe.utils.http_pool import pooled_transport
 if TYPE_CHECKING:
     from openswe.dashboard.principal import DashboardPrincipal
 
-LANGSMITH_LOGIN_ORG_ID = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
+logger = logging.getLogger(__name__)
+
+LANGSMITH_AUTHORIZATION_TTL = timedelta(seconds=60)
 LANGSMITH_LOGIN_CALLBACK_PATH = "/dashboard/api/auth/langsmith/callback"
 
 
@@ -39,7 +42,10 @@ class LangSmithAccount(BaseModel):
     picture: str = ""
 
     def require_allowed_org(self) -> None:
-        if self.ls_org_id != LANGSMITH_LOGIN_ORG_ID:
+        if (
+            not ENV.LANGSMITH_LOGIN_ORG_ID.get()
+            or self.ls_org_id != ENV.LANGSMITH_LOGIN_ORG_ID.get()
+        ):
             raise UnauthorizedUser("This LangSmith organization is not authorized")
 
 
@@ -48,9 +54,10 @@ class LangSmithLogin:
         self.issuer = langsmith_issuer()
         self.client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.get()
         self.client_secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.get()
+        self.org_id = ENV.LANGSMITH_LOGIN_ORG_ID.get()
 
     def require_configured(self) -> None:
-        if not langsmith_oauth_configured():
+        if not self.org_id or not langsmith_oauth_configured():
             raise HTTPException(503, "LangSmith login is not configured")
 
     def same_origin(self, url: str) -> str:
@@ -76,6 +83,8 @@ class LangSmithLogin:
                 )
         except httpx2.RequestError as exc:
             raise HTTPException(503, "LangSmith authorization is temporarily unavailable") from exc
+        if response.is_success and not response.content:
+            return None
         try:
             body: object = response.json()
         except ValueError as exc:
@@ -101,6 +110,9 @@ class LangSmithLogin:
             if not isinstance(endpoint, str) or not endpoint:
                 raise HTTPException(502, "Incomplete LangSmith OAuth discovery")
             endpoints[name] = self.same_origin(endpoint)
+        revocation_endpoint = data.get("revocation_endpoint")
+        if isinstance(revocation_endpoint, str) and revocation_endpoint:
+            endpoints["revocation_endpoint"] = self.same_origin(revocation_endpoint)
         return endpoints
 
     async def start(
@@ -138,6 +150,7 @@ class LangSmithLogin:
     async def account(
         self, token: str, *, userinfo_endpoint: str | None = None
     ) -> LangSmithAccount:
+        self.require_configured()
         data = await self.request(
             "GET", userinfo_endpoint or self.issuer + "/userinfo", token=token
         )
@@ -154,10 +167,7 @@ class LangSmithLogin:
         )
         if not isinstance(organizations, list):
             raise HTTPException(502, "Invalid LangSmith organization response")
-        if not any(
-            isinstance(org, dict) and org.get("id") == LANGSMITH_LOGIN_ORG_ID
-            for org in organizations
-        ):
+        if not any(isinstance(org, dict) and org.get("id") == self.org_id for org in organizations):
             raise HTTPException(
                 403, "Your LangSmith account is not a member of the authorized organization"
             )
@@ -213,6 +223,7 @@ class LangSmithLogin:
         *,
         previous: OAuthCredential | None = None,
         email: str | None = None,
+        authorized_until: datetime | None = None,
     ) -> None:
         refresh_token = tokens.get("refresh_token")
         expires_in = tokens.get("expires_in")
@@ -231,6 +242,8 @@ class LangSmithLogin:
             client_id=self.client_id,
             token_endpoint=self.same_origin(token_endpoint),
             account_email=email,
+            login_authorized_until=authorized_until,
+            login_authorized_org_id=self.org_id if authorized_until else None,
         )
 
     async def access_token(self, key: str) -> str | None:
@@ -251,50 +264,131 @@ class LangSmithLogin:
         principal = DashboardPrincipal("langsmith", key, user_id, identity.external_id)
         return await self.authorize_session(principal)
 
+    async def credential(self, key: str) -> OAuthCredential:
+        credential = await load_credential("langsmith_login", key)
+        if credential is None or credential.client_id != self.client_id:
+            raise HTTPException(401, "LangSmith login expired — sign in again")
+        return credential
+
+    def needs_refresh(self, credential: OAuthCredential) -> bool:
+        return (
+            credential.access_token_expires_at is None
+            or datetime.now(UTC) + timedelta(minutes=2) >= credential.access_token_expires_at
+        )
+
+    def checked_token(self, credential: OAuthCredential) -> str:
+        token = decrypt_token(credential.encrypted_access_token)
+        if not token:
+            raise HTTPException(401, "LangSmith login expired — sign in again")
+        return token
+
+    async def check_identity(self, token: str, principal: DashboardPrincipal) -> None:
+        account = await self.account(token)
+        if account.sub != principal.langsmith_subject:
+            raise HTTPException(401, "LangSmith login identity changed — sign in again")
+
+    async def refresh(self, principal: DashboardPrincipal) -> str | None:
+        async with refresh_guard("langsmith_login", principal.subject):
+            credential = await self.credential(principal.subject)
+            if not self.needs_refresh(credential):
+                return None
+            refresh = decrypt_token(credential.encrypted_refresh_token or "")
+            if not refresh:
+                raise HTTPException(401, "LangSmith login expired — sign in again")
+            data = await self.request(
+                "POST",
+                credential.token_endpoint,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh,
+                    "client_id": credential.client_id,
+                    "client_secret": self.client_secret,
+                    "resource": self.issuer,
+                },
+            )
+            tokens = self.tokens(data)
+            token = str(tokens["access_token"])
+            authorized_until = datetime.now(UTC) + LANGSMITH_AUTHORIZATION_TTL
+            await self.check_identity(token, principal)
+            await self.save(
+                principal.subject,
+                tokens,
+                credential.token_endpoint,
+                previous=credential,
+                email=credential.account_email,
+                authorized_until=authorized_until,
+            )
+            return token
+
+    async def authorize_credential(
+        self, credential: OAuthCredential, principal: DashboardPrincipal
+    ) -> str:
+        token = self.checked_token(credential)
+        now = datetime.now(UTC)
+        if (
+            credential.login_authorized_org_id == self.org_id
+            and credential.login_authorized_until is not None
+            and credential.login_authorized_until > now
+            and credential.access_token_expires_at is not None
+            and credential.access_token_expires_at > now
+        ):
+            return token
+        authorized_until = now + LANGSMITH_AUTHORIZATION_TTL
+        await self.check_identity(token, principal)
+        if not await credential.authorize_login(self.org_id, authorized_until):
+            raise HTTPException(401, "LangSmith login expired — sign in again")
+        return token
+
     async def authorize_session(self, principal: DashboardPrincipal) -> str:
         self.require_configured()
+        await principal.user()
         key = principal.subject
+        credential = await self.credential(key)
+        try:
+            if self.needs_refresh(credential):
+                token = await self.refresh(principal)
+                if token is not None:
+                    return token
+                credential = await self.credential(key)
+            return await self.authorize_credential(credential, principal)
+        except HTTPException as exc:
+            if exc.status_code in {401, 403}:
+                await delete_credential(
+                    "langsmith_login",
+                    key,
+                    encrypted_access_token=credential.encrypted_access_token,
+                )
+            raise
+
+    async def logout(self, key: str) -> None:
         async with refresh_guard("langsmith_login", key):
             credential = await load_credential("langsmith_login", key)
-            if credential is None:
-                raise HTTPException(401, "LangSmith login expired — sign in again")
-            try:
-                token = decrypt_token(credential.encrypted_access_token)
-                if not token:
-                    raise HTTPException(401, "LangSmith login expired — sign in again")
-                if (
-                    credential.access_token_expires_at is None
-                    or datetime.now(UTC) + timedelta(minutes=2)
-                    >= credential.access_token_expires_at
-                ):
-                    refresh = decrypt_token(credential.encrypted_refresh_token or "")
-                    if not refresh:
-                        raise HTTPException(401, "LangSmith login expired — sign in again")
-                    data = await self.request(
+            await delete_credential("langsmith_login", key)
+        if credential is None:
+            return
+        try:
+            endpoints = await self.metadata()
+        except HTTPException:
+            logger.warning("Could not discover LangSmith revocation endpoint", exc_info=True)
+            return
+        endpoint = endpoints.get("revocation_endpoint")
+        if endpoint is None:
+            return
+        for encrypted in (
+            credential.encrypted_refresh_token,
+            credential.encrypted_access_token,
+        ):
+            token = decrypt_token(encrypted or "")
+            if token:
+                try:
+                    await self.request(
                         "POST",
-                        credential.token_endpoint,
+                        endpoint,
                         data={
-                            "grant_type": "refresh_token",
-                            "refresh_token": refresh,
+                            "token": token,
                             "client_id": credential.client_id,
                             "client_secret": self.client_secret,
-                            "resource": self.issuer,
                         },
                     )
-                    tokens = self.tokens(data)
-                    token = str(tokens["access_token"])
-                    await self.save(
-                        key,
-                        tokens,
-                        credential.token_endpoint,
-                        previous=credential,
-                        email=credential.account_email,
-                    )
-                account = await self.account(token)
-                if account.sub != principal.langsmith_subject:
-                    raise HTTPException(401, "LangSmith login identity changed — sign in again")
-                return token
-            except HTTPException as exc:
-                if exc.status_code in {401, 403}:
-                    await delete_credential("langsmith_login", key)
-                raise
+                except HTTPException:
+                    logger.warning("Could not revoke LangSmith token remotely", exc_info=True)

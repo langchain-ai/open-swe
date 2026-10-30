@@ -1,6 +1,7 @@
 """Independent LangSmith login, membership revocation, and desktop handoff."""
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -8,10 +9,9 @@ import httpx
 import httpx2
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, langsmith_routes, oauth
-from openswe.dashboard.langsmith_login import LANGSMITH_LOGIN_ORG_ID
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.profiles import PROFILES, get_profile
 from openswe.dashboard.user_preferences import USER_PREFERENCES
@@ -21,16 +21,28 @@ from openswe.review.routes import router as review_router
 from openswe.users import UnauthorizedUser, User
 
 ISSUER = "https://api.smith.langchain.com"
+ALLOWED_ORG = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
 
 
 @dataclass
 class LangSmithServer:
     subject: str = "5bb3fb19-f328-4815-8fe8-0483b41312c2"
-    organization: str = LANGSMITH_LOGIN_ORG_ID
+    organization: str = ALLOWED_ORG
     member: bool = True
     revoked: bool = False
     unavailable: bool = False
     refreshes: int = 0
+    authorizations: int = 0
+    revocations: list[str] = field(default_factory=list)
+    checking_membership: asyncio.Event | None = None
+    resume_membership: asyncio.Event | None = None
+
+    async def expire_authorization(self, key: str) -> None:
+        credential = await load_credential("langsmith_login", key)
+        assert credential is not None
+        assert await credential.authorize_login(
+            ALLOWED_ORG, datetime.now(UTC) - timedelta(seconds=1)
+        )
 
     async def respond(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/.well-known/openid-configuration":
@@ -41,8 +53,14 @@ class LangSmithServer:
                     "authorization_endpoint": ISSUER + "/oauth/authorize",
                     "token_endpoint": ISSUER + "/oauth/token",
                     "userinfo_endpoint": ISSUER + "/userinfo",
+                    "revocation_endpoint": ISSUER + "/oauth/revoke",
                 },
             )
+        if request.url.path == "/oauth/revoke":
+            if self.unavailable:
+                return httpx2.Response(503, json={"detail": "unavailable"})
+            self.revocations.append(parse_qs(request.content.decode())["token"][0])
+            return httpx2.Response(200)
         if request.url.path == "/oauth/token":
             body = parse_qs(request.content.decode())
             assert body["resource"] == [ISSUER]
@@ -58,6 +76,7 @@ class LangSmithServer:
             )
         assert request.headers["authorization"] == "Bearer access"
         if request.url.path == "/userinfo":
+            self.authorizations += 1
             return httpx2.Response(
                 200,
                 json={
@@ -69,6 +88,9 @@ class LangSmithServer:
             )
         assert request.url.path == "/orgs"
         assert request.url.params["skip_create"] == "true"
+        if self.checking_membership is not None and self.resume_membership is not None:
+            self.checking_membership.set()
+            await self.resume_membership.wait()
         if self.unavailable:
             return httpx2.Response(503, json={"detail": "unavailable"})
         return httpx2.Response(200, json=[{"id": self.organization}] if self.member else [])
@@ -110,6 +132,7 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LANGSMITH_CONNECTION_URL", ISSUER)
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_ID", "test-client")
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", ALLOWED_ORG)
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     server = LangSmithServer()
@@ -226,6 +249,9 @@ async def test_membership_is_rechecked_and_revocation_removes_access(langsmith_c
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     assert (await client.get("/dashboard/api/me")).status_code == 200
     server.unavailable = True
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    await server.expire_authorization(session["sub"])
+    assert (await client.get("/dashboard/api/me")).status_code == 503
     assert (await client.get("/dashboard/api/me")).status_code == 503
     assert await load_credential("langsmith_login", session["sub"]) is not None
     server.unavailable = False
@@ -270,6 +296,117 @@ async def test_changed_provider_subject_cannot_rebind_a_session(langsmith_client
     exchanged = await server.exchange(client, await server.desktop_login(client))
     session = oauth.decode_session(exchanged.json()["session"])
     server.subject = "different-person"
+    await server.expire_authorization(session["sub"])
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     assert (await client.get("/dashboard/api/me")).status_code == 401
+    assert await load_credential("langsmith_login", session["sub"]) is None
+
+
+async def test_login_is_opt_in_and_org_changes_invalidate_cached_access(
+    langsmith_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    monkeypatch.delenv("LANGSMITH_LOGIN_ORG_ID")
+    assert (await client.get("/dashboard/api/me")).status_code == 503
+    start = await client.get(
+        "/dashboard/api/auth/langsmith/login",
+        params={"desktop_handoff": oauth.pkce_s256_challenge("verifier"), "desktop_port": 43210},
+    )
+    assert start.status_code == 503
+    assert langsmith_oauth.langsmith_oauth_configured()
+    monkeypatch.setenv("LANGSMITH_LOGIN_ORG_ID", "different-org")
+    assert (await client.get("/dashboard/api/me")).status_code == 403
+
+
+async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
+    langsmith_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    session = oauth.decode_session(exchanged.json()["session"])
+    checks = server.authorizations
+    monkeypatch.setattr(langsmith_login, "refresh_guard", lambda *args: pytest.fail("refresh lock"))
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    assert await langsmith_oauth.langsmith_access_token(session["sub"]) == "access"
+    assert server.authorizations == checks
+    credential = await load_credential("langsmith_login", session["sub"])
+    assert credential is not None and credential.login_authorized_until is not None
+    assert credential.login_authorized_until <= datetime.now(UTC) + timedelta(seconds=60)
+    await server.expire_authorization(session["sub"])
+    assert (await client.get("/dashboard/api/me")).status_code == 200
+    assert server.authorizations == checks + 1
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_logout_revokes_replayed_sessions_and_runtime_grants(
+    langsmith_client, unavailable: bool
+) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    token = exchanged.json()["session"]
+    session = oauth.decode_session(token)
+    client.cookies.set(oauth.COOKIE_NAME, token, domain="dashboard.example", path="/")
+    server.unavailable = unavailable
+    response = await client.post("/dashboard/api/auth/logout")
+    assert response.status_code == 204 and oauth.COOKIE_NAME not in client.cookies
+    assert server.revocations == ([] if unavailable else ["refresh", "access"])
+    assert await load_credential("langsmith_login", session["sub"]) is None
+    client.cookies.set(oauth.COOKIE_NAME, token)
+    assert (await client.get("/dashboard/api/me")).status_code == 401
+    with pytest.raises(HTTPException, match="LangSmith login expired"):
+        await langsmith_oauth.langsmith_access_token(session["sub"])
+    assert (await client.post("/dashboard/api/auth/logout")).status_code == 204
+
+
+@pytest.mark.parametrize("replace_grant", [False, True])
+async def test_inflight_authorization_cannot_restore_or_delete_a_replaced_grant(
+    langsmith_client, replace_grant: bool
+) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    session = oauth.decode_session(exchanged.json()["session"])
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    await server.expire_authorization(session["sub"])
+    server.checking_membership, server.resume_membership = asyncio.Event(), asyncio.Event()
+    request = asyncio.create_task(client.get("/dashboard/api/me"))
+    try:
+        await asyncio.wait_for(server.checking_membership.wait(), timeout=5)
+        if replace_grant:
+            await langsmith_login.LangSmithLogin().save(
+                session["sub"],
+                {"access_token": "access", "refresh_token": "refresh", "expires_in": 3600},
+                ISSUER + "/oauth/token",
+            )
+        else:
+            assert (await client.post("/dashboard/api/auth/logout")).status_code == 204
+    finally:
+        server.resume_membership.set()
+    assert (await request).status_code == 401
+    stored = await load_credential("langsmith_login", session["sub"])
+    assert (stored is not None) == replace_grant
+    if replace_grant:
+        assert (await client.get("/dashboard/api/me")).status_code == 200
+
+
+async def test_refreshed_identity_is_checked_before_grant_is_saved(langsmith_client) -> None:
+    server, client = langsmith_client
+    exchanged = await server.exchange(client, await server.desktop_login(client))
+    session = oauth.decode_session(exchanged.json()["session"])
+    await save_credential(
+        "langsmith_login",
+        session["sub"],
+        encrypted_access_token=encrypt_token("expired"),
+        encrypted_refresh_token=encrypt_token("refresh"),
+        access_token_expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        client_id="test-client",
+        token_endpoint=ISSUER + "/oauth/token",
+        account_email="same@example.com",
+    )
+    server.subject = "different-person"
+    client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
+    assert (await client.get("/dashboard/api/me")).status_code == 401
+    assert server.refreshes == 1
     assert await load_credential("langsmith_login", session["sub"]) is None

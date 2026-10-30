@@ -64,6 +64,13 @@ class ThreadMetadata(BaseModel):
             return await BridgeStore.is_connected(self.sandbox_id)
         return True
 
+    def owner_subject(self, owner: User) -> str:
+        if self.owner_login and self.owner_login.startswith("user:"):
+            if ThreadIdentity(self.owner_login).user_id != owner.id:
+                raise PermissionError("Task identity does not match its owner")
+            return self.owner_login
+        return owner.github_login
+
     async def owner(self) -> User:
         if self.owner_type != "user":
             raise PermissionError("Task operations require a user-owned thread")

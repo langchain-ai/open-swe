@@ -393,6 +393,8 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     )
     monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
     client.metadata[COORDINATOR]["visibility"] = "private"
+    config = await service.recipient_config(COORDINATOR)
+    assert config["github_login"] == "renamed-owner"
     assert (
         await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
     ).owner_user_id == owner_id

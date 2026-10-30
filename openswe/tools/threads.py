@@ -149,6 +149,10 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         if not cfg.user_id:
             return None
         identity = ThreadIdentity(f"user:{cfg.user_id}")
+        try:
+            await identity.authorize()
+        except HTTPException:
+            return None
         user = await identity.user()
         if user is None:
             return None

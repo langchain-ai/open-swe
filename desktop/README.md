@@ -208,11 +208,13 @@ Without the profile, login still uses browser loopback handoff. macOS decides wh
 
 Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/langsmith/callback`.
 Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
-Apply migration `0088_af406b7c5892`.
+Set `LANGSMITH_LOGIN_ORG_ID=f5c798a2-2155-4999-ad27-6d466bd26e1c` for the production Agent Workspace organization.
+LangSmith login is disabled when this setting is unset, even if personal LangSmith connections are configured.
+Apply migrations through `0089_1850da6129ee`.
 Never ship the client secret in the app.
 
 Login discovers OIDC endpoints on the issuer origin and requests `openid profile email offline_access` for the API resource.
-Users must select org `f5c798a2-2155-4999-ad27-6d466bd26e1c`.
+Users must select the organization configured by `LANGSMITH_LOGIN_ORG_ID`.
 Membership requires both `/userinfo`'s acting-org claim and current `/orgs?skip_create=true` membership; the claim alone does not prove membership.
 The organization list is unpaginated.
 
@@ -222,8 +224,12 @@ No browser session is created, and the handoff cannot itself authenticate as a c
 LangSmith identities have independent internal UUID accounts, without GitHub identities or email-based linking.
 
 Encrypted `langsmith_login` grants refresh automatically and also serve managed tools.
-Every authenticated request, run dispatch, runtime call and worker grant rechecks access.
-Revocation removes the grant; temporary provider failures deny access without discarding it.
+Every authenticated request, run dispatch, runtime call and worker grant checks the stored grant.
+Successful organization authorization is cached in PostgreSQL for at most 60 seconds, bound to the current grant and configured organization; provider revocation or membership removal can take up to 60 seconds to take effect.
+Expired authorization must be revalidated; temporary provider failures deny access without extending the cache or discarding the grant.
+Only tokens nearing expiry acquire the cross-replica refresh lock, and refreshed identities are checked before storing their grants.
+Sign out deletes the stored grant, immediately denying subsequent sessions/runtime calls, and attempts remote refresh/access-token revocation at the issuer's advertised RFC 7009 endpoint.
+Remote revocation failures do not prevent local sign out; a new login is required to restore backend access.
 `/me` renews valid seven-day sessions on loading/focus; sessions inactive past expiry need login again.
 Sign out rather than disconnecting the login grant.
 
