@@ -44,7 +44,7 @@ def _handlers() -> Handlers[ChannelCall]:
     from runtime_api.linear import (
         LINEAR_AUTOMATION_RULES,
         LINEAR_SESSION_FACTS,
-        PLAN_LINEAR_AUTOMATION,
+        PLAN_LINEAR_AUTOMATIONS,
         PLAN_LINEAR_SESSION,
         RECORD_LINEAR_DELIVERY,
     )
@@ -60,7 +60,7 @@ def _handlers() -> Handlers[ChannelCall]:
     handlers.serve(LINEAR_SESSION_FACTS, linear.linear_session_facts)
     handlers.serve(PLAN_LINEAR_SESSION, linear.plan_linear_session)
     handlers.serve(LINEAR_AUTOMATION_RULES, linear.linear_automation_rules)
-    handlers.serve(PLAN_LINEAR_AUTOMATION, linear.plan_linear_automation)
+    handlers.serve(PLAN_LINEAR_AUTOMATIONS, linear.plan_linear_automations)
     return handlers
 
 

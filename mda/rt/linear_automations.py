@@ -3,10 +3,11 @@
 An automation fires on a Linear team's issue events: an issue created, or one that
 gained a label. Its trigger may also ask for labels and a project. This side reads
 the event, asks the backend for the team's automations
-(``linear_automation_rules``), and matches them. For each match the backend claims
-the automation once per delivery, within its hourly cap, writes the run's prompt
-and signs its context (``plan_linear_automation``); the channel starts the run on a
-thread of its own, so automations never touch the issue's conversation.
+(``linear_automation_rules``, which also logs the delivery), and matches them. For
+all the matches at once the backend claims each automation once per delivery,
+within its hourly cap, writes its run's prompt and signs its context
+(``plan_linear_automations``); the channel starts each run on a thread of its own,
+so automations never touch the issue's conversation.
 """
 
 import re
@@ -25,17 +26,18 @@ from managed_deepagents import (
 from pydantic import JsonValue
 from runtime_api.linear import (
     LINEAR_AUTOMATION_RULES,
-    PLAN_LINEAR_AUTOMATION,
+    PLAN_LINEAR_AUTOMATIONS,
     TEAM_KEY_PATTERN,
+    FiredLinearAutomation,
     LinearAutomation,
     LinearAutomationRulesRequest,
     LinearTrigger,
     LinearTriggerEvent,
-    PlanLinearAutomation,
+    PlanLinearAutomations,
 )
 
 from rt.intake import ask_backend
-from rt.linear import record
+from rt.linear import delivery_of, record
 
 _TEAM_KEY: Final = re.compile(TEAM_KEY_PATTERN)
 
@@ -135,39 +137,41 @@ async def start_automations(
     event: LinearIssueCreateEvent | LinearIssueUpdateEvent, thread: LinearChannelThread
 ) -> LinearEventResult:
     """Log the delivery, and start a run for each automation it fires."""
-    await record(event, thread)
     issue = IssueEvent.of(cast(Mapping[str, object], event.payload))
     if issue is None:
-        return None
+        return await record(event, thread)
     automations = (
         await ask_backend(
             LINEAR_AUTOMATION_RULES,
-            LinearAutomationRulesRequest(team=issue.team),
+            LinearAutomationRulesRequest(delivery=delivery_of(event), team=issue.team),
             msg_id=f"msg_{event.delivery_id}_automations",
         )
     ).automations
+    fired = [
+        FiredLinearAutomation(automation_id=automation.id, event=fires_on)
+        for automation in automations
+        if (fires_on := issue.firing(automation)) is not None
+    ]
+    if not fired:
+        return None
+    # A call that fails fails the delivery, so Linear sends it again: automations
+    # already claimed for it plan the same threads, which start their runs once.
+    planned_runs = (
+        await ask_backend(
+            PLAN_LINEAR_AUTOMATIONS,
+            PlanLinearAutomations(
+                delivery_id=event.delivery_id,
+                automations=fired,
+                team=issue.team,
+                issue=issue.data,
+                labels=sorted(issue.labels),
+                project=issue.project,
+            ),
+            msg_id=f"msg_{event.delivery_id}_automations_plan",
+        )
+    ).runs
     runs: list[tuple[ChannelRunInput, ChannelRunOptions]] = []
-    for automation in automations:
-        fired = issue.firing(automation)
-        if fired is None:
-            continue
-        # A call that fails fails the delivery, so Linear sends it again: automations
-        # already claimed for it plan the same threads, which start their runs once.
-        planned = (
-            await ask_backend(
-                PLAN_LINEAR_AUTOMATION,
-                PlanLinearAutomation(
-                    automation_id=automation.id,
-                    delivery_id=event.delivery_id,
-                    event=fired,
-                    team=issue.team,
-                    issue=issue.data,
-                    labels=sorted(issue.labels),
-                    project=issue.project,
-                ),
-                msg_id=f"msg_{event.delivery_id}_automation_{automation.id}",
-            )
-        ).run
+    for planned in planned_runs:
         if planned is None:
             continue
         options: ChannelRunOptions = {

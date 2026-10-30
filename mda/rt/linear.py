@@ -1,10 +1,11 @@
 """What Open SWE's Linear channel does with each Linear delivery, in this deployment.
 
-Every delivery the channel handles goes to the backend's event log
-(``record_linear_delivery``). An agent session turn starts the coding agent's run
-on the session's own thread. This side reads the turn and decides: whether its
-author may run as themselves, which repository and workspace it works in, and why
-nothing starts when nothing does, from what Open SWE knows about them
+Every delivery the channel handles goes to the backend's event log: the first call
+for it carries it, so each event takes at most two calls (``record`` logs one that
+asks nothing else). An agent session turn starts the coding agent's run on the
+session's own thread. This side reads the turn and decides: whether its author may
+run as themselves, which repository and workspace it works in, and why nothing
+starts when nothing does, from what Open SWE knows about them
 (``linear_session_facts``). It fetches the images the turn shows and writes the
 run's input. The backend checks the choice again, indexes the thread and signs the
 run's context (``plan_linear_session``). Issue events start Linear automations
@@ -284,16 +285,19 @@ async def _images(urls: list[str]) -> dict[str, dict[str, object]]:
     }
 
 
+def delivery_of(event: LinearEvent) -> LinearDelivery:
+    """The delivery as the backend logs it."""
+    return LinearDelivery(
+        key=event.key,
+        delivery_id=event.delivery_id,
+        payload=cast(dict[str, JsonValue], event.payload),
+    )
+
+
 async def record(event: LinearEvent, _thread: LinearChannelThread) -> LinearEventResult:
     """Hand the delivery to the event log; it starts nothing here."""
     await ask_backend(
-        RECORD_LINEAR_DELIVERY,
-        LinearDelivery(
-            key=event.key,
-            delivery_id=event.delivery_id,
-            payload=cast(dict[str, JsonValue], event.payload),
-        ),
-        msg_id=f"msg_{event.delivery_id}_record",
+        RECORD_LINEAR_DELIVERY, delivery_of(event), msg_id=f"msg_{event.delivery_id}_record"
     )
     return None
 
@@ -302,14 +306,16 @@ async def start_session(
     event: LinearSessionCreatedEvent | LinearSessionPromptedEvent, thread: LinearChannelThread
 ) -> LinearEventResult:
     """The run a session turn starts on its thread, or why it starts none."""
-    await record(event, thread)
     turn = SessionTurn.of(event, thread.id)
     if turn is None:
+        await record(event, thread)
         return _declined(UNREADABLE_SESSION)
     facts = await ask_backend(
         LINEAR_SESSION_FACTS,
         LinearSessionFactsRequest(
-            thread_id=turn.turn.thread_id, author_email=turn.turn.author.email
+            delivery=delivery_of(event),
+            thread_id=turn.turn.thread_id,
+            author_email=turn.turn.author.email,
         ),
         msg_id=f"msg_{event.delivery_id}_facts",
     )

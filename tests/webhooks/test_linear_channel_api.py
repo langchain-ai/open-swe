@@ -10,13 +10,19 @@ import pytest
 from fastapi import FastAPI
 from pydantic import JsonValue
 from runtime_api.linear import (
+    LINEAR_AUTOMATION_RULES,
     LINEAR_SESSION_FACTS,
+    PLAN_LINEAR_AUTOMATIONS,
     PLAN_LINEAR_SESSION,
     RECORD_LINEAR_DELIVERY,
+    LinearAutomationRules,
+    LinearAutomationRun,
     LinearSessionDeclined,
     LinearSessionFacts,
     LinearSessionRun,
     LinearSessionStart,
+    PlanLinearAutomation,
+    PlannedLinearAutomations,
     RepositoryChoice,
 )
 from standardwebhooks import Webhook
@@ -26,6 +32,7 @@ from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.linear import session
 from openswe.mda_channels import api
+from openswe.schedules import store
 from openswe.users import User, UserIdentity
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 
@@ -47,6 +54,14 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
 
 def _delivery(key: str, payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {"key": key, "delivery_id": "delivery-1", "payload": payload}
+
+
+def _facts_request() -> dict[str, JsonValue]:
+    return {
+        "delivery": _delivery("AgentSessionEvent.created", {"type": "AgentSessionEvent"}),
+        "thread_id": _THREAD,
+        "author_email": "ada@example.com",
+    }
 
 
 def _turn(body: str = "@Open SWE fix it") -> dict[str, JsonValue]:
@@ -154,11 +169,14 @@ async def test_a_session_turns_facts_are_what_open_swe_knows(
     personal = AsyncMock(side_effect=[{"owner": "ada", "name": "personal"}])
     monkeypatch.setattr(User, "default_repo", personal)
 
-    body = {"thread_id": _THREAD, "author_email": "ada@example.com"}
+    body = _facts_request()
     response = await _post(app, LINEAR_SESSION_FACTS.path, body)
 
     facts = LinearSessionFacts.model_validate(response.json())
     assert facts.author == "signed_in"
+    # The facts call logs the turn's delivery, so a turn takes two calls, not three.
+    app.state.record.assert_awaited_once()
+    assert app.state.record.await_args.kwargs["delivery_id"] == "delivery-1"
     assert (facts.thread_repository, facts.thread_workspace) == ("acme/api", "core")
     # The author's default for the thread's workspace.
     assert facts.personal_default == RepositoryChoice(repository="ada/personal", workspace="core")
@@ -174,7 +192,7 @@ async def test_a_session_thread_it_cant_read_fails_the_turn(
         session.common.ThreadRecord, "read", AsyncMock(side_effect=httpx.ReadTimeout("slow"))
     )
 
-    body = {"thread_id": _THREAD, "author_email": "ada@example.com"}
+    body = _facts_request()
     with pytest.raises(httpx.ReadTimeout):
         await _post(app, LINEAR_SESSION_FACTS.path, body)
 
@@ -192,7 +210,7 @@ async def test_an_author_who_cant_run_as_themselves_learns_nothing_more(
     thread = AsyncMock()
     monkeypatch.setattr(session.common.ThreadRecord, "read", thread)
 
-    body = {"thread_id": _THREAD, "author_email": "ada@example.com"}
+    body = _facts_request()
     facts = LinearSessionFacts.model_validate(
         (await _post(app, LINEAR_SESSION_FACTS.path, body)).json()
     )
@@ -287,3 +305,53 @@ async def test_the_backend_checks_the_channels_choice_before_it_signs_a_run(
     assert LinearSessionStart.model_validate(response.json()).answer == declined
     # Refused before the thread is adopted or a run signed.
     adopt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_teams_automation_rules_call_logs_the_issue_event(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(store, "linear_automation_rules", AsyncMock(return_value=[]))
+    body = {"delivery": _delivery("Issue.create", {"type": "Issue"}), "team": "ENG"}
+
+    response = await _post(app, LINEAR_AUTOMATION_RULES.path, body)
+
+    assert LinearAutomationRules.model_validate(response.json()).automations == []
+    app.state.record.assert_awaited_once()
+    assert app.state.record.await_args.kwargs["delivery_id"] == "delivery-1"
+
+
+@pytest.mark.asyncio
+async def test_every_automation_an_issue_event_fires_is_planned_in_one_call(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = LinearAutomationRun(
+        thread_id=uuid.uuid4(), input={"messages": []}, context={}, metadata={}
+    )
+
+    async def plan(each: PlanLinearAutomation) -> LinearAutomationRun | None:
+        # The second automation's claim is already taken for this delivery.
+        return run if each.automation_id == "a1" else None
+
+    planned = AsyncMock(side_effect=plan)
+    monkeypatch.setattr(store, "plan_linear_automation", planned)
+    body: dict[str, JsonValue] = {
+        "delivery_id": "delivery-1",
+        "automations": [
+            {"automation_id": "a1", "event": "issue.created"},
+            {"automation_id": "a2", "event": "issue.labeled"},
+        ],
+        "team": "ENG",
+        "issue": {"id": "issue-1"},
+        "labels": ["bug"],
+    }
+
+    response = await _post(app, PLAN_LINEAR_AUTOMATIONS.path, body)
+
+    # One run per automation, in order: none where the backend starts nothing.
+    assert PlannedLinearAutomations.model_validate(response.json()).runs == [run, None]
+    each = [call.args[0] for call in planned.await_args_list]
+    assert [(p.automation_id, p.event, p.delivery_id, p.team, p.labels) for p in each] == [
+        ("a1", "issue.created", "delivery-1", "ENG", ["bug"]),
+        ("a2", "issue.labeled", "delivery-1", "ENG", ["bug"]),
+    ]
