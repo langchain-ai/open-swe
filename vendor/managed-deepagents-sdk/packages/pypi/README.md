@@ -939,23 +939,36 @@ from Agent Auth are cached for up to 5 minutes. A matched event fails closed if
 the bot ID is missing or invalid. Calling `channels.github()` without handlers preserves
 receipt-only behavior and needs only the webhook secret.
 
-Supported keys:
+Supported keys are `<event>.<action>`, for every action GitHub sends of these
+events:
 
-- Issues: `issues.opened`, `issues.edited`, `issues.reopened`, `issues.labeled`,
-  `issue_comment.created`, `issue_comment.edited`.
-- Pull requests: `pull_request.opened`, `pull_request.edited`,
-  `pull_request.reopened`, `pull_request.ready_for_review`,
-  `pull_request.converted_to_draft`, `pull_request.synchronize`,
-  `pull_request.labeled`, `pull_request.closed`.
-- Reviews: `pull_request_review.submitted`, `pull_request_review.edited`,
-  `pull_request_review.dismissed`, `pull_request_review_comment.created`,
-  `pull_request_review_comment.edited`.
-- Code and CI: `push`, `status`, `check_run.completed`, `check_suite.completed`,
-  `workflow_run.completed`. `push` and `status` have no action, so their key is
-  the event name. A CI event continues a pull request's conversation when it
-  ran for exactly one pull request.
+- `issues`: `opened`, `edited`, `reopened`, `closed`, `deleted`, `transferred`,
+  `labeled`, `unlabeled`, `assigned`, `unassigned`, `locked`, `unlocked`,
+  `milestoned`, `demilestoned`, `pinned`, `unpinned`, `typed`, `untyped`.
+- `issue_comment`: `created`, `edited`, `deleted`.
+- `pull_request`: `opened`, `edited`, `reopened`, `closed`, `ready_for_review`,
+  `converted_to_draft`, `synchronize`, `labeled`, `unlabeled`, `assigned`,
+  `unassigned`, `review_requested`, `review_request_removed`, `locked`,
+  `unlocked`, `milestoned`, `demilestoned`, `enqueued`, `dequeued`,
+  `auto_merge_enabled`, `auto_merge_disabled`.
+- `pull_request_review`: `submitted`, `edited`, `dismissed`.
+- `pull_request_review_comment`: `created`, `edited`, `deleted`.
+- Code and CI: `push` and `status`, which have no action, so their key is the
+  event name; `check_run`: `created`, `completed`, `rerequested`,
+  `requested_action`; `check_suite`: `requested`, `rerequested`, `completed`;
+  `workflow_run`: `requested`, `in_progress`, `completed`. A CI event continues
+  a pull request's conversation when it ran for exactly one pull request.
 - Merge queue: `merge_group.checks_requested`, `merge_group.destroyed`. A
   merge group belongs to no conversation, so each delivery gets its own thread.
+- Installation: `installation.created`, `installation.deleted`, `installation.suspend`,
+  `installation.unsuspend`, `installation.new_permissions_accepted`,
+  `installation_repositories.added`, `installation_repositories.removed`.
+  GitHub sends these to every App, so handling one needs no subscription or
+  permission. They are about the installation, not a repository: the handler
+  gets a `GitHubInstallationEvent`, with the `account` the App is installed on
+  instead of a `repository`. A channel limited to `app["repositories"]` gets
+  them too, each delivery gets its own thread, and `on_received` and
+  `on_finish` aren't called for them.
 
 GitHub sends no event for a mention, so each event lists the handles the
 text it wrote mentions in `event.mentions`: the body of a new or edited
@@ -1556,8 +1569,8 @@ starts the run the service answers with: `{"input", "context"?, "metadata"?,
 agent session that text, non-blank and up to 2000 characters, instead of its own
 "I'm not set up to work on this request."
 A GitHub event also carries what a handler gets beside the payload: its
-`"action"`, `"repository"`, `"sender"` and `"mentions"`, so a service checks them
-as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
+`"action"`, `"repository"` (`"account"` for an installation event), `"sender"`
+and `"mentions"`, so a service checks them as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
 takes requests from older deployments: read `event.get("mentions", [])`. A
 Slack message carries its `"text"`, `"userId"`, `"channelId"`, `"messageTs"`,
 `"threadTs"` and `"files"` the same way, with Slack's own event as `"payload"`;

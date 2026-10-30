@@ -10,10 +10,15 @@ from typing_extensions import TypedDict, TypeVar
 
 from managed_deepagents._channels.actor import GitHubActor, GitHubEndpointActor
 from managed_deepagents._channels.github_schema import (
+    GitHubInstallationEventKey,
+    GitHubInstallationPayload,
+    GitHubInstallationRepository,
     GitHubPayload,
     SupportedEventKey,
     _CheckRunPayload,
     _CheckSuitePayload,
+    _InstallationPayload,
+    _InstallationRepositoriesPayload,
     _IssueCommentPayload,
     _IssuePayload,
     _LabeledIssuePayload,
@@ -34,6 +39,9 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.types import ChannelName
 
 _Payload = TypeVar("_Payload", bound=GitHubPayload, default=GitHubPayload)
+_InstallationPayloadT = TypeVar(
+    "_InstallationPayloadT", bound=GitHubInstallationPayload, default=GitHubInstallationPayload
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,41 @@ class GitHubEvent(Generic[_Payload]):
     a pull request it opened. Such events reach handlers only when the channel
     is created with ``include_own_events=True``; a handler that answers
     comments skips them, so the agent doesn't answer itself."""
+
+    @property
+    def actor(self) -> GitHubActor:
+        """The ``sender``, in the shape every channel's ``actor`` has."""
+        return GitHubActor(id=str(self.sender.id), name=self.sender.login, type=self.sender.type)
+
+
+@dataclass(frozen=True)
+class GitHubAccount:
+    """The user or organization an App is installed on."""
+
+    id: int
+    login: str | None
+    """``None`` for an enterprise account, which has a ``slug`` instead."""
+
+
+@dataclass(frozen=True)
+class GitHubInstallationEvent(Generic[_InstallationPayloadT]):
+    """An event about the App's installation rather than a repository: it was
+    installed, removed, suspended, unsuspended or given new permissions, or
+    repositories were added to it or removed from it.
+
+    GitHub sends these to every App, so handling one subscribes to nothing and
+    needs no permission. It belongs to no issue or pull request: each delivery
+    gets its own thread, and nothing is posted on GitHub for it.
+    """
+
+    key: GitHubInstallationEventKey
+    name: str
+    action: str
+    delivery_id: str
+    installation_id: int
+    account: GitHubAccount
+    sender: GitHubSender
+    payload: _InstallationPayloadT
 
     @property
     def actor(self) -> GitHubActor:
@@ -148,6 +191,11 @@ class _EndpointRepository(TypedDict):
     private: bool
 
 
+class _EndpointAccount(TypedDict):
+    id: int
+    login: str | None
+
+
 class _EndpointSender(TypedDict):
     id: int
     login: str
@@ -165,6 +213,9 @@ class GitHubEndpointFields(TypedDict, total=False):
     action: str
     """Absent for events without an action, such as ``push``."""
     repository: _EndpointRepository
+    """Absent for installation events, which have ``account`` instead."""
+    account: _EndpointAccount
+    """Installation events only: the account the App is installed on."""
     sender: _EndpointSender
     actor: GitHubEndpointActor
     """As ``GitHubEvent.actor``: the ``sender``, in the shape every channel's actor has."""
@@ -191,13 +242,44 @@ class GitHubEndpointEvent(GitHubEndpointFields, Generic[_Key, _EventPayload]):
 GitHubEndpointRequest = (
     EndpointRequest[
         GitHubEndpointEvent[
-            Literal["issues.opened", "issues.edited", "issues.reopened"], _IssuePayload
+            Literal[
+                "issues.opened",
+                "issues.edited",
+                "issues.reopened",
+                "issues.closed",
+                "issues.deleted",
+                "issues.transferred",
+                "issues.pinned",
+                "issues.unpinned",
+                "issues.assigned",
+                "issues.unassigned",
+                "issues.locked",
+                "issues.unlocked",
+                "issues.milestoned",
+                "issues.demilestoned",
+                "issues.typed",
+                "issues.untyped",
+            ],
+            _IssuePayload,
         ]
     ]
-    | EndpointRequest[GitHubEndpointEvent[Literal["issues.labeled"], _LabeledIssuePayload]]
     | EndpointRequest[
         GitHubEndpointEvent[
-            Literal["issue_comment.created", "issue_comment.edited"], _IssueCommentPayload
+            Literal[
+                "issues.labeled",
+                "issues.unlabeled",
+            ],
+            _LabeledIssuePayload,
+        ]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal[
+                "issue_comment.created",
+                "issue_comment.edited",
+                "issue_comment.deleted",
+            ],
+            _IssueCommentPayload,
         ]
     ]
     | EndpointRequest[
@@ -210,12 +292,30 @@ GitHubEndpointRequest = (
                 "pull_request.converted_to_draft",
                 "pull_request.synchronize",
                 "pull_request.closed",
+                "pull_request.assigned",
+                "pull_request.unassigned",
+                "pull_request.review_requested",
+                "pull_request.review_request_removed",
+                "pull_request.locked",
+                "pull_request.unlocked",
+                "pull_request.milestoned",
+                "pull_request.demilestoned",
+                "pull_request.enqueued",
+                "pull_request.dequeued",
+                "pull_request.auto_merge_enabled",
+                "pull_request.auto_merge_disabled",
             ],
             _PullRequestPayload,
         ]
     ]
     | EndpointRequest[
-        GitHubEndpointEvent[Literal["pull_request.labeled"], _LabeledPullRequestPayload]
+        GitHubEndpointEvent[
+            Literal[
+                "pull_request.labeled",
+                "pull_request.unlabeled",
+            ],
+            _LabeledPullRequestPayload,
+        ]
     ]
     | EndpointRequest[
         GitHubEndpointEvent[
@@ -229,20 +329,70 @@ GitHubEndpointRequest = (
     ]
     | EndpointRequest[
         GitHubEndpointEvent[
-            Literal["pull_request_review_comment.created", "pull_request_review_comment.edited"],
+            Literal[
+                "pull_request_review_comment.created",
+                "pull_request_review_comment.edited",
+                "pull_request_review_comment.deleted",
+            ],
             _ReviewCommentPayload,
         ]
     ]
     | EndpointRequest[GitHubEndpointEvent[Literal["push"], _PushPayload]]
     | EndpointRequest[GitHubEndpointEvent[Literal["status"], _StatusPayload]]
-    | EndpointRequest[GitHubEndpointEvent[Literal["check_run.completed"], _CheckRunPayload]]
-    | EndpointRequest[GitHubEndpointEvent[Literal["check_suite.completed"], _CheckSuitePayload]]
-    | EndpointRequest[GitHubEndpointEvent[Literal["workflow_run.completed"], _WorkflowPayload]]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal[
+                "check_run.completed",
+                "check_run.created",
+                "check_run.rerequested",
+                "check_run.requested_action",
+            ],
+            _CheckRunPayload,
+        ]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal[
+                "check_suite.completed",
+                "check_suite.requested",
+                "check_suite.rerequested",
+            ],
+            _CheckSuitePayload,
+        ]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal[
+                "workflow_run.completed",
+                "workflow_run.requested",
+                "workflow_run.in_progress",
+            ],
+            _WorkflowPayload,
+        ]
+    ]
     | EndpointRequest[
         GitHubEndpointEvent[Literal["merge_group.checks_requested"], _MergeGroupPayload]
     ]
     | EndpointRequest[
         GitHubEndpointEvent[Literal["merge_group.destroyed"], _MergeGroupDestroyedPayload]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal[
+                "installation.created",
+                "installation.deleted",
+                "installation.suspend",
+                "installation.unsuspend",
+                "installation.new_permissions_accepted",
+            ],
+            _InstallationPayload,
+        ]
+    ]
+    | EndpointRequest[
+        GitHubEndpointEvent[
+            Literal["installation_repositories.added", "installation_repositories.removed"],
+            _InstallationRepositoriesPayload,
+        ]
     ]
 )
 """What a GitHub channel POSTs an endpoint: its event key picks the payload's type,
@@ -253,8 +403,13 @@ GitHubEventCallback = Callable[
     [GitHubEvent[_Payload], GitHubChannelThread],
     GitHubEventResult | Awaitable[GitHubEventResult],
 ]
+GitHubInstallationEventCallback = Callable[
+    [GitHubInstallationEvent[_InstallationPayloadT], GitHubChannelThread],
+    GitHubEventResult | Awaitable[GitHubEventResult],
+]
 
 __all__ = [
+    "GitHubAccount",
     "GitHubAppOptions",
     "GitHubChannelThread",
     "GitHubCheckRunPayload",
@@ -265,6 +420,13 @@ __all__ = [
     "GitHubEventCallback",
     "GitHubEventResult",
     "GitHubHandlers",
+    "GitHubInstallationEvent",
+    "GitHubInstallationEventCallback",
+    "GitHubInstallationEventKey",
+    "GitHubInstallationEventPayload",
+    "GitHubInstallationPayload",
+    "GitHubInstallationRepositoriesPayload",
+    "GitHubInstallationRepository",
     "GitHubIssueCommentPayload",
     "GitHubIssuePayload",
     "GitHubLabeledIssuePayload",
@@ -290,8 +452,23 @@ GitHubHandlers = TypedDict(
         "issues.edited": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issues.reopened": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issues.labeled": GitHubEventCallback[_LabeledIssuePayload] | EventEndpoint,
+        "issues.closed": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.deleted": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.transferred": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.pinned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.unpinned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.assigned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.unassigned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.unlabeled": GitHubEventCallback[_LabeledIssuePayload] | EventEndpoint,
+        "issues.locked": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.unlocked": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.milestoned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.demilestoned": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.typed": GitHubEventCallback[_IssuePayload] | EventEndpoint,
+        "issues.untyped": GitHubEventCallback[_IssuePayload] | EventEndpoint,
         "issue_comment.created": GitHubEventCallback[_IssueCommentPayload] | EventEndpoint,
         "issue_comment.edited": GitHubEventCallback[_IssueCommentPayload] | EventEndpoint,
+        "issue_comment.deleted": GitHubEventCallback[_IssueCommentPayload] | EventEndpoint,
         "pull_request.opened": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
         "pull_request.edited": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
         "pull_request.reopened": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
@@ -300,6 +477,21 @@ GitHubHandlers = TypedDict(
         "pull_request.synchronize": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
         "pull_request.labeled": GitHubEventCallback[_LabeledPullRequestPayload] | EventEndpoint,
         "pull_request.closed": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.assigned": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.unassigned": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.review_requested": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.review_request_removed": GitHubEventCallback[_PullRequestPayload]
+        | EventEndpoint,
+        "pull_request.unlabeled": GitHubEventCallback[_LabeledPullRequestPayload] | EventEndpoint,
+        "pull_request.locked": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.unlocked": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.milestoned": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.demilestoned": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.enqueued": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.dequeued": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.auto_merge_enabled": GitHubEventCallback[_PullRequestPayload] | EventEndpoint,
+        "pull_request.auto_merge_disabled": GitHubEventCallback[_PullRequestPayload]
+        | EventEndpoint,
         "pull_request_review.submitted": GitHubEventCallback[_ReviewPayload] | EventEndpoint,
         "pull_request_review.edited": GitHubEventCallback[_ReviewPayload] | EventEndpoint,
         "pull_request_review.dismissed": GitHubEventCallback[_ReviewPayload] | EventEndpoint,
@@ -307,13 +499,42 @@ GitHubHandlers = TypedDict(
         | EventEndpoint,
         "pull_request_review_comment.edited": GitHubEventCallback[_ReviewCommentPayload]
         | EventEndpoint,
+        "pull_request_review_comment.deleted": GitHubEventCallback[_ReviewCommentPayload]
+        | EventEndpoint,
         "push": GitHubEventCallback[_PushPayload] | EventEndpoint,
         "status": GitHubEventCallback[_StatusPayload] | EventEndpoint,
         "check_run.completed": GitHubEventCallback[_CheckRunPayload] | EventEndpoint,
+        "check_run.created": GitHubEventCallback[_CheckRunPayload] | EventEndpoint,
+        "check_run.rerequested": GitHubEventCallback[_CheckRunPayload] | EventEndpoint,
+        "check_run.requested_action": GitHubEventCallback[_CheckRunPayload] | EventEndpoint,
         "check_suite.completed": GitHubEventCallback[_CheckSuitePayload] | EventEndpoint,
+        "check_suite.requested": GitHubEventCallback[_CheckSuitePayload] | EventEndpoint,
+        "check_suite.rerequested": GitHubEventCallback[_CheckSuitePayload] | EventEndpoint,
         "workflow_run.completed": GitHubEventCallback[_WorkflowPayload] | EventEndpoint,
+        "workflow_run.requested": GitHubEventCallback[_WorkflowPayload] | EventEndpoint,
+        "workflow_run.in_progress": GitHubEventCallback[_WorkflowPayload] | EventEndpoint,
         "merge_group.checks_requested": GitHubEventCallback[_MergeGroupPayload] | EventEndpoint,
         "merge_group.destroyed": GitHubEventCallback[_MergeGroupDestroyedPayload] | EventEndpoint,
+        "installation.created": GitHubInstallationEventCallback[_InstallationPayload]
+        | EventEndpoint,
+        "installation.deleted": GitHubInstallationEventCallback[_InstallationPayload]
+        | EventEndpoint,
+        "installation.suspend": GitHubInstallationEventCallback[_InstallationPayload]
+        | EventEndpoint,
+        "installation.unsuspend": GitHubInstallationEventCallback[_InstallationPayload]
+        | EventEndpoint,
+        "installation.new_permissions_accepted": GitHubInstallationEventCallback[
+            _InstallationPayload
+        ]
+        | EventEndpoint,
+        "installation_repositories.added": GitHubInstallationEventCallback[
+            _InstallationRepositoriesPayload
+        ]
+        | EventEndpoint,
+        "installation_repositories.removed": GitHubInstallationEventCallback[
+            _InstallationRepositoriesPayload
+        ]
+        | EventEndpoint,
     },
     total=False,
 )
@@ -343,3 +564,5 @@ GitHubMergeGroupPayload = _MergeGroupPayload
 GitHubMergeGroupDestroyedPayload = _MergeGroupDestroyedPayload
 GitHubPushPayload = _PushPayload
 GitHubStatusPayload = _StatusPayload
+GitHubInstallationEventPayload = _InstallationPayload
+GitHubInstallationRepositoriesPayload = _InstallationRepositoriesPayload

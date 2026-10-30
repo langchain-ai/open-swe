@@ -16,24 +16,27 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-import pytest
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.github import (
     ACT_ON_GITHUB_DELIVERY,
     RECORD_GITHUB_DELIVERY,
     ActOnGitHubDelivery,
-    GitHubAutomationRun,
     GitHubDelivery,
     GitHubDeliveryFacts,
     GitHubIssueRunRequest,
+    GitHubThreadRun,
     PlannedGitHubIssueRun,
 )
 from standardwebhooks import Webhook
 from starlette.types import ASGIApp
+
+if TYPE_CHECKING:
+    # The E2E harness imports this module without the dev extras.
+    import pytest
 
 SERVICE_SECRET = "6d" * 32  # noqa: S105 - test value
 
@@ -63,7 +66,11 @@ class GitHubDelivered:
     issue_run: PlannedGitHubIssueRun | None
     # Whether the delivery may fire automations, and the runs the backend planned for them.
     automations: bool = False
-    automation_runs: tuple[GitHubAutomationRun, ...] = ()
+    automation_runs: tuple[GitHubThreadRun, ...] = ()
+    # Whether the delivery is a pull request comment to route, and the run the
+    # backend planned for it on the pull request's own thread.
+    comment: bool = False
+    comment_run: GitHubThreadRun | None = None
 
 
 async def _call[Request: BaseModel, Response: BaseModel](
@@ -120,8 +127,9 @@ async def deliver_as_mda(
         )
         routed = MDA_ROUTES.route(event_type, delivery.payload, facts, from_app=from_app)
         planned = None
-        automation_runs: list[GitHubAutomationRun] = []
-        if routed.work or routed.automations or routed.issue_run:
+        automation_runs: list[GitHubThreadRun] = []
+        comment_run = None
+        if routed.work or routed.comment or routed.automations or routed.issue_run:
             issue_run = (
                 GitHubIssueRunRequest(thread_id=thread_id or uuid.uuid4(), waiting=waiting)
                 if routed.issue_run
@@ -133,6 +141,7 @@ async def deliver_as_mda(
                 ActOnGitHubDelivery(
                     **delivery.model_dump(),
                     work=list(routed.work),
+                    comment=routed.comment,
                     mentioned=routed.mentioned,
                     automations=routed.automations,
                     issue_run=issue_run,
@@ -142,12 +151,15 @@ async def deliver_as_mda(
             )
             planned = acted.issue_run
             automation_runs = acted.automations
+            comment_run = acted.comment_run
     return GitHubDelivered(
         facts=facts,
         work=tuple(routed.work),
         issue_run=planned,
         automations=routed.automations,
         automation_runs=tuple(automation_runs),
+        comment=routed.comment,
+        comment_run=comment_run,
     )
 
 

@@ -8,7 +8,9 @@ pull request comment's run, which the backend runs once per delivery; whether it
 fire automations; and for an ``@openswe`` mention on an issue, the coding agent's run
 on the issue's conversation. The backend checks and signs the runs, and this side
 starts them: each automation's on a thread of its own, the issue's on its
-conversation. So a delivery takes at most two calls.
+conversation. So a delivery takes at most two calls. An installation event, sent
+when the App is installed, removed or suspended or its repositories change, is
+logged the same way and drops the backend's cached repository listings.
 """
 
 from typing import Final, cast
@@ -20,6 +22,7 @@ from managed_deepagents import (
     GitHubChannelThread,
     GitHubEvent,
     GitHubEventResult,
+    GitHubInstallationEvent,
     GitHubPayload,
 )
 from pydantic import JsonValue
@@ -76,6 +79,28 @@ async def on_event[Payload: GitHubPayload](
     runs = [_issue_run(acted.issue_run)] if acted.issue_run and acted.issue_run.starts else []
     runs += [_automation_run(run) for run in acted.automations]
     return runs or None
+
+
+async def on_installation_event(
+    event: GitHubInstallationEvent, _thread: GitHubChannelThread
+) -> GitHubEventResult:
+    """Log the delivery, and start the backend's work it routes to; it starts no run."""
+    delivery = GitHubDelivery(
+        event=event.name,
+        delivery_id=event.delivery_id,
+        payload=cast(dict[str, JsonValue], event.payload),
+    )
+    facts = await ask_backend(
+        RECORD_GITHUB_DELIVERY, delivery, msg_id=f"msg_{event.delivery_id}_record"
+    )
+    routed = route(event.name, delivery.payload, facts, from_app=False)
+    if routed.work:
+        await ask_backend(
+            ACT_ON_GITHUB_DELIVERY,
+            ActOnGitHubDelivery(**delivery.model_dump(), work=list(routed.work)),
+            msg_id=f"msg_{event.delivery_id}_act",
+        )
+    return None
 
 
 def _options(run: GitHubIssueRun | GitHubAutomationRun) -> ChannelRunOptions:

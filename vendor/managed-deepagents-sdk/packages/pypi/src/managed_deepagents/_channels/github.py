@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
@@ -19,19 +19,23 @@ from managed_deepagents._channels.github_connections import (
     GITHUB_TOKEN_SLUG,
     github_app_connection_slug,
 )
-from managed_deepagents._channels.github_events import github_event
+from managed_deepagents._channels.github_events import github_event, github_installation_event
 from managed_deepagents._channels.github_schema import (
+    INSTALLATION_EVENT_KEYS,
     SUPPORTED_EVENT_KEYS,
+    GitHubInstallationEventKey,
     github_identifier_adapter,
     github_receipt_adapter,
 )
 from managed_deepagents._channels.github_types import (
+    GitHubAccount,
     GitHubAppOptions,
     GitHubChannelThread,
     GitHubEndpointFields,
     GitHubEvent,
-    GitHubEventCallback,
+    GitHubEventResult,
     GitHubHandlers,
+    GitHubInstallationEvent,
     GitHubRepository,
     GitHubSender,
     SupportedEventKey,
@@ -73,6 +77,12 @@ if TYPE_CHECKING:
 
 _MAX_SAFE_INTEGER = 9007199254740991
 
+_Handler = Callable[
+    ["GitHubEvent | GitHubInstallationEvent", GitHubChannelThread],
+    "GitHubEventResult | Awaitable[GitHubEventResult]",
+]
+"""A handler of the channel's: a repository event's or an installation event's."""
+
 
 def github_channel(
     *,
@@ -109,7 +119,7 @@ def github_channel(
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing. Events on a
             conversation that waits on an interrupt start nothing either way.
-        on_finish: A delivery of a handled event is done, once, with the
+        on_finish: A delivery of a handled repository event is done, once, with the
             event, its thread, the run it started and how that run ended, as
             LangGraph names it, and the decisions the thread waits on. A
             delivery that started no run, such as one whose handler returned
@@ -117,7 +127,7 @@ def github_channel(
             as the comment that a decision is pending, in the background;
             failures are logged. See ``http_channel``'s ``on_finish`` for its
             limits.
-        on_received: A delivery of a handled event reached its thread, once,
+        on_received: A delivery of a handled repository event reached its thread, once,
             with the event and its thread, before MDA reads the thread or asks
             the handler: the moment to acknowledge it, such as with a 👀
             reaction. It fires even when the thread then waits on an
@@ -139,13 +149,13 @@ def github_channel(
             },
         )
     """
-    handlers: Mapping[str, GitHubEventCallback] = resolve_endpoints(
+    handlers: Mapping[str, _Handler] = resolve_endpoints(
         "GitHub",
         # By key; the channel calls each only with its own key's events.
-        cast("Mapping[str, GitHubEventCallback | EventEndpoint]", on_event or {}),
+        cast("Mapping[str, _Handler | EventEndpoint]", on_event or {}),
         _endpoint_fields,
     )
-    check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS)
+    check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS | INSTALLATION_EVENT_KEYS)
     app_setup = github_app_setup(handlers, app)
     repositories = frozenset(app_setup["repositories"]) if "repositories" in app_setup else None
 
@@ -243,9 +253,20 @@ async def _post_paused_notice(target: JsonValue, delivery: HttpDelivery) -> None
     await _post_interrupted_notice(target, delivery, "interrupted")
 
 
-def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
+def _endpoint_fields(event: GitHubEvent | GitHubInstallationEvent) -> GitHubEndpointFields:
     """The fields of a GitHub event its endpoints are sent beside key, delivery ID
     and payload: the one place they're listed, as TypeScript's ``ENDPOINT_EVENT_FIELDS``."""
+    if isinstance(event, GitHubInstallationEvent):
+        return {
+            "action": event.action,
+            "account": {"id": event.account.id, "login": event.account.login},
+            "sender": {
+                "id": event.sender.id,
+                "login": event.sender.login,
+                "type": event.sender.type,
+            },
+            "actor": endpoint_actor(event.actor),
+        }
     fields: GitHubEndpointFields = {
         "repository": {
             "id": event.repository.id,
@@ -332,7 +353,7 @@ def _sender_user_id(sender: GitHubSender) -> str:
 
 async def _parse(
     ctx: HttpChannelRequest,
-    handlers: Mapping[str, GitHubEventCallback],
+    handlers: Mapping[str, _Handler],
     channel_name: str,
     repositories: frozenset[str] | None,
     include_own_events: bool,
@@ -360,11 +381,20 @@ async def _parse(
     if handlers.get(key) is None:
         return {"type": "ignore", "response": response}
 
-    parsed_event = github_event(key, record, envelope["delivery_id"])
-
-    # Events from repositories the channel is not limited to start nothing.
-    if repositories is not None and parsed_event.repository.full_name.lower() not in repositories:
-        return {"type": "ignore", "response": response}
+    parsed_event: GitHubEvent | GitHubInstallationEvent
+    if key in INSTALLATION_EVENT_KEYS:
+        # About the whole installation, so a channel limited to repositories gets it too.
+        parsed_event = github_installation_event(
+            cast("GitHubInstallationEventKey", key), record, envelope["delivery_id"]
+        )
+    else:
+        parsed_event = github_event(key, record, envelope["delivery_id"])
+        # Events from repositories the channel is not limited to start nothing.
+        if (
+            repositories is not None
+            and parsed_event.repository.full_name.lower() not in repositories
+        ):
+            return {"type": "ignore", "response": response}
 
     # The App's own activity starts nothing unless the channel asks for it, so
     # the agent doesn't trigger itself.
@@ -375,7 +405,8 @@ async def _parse(
         )
     bot_id = github_identifier_adapter.validate_python(int(configured_bot_id), strict=True)
     if parsed_event.sender.id == bot_id:
-        if not include_own_events:
+        # An installation event is a person's, never the App's own.
+        if not include_own_events or not isinstance(parsed_event, GitHubEvent):
             return {"type": "ignore", "response": response}
         parsed_event = replace(parsed_event, from_app=True)
 
@@ -386,13 +417,15 @@ async def _parse(
     # conversation. Other events get their own thread, keyed by the delivery so
     # a redelivery still finds the run it started.
     delivery_id = envelope["delivery_id"]
-    number = _conversation_number(parsed_event)
+    number = _conversation_number(parsed_event) if isinstance(parsed_event, GitHubEvent) else None
     thread_id = channel_thread_id(
         channel_name,
-        f"delivery/{delivery_id}" if number is None else f"{parsed_event.repository.id}/{number}",
+        f"delivery/{delivery_id}"
+        if number is None or not isinstance(parsed_event, GitHubEvent)
+        else f"{parsed_event.repository.id}/{number}",
     )
     target: dict[str, JsonValue] | None = None
-    if number is not None:
+    if number is not None and isinstance(parsed_event, GitHubEvent):
         target = {"repository": parsed_event.repository.full_name, "number": number}
     # What the run starts with is decided once MDA knows the thread takes a new
     # turn.
@@ -414,12 +447,12 @@ async def _parse(
 
 
 async def _handler_input(
-    handlers: Mapping[str, GitHubEventCallback],
+    handlers: Mapping[str, _Handler],
     raw_event: JsonValue | None,
     thread: GitHubChannelThread,
 ) -> ChannelRunResult | None:
     """What the event's handler starts a run with; ``None`` when it skips or fails."""
-    event = _event(raw_event)
+    event = _event(raw_event) or _installation_event(raw_event)
     handler = None if event is None else handlers.get(event.key)
     if event is None or handler is None:
         return None
@@ -435,8 +468,12 @@ def _delivery_id(raw_event: JsonValue | None) -> str | None:
 
 
 def _event(raw_event: JsonValue | None) -> GitHubEvent | None:
-    """The parsed event a delivery carries, as callbacks may change it."""
-    if not isinstance(raw_event, Mapping):
+    """The parsed repository event a delivery carries, as callbacks may change it.
+
+    ``None`` for an installation event, so ``on_received`` and ``on_finish`` get
+    only repository events.
+    """
+    if not isinstance(raw_event, Mapping) or raw_event.get("key") in INSTALLATION_EVENT_KEYS:
         return None
     raw = cast("Mapping[str, object]", copy.deepcopy(dict(raw_event)))
     try:
@@ -451,6 +488,26 @@ def _event(raw_event: JsonValue | None) -> GitHubEvent | None:
             payload=cast("Any", raw["payload"]),
             mentions=tuple(cast("list[str]", raw.get("mentions", ()))),
             from_app=raw.get("from_app") is True,
+        )
+    except (KeyError, TypeError):
+        return None
+
+
+def _installation_event(raw_event: JsonValue | None) -> GitHubInstallationEvent | None:
+    """The parsed installation event a delivery carries, as callbacks may change it."""
+    if not isinstance(raw_event, Mapping) or raw_event.get("key") not in INSTALLATION_EVENT_KEYS:
+        return None
+    raw = cast("Mapping[str, object]", copy.deepcopy(dict(raw_event)))
+    try:
+        return GitHubInstallationEvent(
+            key=cast("GitHubInstallationEventKey", raw["key"]),
+            name=cast("str", raw["name"]),
+            action=cast("str", raw["action"]),
+            delivery_id=cast("str", raw["delivery_id"]),
+            installation_id=cast("int", raw["installation_id"]),
+            account=GitHubAccount(**cast("dict[str, Any]", raw["account"])),
+            sender=GitHubSender(**cast("dict[str, Any]", raw["sender"])),
+            payload=cast("Any", raw["payload"]),
         )
     except (KeyError, TypeError):
         return None

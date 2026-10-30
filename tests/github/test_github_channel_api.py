@@ -221,6 +221,27 @@ async def test_work_runs_once_per_delivery(
     process.assert_awaited_once()
 
 
+@pytest.mark.parametrize("action", ["added", "removed"])
+async def test_an_installation_change_drops_the_cached_repository_listings(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    forget = AsyncMock()
+    monkeypatch.setattr(channel, "forget_cached_repos", forget)
+    payload: dict[str, JsonValue] = {
+        "action": action,
+        "installation": {"id": 1, "account": {"id": 3, "login": "acme"}},
+        "repository_selection": "selected",
+        "repositories_added": [],
+        "repositories_removed": [],
+        "sender": {"id": 2, "login": "ada", "type": "User"},
+    }
+
+    delivered = await _deliver(app, "installation_repositories", payload)
+
+    assert delivered.work == ("forget_cached_repos",)
+    forget.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     ("event", "payload"),
     [("issues", _issue_payload()), ("issue_comment", _comment_payload())],
