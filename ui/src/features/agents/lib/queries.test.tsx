@@ -907,6 +907,37 @@ describe("optimistic thread mutations", () => {
     hasMore: false,
   })
 
+  it("appends a new pin without reordering after the server refresh", async () => {
+    const existing = { ...thread, id: "existing-pin" }
+    const request = deferred<void>()
+    vi.spyOn(agentsApi, "pinThread").mockReturnValue(request.promise)
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValue([existing, thread])
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    const { result } = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        mutation: usePinAgentThread(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([existing]))
+
+    act(() =>
+      result.current.mutation.mutate({ threadId: thread.id, pinned: true })
+    )
+    await waitFor(() =>
+      expect(result.current.pins.data).toEqual([existing, thread])
+    )
+    await act(async () => request.resolve(undefined))
+    await waitFor(() => expect(listPins).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.pins.isFetching).toBe(false))
+    expect(result.current.pins.data).toEqual([existing, thread])
+  })
+
   it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
     const request = deferred<AgentThread>()
     vi.spyOn(agentsApi, "renameThread").mockReturnValue(request.promise)

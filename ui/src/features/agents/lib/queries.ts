@@ -179,7 +179,7 @@ function setAgentThreadPinned(
     (prev) => {
       if (!prev) return prev
       const isPinned = prev.some((candidate) => candidate.id === threadId)
-      if (pinned) return isPinned || !thread ? prev : [thread, ...prev]
+      if (pinned) return isPinned || !thread ? prev : [...prev, thread]
       return isPinned
         ? prev.filter((candidate) => candidate.id !== threadId)
         : prev
