@@ -16,11 +16,39 @@ PermissionLevel = Literal["read", "write"]
 EVENT_PERMISSIONS: dict[str, tuple[str, PermissionLevel]] = {
     "issue_comment.created": ("issues", "write"),
     "issue_comment.edited": ("issues", "write"),
+    "issue_comment.deleted": ("issues", "write"),
     "issues.edited": ("issues", "write"),
     "issues.labeled": ("issues", "write"),
+    "issues.closed": ("issues", "write"),
+    "issues.deleted": ("issues", "write"),
+    "issues.transferred": ("issues", "write"),
+    "issues.pinned": ("issues", "write"),
+    "issues.unpinned": ("issues", "write"),
+    "issues.assigned": ("issues", "write"),
+    "issues.unassigned": ("issues", "write"),
+    "issues.unlabeled": ("issues", "write"),
+    "issues.locked": ("issues", "write"),
+    "issues.unlocked": ("issues", "write"),
+    "issues.milestoned": ("issues", "write"),
+    "issues.demilestoned": ("issues", "write"),
+    "issues.typed": ("issues", "write"),
+    "issues.untyped": ("issues", "write"),
     "issues.opened": ("issues", "write"),
     "issues.reopened": ("issues", "write"),
     "pull_request.closed": ("pull_requests", "write"),
+    "pull_request.assigned": ("pull_requests", "write"),
+    "pull_request.unassigned": ("pull_requests", "write"),
+    "pull_request.review_requested": ("pull_requests", "write"),
+    "pull_request.review_request_removed": ("pull_requests", "write"),
+    "pull_request.unlabeled": ("pull_requests", "write"),
+    "pull_request.locked": ("pull_requests", "write"),
+    "pull_request.unlocked": ("pull_requests", "write"),
+    "pull_request.milestoned": ("pull_requests", "write"),
+    "pull_request.demilestoned": ("pull_requests", "write"),
+    "pull_request.enqueued": ("pull_requests", "write"),
+    "pull_request.dequeued": ("pull_requests", "write"),
+    "pull_request.auto_merge_enabled": ("pull_requests", "write"),
+    "pull_request.auto_merge_disabled": ("pull_requests", "write"),
     "pull_request.converted_to_draft": ("pull_requests", "write"),
     "pull_request.edited": ("pull_requests", "write"),
     "pull_request.labeled": ("pull_requests", "write"),
@@ -33,14 +61,33 @@ EVENT_PERMISSIONS: dict[str, tuple[str, PermissionLevel]] = {
     "pull_request_review.submitted": ("pull_requests", "write"),
     "pull_request_review_comment.created": ("pull_requests", "write"),
     "pull_request_review_comment.edited": ("pull_requests", "write"),
+    "pull_request_review_comment.deleted": ("pull_requests", "write"),
     "check_run.completed": ("checks", "read"),
+    "check_run.created": ("checks", "read"),
+    "check_run.rerequested": ("checks", "read"),
+    "check_run.requested_action": ("checks", "read"),
     "check_suite.completed": ("checks", "read"),
+    "check_suite.requested": ("checks", "read"),
+    "check_suite.rerequested": ("checks", "read"),
     "push": ("contents", "read"),
     "status": ("statuses", "read"),
     "workflow_run.completed": ("actions", "read"),
+    "workflow_run.requested": ("actions", "read"),
+    "workflow_run.in_progress": ("actions", "read"),
     "merge_group.checks_requested": ("merge_queues", "read"),
     "merge_group.destroyed": ("merge_queues", "read"),
+    # GitHub sends installation events to every App: they need nothing beyond
+    # the metadata permission every App has, and no subscription.
+    "installation.created": ("metadata", "read"),
+    "installation.deleted": ("metadata", "read"),
+    "installation.suspend": ("metadata", "read"),
+    "installation.unsuspend": ("metadata", "read"),
+    "installation.new_permissions_accepted": ("metadata", "read"),
+    "installation_repositories.added": ("metadata", "read"),
+    "installation_repositories.removed": ("metadata", "read"),
 }
+# Webhook events GitHub sends every App, which an App can't subscribe to.
+_UNSUBSCRIBED_EVENTS = frozenset({"installation", "installation_repositories"})
 
 _MAX_PERMISSIONS = 50
 # Keeps the App manifest and the deploy report readable.
@@ -88,7 +135,7 @@ def github_app_setup(
     events = [key for key in handled_event_keys(handlers) if key in EVENT_PERMISSIONS]
     setup = GitHubAppSetup(
         events=events,
-        webhookEvents=sorted({key.split(".")[0] for key in events}),
+        webhookEvents=sorted({key.split(".")[0] for key in events} - _UNSUBSCRIBED_EVENTS),
         permissions=_app_permissions(events, (app or {}).get("permissions", {})),
     )
     if app is not None and "repositories" in app:
@@ -106,6 +153,8 @@ def _app_permissions(events: list[str], extra: Mapping[str, str]) -> list[AppPer
     }
     for key in events:
         name, level = EVENT_PERMISSIONS[key]
+        if name == "metadata":
+            continue
         current = permissions.get(name)
         if current is None or (current["level"] == "read" and level == "write"):
             permissions[name] = AppPermission(name=name, level=level, events=[key])

@@ -192,6 +192,49 @@ class _MergeGroupDestroyedPayload(_MergeGroupPayload):
     """Why the group left the queue: ``merged``, ``dequeued`` or ``invalidated``."""
 
 
+@with_config(ConfigDict(extra="allow", strict=True))
+class _Account(TypedDict):
+    id: _PositiveId
+    login: NotRequired[Nonblank]
+    """Absent for an enterprise account, which has a ``slug`` instead."""
+
+
+@with_config(ConfigDict(extra="allow", strict=True))
+class _InstallationRecord(TypedDict):
+    id: _PositiveId
+    account: _Account
+
+
+@with_config(ConfigDict(extra="allow", strict=True))
+class GitHubInstallationRepository(TypedDict):
+    """A repository an installation covers, as installation events list it."""
+
+    id: _PositiveId
+    name: Nonblank
+    full_name: Nonblank
+    private: bool
+
+
+# Installation events are about the App's installation, not a repository.
+@with_config(ConfigDict(extra="allow", strict=True))
+class _InstallationBase(TypedDict):
+    action: Nonblank
+    installation: _InstallationRecord
+    sender: _Sender
+
+
+class _InstallationPayload(_InstallationBase):
+    repositories: NotRequired[list[GitHubInstallationRepository]]
+    """The repositories the installation covers, when it covers chosen ones."""
+
+
+class _InstallationRepositoriesPayload(_InstallationBase):
+    repository_selection: Nonblank
+    """``all`` or ``selected``."""
+    repositories_added: list[GitHubInstallationRepository]
+    repositories_removed: list[GitHubInstallationRepository]
+
+
 # Events without an action are keyed by their name alone.
 class _PushPayload(_DispatchBase):
     ref: Nonblank
@@ -227,8 +270,23 @@ SupportedEventKey = Literal[
     "issues.edited",
     "issues.reopened",
     "issues.labeled",
+    "issues.closed",
+    "issues.deleted",
+    "issues.transferred",
+    "issues.pinned",
+    "issues.unpinned",
+    "issues.assigned",
+    "issues.unassigned",
+    "issues.unlabeled",
+    "issues.locked",
+    "issues.unlocked",
+    "issues.milestoned",
+    "issues.demilestoned",
+    "issues.typed",
+    "issues.untyped",
     "issue_comment.created",
     "issue_comment.edited",
+    "issue_comment.deleted",
     "pull_request.opened",
     "pull_request.edited",
     "pull_request.reopened",
@@ -237,16 +295,37 @@ SupportedEventKey = Literal[
     "pull_request.synchronize",
     "pull_request.labeled",
     "pull_request.closed",
+    "pull_request.assigned",
+    "pull_request.unassigned",
+    "pull_request.review_requested",
+    "pull_request.review_request_removed",
+    "pull_request.unlabeled",
+    "pull_request.locked",
+    "pull_request.unlocked",
+    "pull_request.milestoned",
+    "pull_request.demilestoned",
+    "pull_request.enqueued",
+    "pull_request.dequeued",
+    "pull_request.auto_merge_enabled",
+    "pull_request.auto_merge_disabled",
     "pull_request_review.submitted",
     "pull_request_review.edited",
     "pull_request_review.dismissed",
     "pull_request_review_comment.created",
     "pull_request_review_comment.edited",
+    "pull_request_review_comment.deleted",
     "push",
     "status",
     "check_run.completed",
+    "check_run.created",
+    "check_run.rerequested",
+    "check_run.requested_action",
     "check_suite.completed",
+    "check_suite.requested",
+    "check_suite.rerequested",
     "workflow_run.completed",
+    "workflow_run.requested",
+    "workflow_run.in_progress",
     "merge_group.checks_requested",
     "merge_group.destroyed",
 ]
@@ -262,8 +341,23 @@ _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "issues.edited": _issue_adapter,
     "issues.reopened": _issue_adapter,
     "issues.labeled": TypeAdapter(_LabeledIssuePayload),
+    "issues.closed": _issue_adapter,
+    "issues.deleted": _issue_adapter,
+    "issues.transferred": _issue_adapter,
+    "issues.pinned": _issue_adapter,
+    "issues.unpinned": _issue_adapter,
+    "issues.assigned": _issue_adapter,
+    "issues.unassigned": _issue_adapter,
+    "issues.unlabeled": TypeAdapter(_LabeledIssuePayload),
+    "issues.locked": _issue_adapter,
+    "issues.unlocked": _issue_adapter,
+    "issues.milestoned": _issue_adapter,
+    "issues.demilestoned": _issue_adapter,
+    "issues.typed": _issue_adapter,
+    "issues.untyped": _issue_adapter,
     "issue_comment.created": _comment_adapter,
     "issue_comment.edited": _comment_adapter,
+    "issue_comment.deleted": _comment_adapter,
     "pull_request.opened": _pr_adapter,
     "pull_request.edited": _pr_adapter,
     "pull_request.reopened": _pr_adapter,
@@ -272,21 +366,73 @@ _PAYLOAD_ADAPTERS: dict[SupportedEventKey, TypeAdapter[GitHubPayload]] = {
     "pull_request.synchronize": _pr_adapter,
     "pull_request.labeled": TypeAdapter(_LabeledPullRequestPayload),
     "pull_request.closed": _pr_adapter,
+    "pull_request.assigned": _pr_adapter,
+    "pull_request.unassigned": _pr_adapter,
+    "pull_request.review_requested": _pr_adapter,
+    "pull_request.review_request_removed": _pr_adapter,
+    "pull_request.unlabeled": TypeAdapter(_LabeledPullRequestPayload),
+    "pull_request.locked": _pr_adapter,
+    "pull_request.unlocked": _pr_adapter,
+    "pull_request.milestoned": _pr_adapter,
+    "pull_request.demilestoned": _pr_adapter,
+    "pull_request.enqueued": _pr_adapter,
+    "pull_request.dequeued": _pr_adapter,
+    "pull_request.auto_merge_enabled": _pr_adapter,
+    "pull_request.auto_merge_disabled": _pr_adapter,
     "pull_request_review.submitted": _review_adapter,
     "pull_request_review.edited": _review_adapter,
     "pull_request_review.dismissed": _review_adapter,
     "pull_request_review_comment.created": _review_comment_adapter,
     "pull_request_review_comment.edited": _review_comment_adapter,
+    "pull_request_review_comment.deleted": _review_comment_adapter,
     "push": TypeAdapter(_PushPayload),
     "status": TypeAdapter(_StatusPayload),
     "check_run.completed": TypeAdapter(_CheckRunPayload),
+    "check_run.created": TypeAdapter(_CheckRunPayload),
+    "check_run.rerequested": TypeAdapter(_CheckRunPayload),
+    "check_run.requested_action": TypeAdapter(_CheckRunPayload),
     "check_suite.completed": TypeAdapter(_CheckSuitePayload),
+    "check_suite.requested": TypeAdapter(_CheckSuitePayload),
+    "check_suite.rerequested": TypeAdapter(_CheckSuitePayload),
     "workflow_run.completed": TypeAdapter(_WorkflowPayload),
+    "workflow_run.requested": TypeAdapter(_WorkflowPayload),
+    "workflow_run.in_progress": TypeAdapter(_WorkflowPayload),
     "merge_group.checks_requested": TypeAdapter(_MergeGroupPayload),
     "merge_group.destroyed": TypeAdapter(_MergeGroupDestroyedPayload),
 }
 github_identifier_adapter = TypeAdapter(_PositiveId)
 SUPPORTED_EVENT_KEYS = frozenset(_PAYLOAD_ADAPTERS)
+
+GitHubInstallationPayload = _InstallationPayload | _InstallationRepositoriesPayload
+GitHubInstallationEventKey = Literal[
+    "installation.created",
+    "installation.deleted",
+    "installation.suspend",
+    "installation.unsuspend",
+    "installation.new_permissions_accepted",
+    "installation_repositories.added",
+    "installation_repositories.removed",
+]
+_installation_adapter: TypeAdapter[GitHubInstallationPayload] = TypeAdapter(_InstallationPayload)
+_INSTALLATION_ADAPTERS: dict[GitHubInstallationEventKey, TypeAdapter[GitHubInstallationPayload]] = {
+    "installation.created": _installation_adapter,
+    "installation.deleted": _installation_adapter,
+    "installation.suspend": _installation_adapter,
+    "installation.unsuspend": _installation_adapter,
+    "installation.new_permissions_accepted": _installation_adapter,
+    "installation_repositories.added": TypeAdapter(_InstallationRepositoriesPayload),
+    "installation_repositories.removed": TypeAdapter(_InstallationRepositoriesPayload),
+}
+INSTALLATION_EVENT_KEYS = frozenset(_INSTALLATION_ADAPTERS)
+
+
+def validate_installation_payload(
+    key: GitHubInstallationEventKey, payload: object
+) -> GitHubInstallationPayload:
+    validated = _INSTALLATION_ADAPTERS[key].validate_python(payload, strict=True)
+    if validated["action"] != key.partition(".")[2]:
+        raise ValueError("GitHub action does not match event key")
+    return validated
 
 
 def validate_payload(key: SupportedEventKey, payload: object) -> GitHubPayload:
