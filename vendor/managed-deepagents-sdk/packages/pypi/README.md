@@ -978,7 +978,10 @@ The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
 backend signs for the thread.
 `None` skips without a thread or run.
-Other results and callback failures are safely logged and start nothing.
+Other results are safely logged and start nothing. A handler that raises fails
+the delivery: MDA logs the error's type only and answers GitHub with an error, so
+the delivery shows as failed in the App's settings, to redeliver. Nothing
+started for it, so the redelivery asks the handler again.
 
 Each issue or pull request has one thread, so the agent keeps the conversation:
 an issue, its comments, and a pull request with its reviews and review comments
@@ -986,7 +989,7 @@ continue the same thread, as does a workflow run for exactly one pull request.
 Other events get a thread of their own. A redelivered webhook starts nothing,
 because each thread runs a delivery once. A comment that arrives while the agent
 is still working waits for that run to finish, so it never skips a decision the
-run stops for. There is no automatic retry.
+run stops for. GitHub never redelivers on its own.
 
 A handler may instead return a list of `(input, options)` to start several
 runs for one event, on threads it chooses (GitHub, Linear and HTTP channels):
@@ -1201,6 +1204,11 @@ LangSmith Studio, where the decision is made, also when Studio resumed it;
 replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
+
+A handler that raises fails the delivery, and Linear sends it again (after a
+minute, an hour and six hours), asking the handler again; the error is logged by
+type only. In an agent session it doesn't: the session hears at once that
+something went wrong, since its author waits.
 
 `app` also names the app deploy asks the admin to create: `name` (2-80
 characters, without "Linear"; defaults to the agent's name), `description`,

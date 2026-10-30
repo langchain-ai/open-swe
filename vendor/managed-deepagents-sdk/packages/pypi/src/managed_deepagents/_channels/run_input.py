@@ -173,6 +173,17 @@ class InvalidRunInput(TypeError):  # noqa: N818 - named for what it is, as TypeS
         self.reason = reason
 
 
+class HandlerFailed(Exception):  # noqa: N818 - named for what it is, as TypeScript's
+    """An event handler raised, so its delivery fails.
+
+    MDA answers the provider with an error rather than accepting the delivery,
+    so a provider that redelivers failed deliveries, as Linear does, asks the
+    handler again; on GitHub the delivery shows as failed, to redeliver. Nothing
+    started for the delivery, so a redelivery is not a duplicate. Carries no
+    detail: the handler's own exception is logged by type only.
+    """
+
+
 def _named(value: object) -> str:
     """A key or type the handler chose, as one bounded log line holds it."""
     return logger.log_identifier(str(value))

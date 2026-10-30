@@ -29,6 +29,7 @@ from managed_deepagents._channels.resolve_user import (
     sender_principal_id,
 )
 from managed_deepagents._channels.run_input import (
+    HandlerFailed,
     InvalidRunInput,
     NormalizedRunInput,
     RunChannel,
@@ -286,8 +287,14 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
     )
 
     async def start_first() -> StartedIngressRun | SkippedIngressRun | None:
-        await _plan_runs(plan, planning, waiter)
-        outcome = await _start_first(thread_id, waiter, start)
+        try:
+            await _plan_runs(plan, planning, waiter)
+        except HandlerFailed:
+            # Nothing started: the delivery fails, as a failed start does.
+            _leave_thread_waiters(thread_id, waiter)
+            outcome = None
+        else:
+            outcome = await _start_first(thread_id, waiter, start)
         if outcome is None and channel.on_finish is not None:
             # Answered with an error, the provider may redeliver it, as a new
             # delivery: only one it already accepted is done for good.
@@ -643,6 +650,9 @@ async def _prepare_runs(
         result = await _resolve(
             input_(_copied_message(message), None if raw_event is None else json_copy(raw_event))
         )
+    except HandlerFailed:
+        # An event handler that raised fails the delivery, so the provider may send it again.
+        raise
     except Exception as error:  # noqa: BLE001
         logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return []
@@ -1001,7 +1011,9 @@ async def _prepare(
     """What the channel's ``input`` starts on the event's conversation; failures start nothing.
 
     Asked here only when its runs weren't planned before the start, as when
-    reading the conversation failed.
+    reading the conversation failed. An event handler that raised
+    (``HandlerFailed``) fails the delivery instead: it reaches the start, which
+    answers the provider with an error.
     """
     runs = await _prepare_runs(
         channel, message, raw_event, waiter, RunChannel(name=name, provider=channel.kind)
