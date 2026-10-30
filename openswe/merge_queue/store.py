@@ -16,7 +16,7 @@ from typing import Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
-from sqlalchemy import BigInteger, ForeignKey, Text, delete, func, or_, select, true, tuple_
+from sqlalchemy import BigInteger, ForeignKey, Text, delete, func, or_, select, true, tuple_, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +27,7 @@ from openswe.github.queue import NativeCandidate, NativeEntry, NativeQueueSnapsh
 from openswe.github.repositories import Repository
 from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
+from openswe.merge_queue.dispatch import WorkflowPolicy
 from openswe.merge_queue.git import Candidate
 from openswe.merge_queue.models import (
     Attempt,
@@ -207,6 +208,7 @@ class MergeQueue(Record):
         *,
         generation: str | None = None,
         check_configuration: bool = True,
+        update_configuration: bool = False,
     ) -> AsyncIterator[tuple[AsyncSession, Self, datetime]]:
         async with postgres.session() as session:
             expected = generation or (
@@ -218,7 +220,7 @@ class MergeQueue(Record):
                 configured = await session.scalar(
                     select(WorkspaceRow.merge_queue_config)
                     .where(WorkspaceRow.id == self.workspace_id)
-                    .with_for_update(read=True)
+                    .with_for_update(read=not update_configuration)
                 )
                 try:
                     if not isinstance(configured, dict):
@@ -262,6 +264,42 @@ class MergeQueue(Record):
             ):
                 raise LeaseLost("Queue configuration generation changed")
             yield session, queue, now
+
+    async def adopt_workflow_policy(
+        self, config: QueueConfiguration, approved: WorkflowPolicy
+    ) -> QueueConfiguration:
+        updated = config.with_workflow_policy(approved)
+        async with self._locked(generation=config.generation, update_configuration=True) as (
+            session,
+            queue,
+            now,
+        ):
+            if updated == config:
+                return config
+            active = await session.scalar(
+                select(Batch).where(Batch.queue_id == queue.id, Batch.state == "active")
+            )
+            if active is not None and active.policy.get("trust") == config.native_trust:
+                attempts = list(
+                    await session.scalars(select(Attempt).where(Attempt.batch_id == active.id))
+                )
+                for attempt in attempts:
+                    if attempt.state == "running":
+                        attempt.state, attempt.finished_at = "cancelled", now
+                active.policy = {
+                    **active.policy,
+                    "trust": updated.native_trust,
+                    "superseded_attempts": max((attempt.number for attempt in attempts), default=0),
+                    "workflow_policy_refresh": True,
+                }
+            await session.execute(
+                update(WorkspaceRow)
+                .where(WorkspaceRow.id == self.workspace_id)
+                .values(
+                    merge_queue_config=updated.model_dump(mode="json", exclude={"workspace_id"})
+                )
+            )
+            return updated
 
     @asynccontextmanager
     async def native_publication(self, lease: Lease) -> AsyncIterator[None]:
@@ -342,9 +380,20 @@ class MergeQueue(Record):
                     else set()
                 )
                 if (
+                    batch.policy.get("workflow_policy_refresh") is True
+                    and batch.policy.get("trust") == trust
+                    and batch.policy.get("timeout_seconds") == timeout_seconds
+                    and selection.candidate(snapshot) is not None
+                ):
+                    batch.base_sha = snapshot.main_sha
+                    batch.policy = {**batch.policy, "workflow_policy_refresh": False}
+                if (
                     batch.policy.get("trust") != trust
                     or batch.policy.get("timeout_seconds") != timeout_seconds
-                    or batch.base_sha != snapshot.main_sha
+                    or (
+                        batch.base_sha != snapshot.main_sha
+                        and batch.policy.get("workflow_policy_refresh") is not True
+                    )
                     or not any(entry.id in current_ids for entry in selection.entries)
                 ):
                     await self._invalidate(session, batch, now, None)
@@ -396,7 +445,12 @@ class MergeQueue(Record):
                     select(Attempt).where(Attempt.batch_id == batch.id).order_by(Attempt.number)
                 )
             )
+            superseded = batch.policy.get("superseded_attempts", 0)
+            if type(superseded) is not int:
+                raise ValueError("Invalid workflow policy attempt boundary")
             for attempt in attempts:
+                if attempt.number <= superseded:
+                    continue
                 references = {
                     row.key: row.reference
                     for row in await session.scalars(
@@ -417,14 +471,22 @@ class MergeQueue(Record):
                 run_id = references.get("validation-run", {}).get("run_id")
                 if run_id is not None and type(run_id) is not int:
                     raise ValueError("Invalid saved validation run")
-                return NativeWork(batch, attempt, request, run_id)
+                deferred = "dispatch-policy-deferred" in references
+                if deferred:
+                    await session.execute(
+                        delete(Evidence).where(
+                            Evidence.attempt_id == attempt.id,
+                            Evidence.key == "dispatch-policy-deferred",
+                        )
+                    )
+                return NativeWork(batch, attempt, request, run_id, dispatch=deferred)
             if len(attempts) >= batch.max_attempts:
                 return None
             validation = policy.validation
             assert validation is not None
             attempt = Attempt(
                 batch_id=batch.id,
-                request_key=candidate.head_sha,
+                request_key=f"{candidate.head_sha}:{trust}",
                 number=len(attempts) + 1,
                 deadline=min(batch.deadline, now + timedelta(seconds=validation.deadline_seconds)),
             )
@@ -474,32 +536,30 @@ class MergeQueue(Record):
             await self._save_evidence(session, attempt, "validation-result", evidence)
             attempt.state, attempt.finished_at = "succeeded" if succeeded else "failed", now
 
-    async def native_validation_work(self, lease: Lease) -> NativeWork | None:
+    async def native_validation_history(self, lease: Lease) -> list[NativeWork]:
+        """Read the active batch's attempts, newest first, including superseded successes."""
         async with self._locked(lease) as (session, _, _):
             batch = await session.scalar(
                 select(Batch).where(Batch.queue_id == self.id, Batch.state == "active")
             )
             if batch is None:
-                return None
-            attempt = await session.scalar(
-                select(Attempt)
-                .where(Attempt.batch_id == batch.id)
-                .order_by(Attempt.number.desc())
-                .limit(1)
-            )
-            if attempt is None:
-                return None
-            references = {
-                row.key: row.reference
-                for row in await session.scalars(
-                    select(Evidence).where(Evidence.attempt_id == attempt.id)
-                )
-            }
-            request = ValidationRequest.model_validate(references["native-request"])
-            run_id = references.get("validation-run", {}).get("run_id")
-            if run_id is not None and type(run_id) is not int:
-                raise ValueError("Invalid saved validation run")
-            return NativeWork(batch, attempt, request, run_id)
+                return []
+            history = []
+            for attempt in await session.scalars(
+                select(Attempt).where(Attempt.batch_id == batch.id).order_by(Attempt.number.desc())
+            ):
+                references = {
+                    row.key: row.reference
+                    for row in await session.scalars(
+                        select(Evidence).where(Evidence.attempt_id == attempt.id)
+                    )
+                }
+                request = ValidationRequest.model_validate(references["native-request"])
+                run_id = references.get("validation-run", {}).get("run_id")
+                if run_id is not None and type(run_id) is not int:
+                    raise ValueError("Invalid saved validation run")
+                history.append(NativeWork(batch, attempt, request, run_id))
+            return history
 
     async def record_native_landing(self, work: NativeWork, lease: Lease) -> None:
         async with self._locked(lease) as (session, _, now):
@@ -507,6 +567,11 @@ class MergeQueue(Record):
             attempt = await self._attempt(session, work.attempt.id)
             if batch.state == "active" and attempt.state == "succeeded":
                 batch.state, batch.finished_at = "landed", now
+                await session.execute(
+                    update(Attempt)
+                    .where(Attempt.batch_id == batch.id, Attempt.state == "running")
+                    .values(state="cancelled", finished_at=now)
+                )
 
     async def authorize_native_result(
         self, work: NativeWork, snapshot: NativeQueueSnapshot, lease: Lease
@@ -515,10 +580,14 @@ class MergeQueue(Record):
             batch = await self._batch(session, work.batch.id)
             attempt = await self._attempt(session, work.attempt.id)
             candidate = NativeSelection.model_validate(batch.candidate).candidate(snapshot)
+            superseded = batch.policy.get("superseded_attempts", 0)
+            if type(superseded) is not int:
+                raise ValueError("Invalid workflow policy attempt boundary")
             if (
                 queue.paused
                 or batch.state != "active"
                 or attempt.state != "succeeded"
+                or attempt.number <= superseded
                 or min(batch.deadline, attempt.deadline) <= now
                 or batch.base_sha != snapshot.main_sha
                 or candidate is None

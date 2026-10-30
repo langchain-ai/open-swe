@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxOperationError,
@@ -84,3 +85,38 @@ async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
     assert payload["status"] == "error"
     assert payload["error_type"] == "SandboxOperationError"
     assert "recovery" not in payload
+
+
+async def test_a_review_run_leaves_its_lost_sandbox_to_its_own_failure_notice() -> None:
+    """A review's failure notice and check already tell its PR; a second warning repeats it."""
+    with patch(
+        "openswe.agent_api.failures.post_sandbox_unreachable_notification",
+        new_callable=AsyncMock,
+    ) as notify:
+        failure = await OperationFailure.of(
+            SandboxConnectionError("WebSocket upgrade to sb-dead failed (no valid HTTP response)"),
+            operation="execute",
+            config=_CONFIG,
+            notify=False,
+        )
+
+    # The run still ends; only the warning is left to the review's notice.
+    assert failure.sandbox_unreachable
+    notify.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("assistant_id", "notified"),
+    [("reviewer", False), ("review-scout", False), ("agent", True), (None, True)],
+)
+async def test_only_a_review_skips_the_lost_sandbox_notice(
+    assistant_id: str | None, notified: bool
+) -> None:
+    from openswe.agent_api import graph
+
+    with patch.object(
+        graph, "post_sandbox_unreachable_notification", new_callable=AsyncMock
+    ) as notify:
+        await graph._tell_sandbox_gone(_CONFIG, assistant_id, sandbox_id="sb-dead")
+
+    assert notify.await_count == (1 if notified else 0)

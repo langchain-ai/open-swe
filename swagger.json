@@ -5003,6 +5003,17 @@
             ],
             "title": "Experimental Fleet"
           },
+          "experimental_memory": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Memory"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -5013,17 +5024,6 @@
               }
             ],
             "title": "Pr Failure Reactions"
-          },
-          "pr_review_links": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Review Links"
           },
           "review_draft_prs": {
             "anyOf": [
