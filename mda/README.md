@@ -218,21 +218,25 @@ A reply in the session is the next run there; a new mention on the same issue op
 
 The channel verifies each delivery (Linear's signature and timestamp), and its handlers decide here what it starts.
 They ask the backend only for what needs Open SWE's data or signing key, through the typed channel API (`runtime_api.linear`, `POST /mda/channel-api/{endpoint}`), which answers only calls MDA signed with `MDA_SERVICE_SECRET`.
-Every handled delivery goes to the event log once per delivery ID, which wakes the threads that listen for Linear events. The first call for a delivery carries it, so each event takes at most two calls; `record_linear_delivery` logs one that asks nothing else, such as `Comment.create`.
+Every handled delivery goes to the event log once per delivery ID, which wakes the threads that listen for Linear events.
+The first call for a delivery carries it, so each event takes at most two calls; `record_linear_delivery` logs one that asks nothing else, such as `Comment.create`.
 
 **Agent sessions** (`rt/linear.py`):
 
 1. `linear_session_facts`, which also logs the delivery: whether the turn's author has signed in to Open SWE with the email Linear knows them by; what the session's thread already works in; the author's and the instance's default repositories; and which repositories Open SWE may work in.
-2. The handler picks the repository (the turn's, the thread's, the issue's, then the defaults) and workspace, and checks the allowlist. When nothing can start, it tells the session why: the author must sign in first, no repository is named, or the one named is outside the allowlist.
-3. `plan_linear_session`: the backend checks the author and the repository again, since the channel's choice grants nothing, indexes the thread and signs its run context.
-4. The handler writes the run's input: the `linear-issue` prompt (`prompts/`) and the backend's input message envelope, copied in `rt/input_messages.py`, with the images the issue and the turn show, fetched only over HTTPS from public addresses (`rt/images.py`). It starts the run with the backend's context, metadata and run-complete webhook.
+1. The handler picks the repository (the turn's, the thread's, the issue's, then the defaults) and workspace, and checks the allowlist.
+   When nothing can start, it tells the session why: the author must sign in first, no repository is named, or the one named is outside the allowlist.
+1. `plan_linear_session`: the backend checks the author and the repository again, since the channel's choice grants nothing, indexes the thread and signs its run context.
+1. The handler writes the run's input: the `linear-issue` prompt (`prompts/`) and the backend's input message envelope, copied in `rt/input_messages.py`, with the images the issue and the turn show, fetched only over HTTPS from public addresses (`rt/images.py`).
+   It starts the run with the backend's context, metadata and run-complete webhook.
 
 **Automations** (`rt/linear_automations.py`): an issue created, or one that gained a label, may fire the team's Linear automations.
 
 1. `linear_automation_rules`, which also logs the delivery: the team's enabled automations, their prompts and Linear triggers, and whether the issue's creator is an Open SWE user.
-2. The handler matches the event against them: the event, the labels the issue carries or gained, the project. For each match it writes the run's prompt: the `linear-automation-event` prompt (`prompts/`) with the automation's own, and the issue, fenced as untrusted unless its creator is an Open SWE user (`rt/untrusted.py`).
-3. `plan_linear_automations`, once for every match: for each, the backend checks the automation has a trigger on that team and event, claims it once per delivery within its hourly cap, and signs its run's context.
-4. The handler starts each run on a thread of its own for that automation and delivery, so automations never touch the issue's conversation, and a redelivery starts nothing twice.
+1. The handler matches the event against them: the event, the labels the issue carries or gained, the project.
+   For each match it writes the run's prompt: the `linear-automation-event` prompt (`prompts/`) with the automation's own, and the issue, fenced as untrusted unless its creator is an Open SWE user (`rt/untrusted.py`).
+1. `plan_linear_automations`, once for every match: for each, the backend checks the automation has a trigger on that team and event, claims it once per delivery within its hourly cap, and signs its run's context.
+1. The handler starts each run on a thread of its own for that automation and delivery, so automations never touch the issue's conversation, and a redelivery starts nothing twice.
 
 The copies in `rt/` are AGENTS.md's exception for channel input.
 
@@ -252,7 +256,8 @@ The deployment's GitHub channel (`channels/github.py`) receives every delivery o
 Its handler (`rt/github.py`) decides what each one starts, as the backend's `/webhooks/github` did, and asks the backend's typed channel API (`runtime_api.github`) only for what needs Open SWE's data:
 
 - `record_github_delivery` logs the delivery once and answers whether a workspace owns its repository, whether the allowlist takes it, whether automatic review is on for it, and the handles that mention Open SWE.
-- The switchboard (`rt/github_routes.py`) names the backend's work the delivery starts: the merge queue wakeup, automations, the agent thread's pull request state and usage, approvals withdrawn on a push, review guides paused, reviews and re-reviews, the reviewer's watch, human review requests settled, CI wakeups, and a pull request comment's run. `act_on_github_delivery` runs that work once per delivery, after it answers.
+- The switchboard (`rt/github_routes.py`) names the backend's work the delivery starts: the merge queue wakeup, automations, the agent thread's pull request state and usage, approvals withdrawn on a push, review guides paused, reviews and re-reviews, the reviewer's watch, human review requests settled, CI wakeups, and a pull request comment's run.
+  `act_on_github_delivery` runs that work once per delivery, after it answers.
 - An `@openswe` mention on an issue, in its title or body or in a comment, starts the coding agent's run on the issue's conversation, the channel's own thread: the same `act_on_github_delivery` call checks the commenter and the public-repository gate, reacts to the comment, builds the prompt, indexes the thread and answers with the input, the run context with a run token signed for the thread, the run metadata and the run-complete webhook.
   A new mention interrupts the run in progress, as before; while the thread waits on an interrupt it only answers whether Open SWE acts, so the channel points the issue to the decision.
 
