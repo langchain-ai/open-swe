@@ -201,11 +201,18 @@ export function WorkspacesSection({
   const workspaces = useWorkspaceOptions()
   const options = workspaces.data
   const channelDirectory = useSlackChannelDirectory(true)
-  const channelLabel = (id: string) =>
-    slackChannelLabel(channelDirectory.data, id)
-
   const [adding, setAdding] = useState(false)
   const [createDraft, setCreateDraft] = useState<WorkspaceDraft>(EMPTY_DRAFT)
+  const channelIds = [
+    ...new Set([
+      ...(options?.workspaces.flatMap(
+        (workspace) => workspace.slack_channel_ids
+      ) ?? []),
+      ...createDraft.slackChannelIds,
+    ]),
+  ]
+  const channelLabel = (id: string) =>
+    slackChannelLabel(channelDirectory.data, id, channelIds)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 

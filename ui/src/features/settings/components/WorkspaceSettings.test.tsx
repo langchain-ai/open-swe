@@ -255,7 +255,7 @@ describe("WorkspaceSettingsPanel", () => {
   })
 
   it("never exposes channel IDs while names load or cannot be resolved", async () => {
-    mockApis()
+    mockApis({ ...RECORD, slack_channel_ids: ["C1", "C2"] })
     let finish!: (directory: { channels: []; refreshing: boolean }) => void
     vi.mocked(api.listSlackChannels).mockImplementation(
       () =>
@@ -265,13 +265,23 @@ describe("WorkspaceSettingsPanel", () => {
     )
     renderPage()
 
-    const channel = await screen.findByRole("link", { name: "Slack channel" })
+    const channel = await screen.findByRole("link", { name: "Slack channel 1" })
     expect(channel.textContent).not.toContain("C1")
     expect(
-      screen.getByRole("switch", { name: "Kitchen mode for Slack channel" })
-    ).toBeTruthy()
+      screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
+    ).toContain("C2")
+    const secondKitchen = screen.getByRole("switch", {
+      name: "Kitchen mode for Slack channel 2",
+    })
+    fireEvent.click(secondKitchen)
+    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    expect(
+      screen
+        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
+        .getAttribute("aria-checked")
+    ).toBe("false")
     await act(async () => finish({ channels: [], refreshing: false }))
-    expect(channel.textContent).toBe("Slack channel")
+    expect(channel.textContent).toBe("Slack channel 1")
   })
 
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {

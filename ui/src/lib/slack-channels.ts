@@ -152,10 +152,13 @@ export function slackChannelMatches(
 /** A cached channel name, with a readable fallback while names are unavailable. */
 export function slackChannelLabel(
   directory: SlackChannelDirectory | undefined,
-  id: string
+  id: string,
+  channelIds: ReadonlyArray<string>
 ): string {
   const channel = directory?.channels.find((entry) => entry.id === id)
-  return channel?.name ? `#${channel.name}` : "Slack channel"
+  return channel?.name
+    ? `#${channel.name}`
+    : `Slack channel ${channelIds.indexOf(id) + 1}`
 }
 
 /** The canonical id for a pasted channel id, or null when it cannot be one. */
