@@ -1,8 +1,8 @@
 """Slack files a thread's sandbox receives once its run has opened it.
 
 A message can bring files before the thread has a sandbox: Managed Deep Agents
-creates the box only when the thread's run starts. The webhook records where each
-file goes and where Slack serves it; the run's first connection to its box, before
+creates the sandbox only when the thread's run starts. The webhook records where each
+file goes and where Slack serves it; the run's first connection to its sandbox, before
 the model runs, downloads the files and writes them there.
 """
 
@@ -99,6 +99,11 @@ def _pending(metadata: Mapping[str, object]) -> list[_PendingFile]:
     except ValidationError:
         logger.warning("Dropping unreadable pending Slack files", exc_info=True)
         return []
+
+
+def slack_files_pending(metadata: Mapping[str, object]) -> bool:
+    """Whether files a Slack message brought wait for the thread's sandbox."""
+    return bool(_pending(metadata))
 
 
 def _sanitize_slack_filename(name: str, url: str) -> str:

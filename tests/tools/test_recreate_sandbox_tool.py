@@ -9,7 +9,7 @@ from openswe.tools.recreate_sandbox import recreate_sandbox
 
 @pytest.fixture(autouse=True)
 def _backend_owned_sandbox() -> object:
-    """A thread whose box the backend made, as every thread had before MDA owned them."""
+    """A thread whose sandbox the backend made, as every thread had before MDA owned them."""
     with patch(
         "openswe.tools.recreate_sandbox.get_sandbox_metadata",
         new_callable=AsyncMock,
@@ -19,12 +19,12 @@ def _backend_owned_sandbox() -> object:
 
 
 @pytest.mark.asyncio
-async def test_recreate_sandbox_leaves_an_mda_box_to_mda(
+async def test_recreate_sandbox_leaves_an_mda_sandbox_to_mda(
     grant_tool_access: Callable[..., None], _backend_owned_sandbox: AsyncMock
 ) -> None:
-    """MDA replaces its own box; the backend answers what with, and never makes one itself."""
+    """MDA replaces its own sandbox; the backend answers what with, and never makes one itself."""
     grant_tool_access()
-    _backend_owned_sandbox.return_value = {"sandbox_id": "mda-box", "sandbox_owner": "mda"}
+    _backend_owned_sandbox.return_value = {"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}
     config = {"configurable": {"thread_id": "thread-1", "workspace": "open-swe"}}
     with (
         patch("openswe.run_config.get_config", return_value=config),
@@ -52,7 +52,7 @@ async def test_recreate_sandbox_leaves_an_mda_box_to_mda(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stop_error", [None, "stop unavailable"])
-async def test_recreate_sandbox_hands_an_old_box_to_mda_with_the_admin_workspace(
+async def test_recreate_sandbox_hands_an_old_sandbox_to_mda_with_the_admin_workspace(
     grant_tool_access: Callable[..., None],
     stop_error: str | None,
 ) -> None:

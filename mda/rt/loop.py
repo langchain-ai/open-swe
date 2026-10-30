@@ -1,10 +1,11 @@
 """Open SWE's middleware around each model call, run here as the catalog's ``LoopRules`` say.
 
 Before each call it ends the run where a rule says to, adds the thread's task
-context, keeps the box's GitHub proxy fresh, picks the call's route and model, and
+context, keeps the sandbox's GitHub proxy fresh, picks the call's route and model, and
 assembles its system prompt and tool list. After an answer that calls no tool, it
-asks again for the reply or CLI result the run owes. When the run ends, it reports
-the end and does the graph's own end-of-run work.
+asks again for the reply or CLI result the run owes. When the run ends, it asks
+for the graph's own end-of-run work and reports the end, neither of which the run
+waits for.
 
 The backend answers only what needs its data or credentials, one named call each
 (``runtime_api.loop``). Graph state the loop reads or writes is the backend's held
@@ -51,7 +52,6 @@ from runtime_api.loop import (
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
-    AfterAgent,
     BeforeModel,
     ChosenModel,
     GitHubProxyRefreshed,
@@ -71,7 +71,6 @@ from rt.backend import (
     BackendCallError,
     OpenSweBackend,
     RunLocal,
-    git_trace,
     human_messages,
     run_call,
 )
@@ -82,13 +81,13 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
-# Held state: when the box's GitHub token next needs replacing. It lives in the thread's
+# Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
 # A token is replaced this long before it expires. The backend never hands out one with
 # less left, so a replacement is not due again at once.
 _GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
-# A thread whose box has no GitHub proxy is asked again after this long.
+# A thread whose sandbox has no GitHub proxy is asked again after this long.
 _GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
 # A refresh that failed is tried again after this long, so a failure that keeps happening
 # does not hold up every model call.
@@ -327,6 +326,16 @@ class RunLoop:
             raise BackendCallError("The run's catalog names no models")
         return models
 
+    def starting(self) -> dict[str, JsonValue]:
+        """The held state a turn starts from: nothing asked again yet, and answers going
+        where the turn was asked from."""
+        update: dict[str, JsonValue] = {}
+        if self.rules.reply is not None:
+            update.update(reply_surface=self.rules.reply.surface, reply_nudges=0)
+        if self.rules.cli_result is not None:
+            update["cli_result_nudges"] = 0
+        return update
+
     @property
     def looks_at_answers(self) -> bool:
         return self.rules.reply is not None or self.rules.cli_result is not None
@@ -426,7 +435,7 @@ class RunLoop:
         return False
 
     async def _github_proxy(self, held: Mapping[str, object]) -> dict[str, JsonValue]:
-        """Put a new GitHub token on the box once the one there is about to expire.
+        """Put a new GitHub token on the sandbox once the one there is about to expire.
 
         The call is awaited, so the model's first command never runs on an expired
         token. A failure leaves the run going and the call is made again a minute later.
@@ -440,12 +449,12 @@ class RunLoop:
         try:
             refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
         except Exception:
-            logger.warning("Could not refresh the box's GitHub token", exc_info=True)
+            logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
         return _github_proxy_due(refreshed, now)
 
     def prepared(self, prepared: Prepared) -> dict[str, JsonValue]:
-        """Held state that keeps the token preparation put on the box until it is due."""
+        """Held state that keeps the token preparation put on the sandbox until it is due."""
         if prepared.github_proxy is None or not self.rules.refresh_github_proxy:
             return {}
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
@@ -649,13 +658,11 @@ class RunLoop:
         }
         return turn.succeeded(call_ids)
 
-    async def after_agent(
-        self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
-    ) -> AfterAgent:
+    def after_agent(self, state: Mapping[str, object]) -> None:
         """Ask for the graph's own end-of-run work, then report the run's end.
 
-        The work goes out behind the run's reports, and one the backend cannot do takes
-        none of the rest with it.
+        Both go out behind the run's reports, so the transcript has every reply and tool
+        call before the end; one the backend cannot do takes none of the rest with it.
         """
         messages = _messages(state)
         current = run_id()
@@ -672,9 +679,6 @@ class RunLoop:
                     human_input_summary=summary if isinstance(summary, str) else "",
                 )
                 outbox.notify(FINISH_SCOUT_PLAN, finished)
-        # The transcript has every reply and tool call, and the backend the work, before
-        # the run's end.
-        await outbox.drain()
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(
@@ -686,12 +690,12 @@ class RunLoop:
             for message in messages
             if isinstance(message, AIMessage) and message.usage_metadata
         ]
-        request = RunEnded(
+        ended = RunEnded(
             run_id=current,
-            git={**git_trace(state), **evidence},
             replies=_json_dicts.validate_python(messages_to_dict(replies)),
+            invocation_id=self._backend.invocation_id,
         )
-        return await call(self._backend, RUN_ENDED, request)
+        outbox.notify(RUN_ENDED, ended)
 
 
 def _messages(state: Mapping[str, object]) -> list[AnyMessage]:

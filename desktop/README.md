@@ -10,7 +10,7 @@ No dashboard is embedded in the installer.
 First launch requires connectivity to download the UI; failure shows a retry screen.
 
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project.
-The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box.
+The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
 The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back.
 This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 

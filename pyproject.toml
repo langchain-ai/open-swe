@@ -84,7 +84,7 @@ packages = ["openswe"]
 [tool.ruff]
 line-length = 100
 # Scripts copied into sandboxes run on whatever python3 the image ships.
-per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38" }
+per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38", "mda/rt/sandbox_scripts/*.py" = "py38" }
 # Vendored upstream code keeps its own style.
 extend-exclude = ["vendor"]
 

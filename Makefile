@@ -139,7 +139,7 @@ format-check:
 
 typecheck:
 	uv run ty check openswe packages tests
-	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
+	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py mda/rt/sandbox_scripts/*.py
 
 # mda/ is its own project: checked and tested against its own environment alone,
 # so an import reaching for the backend (`openswe`) or a database driver fails here.
