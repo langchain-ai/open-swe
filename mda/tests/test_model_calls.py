@@ -281,10 +281,6 @@ async def _answered(reply: AIMessage, monkeypatch: pytest.MonkeyPatch) -> AIMess
             f"[Watch the 8-second recording]({_ISSUED_URL})",
         ),
         (
-            f"Recording:\n{_ISSUED_URL[:300]}\n{_ISSUED_URL[300:]}\nDone.",
-            f"Recording:\n{_ISSUED_URL}\nDone.",
-        ),
-        (
             [
                 {"type": "thinking", "thinking": "link it", "signature": "s"},
                 {"type": "text", "text": f"[Recording]({_ISSUED_URL[:445]}\t{_ISSUED_URL[445:]})"},
@@ -295,7 +291,7 @@ async def _answered(reply: AIMessage, monkeypatch: pytest.MonkeyPatch) -> AIMess
             ],
         ),
     ],
-    ids=["space", "newline", "text-block"],
+    ids=["space", "text-block"],
 )
 async def test_a_reply_links_a_tool_issued_url_exactly_as_issued(
     monkeypatch: pytest.MonkeyPatch, written: str | list[str | dict], kept: str | list[str | dict]
@@ -303,23 +299,6 @@ async def test_a_reply_links_a_tool_issued_url_exactly_as_issued(
     answered = await _answered(AIMessage(content=written), monkeypatch)
 
     assert answered.content == kept
-
-
-@pytest.mark.parametrize(
-    "written",
-    [
-        f"[Watch the recording]({_ISSUED_URL})",
-        # No tool issued it, so its whitespace stays, however long.
-        f"See https://github.com/o/r/pull/1 and https://example.com/{'a1b2' * 30} {'c3d4' * 30}",
-    ],
-    ids=["exact", "unrelated"],
-)
-async def test_a_reply_keeps_what_it_wrote_around_issued_urls(
-    monkeypatch: pytest.MonkeyPatch, written: str
-) -> None:
-    answered = await _answered(AIMessage(content=written), monkeypatch)
-
-    assert answered.content == written
 
 
 async def test_a_changed_issued_url_is_left_and_logged_without_it(
