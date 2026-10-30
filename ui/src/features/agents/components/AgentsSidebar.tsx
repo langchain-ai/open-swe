@@ -188,7 +188,7 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const profile = useProfile()
-  const fleetEnabled = profile.data?.experimental_fleet === true
+  const agentWorkspaceEnabled = profile.data?.experimental_fleet === true
   const newThreadShortcut = useShortcutLabel("mod+n")
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -251,7 +251,7 @@ export function AgentsSidebar({
   // header instead of a flat list), so every other repo-mode query and
   // computation below applies to both.
   const repoMode =
-    !fleetEnabled && (prefs.organize === "repo" || workspaceOrganize)
+    !agentWorkspaceEnabled && (prefs.organize === "repo" || workspaceOrganize)
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
@@ -259,10 +259,10 @@ export function AgentsSidebar({
   const recentsQuery = useSidebarRecents({
     repoMode,
     includeAutomations,
-    includeResolved: fleetEnabled || prefs.filters.includeResolved,
+    includeResolved: agentWorkspaceEnabled || prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
     includeClaudeCode: prefs.filters.includeClaudeCode,
-    sort: fleetEnabled ? "updated" : prefs.sortChats,
+    sort: agentWorkspaceEnabled ? "updated" : prefs.sortChats,
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
@@ -671,8 +671,8 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      {fleetEnabled && (
-        <FleetThreadList
+      {agentWorkspaceEnabled && (
+        <AgentWorkspaceThreadList
           items={allItems}
           activeThreadId={activeThreadId}
           compact={prefs.compact}
@@ -700,7 +700,7 @@ export function AgentsSidebar({
       <div
         className={cn(
           "flex flex-col gap-0.5 px-space-2 pb-space-1",
-          fleetEnabled && "hidden"
+          agentWorkspaceEnabled && "hidden"
         )}
       >
         <Link
@@ -752,7 +752,7 @@ export function AgentsSidebar({
       <div
         className={cn(
           "relative flex min-h-0 flex-1 flex-col",
-          fleetEnabled && "hidden"
+          agentWorkspaceEnabled && "hidden"
         )}
       >
         {scrollEdges.top && (
@@ -1439,9 +1439,9 @@ export function AgentsShell({
   )
 }
 
-const FLEET_SECTIONS = ["Pinned", "Recents", "Archived"] as const
+const CHAT_SECTIONS = ["Pinned", "Recents", "Archived"] as const
 
-function FleetThreadList({
+function AgentWorkspaceThreadList({
   items,
   activeThreadId,
   compact,
@@ -1495,7 +1495,7 @@ function FleetThreadList({
       )}
       <div ref={viewport} className="min-h-0 flex-1 overflow-y-auto">
         {loading && <ThreadListSkeleton compact={compact} />}
-        {FLEET_SECTIONS.map((label) => {
+        {CHAT_SECTIONS.map((label) => {
           const rows = items.filter((item) => section(item) === label)
           if (!rows.length) return null
           const collapsible = label === "Archived"

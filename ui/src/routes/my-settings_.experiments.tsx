@@ -22,8 +22,8 @@ function ExperimentsPage() {
         <StreamPreference />
         <ProfileSwitchRow
           field="experimental_fleet"
-          label="Fleet chats"
-          description="Use the Fleet chat interface for your Open SWE agents, with one list of pinned, recent, and archived chats."
+          label="LangSmith Agent Workspace"
+          description="Use LangSmith Agent Workspace for your Open SWE agents, with one list of pinned, recent, and archived chats."
         />
       </SettingsSection>
       <SettingsSection title="Slack">

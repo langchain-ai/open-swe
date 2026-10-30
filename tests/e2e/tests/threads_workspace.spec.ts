@@ -390,7 +390,7 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("threads workspace", () => {
-  test("Fleet interface uses Open SWE threads without a mode switch", async ({
+  test("LangSmith Agent Workspace uses Open SWE threads without a mode switch", async ({
     page,
     request,
   }) => {
