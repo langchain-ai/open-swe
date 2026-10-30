@@ -74,7 +74,7 @@ async def remember(
 @expose_mcp()
 @audit_tool()
 @access(_PERSONAL)
-async def forget(memory_id: str) -> dict[str, object]:
+async def forget(memory_id: str, scope: Literal["personal"]) -> dict[str, object]:
     """Implement the `forget` tool."""
     login = await resolve_github_login(as_json_object(get_config()))
     person = await User.for_login("github", login) if login else None
@@ -84,6 +84,6 @@ async def forget(memory_id: str) -> dict[str, object]:
         parsed = UUID(memory_id)
     except ValueError:
         return {"ok": False, "error": "memory_id is not a memory id"}
-    if not await MEMORIES.forget(parsed, person.id):
+    if not await MEMORIES.forget(parsed, person.id, scope):
         return {"ok": False, "error": "No personal memory of yours has that id."}
     return {"ok": True, "memory_id": memory_id}

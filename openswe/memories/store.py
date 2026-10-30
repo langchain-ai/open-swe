@@ -189,14 +189,17 @@ class Memories:
             )
         return [PersonalMemory(id=row.id, body=row.body) for row in rows]
 
-    async def forget(self, memory_id: UUID, person: UUID) -> bool:
-        """Delete one of ``person``'s personal memories; False when they have no such one."""
+    async def forget(self, memory_id: UUID, person: UUID, scope: Literal["personal"]) -> bool:
+        """Delete one of ``person``'s memories in ``scope``; False when they have no such one.
+
+        Only personal ones: a workspace memory is the curator's to decide.
+        """
         async with postgres.session() as session:
             deleted = await session.scalar(
                 delete(MemoryRow)
                 .where(
                     MemoryRow.id == memory_id,
-                    MemoryRow.scope == "personal",
+                    MemoryRow.scope == scope,
                     MemoryRow.created_by == person,
                 )
                 .returning(MemoryRow.id)
