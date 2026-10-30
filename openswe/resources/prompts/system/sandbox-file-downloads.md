@@ -23,13 +23,11 @@ For PR comparison screenshots:
   If it does not, the screenshots do not show the fix; find out why instead of publishing them.
 - Generate inline image download URLs with the correct MIME type, without an expiry unless requested.
   Keep the files available; a non-expiring URL does not make sandbox files permanent.
-- Save the tool's JSON response and build the PR body from its exact `url` field programmatically.
-  Never retype, shorten, decode/re-encode, or reconstruct signed URLs; one changed byte can cause 403.
 - Embed a Before/After image table.
   Use `gh pr edit --body-file` for updates, preserving the existing description and footer.
   Do not use `gh pr edit --attach`: sandbox proxy authentication does not support that upload path (`unsupported authentication type`).
 - After creation or every screenshot edit, read the published PR back with `gh api repos/OWNER/REPO/pulls/NUMBER -H 'Accept: application/vnd.github.full+json'`.
-  Check screenshot URLs parsed from `body` match the saved tool results; parse `body_html` with an HTML parser and also check the rendered screenshot `<img src>` URLs (including GitHub's proxy).
+  Check screenshot URLs parsed from `body` match the tool's returned `url` values; parse `body_html` with an HTML parser and also check the rendered screenshot `<img src>` URLs (including GitHub's proxy).
 - GET those exact published and rendered URLs, following redirects without authorization headers, cookies, or a logged-in browser.
   Require HTTP 200 and the expected image MIME type, not an HTML login/error page; HEAD or checking only the original tool output is insufficient.
 - If a check fails, reissue the URL, rebuild and publish the body, then repeat the read-back checks.

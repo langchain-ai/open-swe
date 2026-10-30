@@ -12080,6 +12080,41 @@
         ]
       }
     },
+    "/dashboard/api/l/{token}": {
+      "get": {
+        "operationId": "open_short_link_dashboard_api_l__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Short Link",
+        "tags": [
+          "short-links"
+        ]
+      }
+    },
     "/dashboard/api/langsmith/callback": {
       "get": {
         "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
