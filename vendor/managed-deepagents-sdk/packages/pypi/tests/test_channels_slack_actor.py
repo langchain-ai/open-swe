@@ -17,6 +17,7 @@ import jwt
 import pytest
 
 from managed_deepagents import SlackActor, SlackEvent, SlackMessageEvent, channels
+from managed_deepagents._agent_auth_http import CredentialStoreError
 from managed_deepagents._channels.http import endpoint as endpoint_module
 from managed_deepagents._channels.slack.events import endpoint_fields
 from managed_deepagents._channels.trigger import http as trigger_http
@@ -133,18 +134,57 @@ def test_hands_trigger_servers_slack_user_to_the_decision_and_never_logs_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     seen: list[object] = []
+    resolved: list[object] = []
 
     async def decide(_event: object, _thread: object, actor: object) -> TriggerMessageDecision:
         seen.append(actor)
         return TriggerMessageDecision("skipped")
 
+    def resolve_principal(identity: object) -> str:
+        resolved.append(identity)
+        return _IDENTITY_PRINCIPAL_ID
+
     actor = {"provider": "slack", "issuer": "T9EXTERNAL", "subject": "U-VERIFIED"}
     with caplog.at_level(logging.DEBUG):
-        response = _handle(_token(), actor, decide_message=decide)
+        response = _handle(
+            _token(), actor, decide_message=decide, resolve_principal=resolve_principal
+        )
 
     assert response.status_code == 202
     assert seen == [SlackActor(team_id="T9EXTERNAL", id="U-VERIFIED")]
+    # The principal is keyed on the install team, not the guest's own team.
+    assert resolved == [{"provider": "slack", "issuer": "T1", "subject": "U-VERIFIED"}]
     assert "U-VERIFIED" not in caplog.text
+
+
+def _unavailable(_identity: object) -> str:
+    raise CredentialStoreError("Agent Auth unavailable")
+
+
+@pytest.mark.parametrize(
+    "resolve_principal",
+    [lambda _identity: "44444444-4444-4444-8444-444444444444", _unavailable],
+    ids=["another-principal", "unavailable"],
+)
+def test_drops_an_actor_agent_auth_does_not_key_on_the_principal(
+    resolve_principal: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    seen: list[object] = []
+
+    async def decide(_event: object, _thread: object, actor: object) -> TriggerMessageDecision:
+        seen.append(actor)
+        return TriggerMessageDecision("skipped")
+
+    actor = {"provider": "slack", "issuer": "T1", "subject": "U-FORGED"}
+    with caplog.at_level(logging.WARNING):
+        response = _handle(
+            _token(), actor, decide_message=decide, resolve_principal=resolve_principal
+        )
+
+    assert response.status_code == 202
+    assert seen == [None]
+    assert "channel actor" in caplog.text
+    assert "U-FORGED" not in caplog.text
 
 
 def test_has_no_actor_when_trigger_server_names_none() -> None:
@@ -306,6 +346,7 @@ def test_finishes_a_message_with_the_verified_actor(monkeypatch: pytest.MonkeyPa
             schedule=work.append,
             decide_message=decide,
             on_finish=on_finish,
+            resolve_principal=lambda _identity: _IDENTITY_PRINCIPAL_ID,
         )
     )
     for job in work:

@@ -387,7 +387,7 @@ def test_unproxied_definition_clears_rules_each_run_after_proxied_run(
         root = runtime._managed_sandbox_backend(
             definition,
             _config(),
-            selection_fingerprint=runtime._sandbox_selection_fingerprint(definition),
+            selection=runtime._sandbox_selection(definition),
         )
         assert root.execute("command") == "done"
     wires = [call.args[2] for call in proxy.patch.call_args_list]
@@ -402,8 +402,8 @@ def test_unproxied_run_clears_rules_another_worker_applied(
 ) -> None:
     unproxied = mda.define_sandbox()
     proxied = mda.define_sandbox(proxy_config={"rules": [{"name": "other-worker"}]})
-    fingerprint = runtime._sandbox_selection_fingerprint(unproxied)
-    assert fingerprint == runtime._sandbox_selection_fingerprint(proxied)
+    selection = runtime._sandbox_selection(unproxied)
+    assert selection == runtime._sandbox_selection(proxied)
     host_wire: dict[str, object] = {}
 
     def patch(_sandbox: object, _name: str, wire: dict[str, object]) -> None:
@@ -413,9 +413,7 @@ def test_unproxied_run_clears_rules_another_worker_applied(
     proxy.patch.side_effect = patch
 
     def run(definition: SandboxDefinition) -> object:
-        root = runtime._managed_sandbox_backend(
-            definition, _config(), selection_fingerprint=fingerprint
-        )
+        root = runtime._managed_sandbox_backend(definition, _config(), selection=selection)
         return asyncio.run(root.aexecute("command")) if asynchronous else root.execute("command")
 
     assert run(unproxied) == "done"

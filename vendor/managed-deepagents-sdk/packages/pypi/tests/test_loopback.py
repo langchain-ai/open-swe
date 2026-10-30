@@ -64,9 +64,18 @@ def test_resolve_ignores_langsmith_endpoint(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_resolve_api_key_falls_back_to_local(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
     assert resolve_loopback_api_key() == "local"
     assert resolve_loopback_api_key(explicit="  ") == "local"
     assert resolve_loopback_api_key(explicit="lsv2-key") == "lsv2-key"
+
+
+def test_resolve_loopback_api_key_uses_the_deployment_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "deployment-key")
+    assert resolve_loopback_api_key() == "deployment-key"
 
 
 @pytest.mark.parametrize(

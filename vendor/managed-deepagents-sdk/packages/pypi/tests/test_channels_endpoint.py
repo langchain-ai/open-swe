@@ -19,6 +19,7 @@ from managed_deepagents import GitHubEndpointRequest, LinearEndpointRequest, cha
 from managed_deepagents._channels.github_schema import SUPPORTED_EVENT_KEYS as GITHUB_EVENT_KEYS
 from managed_deepagents._channels.http import endpoint as endpoint_module
 from managed_deepagents._channels.http.endpoint import (
+    EndpointDeclined,
     endpoint_handler,
     signature_headers,
     signing_key,
@@ -125,7 +126,32 @@ def test_takes_the_endpoint_as_a_url(monkeypatch: pytest.MonkeyPatch) -> None:
 )
 def test_refuses_an_array_input(monkeypatch: pytest.MonkeyPatch, run_input: object) -> None:
     _service(monkeypatch, httpx.Response(200, json={"input": run_input}))
-    with pytest.raises(RuntimeError, match="must be null or"):
+    with pytest.raises(RuntimeError, match=r"must be null, \{ decline \} or"):
+        asyncio.run(endpoint_handler(_URL, "test")(_Event(), _Thread()))
+
+
+def test_declines_with_the_message_the_service_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    _service(monkeypatch, httpx.Response(200, json={"decline": "Which repository?"}))
+    result = asyncio.run(endpoint_handler(_URL, "test")(_Event(), _Thread()))
+    assert result == EndpointDeclined("Which repository?")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"decline": ""},
+        {"decline": "  "},
+        {"decline": "x" * 2001},
+        {"decline": 1},
+        {"decline": "why", "input": "x"},
+    ],
+    ids=["empty", "blank", "too-long", "not-text", "with-input"],
+)
+def test_fails_the_handler_on_a_decline_it_cant_post(
+    monkeypatch: pytest.MonkeyPatch, answer: dict[str, object]
+) -> None:
+    _service(monkeypatch, httpx.Response(200, json=answer))
+    with pytest.raises(RuntimeError, match=r"must be null, \{ decline \} or"):
         asyncio.run(endpoint_handler(_URL, "test")(_Event(), _Thread()))
 
 
@@ -229,8 +255,8 @@ def test_starts_nothing_when_the_service_says_so(
         (httpx.Response(400, text="nope"), "HTTP 400"),
         (httpx.Response(302, headers={"location": "http://169.254.169.254/"}), "HTTP 302"),
         (httpx.Response(200, text="not json"), "not JSON"),
-        (httpx.Response(200, json={"context": {}}), "must be null or"),
-        (httpx.Response(200, json={"input": "x", "config": {}}), "must be null or"),
+        (httpx.Response(200, json={"context": {}}), "must be null, { decline } or"),
+        (httpx.Response(200, json={"input": "x", "config": {}}), "must be null, { decline } or"),
         (
             httpx.Response(200, headers={"content-length": str(11 * 1024 * 1024)}, text="x"),
             "too large",

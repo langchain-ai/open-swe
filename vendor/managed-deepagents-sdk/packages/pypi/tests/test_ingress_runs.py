@@ -420,6 +420,81 @@ def test_hands_the_trace_id_to_the_run_and_records_its_ids_and_status(
     }
 
 
+def test_keeps_a_runs_own_metadata_beside_the_trace_id(client: SimpleNamespace) -> None:
+    from managed_deepagents._telemetry.otel import (  # noqa: PLC0415
+        LogContext,
+        enter_log_context,
+        exit_log_context,
+    )
+
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+
+    async def run() -> None:
+        token = enter_log_context(LogContext(trace_id=trace_id))
+        try:
+            await ingress_runs.start_ingress_run(
+                client=client,  # type: ignore[arg-type]
+                thread_id="thread-1",
+                assistant_id="agent",
+                messages=[],
+                metadata={"mda_delivery_key": "d-1"},
+            )
+        finally:
+            exit_log_context(token)
+
+    asyncio.run(run())
+
+    assert client.runs.create.await_args.kwargs["metadata"] == {
+        "mda_delivery_key": "d-1",
+        "mda_trace_id": trace_id,
+    }
+
+
+def test_hands_the_run_the_deliverys_event_type_and_user_resolution(
+    client: SimpleNamespace,
+) -> None:
+    from managed_deepagents._telemetry.otel import (  # noqa: PLC0415
+        LogContext,
+        enter_log_context,
+        exit_log_context,
+        set_log_attributes,
+    )
+
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+
+    async def run() -> None:
+        token = enter_log_context(LogContext(trace_id=trace_id))
+        try:
+            set_log_attributes(
+                {"provider_event_type": "issues.opened", "user_resolution": "channel"}
+            )
+            await ingress_runs.start_ingress_run(
+                client=client,  # type: ignore[arg-type]
+                thread_id="thread-1",
+                assistant_id="agent",
+                messages=[],
+            )
+        finally:
+            exit_log_context(token)
+
+    asyncio.run(run())
+
+    metadata = client.runs.create.await_args.kwargs["metadata"]
+    assert metadata == {
+        "mda_trace_id": trace_id,
+        "mda_provider_event_type": "issues.opened",
+        "mda_user_resolution": "channel",
+    }
+    assert ingress_runs.ingress_run_origin(metadata) == {
+        "provider_event_type": "issues.opened",
+        "user_resolution": "channel",
+    }
+    assert ingress_runs.ingress_run_origin(None) == {
+        "provider_event_type": None,
+        "user_resolution": None,
+    }
+
+
 def test_sends_no_metadata_outside_a_log_context(client: SimpleNamespace) -> None:
     asyncio.run(
         ingress_runs.start_ingress_run(

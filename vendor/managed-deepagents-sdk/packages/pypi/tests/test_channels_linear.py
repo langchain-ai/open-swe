@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -759,6 +760,33 @@ def test_continues_with_a_session_reply_and_answers_a_declined_session(
         "type": "response",
         "body": "I'm not set up to work on this request.",
     }
+
+
+def test_tells_a_session_why_an_endpoint_declined(
+    ingress: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from managed_deepagents._channels.http import endpoint as endpoint_module  # noqa: PLC0415
+
+    caplog.set_level(logging.INFO)
+    real_client = httpx.AsyncClient
+    why = "Which repository should I work in?"
+    monkeypatch.setattr(
+        endpoint_module.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(
+            transport=httpx.MockTransport(lambda _r: httpx.Response(200, json={"decline": why})),
+            **kwargs,
+        ),
+    )
+    channel = channels.linear(
+        on_event={"AgentSessionEvent.created": "https://backend.example/runs"}
+    )
+    asyncio.run(send(channel, payload("AgentSessionEvent.created")))
+    asyncio.run(drain(ingress))
+    assert ingress.prepared == [None]
+    assert ingress.activity.await_args.kwargs["content"] == {"type": "response", "body": why}
+    assert "Linear endpoint declined" in caplog.text
+    assert why not in caplog.text
 
 
 def test_rejects_a_malformed_service_secret_when_declared(

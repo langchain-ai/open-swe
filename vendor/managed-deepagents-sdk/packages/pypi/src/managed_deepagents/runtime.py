@@ -2088,9 +2088,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if resolved:
             return str(resolved)
         try:
-            scope = _sandbox_scope_key(
-                self._sandbox(), self._config(), self._source.selection
-            )
+            scope = _sandbox_scope_key(self._sandbox(), self._config(), self._source.selection)
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"

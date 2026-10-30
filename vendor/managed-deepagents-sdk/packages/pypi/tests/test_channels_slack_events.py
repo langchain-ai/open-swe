@@ -95,8 +95,10 @@ def _decider(monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> tuple[dict[str, 
 
 def test_messages_start_as_before_without_on_event(monkeypatch: pytest.MonkeyPatch) -> None:
     captured, _ = _decider(monkeypatch)
+    decide_message = captured["decide_message"]
+    assert callable(decide_message)
 
-    assert captured["decide_message"] is None
+    assert asyncio.run(decide_message(_delivery(_MENTION), dict(_THREAD), None)) is None
     assert captured["multitask_strategy"] == "enqueue"
 
 
@@ -458,13 +460,14 @@ def _click(raw_event: Mapping[str, object] = _BLOCK_ACTIONS) -> dict[str, object
     }
 
 
-def test_decides_interactions_only_with_an_interaction_handler(
+def test_leaves_interactions_alone_without_an_interaction_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured, _ = _decider(monkeypatch, on_event={"mention": lambda _e, _t: None})
-    assert captured["decide_interaction"] is None
-    captured, _ = _decider(monkeypatch, on_event={"interaction": lambda _e, _t: None})
-    assert callable(captured["decide_interaction"])
+    decide_interaction = captured["decide_interaction"]
+    assert callable(decide_interaction)
+
+    assert asyncio.run(decide_interaction(_click(), dict(_THREAD), None)) is None
 
 
 def test_calls_the_interaction_handler_with_the_click_without_slacks_token(

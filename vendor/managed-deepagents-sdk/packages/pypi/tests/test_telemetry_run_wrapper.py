@@ -55,6 +55,10 @@ CONFIGURATION = RunConfiguration(
     backend_kind="state",
     context_source="none",
     memory=MemoryObservations(layers_declared=[], layers_mounted=[], user_denied_reason=None),
+    provider_event_type=None,
+    user_resolution=None,
+    subagent_role="lead",
+    browser_declared=False,
 )
 
 
@@ -325,7 +329,30 @@ def test_concurrent_runs_do_not_share_events(recorder: _Recorder) -> None:
     assert all(event["outcome"] == "success" for event in recorder.events)
 
 
-def test_cancellation_cleans_up_and_reports_failure(recorder: _Recorder) -> None:
+@pytest.mark.parametrize(("name", "used"), [("browser_snapshot", True), ("read_file", False)])
+def test_reports_a_browser_tool_call_as_browser_use(
+    recorder: _Recorder, name: str, used: bool
+) -> None:
+    from langchain_core.runnables import RunnableConfig  # noqa: PLC0415
+    from langchain_core.tools import StructuredTool  # noqa: PLC0415
+
+    called = StructuredTool.from_function(lambda: "ok", name=name, description="test tool")
+
+    def call(state: _State, config: RunnableConfig) -> _State:
+        called.invoke({}, config)
+        return {"n": state["n"] + 1}
+
+    graph = StateGraph(_State)
+    graph.add_node("call", call)
+    graph.add_edge(START, "call")
+    graph.add_edge("call", END)
+    observe_run(graph.compile(), _pending()).invoke({"n": 0})
+
+    assert flush_run_telemetry_for_tests()
+    assert [event["browser_used"] for event in recorder.events] == [used]
+
+
+def test_cancellation_cleans_up_and_reports_cancelled(recorder: _Recorder) -> None:
     async def run() -> None:
         started = asyncio.Event()
         closed = asyncio.Event()
@@ -349,7 +376,7 @@ def test_cancellation_cleans_up_and_reports_failure(recorder: _Recorder) -> None
             await task
         assert closed.is_set()
         assert flush_run_telemetry_for_tests()
-        assert [event["outcome"] for event in recorder.events] == ["failure"]
+        assert [event["outcome"] for event in recorder.events] == ["cancelled"]
 
     asyncio.run(run())
 

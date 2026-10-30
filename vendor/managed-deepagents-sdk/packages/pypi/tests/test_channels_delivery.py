@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -14,9 +15,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.types import Command, interrupt
 
+from managed_deepagents._agent_auth_http import missing_workspace_connection_error
 from managed_deepagents._channels import delivery
 from managed_deepagents._channels.messaging_registry import register_channel_messaging
 from managed_deepagents._channels.run_output import RunOutputMiddleware
+from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._managed_thread import _verified_lead_metadata
 from managed_deepagents._run_input import ManagedCompiledAgent
 from managed_deepagents._thread_record import next_thread_record, thread_record_metadata
@@ -115,15 +118,28 @@ def _texts(sent: SimpleNamespace) -> list[str]:
     return [action["message"]["text"] for action in sent.actions]
 
 
+#: The (empty) block OpenAI's Responses API, through LangChain, puts before the answer's text.
+REASONING = {"type": "reasoning", "id": "rs_1", "reasoning": ""}
+
+
 def _agent() -> Any:
-    """Answers each message; ``approve?`` first waits on an interrupt."""
+    """Answers each message; ``approve?`` waits on an interrupt; ``boom``, ``missing`` raise.
+
+    ``think`` answers with a reasoning block before its text.
+    """
 
     def answer(state: MessagesState) -> dict[str, object]:
         text = state["messages"][-1].text
+        if text == "boom":
+            raise RuntimeError("secret detail")
+        if text == "missing":
+            raise missing_workspace_connection_error("clickup")
         if text == "[quiet]":
             return {"messages": [AIMessage(text)]}
         if text == "approve?":
             text = f"approved {interrupt({'question': 'ok?'})}"
+        if text == "think":
+            return {"messages": [AIMessage([REASONING, {"type": "text", "text": "re: think"}])]}
         return {"messages": [AIMessage(f"re: {text}")]}
 
     graph = (
@@ -187,6 +203,15 @@ def test_a_channel_run_posts_its_answer(sent: SimpleNamespace) -> None:
     ]
 
 
+def test_a_text_only_channel_gets_the_text_of_an_answer_with_reasoning(
+    sent: SimpleNamespace,
+) -> None:
+    _agent().invoke(_user("think"), _config(ORDERS), context={"mda_channel": DIRECT})
+
+    # Text-only transports such as Linear reject any block that isn't text.
+    assert [require_text_content(post["message"]) for post in sent.posts] == ["re: think"]
+
+
 @pytest.mark.parametrize(
     ("user", "binding", "metadata", "fails"),
     [
@@ -206,6 +231,30 @@ def test_failed_reply_policies(
             _agent().invoke(_user("hi"), config)
     else:
         assert _agent().invoke(_user("hi"), config)["messages"][-1].text == "re: hi"
+
+
+def test_a_failed_reply_logs_the_channel_and_why(
+    sent: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    sent.fail = True
+    register_channel_messaging([SimpleNamespace(name="mute", kind="orders")])
+    with caplog.at_level(logging.ERROR, logger="mda"):
+        _agent().invoke(_user("hi"), _config(ORDERS), context={"mda_channel": DIRECT})
+        _agent().invoke(
+            _user("hi"),
+            _config(ORDERS, thread_id="t2"),
+            context={"mda_channel": {**DIRECT, "name": "mute"}},
+        )
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "[mda] channel reply failed (channel=orders): RuntimeError",
+        (
+            "[mda] channel reply failed (channel=mute): "
+            "NoReplyTransportError: the channel has no `post`, "
+            "so it cannot post the run's answer. "
+            'Add `post` to the channel, or set `reply` to "none"'
+        ),
+    ]
 
 
 def test_a_woken_runs_resume_posts_only_its_own_answers(sent: SimpleNamespace) -> None:
@@ -523,3 +572,122 @@ def test_a_stateless_schedule_opens_no_thread(
     deliver.assert_awaited_once()
     sent.deployment_action.assert_not_awaited()
     sent.hand_off.assert_not_awaited()
+
+
+def _fixed_thread_cron() -> dict[str, object]:
+    return {**_record(), "mda_managed": True, "mda_schedule_spec": {"new_thread": False}}
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_a_failed_schedule_reports_run_failed_in_its_trigger_thread(
+    sent: SimpleNamespace, use_async: bool
+) -> None:
+    agent, config = _agent(), _config(CRON_USER, metadata=_fixed_thread_cron())
+    run = (
+        (lambda: asyncio.run(agent.ainvoke(_user("boom"), config)))
+        if use_async
+        else (lambda: agent.invoke(_user("boom"), config))
+    )
+    with pytest.raises(RuntimeError, match="secret detail"):
+        run()
+
+    assert sent.actions == []
+    ((body),) = sent.events
+    assert (body["type"], body["run_thread_id"], body["run_id"], body["source_thread_key"]) == (
+        "run.failed",
+        "t1",
+        "run-1",
+        KEY,
+    )
+    # Only a known-safe message leaves the run; Trigger shows its own error reply.
+    assert "message" not in body
+
+
+def test_a_schedule_that_misses_a_connection_says_which(sent: SimpleNamespace) -> None:
+    with pytest.raises(Exception, match="clickup"):
+        _agent().invoke(_user("missing"), _config(CRON_USER, metadata=_fixed_thread_cron()))
+
+    ((body),) = sent.events
+    assert body["type"] == "run.failed"
+    assert "`clickup` connection isn't configured" in body["message"]["text"]
+
+
+def test_a_failed_new_thread_schedule_reports_run_failed_in_the_thread_it_opens(
+    sent: SimpleNamespace,
+) -> None:
+    sent.started = STARTED
+    with pytest.raises(RuntimeError):
+        _agent().invoke(_user("missing"), _config(CRON_USER, metadata=_new_thread_cron()))
+
+    ((action),) = sent.actions
+    assert action["action_id"] == delivery.failed_action_id("run-1")
+    assert action["message"] == {"text": delivery.FAILED_THREAD_NOTICE}
+    sent.hand_off.assert_awaited_once()
+    ((body),) = sent.events
+    assert (body["type"], body["source_thread_key"], body["address"], body["run_thread_id"]) == (
+        "run.failed",
+        NEW_KEY,
+        STARTED["address"],
+        "t1",
+    )
+    assert "`clickup` connection isn't configured" in body["message"]["text"]
+
+
+def test_a_failed_deliver_to_schedule_posts_a_notice(
+    sent: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deliver = AsyncMock(return_value="posted")
+    monkeypatch.setattr(delivery, "deliver_schedule_result", deliver)
+    user = {key: value for key, value in CRON_USER.items() if key != "mda_source_thread_id"}
+    to = {"type": "provider_thread", "conversation_id": "C1", "thread_id": "171.1"}
+    with pytest.raises(RuntimeError):
+        _agent().invoke(
+            _user("boom"),
+            _config(user, metadata={"mda_managed": True}),
+            context={
+                "mda_schedule": {"name": "daily", "deliver_to": {"channel": "slack", "to": to}}
+            },
+        )
+
+    deliver.assert_awaited_once_with(
+        deliver_to={"channel": "slack", "to": to, "auto_post": True},
+        reply_text=delivery.FAILED_NOTICE,
+    )
+
+
+def test_a_failed_channel_message_run_is_left_to_trigger_ingress(sent: SimpleNamespace) -> None:
+    with pytest.raises(RuntimeError):
+        _agent().invoke(_user("boom"), _config(SLACK), context={"mda_channel": TRIGGER})
+
+    assert (sent.actions, sent.events) == ([], [])
+
+
+def test_a_cancelled_schedule_reports_nothing(sent: SimpleNamespace) -> None:
+    started = asyncio.Event()
+
+    async def wait(state: MessagesState) -> dict[str, object]:
+        started.set()
+        await asyncio.sleep(60)
+        return {}
+
+    graph = (
+        StateGraph(MessagesState)
+        .add_node("wait", wait)
+        .add_edge(START, "wait")
+        .add_edge("wait", END)
+        .compile(checkpointer=InMemorySaver())
+    )
+    graph.__class__ = ManagedCompiledAgent
+
+    async def cancel() -> None:
+        run = asyncio.create_task(
+            graph.ainvoke(_user("hi"), _config(CRON_USER, metadata=_fixed_thread_cron()))
+        )
+        await started.wait()
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+
+    asyncio.run(cancel())
+
+    assert (sent.actions, sent.events) == ([], [])

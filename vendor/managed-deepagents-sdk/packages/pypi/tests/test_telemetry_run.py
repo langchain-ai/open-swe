@@ -42,6 +42,10 @@ CONFIGURATION = RunConfiguration(
         layers_mounted=["agent"],
         user_denied_reason="not_slack_dm",
     ),
+    provider_event_type="mention",
+    user_resolution="agent_auth_principal",
+    subagent_role="lead",
+    browser_declared=True,
 )
 
 
@@ -78,7 +82,7 @@ def test_finish_run_has_the_expected_shape() -> None:
     assert event == {
         "event_id": "22222222-2222-4222-8222-222222222222",
         "event_type": "run_completed",
-        "schema_version": "2026-09-15",
+        "schema_version": "2026-10-29",
         "created_at": "1970-01-01T00:00:02.234Z",
         "distinct_id": "tenant-123",
         "run_id": "11111111-1111-4111-8111-111111111111",
@@ -107,7 +111,19 @@ def test_finish_run_has_the_expected_shape() -> None:
             "layers_mounted": ["agent"],
             "user_denied_reason": "not_slack_dm",
         },
+        "provider_event_type": "mention",
+        "user_resolution": "agent_auth_principal",
+        "subagent_role": "lead",
+        "browser_declared": True,
+        "browser_used": False,
     }
+
+
+def test_reports_the_browser_use_the_run_recorded() -> None:
+    pending = _pending()
+    pending.browser_used = True
+
+    assert finish_run(pending, "success")["browser_used"] is True
 
 
 def test_leaves_the_pending_run_untouched_so_a_second_close_is_identical() -> None:

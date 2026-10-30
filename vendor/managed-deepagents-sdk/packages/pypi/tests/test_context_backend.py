@@ -294,39 +294,74 @@ def test_skills_route_is_read_only_while_memory_stays_writable() -> None:
     assert ("write", ("/memories/agent/AGENTS.md", "agent")) in backend.calls
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["/memories/agent/AGENTS.md", "/memories/user/AGENTS.md", "/instructions.md", "/skills/a.md"],
-)
-def test_composite_delete_on_context_mounts_reports_unsupported(tmp_path: Path, path: str) -> None:
-    # Regression: mounts lacked ``delete``, so ``CompositeBackend.delete`` (which
-    # only converts ``NotImplementedError``) raised ``AttributeError``. Mounts now
-    # inherit the native default and never delete Context Hub content.
+def _delete_fixture(tmp_path: Path, *, mount_user: bool = True) -> CompositeBackend:
     hub = tmp_path / "hub"
     users = tmp_path / "user"
     for root, relative in (
-        (hub, "memories/agent/AGENTS.md"),
+        (hub, "memories/agent/old.md"),
         (hub, "instructions.md"),
         (hub, "skills/a.md"),
-        (users, "AGENTS.md"),
+        (users, "old.md"),
     ):
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_text("keep")
-    composite = _managed_context_backend(
+    return _managed_context_backend(
         FilesystemBackend(root_dir=hub, virtual_mode=True),
         None,
         CompositeBackend,
         StateBackend,
         mount_agent_memory=True,
-        user_memory_backend=FilesystemBackend(root_dir=users, virtual_mode=True),
+        user_memory_backend=FilesystemBackend(root_dir=users, virtual_mode=True)
+        if mount_user
+        else None,
     )
 
-    result = composite.delete(path)
-    async_result = asyncio.run(composite.adelete(path))
 
-    assert result.error == f"Error: deletion is not supported for '{path}'."
-    assert async_result.error == result.error
+@pytest.mark.parametrize(
+    ("path", "repo_file"),
+    [
+        ("/memories/agent/old.md", "hub/memories/agent/old.md"),
+        ("/memories/user/old.md", "user/old.md"),
+    ],
+)
+@pytest.mark.parametrize("use_async", [False, True])
+def test_composite_delete_removes_memory_files(
+    tmp_path: Path, path: str, repo_file: str, use_async: bool
+) -> None:
+    composite = _delete_fixture(tmp_path)
+
+    result = _call(composite, "delete", path, use_async=use_async)
+
+    assert (result.path, result.error) == (path, None)
+    assert not (tmp_path / repo_file).exists()
+
+
+@pytest.mark.parametrize(
+    ("path", "error"),
+    [
+        ("/instructions.md", "Context Hub mount /instructions.md is read-only"),
+        ("/skills/a.md", "Context Hub mount /skills is read-only"),
+        (
+            "/memories/agent/",
+            "Cannot delete /memories/agent: delete the files inside it instead",
+        ),
+    ],
+)
+def test_composite_delete_keeps_deploy_files_and_mount_roots(
+    tmp_path: Path, path: str, error: str
+) -> None:
+    composite = _delete_fixture(tmp_path)
+
+    assert composite.delete(path).error == error
     assert sorted(p.read_text() for p in tmp_path.rglob("*.md")) == ["keep"] * 4
+
+
+def test_composite_delete_on_unmounted_user_memory_reports_error(tmp_path: Path) -> None:
+    composite = _delete_fixture(tmp_path, mount_user=False)
+
+    assert composite.delete("/memories/user/old.md").error == (
+        "Cannot delete /memories/user/old.md: user memory is not mounted for this run."
+    )
 
 
 #: The deploy Hub repo as ``mda deploy`` leaves it.

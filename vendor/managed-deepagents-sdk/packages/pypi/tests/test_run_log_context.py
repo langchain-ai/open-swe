@@ -45,6 +45,10 @@ CONFIGURATION = RunConfiguration(
     backend_kind="state",
     context_source="none",
     memory=MemoryObservations(layers_declared=[], layers_mounted=[], user_denied_reason=None),
+    provider_event_type=None,
+    user_resolution=None,
+    subagent_role="lead",
+    browser_declared=False,
 )
 
 

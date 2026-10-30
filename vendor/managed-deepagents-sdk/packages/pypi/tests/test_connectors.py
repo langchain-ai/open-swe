@@ -33,7 +33,10 @@ from managed_deepagents._agent_auth import AgentAuthContext
 from managed_deepagents._connector import is_connector
 from managed_deepagents._connectors import McpServersDefinition
 from managed_deepagents._connectors.mcp import load as mcp_load
-from managed_deepagents._connectors.mcp.langsmith_url import is_langsmith_managed_tools_url
+from managed_deepagents._connectors.mcp.langsmith_url import (
+    is_langsmith_managed_tools_path,
+    is_langsmith_managed_tools_url,
+)
 from managed_deepagents._connectors.mcp.load import (
     ManagedAuth,
     load_caller_mcp_tools,
@@ -80,11 +83,13 @@ class TestLangSmithUrl:
             "01a0f00e-4fe4-7c06-85d7-caa9359e9dff/mcp"
         )
         assert is_langsmith_managed_tools_url(gateway, "https://api.smith.langchain.com")
-        assert not is_langsmith_managed_tools_url(
-            f"{gateway}?steal=1", "https://api.smith.langchain.com"
+        assert is_langsmith_managed_tools_path(f"{gateway}?mode=search")
+        assert is_langsmith_managed_tools_url(
+            f"{gateway}?mode=search", "https://api.smith.langchain.com"
         )
         assert not is_langsmith_managed_tools_url(
-            gateway.replace("https://api.smith.langchain.com", "https://evil.example"),
+            gateway.replace("https://api.smith.langchain.com", "https://evil.example")
+            + "?mode=search",
             "https://api.smith.langchain.com",
         )
 

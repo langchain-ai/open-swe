@@ -542,7 +542,7 @@ def test_github_sender_runs_without_integrations_they_would_have_to_connect(
     middleware = create_credential_gate_middleware([_consumer(calls=calls)])
     assert middleware is not None
 
-    with pytest.warns(RuntimeWarning, match="its github sender cannot be mapped to a user"):
+    with pytest.warns(RuntimeWarning, match="does not map its github sender to a user"):
         assert middleware.before_agent(None, {}) is None
     seen: list[_ModelRequest] = []
     middleware.wrap_model_call(_ModelRequest(), seen.append)

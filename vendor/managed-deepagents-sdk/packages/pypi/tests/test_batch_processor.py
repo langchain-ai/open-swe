@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import threading
 import time
+from dataclasses import replace
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -237,6 +239,71 @@ def test_retries_until_the_call_succeeds_waiting_what_the_error_asks() -> None:
 
     assert with_retry(fn, POLICY)(None, deadline) == "ok"
     assert deadline.waits == [0.9]
+
+
+def test_retry_preserves_the_argument_and_deadline() -> None:
+    deadline = _RecordingDeadline()
+    arg = {"batch": [1, 2]}
+    fn = Mock(side_effect=[_RetryableError(after=0), "ok"])
+
+    assert with_retry(fn, POLICY)(arg, deadline) == "ok"
+    assert fn.call_count == 2
+    for args in fn.call_args_list:
+        assert args.args[0] is arg
+        assert args.args[1] is deadline
+
+
+@pytest.mark.parametrize("with_delay_hint", [False, True])
+def test_retry_uses_exponential_backoff_without_a_requested_delay(
+    monkeypatch: pytest.MonkeyPatch, *, with_delay_hint: bool
+) -> None:
+    monkeypatch.setattr("managed_deepagents._resilience.retry.random.random", lambda: 0.5)
+    deadline = _RecordingDeadline()
+    fn = Mock(side_effect=[_RetryableError(), _RetryableError(), "ok"])
+    policy = POLICY if with_delay_hint else replace(POLICY, delay_for=None)
+
+    assert with_retry(fn, policy)(None, deadline) == "ok"
+    assert deadline.waits == pytest.approx([0.075, 0.15])
+    assert fn.call_args_list == [call(None, deadline)] * 3
+
+
+def test_retry_honors_a_zero_requested_delay() -> None:
+    deadline = _RecordingDeadline()
+    fn = Mock(side_effect=[_RetryableError(after=0), "ok"])
+
+    assert with_retry(fn, POLICY)(None, deadline) == "ok"
+    assert deadline.waits == [0]
+    assert fn.call_count == 2
+
+
+def test_retry_preserves_the_exact_final_error() -> None:
+    deadline = _RecordingDeadline()
+    final_error = _RetryableError(after=0)
+    fn = Mock(side_effect=[_RetryableError(after=0), _RetryableError(after=0), final_error])
+
+    with pytest.raises(_RetryableError) as caught:
+        with_retry(fn, POLICY)(None, deadline)
+
+    assert caught.value is final_error
+    assert fn.call_count == 3
+    assert deadline.waits == [0, 0]
+
+
+def test_retry_does_not_wait_when_the_failed_call_expires_the_deadline() -> None:
+    deadline = _RecordingDeadline()
+    error = _RetryableError()
+
+    def fail(_arg: None, received_deadline: Deadline) -> None:
+        received_deadline.set(0)
+        raise error
+
+    fn = Mock(side_effect=fail)
+    with pytest.raises(_RetryableError) as caught:
+        with_retry(fn, POLICY)(None, deadline)
+
+    assert caught.value is error
+    assert fn.call_count == 1
+    assert deadline.waits == []
 
 
 def test_caps_an_asked_for_delay_at_the_policy_max() -> None:

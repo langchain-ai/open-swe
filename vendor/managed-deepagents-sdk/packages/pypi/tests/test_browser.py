@@ -5,14 +5,19 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import importlib.metadata
+import io
 import json
 import os
+import shlex
 import shutil
-from collections.abc import Awaitable, Callable, Iterator
+import signal
+import sys
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, Self, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -24,9 +29,20 @@ from deepagents.backends.protocol import (
 )
 from langchain.agents import create_agent
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, convert_to_messages
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    convert_to_messages,
+)
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import ExecutionInfo
 from langgraph.types import Command
+from langsmith.sandbox import ResourceNotFoundError
+from PIL import Image
+from stagehand.cdp_client import CDPConnectionClosedError
+from stagehand.rpc_client import RPCClient
 from stagehand_middleware.facade import (
     StagehandFacadeExecutionError,
     StagehandFacadeInputError,
@@ -34,13 +50,17 @@ from stagehand_middleware.facade import (
     facade_tools,
 )
 
+from managed_deepagents import DeepAgentDefinition, MemoryLayer, define_memory, define_sandbox
+from managed_deepagents import _browser_recording as rec
 from managed_deepagents import browser as b
-from managed_deepagents import define_sandbox
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents._channels.assistant_text import is_task_notification
 from managed_deepagents._managed_tools import ManagedToolRuntime
 from managed_deepagents.define_browser import BrowserDefinition, define_browser
 from managed_deepagents.identity import ManagedServerInfo, PrincipalView
+from tests.test_browser_recording import _Chrome, _decode, _rgb
+
+_Handed = tuple[str, str, str, str | None]  # what `_hand_over` returns
 
 
 class _Backend:
@@ -113,10 +133,42 @@ class _Facade:
         return self._answer("screenshot", **kwargs)
 
 
+class _Socket:
+    """Stagehand's CDP connection to the window, as its client reads it, until Chrome exits."""
+
+    def __init__(self) -> None:
+        self._exited = asyncio.Event()
+
+    async def send(self, message: dict[str, object]) -> None:
+        pass
+
+    async def receive(self) -> object:
+        await self._exited.wait()
+        raise CDPConnectionClosedError
+
+    async def close(self) -> None:
+        self._exited.set()
+
+
 class _Stagehand:
+    """Stands in for ``Stagehand``, with its own JSON-RPC client on a ``_Socket``."""
+
     def __init__(self) -> None:
         self.closed = False
-        self.browser = object()
+        self.browser = SimpleNamespace(context=_Window("tab0"))
+        self._socket = _Socket()
+        self._rpc_client = RPCClient(cast("Any", self._socket))
+        self._gone = asyncio.Event()
+
+        async def gone() -> None:
+            self._gone.set()
+
+        self._rpc_client.on_close(gone)
+
+    async def chrome_exits(self) -> None:
+        """Chrome exits, as browserd restarts it: the client sees its connection end."""
+        await self._socket.close()
+        await self._gone.wait()
 
     async def close(self) -> None:
         self.closed = True
@@ -178,6 +230,14 @@ def test_browser_key_is_the_thread_or_the_person() -> None:
         _key(_runtime(), "user")
 
 
+def test_browser_name_is_the_keys_first_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "browser-test")
+    middleware = b.BrowserMiddleware(scope="user")
+    assert middleware.browser_name(_runtime(user="u1")) == b._browser_name("user:u1")
+    with pytest.raises(RuntimeError, match="signed-in user"):
+        middleware.browser_name(_runtime())
+
+
 def test_an_agent_builds_with_the_middleware() -> None:
     # ToolNode resolves the tools' annotations when the agent is built, so the runtime
     # type they name must be importable then, not only while type checking.
@@ -193,6 +253,7 @@ def test_the_tools_are_the_facades_own_under_browser_names() -> None:
         "browser_snapshot",
         "browser_screenshot",
         "browser_handoff",
+        "browser_record",
     ]
     for entry in facade_tools():
         own = tools[f"browser_{entry['name']}"]
@@ -236,11 +297,12 @@ def test_names_a_tool_lacks_are_turned_away_before_it_runs() -> None:
 
 
 class _Request:
-    def __init__(self, system_message: SystemMessage) -> None:
+    def __init__(self, system_message: SystemMessage, backend: object = None) -> None:
         self.system_message = system_message
+        self.runtime = SimpleNamespace(backend=backend)  # MDA gives hooks the run's sandbox
 
     def override(self, *, system_message: SystemMessage) -> _Request:
-        return _Request(system_message)
+        return _Request(system_message, self.runtime.backend)
 
 
 def test_the_model_gets_the_facade_instructions_after_the_agents_own() -> None:
@@ -259,17 +321,23 @@ def test_the_model_gets_the_facade_instructions_after_the_agents_own() -> None:
     assert "/workspace" in text
 
 
-@pytest.mark.parametrize("scope", ["thread", "user"])
-def test_only_a_threads_browser_is_told_about_its_sandboxs_localhost(scope: b.Scope) -> None:
+@pytest.mark.parametrize(
+    ("scope", "sandbox", "told"),
+    [("thread", True, True), ("thread", False, False), ("user", True, False)],
+)
+def test_only_a_threads_browser_is_told_about_its_sandboxs_localhost(
+    scope: b.Scope, sandbox: bool, told: bool
+) -> None:
     # A user's browser serves several threads, whose sandboxes cannot all be localhost.
-    request = cast("Any", _Request(SystemMessage(content="You are helpful.")))
+    backend = _SandboxBackend() if sandbox else None
+    request = cast("Any", _Request(SystemMessage(content="You are helpful."), backend))
 
     async def handler(updated: Any) -> Any:
         return updated
 
     updated = asyncio.run(b.BrowserMiddleware(scope=scope).awrap_model_call(request, handler))
     ours = cast("Any", updated).system_message.content_blocks[1]["text"]
-    assert ("http://localhost:<port>" in ours) is (scope == "thread")
+    assert ("http://localhost:<port>" in ours) is told
 
 
 def test_calls_reuse_the_session_until_the_run_ends(opened: list[b._Session]) -> None:
@@ -349,6 +417,22 @@ def test_errors_go_back_to_the_model(opened: list[b._Session]) -> None:
         )
         assert not b._SESSIONS
         assert len(facade.calls) == 4  # the failed snapshot was not retried
+
+    asyncio.run(go())
+
+
+def test_a_call_after_chrome_restarted_connects_afresh(opened: list[b._Session]) -> None:
+    # Chrome exited between calls, within the idle minute; its client is closed for good.
+    tools = _tools(b.BrowserMiddleware())
+
+    async def go() -> None:
+        await tools["browser_snapshot"](_runtime())
+        await cast("_Stagehand", opened[0].stagehand).chrome_exits()
+        _facade(opened[0]).result = RuntimeError("RPC client is closed")  # as Stagehand's says
+        assert await tools["browser_snapshot"](_runtime()) == {"ok": True}
+        assert len(opened) == 2
+        assert cast("_Stagehand", opened[0].stagehand).closed
+        assert [name for name, _ in _facade(opened[1]).calls] == ["snapshot"]
 
     asyncio.run(go())
 
@@ -438,6 +522,96 @@ def test_screenshot_returns_the_image_and_saves_it_to_path(opened: list[b._Sessi
         {"type": "image", "url": f"data:image/jpeg;base64,{data}"},
     ]
     assert backend.files == {"/workspace/a/shot.jpg": b"jpeg"}
+
+
+class _ScriptedModel(GenericFakeChatModel):
+    def bind_tools(self, tools: object, **kwargs: object) -> Self:
+        return self
+
+
+_PNG = b"\x89PNG\r\n\x1a\nshot"
+
+
+@pytest.fixture
+def page(opened: list[b._Session], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sessions whose screenshot is ``_PNG``, as is the shots/a.png their run code saves."""
+    opening = b._open
+
+    async def open_page(key: str, window: str, idle_ttl_seconds: int) -> b._Session:
+        session = await opening(key, window, idle_ttl_seconds)
+        _facade(session).result = {"data": base64.b64encode(_PNG).decode(), "mimeType": "x"}
+        _facade(session).saves = {"shots/a.png": _PNG}
+        return session
+
+    monkeypatch.setattr(b, "_open", open_page)
+
+
+def _run_agent(*calls: tuple[str, dict[str, object]], **options: Any) -> dict[str, str]:
+    """Each tool's reply, from a managed agent with a browser and no sandbox making ``calls``."""
+    replies = [
+        AIMessage(content="", tool_calls=[{"id": f"call-{i}", "name": name, "args": args}])
+        for i, (name, args) in enumerate(calls)
+    ]
+    model = _ScriptedModel(messages=iter([*replies, AIMessage(content="done")]))
+    graph = mda_runtime.compile_managed_agent(
+        DeepAgentDefinition({"model": model}), browser=define_browser(), run_context={}, **options
+    )
+    inputs = {"messages": [{"role": "user", "content": "go"}]}
+    result = asyncio.run(graph.ainvoke(inputs, {"configurable": {"thread_id": "t1"}}))
+    return {m.name: str(m.content) for m in result["messages"] if isinstance(m, ToolMessage)}
+
+
+@pytest.mark.usefixtures("page")
+def test_without_a_sandbox_screenshots_save_where_the_agents_file_tools_see_them() -> None:
+    replies = _run_agent(
+        ("browser_screenshot", {"path": "/workspace/shot.png"}),
+        ("browser_run", {"code": "await page.screenshot({ path: 'shots/a.png' })"}),
+        ("ls", {"path": "/workspace"}),
+        ("read_file", {"file_path": "/workspace/shots/a.png"}),
+    )
+    assert "Saved /workspace/shot.png." in replies["browser_screenshot"]
+    assert replies["browser_run"].endswith("Saved /workspace/shots/a.png.")
+    assert "/workspace/shot.png" in replies["ls"]
+    assert base64.b64encode(_PNG).decode() in replies["read_file"]
+
+
+@pytest.mark.usefixtures("page")
+def test_a_screenshot_is_not_saved_into_memory(tmp_path: Path) -> None:
+    replies = _run_agent(
+        ("browser_screenshot", {"path": "/memories/agent/shot.png"}),
+        context_root=str(tmp_path),
+        memory=define_memory(agent=MemoryLayer()),
+    )
+    assert (
+        "error: /memories/agent/shot.png not saved: /memories/agent is not for saved files."
+    ) in replies["browser_screenshot"]
+    assert not (tmp_path / "memories" / "agent" / "shot.png").exists()
+
+
+@pytest.mark.parametrize(
+    ("path", "error"),
+    [
+        ("/skills/x/a.png", "/skills/x/a.png not saved: /skills"),
+        ("//skills/a.png", "/skills/a.png not saved: /skills"),
+        ("/instructions.md", "/instructions.md not saved: /instructions.md"),
+    ],
+)
+def test_nothing_saves_into_a_context_hub_mount(path: str, error: str) -> None:
+    mounts = CompositeBackend(
+        default=_Backend(), routes={"/skills/": _Backend(), "/instructions.md": _Backend()}
+    )
+    saved = asyncio.run(b._save(cast("Any", mounts), path, b"png"))
+    assert saved == f"error: {error} is not for saved files. Save it under /workspace."
+
+
+def test_without_a_sandbox_a_file_saves_up_to_5_mb() -> None:
+    files, box = _Backend(), _SandboxBackend()
+    assert asyncio.run(b._save(files, "/a.png", bytes(5_000_000))) == "Saved /a.png."
+    assert asyncio.run(b._save(files, "/b.png", bytes(5_000_001))) == (
+        "error: /b.png not saved: 5.1 MB is over the 5 MB limit for files saved "
+        "without a sandbox. Take a viewport screenshot instead of a full page."
+    )
+    assert asyncio.run(b._save(box, "/b.png", bytes(5_000_001))) == "Saved /b.png."
 
 
 class _Tab:
@@ -548,8 +722,74 @@ def test_the_sessions_file_work_stays_off_the_event_loop(
     assert not Path(session.artifacts).exists()
 
 
+class _LaunchedChrome(_Chrome):
+    """Chrome that loaded the extension at launch, whose worker holds a dead client's claim.
+
+    Chrome uninstalls over CDP only an extension loaded over CDP; loading the extension's
+    folder again reloads it in place, without the claim.
+    """
+
+    claimed = True
+
+    def _answer(self, method: str, params: dict[str, Any], tab: str) -> dict[str, Any]:
+        if method == "Extensions.uninstall":
+            msg = "Uninstall failed. Reason: extension is not an unpacked extension."
+            raise LookupError(msg)
+        if method == "Extensions.loadUnpacked" and params["path"] == b._EXTENSION_DIR:
+            self.claimed = False
+        return super()._answer(method, params, tab)
+
+
+def test_a_claim_left_by_a_dead_client_is_cleared_by_reloading_the_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chrome = _LaunchedChrome()
+    window = {"id": "w1", "name": "mda", "api_cdp_url": "https://api/cdp/w1"}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/json/version"):
+            return httpx.Response(200, json={"webSocketDebuggerUrl": chrome.url})
+        return httpx.Response(200, json={"attachments": [window]})
+
+    saved = json.dumps({"attachments": [{"id": "w1", "port": 9222}]})  # browserd's windows
+    box = SimpleNamespace(
+        id="box", run=AsyncMock(return_value=SimpleNamespace(exit_code=0, stdout=saved))
+    )
+    browser = SimpleNamespace(context=_Window("tab0"))
+
+    async def usable(*_: object) -> tuple[str, object]:
+        return "mda-browser-1", box
+
+    async def connect(**_: object) -> object:
+        return browser
+
+    async def create(**_: object) -> object:
+        if chrome.claimed:
+            msg = "A Stagehand instance is already initialized"
+            raise RuntimeError(msg)
+        return SimpleNamespace(browser=browser)
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(
+        b.httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(handle), **kw)
+    )
+    monkeypatch.setattr(b, "AsyncSandboxClient", lambda **_: contextlib.nullcontext())
+    monkeypatch.setattr(b, "_api", lambda: ("https://api/v2/sandboxes", {"X-Api-Key": "k"}))
+    monkeypatch.setattr(b, "_usable_browser", usable)
+    monkeypatch.setattr(b.local_browser, "connect", connect)
+    monkeypatch.setattr(b.Stagehand, "create", create)
+
+    async def go() -> b._Session:
+        async with chrome:
+            return await b._open("thread:t1", "mda", 600)
+
+    session = asyncio.run(go())
+    assert asyncio.run(session.tools.snapshot()) == "tree of tab0"
+    shutil.rmtree(session.artifacts)
+
+
 def test_screenshot_path_must_be_absolute() -> None:
-    note = asyncio.run(b._save(_runtime(backend=_Backend()), "shot.png", b""))
+    note = asyncio.run(b._save(_Backend(), "shot.png", b""))
     assert note == "error: shot.png not saved: give an absolute path."
 
 
@@ -748,9 +988,9 @@ def test_browser_handoff_hands_over_and_returns_at_once(
     handed: list[tuple[str, str]] = []
     watched: list[b.PendingBrowserHandoff] = []
 
-    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> tuple[str, str, str]:
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
         handed.append((key, window))
-        return "browser", f"w{len(handed)}", f"https://act.example/{len(handed)}"
+        return "browser", f"w{len(handed)}", f"https://act.example/{len(handed)}", None
 
     async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
         watched.append(pending)
@@ -855,8 +1095,8 @@ def test_how_a_handoff_ended(
 def test_a_handoff_survives_a_watcher_that_could_not_start(
     opened: list[b._Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> tuple[str, str, str]:
-        return "browser", "w1", "https://act.example/1"
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
+        return "browser", "w1", "https://act.example/1", None
 
     async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
         raise RuntimeError("no Agent Server")
@@ -1040,3 +1280,737 @@ def test_more_origins_may_embed_the_handoff_window(monkeypatch: pytest.MonkeyPat
     )
     origins = asyncio.run(b._embed_origins(cast("Any", None)))
     assert origins == ["https://smith.langchain.com", "https://preview.example"]
+
+
+# --- recording ---------------------------------------------------------------
+
+
+def test_the_record_tools_description_states_the_recorders_limits() -> None:
+    # The agent server describes limits that only the recorder, in the browser, applies.
+    assert b._RECORD_VIEWPORT == rec.VIEWPORT
+    assert b._RECORD_MAX_HOLD_S == rec.MAX_HOLD_S
+    assert b._RECORD_MAX_S == rec.MAX_S
+
+
+def test_the_browser_sandbox_gets_the_packages_the_recorder_is_tested_with() -> None:
+    pins = dict(pin.split("==") for pin in b._RECORDER_PACKAGES)
+    assert pins == {name: importlib.metadata.version(name) for name in pins}
+
+
+class _LocalBox:
+    """A browser sandbox that is this machine, so the recorder runs as it does there."""
+
+    id: str | None = None
+
+    async def write(self, path: str, content: bytes, *, timeout: int = 60) -> None:  # noqa: ASYNC109 - the sandbox's signature
+        await asyncio.to_thread(Path(path).write_bytes, content)
+
+    async def read(self, path: str, *, timeout: int = 60) -> bytes:  # noqa: ASYNC109 - the sandbox's signature
+        return await asyncio.to_thread(Path(path).read_bytes)
+
+    async def run(self, command: str, *, timeout: int = 60) -> SimpleNamespace:  # noqa: ASYNC109 - the sandbox's signature
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            executable="/bin/bash",
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        return SimpleNamespace(
+            exit_code=process.returncode, stdout=stdout.decode(), stderr=stderr.decode()
+        )
+
+
+@pytest.fixture
+def chrome(
+    opened: list[b._Session], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[_Chrome]:
+    """The browser's sandbox is this machine, with this test's packages, and a fake Chrome."""
+    chrome = _Chrome()
+    monkeypatch.setattr(b, "_RECORDER_PACKAGES_DIR", str(tmp_path / "packages"))
+    monkeypatch.setattr(b, "_RECORDER_TAKES", str(tmp_path / "take"))
+    monkeypatch.setattr(b, "_RECORDER_PYTHON", shlex.quote(sys.executable))
+    (tmp_path / "packages").mkdir()
+    (tmp_path / "packages" / ".installed").touch()
+
+    @contextlib.asynccontextmanager
+    async def box(name: str) -> AsyncIterator[_LocalBox]:
+        yield _LocalBox()
+
+    opening = b._open
+
+    async def open_window(key: str, window: str, idle_ttl_seconds: int) -> b._Session:
+        session = await opening(key, window, idle_ttl_seconds)
+        session.local_url = chrome.url
+        return session
+
+    monkeypatch.setattr(b, "_browser_box", box)
+    monkeypatch.setattr(b, "_open", open_window)
+    yield chrome
+    for pid in tmp_path.glob("take-*/pid"):
+        with contextlib.suppress(ProcessLookupError, ValueError):
+            os.kill(int(pid.read_text()), signal.SIGKILL)
+    b._TAKES.clear()
+
+
+def _color(url: str) -> tuple[int, int, int]:
+    image = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
+    assert image.size == (320, 200)
+    return _rgb(image.convert("RGB"), 160, 100)
+
+
+def test_record_saves_an_mp4_that_ends_on_how_the_tab_looks(
+    chrome: _Chrome, tmp_path: Path
+) -> None:
+    tools = _tools(b.BrowserMiddleware())
+    backend = _Backend()
+
+    async def go() -> tuple[str, object]:
+        async with chrome:
+            started = await tools["browser_record"](_runtime(backend=backend), action="start")
+            await chrome.type("LangChain", "input#q")
+            chrome.colors["tab0"] = "yellow"  # its frame never comes
+            stopped = await tools["browser_record"](
+                _runtime(backend=backend), action="stop", path="/workspace/demo.mp4"
+            )
+            return started, stopped
+
+    started, stopped = asyncio.run(go())
+
+    assert started.startswith("Recording. The viewport is 1280x800")
+    text, first, last = cast("list[dict[str, str]]", stopped)
+    assert text["text"].startswith("Saved /workspace/demo.mp4: ")
+    assert "Saved /workspace/demo.json." in text["text"]
+    assert "typed 'LangChain' into input#q" in text["text"]
+    assert "opened https://acme.test/tab0.html\n" in text["text"]
+    assert b"hunter2" not in backend.files["/workspace/demo.json"]
+    assert _color(first["url"]) > (240, 240, 240)
+    r, g, b_ = _color(last["url"])
+    assert min(r, g) > 200, "it ends on the yellow page"
+    assert b_ < 60
+    assert _decode(backend.files["/workspace/demo.mp4"])
+    assert not b._TAKES
+    assert not list(tmp_path.glob("take-*")), "the take and its recorder are gone from the box"
+
+
+def test_record_follows_a_new_tab(chrome: _Chrome) -> None:
+    tools = _tools(b.BrowserMiddleware())
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](_runtime(backend=_Backend()), action="start")
+            await chrome.open_tab("tab1", "black")
+            return await tools["browser_record"](_runtime(), action="stop")
+
+    _, _, last = cast("list[dict[str, str]]", asyncio.run(go()))
+    assert chrome.attached == ["tab0", "tab1"]
+    assert max(_color(last["url"])) < 40
+
+
+def test_a_tab_the_recorder_cannot_follow_leaves_it_recording_the_tab_it_had(
+    chrome: _Chrome,
+) -> None:
+    tools = _tools(b.BrowserMiddleware())
+    chrome.refused.add("tab1")
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](_runtime(backend=_Backend()), action="start")
+            await chrome.open_tab("tab1", "black")
+            chrome.colors["tab0"] = "yellow"
+            return await tools["browser_record"](_runtime(), action="stop")
+
+    text, _, last = cast("list[dict[str, str]]", asyncio.run(go()))
+    assert chrome.attached == ["tab0", "tab1"]
+    assert text["text"].startswith("Saved /workspace/recordings/")
+    r, g, b_ = _color(last["url"])
+    assert min(r, g) > 200, "it ends on tab0, turned yellow"
+    assert b_ < 60
+
+
+def test_a_take_whose_browser_closes_is_saved_and_says_so(chrome: _Chrome, tmp_path: Path) -> None:
+    tools = _tools(b.BrowserMiddleware())
+    backend = _Backend()
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](_runtime(backend=backend), action="start")
+            await chrome.close()
+            async with asyncio.timeout(10):  # the recorder saves the take by itself
+                while not list(tmp_path.glob("take-*/result.json")):  # noqa: ASYNC110, ASYNC240 - its own process writes it
+                    await asyncio.sleep(0.05)
+            return await tools["browser_record"](_runtime(backend=backend), action="stop")
+
+    [text, *_] = cast("list[dict[str, str]]", asyncio.run(go()))
+    assert "It stopped early, when the browser closed.\n" in text["text"]
+    assert "limit" not in text["text"]
+    [video] = [path for path in backend.files if path.endswith(".mp4")]
+    assert _decode(backend.files[video])
+
+
+def test_modules_beside_the_takes_never_reach_the_recorder(chrome: _Chrome, tmp_path: Path) -> None:
+    # The takes share the browser sandbox's /tmp with whatever else is there.
+    (tmp_path / "json.py").write_text("raise SystemExit('a json.py beside the takes ran')\n")
+    tools = _tools(b.BrowserMiddleware())
+    backend = _Backend()
+
+    async def go() -> tuple[object, object]:
+        async with chrome:
+            started = await tools["browser_record"](_runtime(backend=backend), action="start")
+            return started, await tools["browser_record"](_runtime(backend=backend), action="stop")
+
+    started, stopped = asyncio.run(go())
+    assert str(started).startswith("Recording."), started
+    [text, *_] = cast("list[dict[str, str]]", stopped)
+    assert text["text"].startswith("Saved /workspace/recordings/")
+
+
+def test_a_start_that_fails_leaves_nothing_in_the_browsers_sandbox(
+    chrome: _Chrome, tmp_path: Path
+) -> None:
+    chrome.refused.add("tab0")
+    tools = _tools(b.BrowserMiddleware())
+
+    async def go() -> object:
+        async with chrome:
+            return await tools["browser_record"](_runtime(backend=_Backend()), action="start")
+
+    assert str(asyncio.run(go())).startswith("error: the recorder failed: ")
+    assert not list(tmp_path.glob("take-*")), "the take and its recorder are gone from the box"
+
+
+def test_a_stop_reply_without_the_take_is_the_recorders_failure(
+    chrome: _Chrome, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Garbled(_LocalBox):
+        async def run(self, command: str, *, timeout: int = 60) -> SimpleNamespace:  # noqa: ASYNC109 - the sandbox's signature
+            ran = await super().run(command, timeout=timeout)
+            if " stop " in command:
+                ran.stdout = '{"seconds": 4.2}\n'
+            return ran
+
+    @contextlib.asynccontextmanager
+    async def box(name: str) -> AsyncIterator[_LocalBox]:
+        yield _Garbled()
+
+    monkeypatch.setattr(b, "_browser_box", box)
+    tools = _tools(b.BrowserMiddleware())
+    backend = _Backend()
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](_runtime(backend=backend), action="start")
+            return await tools["browser_record"](_runtime(backend=backend), action="stop")
+
+    assert str(asyncio.run(go())).startswith("error: RuntimeError: the recorder failed: ")
+    assert not backend.files
+    assert not list(tmp_path.glob("take-*")), "the take and its recorder are gone from the box"
+
+
+def test_record_turns_away_a_relative_path_a_second_start_and_a_stop_without_one(
+    chrome: _Chrome,
+) -> None:
+    tools = _tools(b.BrowserMiddleware())
+
+    runtime = _runtime(backend=_Backend())
+
+    async def go() -> tuple[object, object, object]:
+        async with chrome:
+            relative = await tools["browser_record"](runtime, action="start", path="demo.mp4")
+            stop = await tools["browser_record"](runtime, action="stop")
+            await tools["browser_record"](runtime, action="start")
+            return relative, stop, await tools["browser_record"](runtime, action="start")
+
+    relative, stop, again = asyncio.run(go())
+    assert relative == "error: demo.mp4 is not an absolute path. Recording not started."
+    assert str(stop).startswith("error: not recording.")
+    assert again == "error: already recording. Stop this recording first."
+    assert chrome.attached == ["tab0"]
+
+
+def test_record_starts_only_for_an_agent_with_a_sandbox_to_save_into(chrome: _Chrome) -> None:
+    tools = _tools(b.BrowserMiddleware())
+
+    async def go() -> tuple[object, object]:
+        async with chrome:
+            start = await tools["browser_record"](_runtime(), action="start")
+            return start, await tools["browser_record"](_runtime(), action="stop")
+
+    start, stop = asyncio.run(go())
+    assert str(start).startswith("error: browser_record needs a sandbox")
+    assert str(stop).startswith("error: not recording.")
+    assert chrome.attached == []
+    assert not b._TAKES
+
+
+def test_a_stop_with_a_bad_path_keeps_recording_and_saves_where_start_said(
+    chrome: _Chrome,
+) -> None:
+    tools = _tools(b.BrowserMiddleware())
+    backend = _Backend()
+
+    async def go() -> tuple[object, object]:
+        async with chrome:
+            await tools["browser_record"](
+                _runtime(backend=backend), action="start", path="/workspace/demo.mp4"
+            )
+            bad = await tools["browser_record"](
+                _runtime(backend=backend), action="stop", path="demo.mp4"
+            )
+            return bad, await tools["browser_record"](_runtime(backend=backend), action="stop")
+
+    bad, saved = asyncio.run(go())
+    assert bad == "error: demo.mp4 not saved: give an absolute path. Still recording."
+    [text, *_] = cast("list[dict[str, str]]", saved)
+    assert text["text"].startswith("Saved /workspace/demo.mp4: ")
+    assert sorted(backend.files) == ["/workspace/demo.json", "/workspace/demo.mp4"]
+    assert _decode(backend.files["/workspace/demo.mp4"])
+
+
+def test_a_recording_outlives_the_client(opened: list[b._Session], chrome: _Chrome) -> None:
+    # A minute idle between calls releases the client; the recording goes on.
+    tools = _tools(b.BrowserMiddleware())
+    backend = _Backend()
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](_runtime(backend=backend), action="start")
+            await b._release("thread:t1")
+            await tools["browser_snapshot"](_runtime())
+            return await tools["browser_record"](_runtime(), action="stop")
+
+    text, _, _ = cast("list[dict[str, str]]", asyncio.run(go()))
+    assert len(opened) == 2
+    assert text["text"].startswith("Saved /workspace/recordings/")
+
+
+def test_a_recording_is_saved_when_the_run_ends(chrome: _Chrome) -> None:
+    middleware = b.BrowserMiddleware()
+    backend = _Backend()
+
+    async def go() -> None:
+        async with chrome:
+            await _tools(middleware)["browser_record"](_runtime(backend=backend), action="start")
+            await middleware.aafter_agent(cast("Any", {}), cast("Any", _runtime()))
+
+    asyncio.run(go())
+    timeline, video = sorted(backend.files)  # .json, .mp4
+    assert video.startswith("/workspace/recordings/")
+    assert video.endswith(".mp4")
+    assert timeline == video.replace(".mp4", ".json")
+    assert _decode(backend.files[video])
+    assert not b._TAKES
+
+
+def test_a_handoff_saves_the_recording_first_and_tells_the_model_where(
+    chrome: _Chrome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _Backend()
+    saved: list[bool] = []
+
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
+        saved.append(bool(backend.files))
+        return "browser", "w1", "https://act.example/short-lived", None
+
+    async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
+        pass
+
+    monkeypatch.setattr(b, "_hand_over", hand_over)
+    monkeypatch.setattr(b, "_start_watcher", watch)
+    tools = _tools(b.BrowserMiddleware())
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](
+                _runtime(backend=backend), action="start", path="/workspace/login.mp4"
+            )
+            return await tools["browser_handoff"](_runtime(backend=backend), reason="Log in")
+
+    [reply] = cast("dict[str, Any]", cast("Command", asyncio.run(go())).update)["messages"]
+    assert saved == [True]  # saved before the user gets the window
+    text, first, last = reply.content
+    assert text["text"].startswith(
+        f"{b._HANDED_OVER}\nYour recording ended here. Saved /workspace/login.mp4: "
+    )
+    assert [first["type"], last["type"]] == ["image", "image"]
+    assert _decode(backend.files["/workspace/login.mp4"])
+    assert not b._TAKES
+
+
+class _WorkspaceOnly(_Backend):
+    """A sandbox whose user can write only under /workspace."""
+
+    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        if any(not path.startswith("/workspace/") for path, _ in files):
+            msg = "denied, see https://box.test/?token=abc"
+            raise PermissionError(msg)
+        return await super().aupload_files(files)
+
+
+@pytest.mark.parametrize("end", ["stop", "run end", "handoff"])
+def test_a_recording_that_cannot_be_saved_where_asked_is_saved_under_recordings(
+    end: str, chrome: _Chrome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
+        return "browser", "w1", "https://act.example/short-lived", None
+
+    async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
+        pass
+
+    monkeypatch.setattr(b, "_hand_over", hand_over)
+    monkeypatch.setattr(b, "_start_watcher", watch)
+    middleware = b.BrowserMiddleware()
+    tools = _tools(middleware)
+    backend = _WorkspaceOnly()
+    runtime = _runtime(backend=backend)
+    ends = {
+        "stop": lambda: tools["browser_record"](runtime, action="stop"),
+        "run end": lambda: middleware.aafter_agent(cast("Any", {}), cast("Any", runtime)),
+        "handoff": lambda: tools["browser_handoff"](runtime, reason="Log in"),
+    }
+
+    async def go() -> object:
+        async with chrome:
+            await tools["browser_record"](runtime, action="start", path="/root/demo.mp4")
+            return await ends[end]()
+
+    ended = asyncio.run(go())
+    assert len(backend.files) == 2, "the video and its timeline are saved somewhere"
+    timeline, video = sorted(backend.files)  # .json, .mp4
+    assert video.startswith("/workspace/recordings/")
+    assert video.endswith(".mp4")
+    assert timeline == video.replace(".mp4", ".json")
+    assert _decode(backend.files[video])
+    if end == "run end":
+        return  # the model is not told
+    if end == "handoff":
+        [ended] = cast("dict[str, Any]", cast("Command", ended).update)["messages"]
+        ended = ended.content
+    text = cast("list[dict[str, str]]", ended)[0]["text"]
+    assert "/root/demo.mp4 not saved: PermissionError" in text
+    assert "token=abc" not in text
+    assert f"Saved {video} instead: " in text
+
+
+class _TimesOut(_Backend):
+    """A sandbox whose first ``times`` uploads of a video time out."""
+
+    def __init__(self, times: int) -> None:
+        super().__init__()
+        self.times = times
+
+    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        if self.times and any(path.endswith(".mp4") for path, _ in files):
+            self.times -= 1
+            msg = "The read operation timed out"
+            raise TimeoutError(msg)
+        return await super().aupload_files(files)
+
+
+def test_a_recording_whose_upload_times_out_once_is_still_saved(chrome: _Chrome) -> None:
+    backend = _TimesOut(1)
+    record = _tools(b.BrowserMiddleware())["browser_record"]
+
+    async def go() -> object:
+        async with chrome:
+            await record(_runtime(backend=backend), action="start")
+            return await record(_runtime(backend=backend), action="stop")
+
+    ended = asyncio.run(go())
+    assert len(backend.files) == 2, "the video and its timeline are saved"
+    timeline, video = sorted(backend.files)  # .json, .mp4
+    assert video.startswith("/workspace/recordings/")
+    assert timeline == video.replace(".mp4", ".json")
+    assert _decode(backend.files[video])
+    assert cast("list[dict[str, str]]", ended)[0]["text"].startswith(f"Saved {video}: ")
+
+
+def test_a_recording_whose_upload_keeps_timing_out_is_reported_lost(chrome: _Chrome) -> None:
+    backend = _TimesOut(2)
+    record = _tools(b.BrowserMiddleware())["browser_record"]
+
+    async def go() -> object:
+        async with chrome:
+            await record(_runtime(backend=backend), action="start")
+            return await record(_runtime(backend=backend), action="stop")
+
+    ended = asyncio.run(go())
+    assert not backend.files
+    assert isinstance(ended, str)
+    assert ended.startswith("error: /workspace/recordings/")
+    assert "not saved: TimeoutError: The read operation timed out" in ended
+    assert ended.endswith(" The recording is lost.")
+
+
+def _hold_stops(monkeypatch: pytest.MonkeyPatch) -> tuple[asyncio.Event, asyncio.Event]:
+    """Hold the recorder's stops, as a long encode does: the first event is set once one
+    is held, and the second lets them go."""
+    encoding, encoded = asyncio.Event(), asyncio.Event()
+
+    class _Encoding(_LocalBox):
+        async def run(self, command: str, *, timeout: int = 60) -> SimpleNamespace:  # noqa: ASYNC109 - the sandbox's signature
+            if " stop " in command:
+                encoding.set()
+                await encoded.wait()
+            return await super().run(command, timeout=timeout)
+
+    @contextlib.asynccontextmanager
+    async def box(name: str) -> AsyncIterator[_LocalBox]:
+        yield _Encoding()
+
+    monkeypatch.setattr(b, "_browser_box", box)
+    return encoding, encoded
+
+
+@pytest.mark.parametrize("end", ["stop", "run end", "handoff"])
+def test_saving_a_recording_holds_up_none_of_the_users_other_threads(
+    end: str, chrome: _Chrome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A user's threads share a browser, and saving a take can take minutes.
+    encoding, encoded = _hold_stops(monkeypatch)
+
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
+        return "browser", "w1", "https://act.example/short-lived", None
+
+    async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
+        pass
+
+    monkeypatch.setattr(b, "_hand_over", hand_over)
+    monkeypatch.setattr(b, "_start_watcher", watch)
+    middleware = b.BrowserMiddleware(scope="user")
+    tools = _tools(middleware)
+    backend = _Backend()
+    t1, t2 = (_runtime(thread=thread, user="u1", backend=backend) for thread in ("t1", "t2"))
+    ends = {
+        "stop": lambda: tools["browser_record"](t1, action="stop"),
+        "run end": lambda: middleware.aafter_agent(cast("Any", {}), cast("Any", t1)),
+        "handoff": lambda: tools["browser_handoff"](t1, reason="Log in"),
+    }
+
+    async def go() -> bool:
+        async with chrome:
+            await tools["browser_record"](t1, action="start")
+            ending = asyncio.create_task(ends[end]())
+            await encoding.wait()
+            snapshot = asyncio.create_task(tools["browser_snapshot"](t2))
+            done, _ = await asyncio.wait([snapshot], timeout=5)
+            encoded.set()
+            await asyncio.gather(ending, snapshot)
+            return snapshot in done
+
+    assert asyncio.run(go()), "the other thread's call waited for the recording to be saved"
+    assert [path for path in backend.files if path.endswith(".mp4")]
+
+
+@pytest.mark.parametrize(("first", "beside"), [("stop", "handoff"), ("handoff", "start")])
+def test_a_handoff_never_gives_the_user_a_window_being_recorded(
+    first: str, beside: str, chrome: _Chrome, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The model may call browser_record beside browser_handoff, and they run side by side.
+    encoding, encoded = _hold_stops(monkeypatch)
+    handed: list[list[str]] = []  # the takes in the box as the user got the window
+
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
+        takes = tmp_path.glob("take-*")  # noqa: ASYNC240 - the box as the user gets the window
+        handed.append(sorted(path.name for path in takes))
+        return "browser", "w1", "https://act.example/short-lived", None
+
+    async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
+        pass
+
+    monkeypatch.setattr(b, "_hand_over", hand_over)
+    monkeypatch.setattr(b, "_start_watcher", watch)
+    tools = _tools(b.BrowserMiddleware())
+    runtime = _runtime(backend=_Backend())
+    calls = {
+        "start": lambda: tools["browser_record"](runtime, action="start"),
+        "stop": lambda: tools["browser_record"](runtime, action="stop"),
+        "handoff": lambda: tools["browser_handoff"](runtime, reason="Log in"),
+    }
+
+    async def go() -> None:
+        async with chrome:
+            await calls["start"]()
+            stopping = asyncio.create_task(calls[first]())
+            await encoding.wait()
+            other = asyncio.create_task(calls[beside]())
+            await asyncio.wait([other], timeout=0.5)  # time to go on, unless it waits
+            encoded.set()
+            await asyncio.gather(stopping, other)
+
+    asyncio.run(go())
+    assert handed == [[]], "the user got the window while a take in it was recording"
+
+
+# --- a browser deleted under the thread ----------------------------------------
+
+
+@pytest.fixture
+def boxes(opened: list[b._Session], monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Sessions open on the browser sandbox named last in the list, which a test appends to
+    as a browser is deleted and made again; their snapshot is "tree"."""
+    ids = ["box-1"]
+    opening = b._open
+
+    async def open_box(key: str, window: str, idle_ttl_seconds: int) -> b._Session:
+        session = await opening(key, window, idle_ttl_seconds)
+        session.box = ids[-1]
+        _facade(session).result = "tree"
+        return session
+
+    monkeypatch.setattr(b, "_open", open_box)
+    return ids
+
+
+def _snapshots(*calls: int, checkpointer: InMemorySaver) -> list[str]:
+    """Run thread t1's agent, whose model makes ``calls`` snapshots side by side, then again
+    for each of the others; what each snapshot returned."""
+    replies = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"id": f"call-{i}-{j}", "name": "browser_snapshot", "args": {}}
+                for j in range(count)
+            ],
+        )
+        for i, count in enumerate(calls)
+    ]
+    model = _ScriptedModel(messages=iter([*replies, AIMessage(content="done")]))
+    graph = mda_runtime.compile_managed_agent(
+        DeepAgentDefinition({"model": model}), browser=define_browser(), run_context={}
+    )
+    graph.checkpointer = checkpointer
+    config = {"configurable": {"thread_id": "t1"}}
+    seen = len(asyncio.run(graph.aget_state(config)).values.get("messages") or [])
+    result = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "go"}]}, config))
+    return [str(m.content) for m in result["messages"][seen:] if isinstance(m, ToolMessage)]
+
+
+def test_a_thread_is_told_once_that_its_browser_was_replaced(boxes: list[str]) -> None:
+    saver = InMemorySaver()
+    # A thread's first browser is no news, even to calls side by side.
+    assert _snapshots(2, checkpointer=saver) == ["tree", "tree"]
+    # The same browser in the next run, as after it stopped and started again.
+    assert _snapshots(1, checkpointer=saver) == ["tree"]
+    boxes.append("box-2")  # deleted, and made again under its name
+    assert _snapshots(1, 1, checkpointer=saver) == [f"{b._REPLACED}\ntree", "tree"]
+
+
+async def _called(
+    middleware: b.BrowserMiddleware, name: str, runtime: ManagedToolRuntime, **args: object
+) -> object:
+    """Call tool ``name``, with ``runtime.state`` as its state, which takes the call's
+    updates; what the model reads."""
+    result = await _tools(middleware)[name](runtime, **args)
+    if not isinstance(result, Command):
+        return result
+    update = cast("dict[str, Any]", result.update)
+    [message] = update.pop("messages")
+    cast("dict[str, Any]", runtime.state).update(update)
+    return message.content
+
+
+def test_each_of_a_users_threads_is_told_their_browser_was_replaced(boxes: list[str]) -> None:
+    # The user's threads share the browser: the one that comes second finds it made already.
+    middleware = b.BrowserMiddleware(scope="user")
+    t1, t2 = (_with_state(_runtime(thread=t, user="u1"), {}) for t in ("t1", "t2"))
+
+    async def go() -> list[object]:
+        seen = [await _called(middleware, "browser_snapshot", rt) for rt in (t1, t2)]
+        boxes.append("box-2")
+        await b._release("user:u1")
+        seen += [await _called(middleware, "browser_snapshot", rt) for rt in (t1, t2, t1)]
+        return seen
+
+    assert asyncio.run(go()) == [
+        "tree",
+        "tree",
+        f"{b._REPLACED}\ntree",
+        f"{b._REPLACED}\ntree",
+        "tree",
+    ]
+
+
+def test_a_handoff_to_a_new_browser_says_so(
+    boxes: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def hand_over(key: str, window: str, idle_ttl_seconds: int) -> _Handed:
+        return "browser", "w1", "https://act.example/1", boxes[-1]
+
+    async def watch(runtime: ManagedToolRuntime, pending: b.PendingBrowserHandoff) -> None:
+        pass
+
+    monkeypatch.setattr(b, "_hand_over", hand_over)
+    monkeypatch.setattr(b, "_start_watcher", watch)
+    middleware = b.BrowserMiddleware()
+    runtime = _with_state(_runtime(), {})
+
+    async def go() -> list[object]:
+        seen = [await _called(middleware, "browser_handoff", runtime, reason="Log in")]
+        boxes.append("box-2")  # deleted while the user had it
+        runtime.state = {**runtime.state, "mda_browser_handoff": None}
+        seen.append(await _called(middleware, "browser_snapshot", runtime))
+        seen.append(await _called(middleware, "browser_handoff", runtime, reason="Log in"))
+        return seen
+
+    assert asyncio.run(go()) == [b._HANDED_OVER, f"{b._REPLACED}\ntree", b._HANDED_OVER]
+
+
+class _BoxNamed(_LocalBox):
+    def __init__(self, box: str) -> None:
+        self.id = box
+
+
+@pytest.mark.parametrize("then", ["deleted", "made again"])
+def test_a_recording_whose_browser_was_deleted_is_lost_and_a_new_one_starts(
+    then: str, chrome: _Chrome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids = ["box-1"]
+
+    @contextlib.asynccontextmanager
+    async def box(name: str) -> AsyncIterator[_LocalBox]:
+        if not ids:
+            raise ResourceNotFoundError(f"Sandbox '{name}' not found", resource_type="sandbox")
+        yield _BoxNamed(ids[-1])
+
+    monkeypatch.setattr(b, "_browser_box", box)
+    record = _tools(b.BrowserMiddleware())["browser_record"]
+    runtime = _runtime(backend=_Backend())
+
+    async def go() -> list[object]:
+        async with chrome:
+            await record(runtime, action="start")
+            if then == "deleted":
+                ids.clear()
+                stopped = await record(runtime, action="stop")
+                ids.append("box-2")
+            else:
+                ids.append("box-2")
+                stopped = await record(runtime, action="stop")
+            return [stopped, await record(runtime, action="start")]
+
+    stopped, started = asyncio.run(go())
+    assert stopped == "error: the browser was deleted, so the recording is lost."
+    assert str(started).startswith("Recording.")
+
+
+def test_a_browser_deleted_after_it_was_found_is_made_again() -> None:
+    # The create found it (409), and it finished deleting before it was looked up.
+    first = b._browser_name("user:u1")
+
+    class _Deleting(_Sandboxes):
+        async def get_sandbox(self, name: str) -> Any:
+            if name in api.existing:
+                api.existing.discard(name)
+                raise ResourceNotFoundError(f"Sandbox '{name}' not found", resource_type="sandbox")
+            return await super().get_sandbox(name)
+
+    api = _CreateAPI(existing={first})
+    name, box = asyncio.run(
+        b._usable_browser(
+            cast("Any", api), cast("Any", _Deleting({})), "https://api/b", "user:u1", 600
+        )
+    )
+
+    assert (name, box.status) == (first, "ready")
+    assert api.created == [{"name": first, "idle_ttl_seconds": 600, "hidpi": True}]

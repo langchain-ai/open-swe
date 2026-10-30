@@ -336,7 +336,7 @@ def test_dynamic_sandbox_selection(
 ) -> None:
     captured: dict[str, Any] = {}
     selected_sandboxes: list[object] = []
-    selection_fingerprints: list[str | None] = []
+    selections: list[object] = []
     discovered = define_sandbox(default_timeout=100)
     selected = define_sandbox(default_timeout=200)
 
@@ -350,7 +350,7 @@ def test_dynamic_sandbox_selection(
 
     def managed_sandbox(sandbox: object, *_args: object, **_kwargs: object) -> FakeBackend:
         selected_sandboxes.append(sandbox)
-        selection_fingerprints.append(_kwargs.get("selection_fingerprint"))
+        selections.append(_kwargs.get("selection"))
         return FakeBackend()
 
     monkeypatch.setattr(
@@ -379,11 +379,11 @@ def test_dynamic_sandbox_selection(
     expected_sandbox = {"discovered": discovered, "selected": selected}.get(expected)
     assert selected_sandboxes == ([] if expected_sandbox is None else [expected_sandbox])
     if expected_sandbox is None:
-        assert selection_fingerprints == []
+        assert selections == []
     elif selection == "selected":
-        assert selection_fingerprints == [runtime._sandbox_selection_fingerprint(selected)]
+        assert selections == [runtime._sandbox_selection(selected)]
     else:
-        assert selection_fingerprints == [None]
+        assert selections == [None]
 
 
 def _compile_with_setup_recipe(
@@ -407,7 +407,7 @@ def _compile_with_setup_recipe(
             return object()
 
     def managed_sandbox(sandbox: object, *_args: object, **kwargs: object) -> FakeBackend:
-        provisioned.append((sandbox, kwargs.get("selection_fingerprint")))
+        provisioned.append((sandbox, kwargs.get("selection")))
         return FakeBackend()
 
     monkeypatch.setattr(runtime, "create_deep_agent", lambda **_kwargs: FakeAgent())
@@ -438,14 +438,14 @@ def test_setup_recipe_selection_clones_the_recipe(
 ) -> None:
     declared = define_sandbox(docker_image="python:3.12-slim")
 
-    [(sandbox, fingerprint)] = _compile_with_setup_recipe(monkeypatch, selected, declared=declared)
+    [(sandbox, selection)] = _compile_with_setup_recipe(monkeypatch, selected, declared=declared)
 
     assert "docker_image" not in sandbox.options
-    assert runtime._sandbox_create_kwargs(sandbox, fingerprint)["snapshot_name"] == (
+    assert runtime._sandbox_create_kwargs(sandbox, selection)["snapshot_name"] == (
         "agent--setup-abc"
     )
     # The selection keeps its identity, so live boxes are still found.
-    assert fingerprint == runtime._sandbox_selection_fingerprint(selected)
+    assert selection == runtime._sandbox_selection(selected)
 
 
 def test_setup_recipe_rejects_a_base_the_recipe_was_not_baked_on(
@@ -479,8 +479,8 @@ def test_setup_recipe_check_is_skipped_without_setup_or_outside_runs(
     without_setup = _compile_with_setup_recipe(monkeypatch, selected, sandbox_setup=False)
     inspection = _compile_with_setup_recipe(monkeypatch, selected, is_run=False)
 
-    [(sandbox, fingerprint)] = without_setup
-    assert runtime._sandbox_create_kwargs(sandbox, fingerprint)["snapshot_name"] == "custom"
+    [(sandbox, selection)] = without_setup
+    assert runtime._sandbox_create_kwargs(sandbox, selection)["snapshot_name"] == "custom"
     assert all(sandbox.options.get("snapshot_name") == "custom" for sandbox, _ in inspection)
 
 

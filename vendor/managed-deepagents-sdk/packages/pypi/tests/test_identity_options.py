@@ -22,8 +22,17 @@ def test_uses_explicit_langsmith_api_key_auth_with_per_caller_credentials() -> N
     assert define_identity(auth=auth.langsmith_api_key()).config == _LANGSMITH_API_KEY_CONFIG
 
 
-def test_exposes_only_the_auth_keyword() -> None:
-    assert list(inspect.signature(define_identity).parameters) == ["auth"]
+def test_exposes_only_the_auth_and_resolve_user_keywords() -> None:
+    assert list(inspect.signature(define_identity).parameters) == ["auth", "resolve_user"]
+
+
+def test_keeps_resolve_user_as_the_channels_default() -> None:
+    def resolve_user(_request: object) -> None:
+        return None
+
+    assert define_identity(auth="backend", resolve_user=resolve_user).resolve_user is resolve_user
+    with pytest.raises(TypeError, match="resolve_user must be callable or an endpoint"):
+        define_identity(auth="backend", resolve_user=42)  # type: ignore[arg-type]
 
 
 def test_requires_an_auth_declaration() -> None:

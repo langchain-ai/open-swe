@@ -270,6 +270,26 @@ def test_start_ingress_agent_stamps_identity_context_principal(
     }
 
 
+def test_start_ingress_agent_without_deployment_key_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+
+    with pytest.raises(ChannelError, match="managed loopback authentication is not configured"):
+        asyncio.run(
+            trigger_ingress.start_ingress_agent(
+                binding=CHANNEL_BINDING,
+                thread_id="thread-1",
+                assistant_id="agent",
+                messages=[],
+                source_provider="slack",
+                source_thread_key="slack:v1:A1:T1:C1:171.1",
+                user_id="11111111-1111-4111-8111-111111111111",
+            )
+        )
+
+
 @pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
 def test_observe_ingress_agent_joins_then_gets_terminal_status(
     monkeypatch: pytest.MonkeyPatch, status: str

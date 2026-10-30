@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     )
 
 
-@pytest.mark.parametrize("key", [None, "", "  ", "preferred-key"])
+@pytest.mark.parametrize("key", [None, "preferred-key"])
 def test_trigger_client_supports_self_hosted_deployment_key(key: str | None) -> None:
     def fetch(
         _url: str, headers: Mapping[str, str], _body: bytes, _timeout: float

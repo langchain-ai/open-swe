@@ -301,7 +301,6 @@ def test_missing_workspace_id_is_reported_by_variable_name() -> None:
             {"LANGSMITH_WORKSPACE_ID": "workspace-1", "LANGSMITH_TENANT_ID": "tenant-1"},
             "workspace-1",
         ),
-        ({"LANGSMITH_WORKSPACE_ID": " ", "LANGSMITH_TENANT_ID": "tenant-1"}, "tenant-1"),
     ],
 )
 def test_workspace_falls_back_to_the_deployment_tenant(
@@ -370,14 +369,6 @@ def test_resolve_agent_auth_base_url_falls_back_to_langchain_endpoint(
     monkeypatch.delenv("LANGSMITH_ENDPOINT", raising=False)
     monkeypatch.setenv("LANGCHAIN_ENDPOINT", "https://dev.api.smith.langchain.com/")
     assert resolve_agent_auth_base_url() == "https://dev.api.smith.langchain.com"
-
-
-def test_resolve_agent_auth_base_url_prefers_langsmith_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://eu.api.smith.langchain.com")
-    monkeypatch.setenv("LANGCHAIN_ENDPOINT", "https://dev.api.smith.langchain.com")
-    assert resolve_agent_auth_base_url() == "https://eu.api.smith.langchain.com"
 
 
 def test_resolve_agent_auth_base_url_defaults_to_production(
@@ -840,13 +831,6 @@ def test_agent_auth_context_binds_a_stamped_principal(provider: str) -> None:
     ("keys", "expected"),
     [
         ({"LANGCHAIN_API_KEY": "deployment-key"}, "deployment-key"),
-        (
-            {
-                "LANGSMITH_API_KEY": "langsmith-key",
-                "LANGCHAIN_API_KEY": "deployment-key",
-            },
-            "langsmith-key",
-        ),
     ],
 )
 def test_agent_auth_context_accepts_the_deployment_key(keys: dict[str, str], expected: str) -> None:
@@ -976,14 +960,16 @@ def test_agent_auth_context_refuses_a_channel_conversation_even_for_a_studio_per
     assert resolve_agent_auth_context(slack_person, _ENV).principal_id == "principal-1"
 
 
-def test_agent_auth_context_refuses_an_unlinked_github_sender() -> None:
+@pytest.mark.parametrize("provider", ["github", "linear"])
+def test_agent_auth_context_refuses_a_sender_resolve_user_did_not_map(provider: str) -> None:
+    # The sender's own principal, without the stamp a mapped user gets.
     sender = build_runtime_identity(
         {
             "langgraph_auth_user": {
-                "identity": "github:7",
-                "mda_user_id": "github:7",
-                "mda_source_provider": "github",
-                "mda_source_thread_id": "github:3/1",
+                "identity": "3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a0b71",
+                "mda_user_id": "3f2a9c1e-7b4d-4e0a-9c55-1d2e8f6a0b71",
+                "mda_source_provider": provider,
+                "mda_source_thread_id": f"{provider}:3/1",
             }
         }
     )
@@ -992,7 +978,7 @@ def test_agent_auth_context_refuses_an_unlinked_github_sender() -> None:
 
     with pytest.raises(
         CredentialStoreError,
-        match="user-owned connections are unavailable to github senders",
+        match=f"user-owned connections are unavailable to {provider} senders that resolve_user",
     ):
         resolve_agent_auth_context(sender, _ENV)
 

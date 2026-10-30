@@ -2,7 +2,7 @@
 
 **Verdict: not upstream as-is.** Preserving work is right; selecting this policy with `_openswe_per_thread` is Open SWE-specific.
 
-**Changed:** `managed_deepagents/runtime.py` (sandbox lookup, restart, adoption, resolution and tool-error recovery).
+**Changed:** `managed_deepagents/runtime.py` (sandbox lookup, restart, adoption, resolution and tool-error recovery); `tests/test_dev_sandbox.py`, whose stand-in client reports a missing sandbox with `ResourceNotFoundError`, as the real one does, since any other lookup error is now logged as unreachable.
 
 ## What
 

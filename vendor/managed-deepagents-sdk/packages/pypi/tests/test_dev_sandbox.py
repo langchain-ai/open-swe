@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import threading
 import time
 import types
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
@@ -90,7 +92,7 @@ class _FakeSandboxClient:
         results = self.state["get_results"]
         if results:
             return results.pop(0)
-        raise RuntimeError("HTTP 404: sandbox not found")
+        raise ResourceNotFoundError("sandbox not found")
 
     def start_sandbox(self, name: str) -> Any:
         self.state["start_calls"].append(name)
@@ -121,6 +123,7 @@ def fake_sandbox_client(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "MDA_SANDBOX_API_ENDPOINT",
         "MDA_DEPLOYMENT_NAME",
         "LANGSMITH_DEPLOYMENT_NAME",
+        "MDA_LOCAL_DEV",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(runtime.RECIPE_SNAPSHOT_ENV, RECIPE)
@@ -162,12 +165,12 @@ def _resolve(
     sandbox: Any,
     thread_id: str = "t-1",
     *,
-    selection_fingerprint: str | None = None,
+    selection: runtime._SandboxSelection | None = None,
 ) -> Any:
     return runtime._resolve_managed_sandbox(
         sandbox,
         {"configurable": {"thread_id": thread_id, "assistant_id": "assistant-1"}},
-        selection_fingerprint=selection_fingerprint,
+        selection=selection,
     )
 
 
@@ -199,55 +202,55 @@ def test_reuses_equivalent_dynamic_sandbox_selections(
 
     first_backend = _resolve(
         first,
-        selection_fingerprint=runtime._sandbox_selection_fingerprint(first),
+        selection=runtime._sandbox_selection(first),
     )
     second_backend = _resolve(
         equivalent,
-        selection_fingerprint=runtime._sandbox_selection_fingerprint(equivalent),
+        selection=runtime._sandbox_selection(equivalent),
     )
 
     assert first_backend is second_backend
     assert len(fake_sandbox_client["create_calls"]) == 1
 
 
-def test_changed_dynamic_sandbox_selection_creates_with_new_options(
+def test_changed_dynamic_sandbox_selection_keeps_the_live_box(
     fake_sandbox_client: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "my-agent")
-    first = _langsmith(snapshot_name="snapshot-a", default_timeout=100, idle_ttl_seconds=60)
-    second = _langsmith(snapshot_name="snapshot-b", default_timeout=200, idle_ttl_seconds=120)
-    first_fingerprint = runtime._sandbox_selection_fingerprint(first)
-    second_fingerprint = runtime._sandbox_selection_fingerprint(second)
-    config = {"configurable": {"thread_id": "t-1"}}
+    first = _langsmith(snapshot_name="snapshot-a", idle_ttl_seconds=60)
+    second = _langsmith(snapshot_name="snapshot-b", idle_ttl_seconds=120)
 
-    first_backend = _resolve(
-        first,
-        selection_fingerprint=first_fingerprint,
-    )
-    second_backend = _resolve(
-        second,
-        selection_fingerprint=second_fingerprint,
-    )
+    first_backend = _resolve(first, selection=runtime._sandbox_selection(first))
+    with caplog.at_level(logging.WARNING, logger="mda"):
+        second_backend = _resolve(second, selection=runtime._sandbox_selection(second))
 
-    assert first_backend is not second_backend
+    assert first_backend is second_backend
     assert fake_sandbox_client["create_calls"] == [
         {
             "idle_ttl_seconds": 60,
-            "name": runtime._managed_sandbox_name(
-                "my-agent", runtime._thread_scope_key(config, first_fingerprint)
-            ),
+            "name": runtime._managed_sandbox_name("my-agent", "thread:t-1"),
             "snapshot_name": "snapshot-a",
-        },
-        {
-            "idle_ttl_seconds": 120,
-            "name": runtime._managed_sandbox_name(
-                "my-agent", runtime._thread_scope_key(config, second_fingerprint)
-            ),
-            "snapshot_name": "snapshot-b",
-        },
+        }
     ]
-    assert [backend._default_timeout for backend in LangSmithSandbox.instances] == [100, 200]
+    assert caplog.messages == [
+        "[mda] sandbox options changed on thread t-1; they apply only when a new sandbox is created"
+    ]
+
+
+def test_selection_mounts_key_the_box() -> None:
+    config = {"configurable": {"thread_id": "t-1"}}
+
+    def key(**options: object) -> str:
+        selection = runtime._sandbox_selection(SandboxDefinition(options))
+        return runtime._thread_scope_key(config, selection)
+
+    alice = key(snapshot_name="a", mount_config={"mounts": [{"bucket": "alice"}]})
+    assert key(snapshot_name="a") == key(snapshot_name="b") == "thread:t-1"
+    assert alice == key(snapshot_name="b", mount_config={"mounts": [{"bucket": "alice"}]})
+    assert alice != key(snapshot_name="a", mount_config={"mounts": [{"bucket": "bob"}]})
+    assert alice.startswith("thread:t-1:mounts:")
 
 
 def _proxied(value: str) -> dict[str, object]:
@@ -285,33 +288,24 @@ def test_selection_fingerprint_hashes_only_identity_options(
     assert (fingerprint(SandboxDefinition(first)) == fingerprint(SandboxDefinition(second))) is same
 
 
-def test_selection_fingerprint_leaves_out_unset_identity_options() -> None:
-    sandbox = _langsmith(snapshot_name="a")
-    assert runtime._sandbox_selection_fingerprint(sandbox) == (
-        runtime._legacy_sandbox_selection_fingerprint(sandbox)
-    )
-
-
 @pytest.mark.parametrize("live", [True, False])
-def test_looks_up_new_then_legacy_selection_names(
+def test_looks_up_new_then_options_keyed_names(
     fake_sandbox_client: dict[str, Any], monkeypatch: pytest.MonkeyPatch, live: bool
 ) -> None:
     monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "my-agent")
     sandbox = _langsmith(snapshot_name="a", default_timeout=100)
-    config = {"configurable": {"thread_id": "t-1"}}
-    fingerprint = runtime._sandbox_selection_fingerprint(sandbox)
-    scope_key = runtime._thread_scope_key(config, fingerprint)
-    legacy = runtime._legacy_sandbox_selection_fingerprint(sandbox)
+    selection = runtime._sandbox_selection(sandbox)
+    options_key = f"thread:t-1:sandbox:{selection.fingerprint}"
     names = [
-        runtime._managed_sandbox_name("my-agent", scope_key),
-        runtime._managed_sandbox_name("my-agent", runtime._thread_scope_key(config, legacy)),
-        runtime._legacy_managed_sandbox_name("my-agent", scope_key, {"snapshot_name": "a"}),
+        runtime._managed_sandbox_name("my-agent", "thread:t-1"),
+        runtime._managed_sandbox_name("my-agent", options_key),
+        runtime._legacy_managed_sandbox_name("my-agent", "thread:t-1", {"snapshot_name": "a"}),
     ]
     box = {"name": names[1], "status": "ready"}
     if live:
         fake_sandbox_client["get_by_name"][names[1]] = box
 
-    backend = _resolve(sandbox, selection_fingerprint=fingerprint)
+    backend = _resolve(sandbox, selection=selection)
 
     assert fake_sandbox_client["get_calls"] == (names[:2] if live else names)
     if live:
@@ -319,29 +313,6 @@ def test_looks_up_new_then_legacy_selection_names(
         assert backend.sandbox == box
     else:
         assert fake_sandbox_client["create_calls"] == [{"name": names[0], "snapshot_name": "a"}]
-
-
-def test_skips_legacy_selection_name_for_unsupported_option(
-    fake_sandbox_client: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "my-agent")
-    custom = object()
-    sandbox = _langsmith(snapshot_name="a", custom=custom)
-    fingerprint = runtime._sandbox_selection_fingerprint(sandbox)
-    scope_key = runtime._thread_scope_key({"configurable": {"thread_id": "t-1"}}, fingerprint)
-    name = runtime._managed_sandbox_name("my-agent", scope_key)
-
-    _resolve(sandbox, selection_fingerprint=fingerprint)
-
-    assert fake_sandbox_client["get_calls"] == [
-        name,
-        runtime._legacy_managed_sandbox_name(
-            "my-agent", scope_key, {"snapshot_name": "a", "custom": custom}
-        ),
-    ]
-    assert fake_sandbox_client["create_calls"] == [
-        {"name": name, "snapshot_name": "a", "custom": custom}
-    ]
 
 
 def test_discovered_sandbox_reuse_remains_thread_scoped(
@@ -502,7 +473,7 @@ def test_dynamic_snapshot_reaches_sandbox_creation(
     runtime._resolve_managed_sandbox(
         sandbox,
         {"configurable": {"thread_id": "t-1"}},
-        selection_fingerprint=runtime._sandbox_selection_fingerprint(sandbox),
+        selection=runtime._sandbox_selection(sandbox),
     )
 
     assert fake_sandbox_client["create_calls"] == [
@@ -691,6 +662,27 @@ def test_leaves_sandbox_unnamed_without_a_deployment(
     assert fake_sandbox_client["get_calls"] == []
 
 
+def test_names_mda_dev_sandboxes_after_the_machine_and_project(
+    fake_sandbox_client: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MDA_LOCAL_DEV", "1")
+    monkeypatch.chdir(tmp_path)
+
+    _resolve(_langsmith())
+    deployment = runtime._managed_deployment_name()
+    monkeypatch.chdir(tmp_path.parent)
+
+    assert deployment is not None
+    assert re.fullmatch(r"mda-dev-[0-9a-f]{8}", deployment)
+    assert runtime._managed_deployment_name() != deployment
+    assert runtime._managed_deployment_name({"MDA_LOCAL_DEV": "1"}) is None
+    assert fake_sandbox_client["create_calls"][0]["name"] == runtime._managed_sandbox_name(
+        deployment, "thread:t-1"
+    )
+
+
 def test_adopts_the_deployments_existing_sandbox(
     fake_sandbox_client: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -756,8 +748,8 @@ def test_adopts_the_winner_when_a_concurrent_container_wins_the_create_race(
 ) -> None:
     monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "my-agent")
     # First lookup finds nothing, the create loses the race, the retry adopts.
-    fake_sandbox_client["get_errors"].append(RuntimeError("HTTP 404: not found"))
-    fake_sandbox_client["get_errors"].append(RuntimeError("HTTP 404: not found"))
+    fake_sandbox_client["get_errors"].append(ResourceNotFoundError("not found"))
+    fake_sandbox_client["get_errors"].append(ResourceNotFoundError("not found"))
     fake_sandbox_client["errors"].append(RuntimeError("HTTP 409: sandbox already exists"))
     fake_sandbox_client["get_results"].append(
         types.SimpleNamespace(name="sandbox-winner", status="ready")
@@ -832,11 +824,10 @@ def test_selected_sandbox_is_snapshotted_before_lazy_provisioning(
     selected = _langsmith(default_timeout=60, idle_ttl_seconds=100)
     snapshot = runtime._select_run_sandbox({"sandbox": selected}, None)
     assert snapshot is not None
-    fingerprint = runtime._sandbox_selection_fingerprint(snapshot)
     backend = runtime._managed_sandbox_backend(
         snapshot,
         _run_config(),
-        selection_fingerprint=fingerprint,
+        selection=runtime._sandbox_selection(snapshot),
     )
 
     selected.options["default_timeout"] = 120
@@ -849,7 +840,7 @@ def test_selected_sandbox_is_snapshotted_before_lazy_provisioning(
     equivalent_backend = runtime._managed_sandbox_backend(
         equivalent_snapshot,
         _run_config(),
-        selection_fingerprint=runtime._sandbox_selection_fingerprint(equivalent_snapshot),
+        selection=runtime._sandbox_selection(equivalent_snapshot),
     )
     equivalent_backend.execute("pwd")
 

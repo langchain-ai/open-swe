@@ -455,6 +455,8 @@ def test_slack_events_identify_the_managed_provider(
     asyncio.run(channel.events({"name": "team-chat", "request": request, "raw_body": b"{}"}))
 
     message_input = captured.pop("message_input")
+    assert callable(captured.pop("decide_message"))
+    assert callable(captured.pop("decide_interaction"))
     assert captured == {
         "request": request,
         "raw_body": b"{}",
@@ -464,10 +466,9 @@ def test_slack_events_identify_the_managed_provider(
         "started_status": None,
         "channel_name": "team-chat",
         "only_continues_thread": None,
-        "decide_message": None,
-        "decide_interaction": None,
         "multitask_strategy": "enqueue",
         "on_finish": None,
+        "resolve_user": None,
     }
     assert callable(message_input)
     event = {
@@ -754,25 +755,29 @@ def test_trigger_message_stamps_identity_context_principal_on_start_and_observat
     }
 
 
-def test_trigger_message_fetches_identity_context_jwks_off_the_event_loop(
+def test_trigger_message_verifies_identity_context_jwks_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # PyJWKClient fetches the JWKS with blocking urllib on a cache miss, so
+    # verification must not run on the event loop (`langgraph dev` raises
+    # BlockingError there; production servers stall every other request).
     monkeypatch.setenv("MDA_ASSISTANT_ID", "agent")
-    jwks_fetch_loops: list[bool] = []
+    on_event_loop: list[bool] = []
 
-    class _BlockingJwksClient:
+    class _LoopCheckingJwks:
         def get_signing_key_from_jwt(self, _token: str) -> object:
-            # PyJWKClient does blocking urllib I/O here.
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
-                jwks_fetch_loops.append(False)
+                on_event_loop.append(False)
             else:
-                jwks_fetch_loops.append(True)
+                on_event_loop.append(True)
             return _IDENTITY_KEY.public_key()
 
-    monkeypatch.setattr(
-        trigger_identity_context, "_jwks_client", lambda _env: _BlockingJwksClient()
+    monkeypatch.setitem(
+        trigger_identity_context._jwks_clients,
+        trigger_identity_context.resolve_identity_context_jwks_url(),
+        _LoopCheckingJwks(),
     )
     start_input: dict[str, object] = {}
 
@@ -802,7 +807,7 @@ def test_trigger_message_fetches_identity_context_jwks_off_the_event_loop(
     )
 
     assert response.status_code == 202
-    assert jwks_fetch_loops == [False]
+    assert on_event_loop == [False]
     assert start_input["user_id"] == _IDENTITY_PRINCIPAL_ID
 
 
