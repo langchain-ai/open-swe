@@ -650,12 +650,14 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className="flex items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
+          className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
-          <LogoMark alt="" className="size-5" />
-          Open SWE
+          <LogoMark alt="" className="size-5 shrink-0" />
+          <span>
+            {agentWorkspaceEnabled ? "LangSmith Agent Workspace" : "Open SWE"}
+          </span>
         </Link>
-        <div className="flex items-center gap-space-1">
+        <div className="flex shrink-0 items-center gap-space-1">
           <IconButton
             icon={MagnifyingGlassRegularIcon}
             label="Search"
