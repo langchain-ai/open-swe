@@ -73,7 +73,7 @@ async def answer_click(
         and outcome.dm_card_success
         and request.kind == "expedited"
         and channel_id == request.slack_dm_channel_id
-        and await ReviewCard(request).refresh_author_dm(None)
+        and await ReviewCard(request).refresh_author_dm(None, force=True)
     ):
         return outcome
     if (
