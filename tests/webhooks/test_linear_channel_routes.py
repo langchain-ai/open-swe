@@ -163,7 +163,11 @@ async def test_mda_starts_the_run_a_session_turn_prepares(
         AsyncMock(return_value=({"owner": "acme", "name": "api"}, None)),
     )
     monkeypatch.setattr(session.User, "login_for_email", AsyncMock(return_value="ada"))
-    monkeypatch.setattr(session.common, "get_thread_workspace", AsyncMock(return_value="acme"))
+    monkeypatch.setattr(
+        session.common.ThreadRecord,
+        "read",
+        AsyncMock(return_value=session.common.ThreadRecord(True, {"workspace": "acme"})),
+    )
     monkeypatch.setattr(session.common, "upsert_agent_thread_metadata", AsyncMock())
     monkeypatch.setattr(session, "adopt_channel_run", AsyncMock())
     monkeypatch.setattr(session, "channel_run_starting", AsyncMock())
