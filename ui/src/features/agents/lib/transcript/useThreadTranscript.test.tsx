@@ -4,7 +4,11 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import type { TranscriptEventHandlers } from "./api"
 import type { StoredEvent } from "./types"
-import { useThreadTranscript } from "./useThreadTranscript"
+import { fetchTranscript } from "./api"
+import {
+  prefetchThreadTranscript,
+  useThreadTranscript,
+} from "./useThreadTranscript"
 
 const stream = vi.hoisted(() => ({
   handlers: null as TranscriptEventHandlers | null,
@@ -12,7 +16,7 @@ const stream = vi.hoisted(() => ({
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }))
 vi.mock("@/features/agents/lib/queries", () => ({}))
 vi.mock("./api", () => ({
-  fetchTranscript: async () => ({
+  fetchTranscript: vi.fn(async () => ({
     thread_id: "completion",
     version: 0,
     thread: { status: "idle" },
@@ -21,7 +25,7 @@ vi.mock("./api", () => ({
     tool_calls: [],
     notices: [],
     older_cursor: null,
-  }),
+  })),
   openTranscriptEvents: (
     _id: string,
     _after: number,
@@ -34,6 +38,27 @@ vi.mock("./api", () => ({
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+})
+
+it("renders the accepted run on the first frame after a prefetched handoff", async () => {
+  vi.mocked(fetchTranscript).mockResolvedValueOnce({
+    thread_id: "handoff",
+    version: 1,
+    thread: { status: "running" },
+    turns: [],
+    messages: [],
+    tool_calls: [],
+    notices: [],
+    older_cursor: null,
+  })
+  await prefetchThreadTranscript("handoff")
+  const view = renderHook(() => useThreadTranscript("handoff"))
+  expect(view.result.current.isHydrating).toBe(false)
+  expect(view.result.current.isRunning).toBe(true)
+  expect(view.result.current.state?.version).toBe(1)
+  await act(async () => {
+    await view.result.current.hydration
+  })
 })
 
 it("publishes first text immediately and flushes buffered text on completion", async () => {
