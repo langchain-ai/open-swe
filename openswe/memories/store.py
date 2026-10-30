@@ -13,7 +13,7 @@ from typing import Final, Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
-from sqlalchemy import ForeignKey, delete, func, select, update
+from sqlalchemy import ForeignKey, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -95,12 +95,18 @@ class WorkspacePromptVersion(Base):
 
 
 class PersonalMemory(BaseModel):
+    """A memory that reaches its person's runs: a personal one, or a workspace one they
+    saved that the curator has not processed yet."""
+
     id: UUID
+    scope: Scope
     body: str
 
     @property
     def line(self) -> str:
-        """The memory as its person's block lists it, with the id that forgets it."""
+        """The memory as its person's block lists it, with the id and scope that forget it."""
+        if self.scope == "workspace":
+            return f"{self.body} (workspace memory {self.id}, awaiting the curator)"
         return f"{self.body} (memory {self.id})"
 
 
@@ -195,22 +201,38 @@ class Memories:
             session.add(row)
         return row
 
-    async def personal(self, person: UUID | None) -> list[PersonalMemory]:
-        """``person``'s personal memories, newest first; none for no person."""
+    async def personal(
+        self, person: UUID | None, *, unprocessed_workspace: bool = False
+    ) -> list[PersonalMemory]:
+        """``person``'s personal memories, newest first; none for no person.
+
+        With ``unprocessed_workspace``, also the workspace memories they saved that the
+        curator has not adopted or declined yet: until it does, they apply to their person
+        as if personal.
+        """
         if person is None or not postgres.configured():
             return []
+        scopes = MemoryRow.scope == "personal"
+        if unprocessed_workspace:
+            scopes = or_(
+                scopes,
+                and_(MemoryRow.scope == "workspace", MemoryRow.status.in_(("pending", "held"))),
+            )
         async with postgres.session() as session:
-            rows = await session.execute(
-                select(MemoryRow.id, MemoryRow.body)
+            rows = await session.scalars(
+                select(MemoryRow)
                 .where(
-                    MemoryRow.scope == "personal",
+                    scopes,
                     MemoryRow.created_by == person,
                     MemoryRow.withdrawal_requested.is_(False),
                 )
                 .order_by(MemoryRow.created_at.desc())
                 .limit(_PERSONAL_LIMIT)
             )
-        return [PersonalMemory(id=row.id, body=row.body) for row in rows]
+            return [
+                PersonalMemory.model_validate({"id": row.id, "scope": row.scope, "body": row.body})
+                for row in rows
+            ]
 
     async def withdraw(self, memory_id: UUID, person: UUID, scope: Scope) -> Withdrawal | None:
         """Take back one of ``person``'s memories in ``scope``; None when they saved no such one.

@@ -59,9 +59,12 @@ async def remember(
         "memory_id": str(row.id),
         "status": row.status,
         "applies": (
-            "once the workspace's curator adopts it, never sooner"
-            if scope == "workspace"
-            else "to this person's future runs now; follow it for the rest of this thread too"
+            "to this person's future runs now; follow it for the rest of this thread too"
+            if scope == "personal"
+            else "to this person's runs as if personal until the curator processes it, and to "
+            "everyone's once it adopts it"
+            if person is not None and person.typed_preferences.experimental_memory
+            else "once the workspace's curator adopts it, never sooner"
         ),
         **(
             {"held": "Saved in a private thread and not shared: the curator will never see it."}

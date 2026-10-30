@@ -484,7 +484,10 @@ async def _thread_participant(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
-        MEMORIES.personal(user.id if user else None),
+        MEMORIES.personal(
+            user.id if user else None,
+            unprocessed_workspace=user is not None and user.typed_preferences.experimental_memory,
+        ),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
