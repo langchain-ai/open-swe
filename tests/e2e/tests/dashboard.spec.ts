@@ -687,6 +687,39 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
+  test("previews each collapsed reasoning block on its brain-icon toggle", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page, {
+      message: "<@U0BOT> E2E_THOUGHT please add a greet() helper and open a PR",
+    });
+    await expectTranscriptVisible(page);
+
+    for (const fold of await page
+      .getByRole("button", { name: /^Worked(?: for .+)? · \d+ actions?$/ })
+      .all()) {
+      await fold.click();
+    }
+
+    const toggle = page
+      .getByRole("button", { name: "Checking the snapshot status" })
+      .first();
+    await expect(toggle).toBeVisible();
+    await expect(
+      page.getByText(/compare it with the latest capture/),
+    ).toHaveCount(0);
+    await test.info().attach("collapsed-reasoning", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+
+    await toggle.click();
+    await expect(
+      page.getByText(/compare it with the latest capture/).first(),
+    ).toBeVisible();
+  });
+
   test("stops a Slack-started run from the web app", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");

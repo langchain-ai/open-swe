@@ -27,7 +27,7 @@ Direct the user to the dashboard settings to enable or disable it; including it 
 
 Only save explicitly requested personal changes.
 If personal versus shared scope is unclear, ask first.
-Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills.
+Use `remember` (scope `personal`) for standing behavioral guidance and the existing personal skill tools for skills.
 This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences.
 Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
 
