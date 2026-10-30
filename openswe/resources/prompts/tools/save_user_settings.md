@@ -11,6 +11,9 @@ Supported profile fields:
   Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
+- `auto_human_review_excluded_repos`: complete list of `owner/repo` repositories excluded from automatic review picks.
+  Read the current list first and preserve exclusions the user did not ask to change; an empty list clears exclusions.
+  Other repositories stay eligible, and explicit human-named assignments and voluntary sign-ups remain allowed.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
 - `review_draft_prs`: boolean overrides; null inherits the shared default.
