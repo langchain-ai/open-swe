@@ -11,6 +11,7 @@ const {
   desktopDeepLinkUrl,
   connectExchangeUrl,
   connectLoginUrl,
+  headersFramedByApp,
   isAppLoginUrl,
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
@@ -273,4 +274,25 @@ test("keeps only well-formed alternate environments", () => {
     [{ name: "staging", url: "https://staging.example/" }],
   );
   assert.deepEqual(parseDesktopEnvironments(null), []);
+});
+
+test("lets the app frame a page whose CSP names other frame ancestors", () => {
+  assert.deepEqual(
+    headersFramedByApp({
+      "Content-Type": ["text/html"],
+      "content-security-policy": [
+        "default-src 'none'; frame-ancestors https://dash.example.com; img-src data:",
+        "frame-ancestors 'self' https://dev.smith.langchain.com; object-src 'none'",
+        "default-src 'none'",
+      ],
+    }),
+    {
+      "Content-Type": ["text/html"],
+      "content-security-policy": [
+        "default-src 'none'; frame-ancestors open-swe://app; img-src data:",
+        "frame-ancestors open-swe://app; object-src 'none'",
+        "default-src 'none'",
+      ],
+    },
+  );
 });
