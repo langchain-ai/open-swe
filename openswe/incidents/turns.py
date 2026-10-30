@@ -10,6 +10,7 @@ from langgraph_sdk import get_client
 from openswe.dashboard.options import normalize_model_choice
 from openswe.dispatch import create_durable_run
 from openswe.incidents import service
+from openswe.incidents.evidence_tools import redact
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.report import CONTEXT_MARKER
 from openswe.input_messages import (
@@ -28,7 +29,6 @@ from openswe.slack.client import (
 )
 from openswe.threads import succession
 from openswe.ui_invalidations import Topic
-from openswe.utils.redaction import redact
 from openswe.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)

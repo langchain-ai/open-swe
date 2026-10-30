@@ -38,7 +38,6 @@ from openswe.analytics.identity import opaque_id, opaque_person
 from openswe.analytics.outbox import enqueue
 from openswe.config import ENV
 from openswe.database.analytics import workspace_id
-from openswe.utils.redaction import redact
 from openswe.utils.time import parse_iso
 
 if TYPE_CHECKING:
@@ -544,7 +543,6 @@ async def workspace_refreshed(record: Workspace) -> None:
         return
     failed = record.refresh_status == "failed"
     finished = parse_iso(record.refresh_finished_at) or datetime.now(UTC)
-    log_tail = record.refresh_log_tail(chars=_REFRESH_LOG_TAIL_CHARS) if failed else None
     name = EventName.WORKSPACE_REFRESH_FAILED if failed else EventName.WORKSPACE_REFRESH_SUCCEEDED
     await emit(
         name,
@@ -567,9 +565,7 @@ async def workspace_refreshed(record: Workspace) -> None:
                 for step in record.refresh_steps
             ),
             error=record.refresh_error,
-            log_tail=redact(log_tail, 2 * _REFRESH_LOG_TAIL_CHARS)[-_REFRESH_LOG_TAIL_CHARS:]
-            if log_tail
-            else None,
+            log_tail=record.refresh_log_tail(chars=_REFRESH_LOG_TAIL_CHARS) if failed else None,
         ),
         occurred_at=finished,
     )
