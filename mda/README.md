@@ -229,9 +229,9 @@ Every handled delivery goes to the event log once per delivery ID, which wakes t
 
 **Automations** (`rt/linear_automations.py`): an issue created, or one that gained a label, may fire the team's Linear automations.
 
-1. `linear_automation_rules`, which also logs the delivery: the team's enabled automations and their Linear triggers.
-2. The handler matches the event against them: the event, the labels the issue carries or gained, the project.
-3. `plan_linear_automations`, once for every match: for each, the backend checks the automation has a trigger on that team and event, claims it once per delivery within its hourly cap, writes the run's prompt (the issue fenced as untrusted unless its creator is an Open SWE user) and signs its context.
+1. `linear_automation_rules`, which also logs the delivery: the team's enabled automations, their prompts and Linear triggers, and whether the issue's creator is an Open SWE user.
+2. The handler matches the event against them: the event, the labels the issue carries or gained, the project. For each match it writes the run's prompt: the `linear-automation-event` prompt (`prompts/`) with the automation's own, and the issue, fenced as untrusted unless its creator is an Open SWE user (`rt/untrusted.py`).
+3. `plan_linear_automations`, once for every match: for each, the backend checks the automation has a trigger on that team and event, claims it once per delivery within its hourly cap, and signs its run's context.
 4. The handler starts each run on a thread of its own for that automation and delivery, so automations never touch the issue's conversation, and a redelivery starts nothing twice.
 
 The copies in `rt/` are AGENTS.md's exception for channel input.

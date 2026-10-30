@@ -3,11 +3,12 @@
 An automation fires on a Linear team's issue events: an issue created, or one that
 gained a label. Its trigger may also ask for labels and a project. This side reads
 the event, asks the backend for the team's automations
-(``linear_automation_rules``, which also logs the delivery), and matches them. For
-all the matches at once the backend claims each automation once per delivery,
-within its hourly cap, writes its run's prompt and signs its context
-(``plan_linear_automations``); the channel starts each run on a thread of its own,
-so automations never touch the issue's conversation.
+(``linear_automation_rules``, which also logs the delivery), matches them, and
+writes each match's prompt: the automation's own, then the issue, fenced as
+untrusted unless its creator is an Open SWE user. For all the matches at once the
+backend claims each automation once per delivery, within its hourly cap, and signs
+its run's context (``plan_linear_automations``); the channel starts each run on a
+thread of its own, so automations never touch the issue's conversation.
 """
 
 import re
@@ -38,8 +39,15 @@ from runtime_api.linear import (
 
 from rt.intake import ask_backend
 from rt.linear import delivery_of, record
+from rt.prompts import prompt
+from rt.untrusted import fence
 
 _TEAM_KEY: Final = re.compile(TEAM_KEY_PATTERN)
+_EVENT_DESCRIPTIONS: Final[dict[LinearTriggerEvent, str]] = {
+    "issue.created": "an issue was created",
+    "issue.labeled": "a label was added to an issue",
+}
+_DESCRIPTION_MAX_CHARS: Final = 8_000
 
 
 def _names(items: object) -> dict[str, str]:
@@ -132,6 +140,36 @@ class IssueEvent:
             None,
         )
 
+    def context(self, *, registered: bool) -> str:
+        """The issue, as a run's prompt quotes it: fenced unless its creator is registered."""
+        data = self.data
+        creator = data.get("creator")
+        creator_name = creator.get("name") if isinstance(creator, dict) else None
+        state = data.get("state")
+        state_name = state.get("name") if isinstance(state, dict) else None
+        lines = [
+            f"Issue: {data.get('identifier') or ''} {data.get('title') or ''}",
+            f"URL: {data.get('url') or ''}",
+            f"Team: {self.team}",
+            f"Project: {self.project or '(none)'}",
+            f"Labels: {', '.join(sorted(self.labels)) or '(none)'}",
+            f"State: {state_name or ''}",
+            f"Creator: {creator_name or ''}",
+        ]
+        description = str(data.get("description") or "")[:_DESCRIPTION_MAX_CHARS]
+        return fence("\n".join(lines) + f"\n\n{description}", registered=registered)
+
+    def prompt(
+        self, automation: LinearAutomation, event: LinearTriggerEvent, *, registered: bool
+    ) -> str:
+        """The run's prompt: the automation's own, then the event and the issue."""
+        return prompt(
+            "linear-automation-event",
+            prompt=automation.prompt,
+            event_description=_EVENT_DESCRIPTIONS[event],
+            event_context=self.context(registered=registered),
+        )
+
 
 async def start_automations(
     event: LinearIssueCreateEvent | LinearIssueUpdateEvent, thread: LinearChannelThread
@@ -140,16 +178,18 @@ async def start_automations(
     issue = IssueEvent.of(cast(Mapping[str, object], event.payload))
     if issue is None:
         return await record(event, thread)
-    automations = (
-        await ask_backend(
-            LINEAR_AUTOMATION_RULES,
-            LinearAutomationRulesRequest(delivery=delivery_of(event), team=issue.team),
-            msg_id=f"msg_{event.delivery_id}_automations",
-        )
-    ).automations
+    rules = await ask_backend(
+        LINEAR_AUTOMATION_RULES,
+        LinearAutomationRulesRequest(delivery=delivery_of(event), team=issue.team),
+        msg_id=f"msg_{event.delivery_id}_automations",
+    )
     fired = [
-        FiredLinearAutomation(automation_id=automation.id, event=fires_on)
-        for automation in automations
+        FiredLinearAutomation(
+            automation_id=automation.id,
+            event=fires_on,
+            prompt=issue.prompt(automation, fires_on, registered=rules.creator_registered),
+        )
+        for automation in rules.automations
         if (fires_on := issue.firing(automation)) is not None
     ]
     if not fired:
@@ -164,9 +204,6 @@ async def start_automations(
                 delivery_id=event.delivery_id,
                 automations=fired,
                 team=issue.team,
-                issue=issue.data,
-                labels=sorted(issue.labels),
-                project=issue.project,
             ),
             msg_id=f"msg_{event.delivery_id}_automations_plan",
         )

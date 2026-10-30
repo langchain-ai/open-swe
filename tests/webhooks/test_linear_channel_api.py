@@ -322,6 +322,35 @@ async def test_a_teams_automation_rules_call_logs_the_issue_event(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("login", ["ada", None], ids=["open-swe-user", "stranger"])
+async def test_a_teams_automation_rules_say_whether_the_issues_creator_is_a_user(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, login: str | None
+) -> None:
+    record = {
+        "id": "a1",
+        "prompt": "Triage the bug",
+        "triggers": [{"kind": "linear", "config": {"team": "ENG", "events": ["issue.created"]}}],
+    }
+    monkeypatch.setattr(store, "linear_automation_rules", AsyncMock(return_value=[record]))
+    looked_up = AsyncMock(return_value=login)
+    monkeypatch.setattr(User, "login_for_email", looked_up)
+    issue: dict[str, JsonValue] = {"id": "issue-1", "creator": {"email": "ada@example.com"}}
+    body = {
+        "delivery": _delivery("Issue.create", {"type": "Issue", "data": issue}),
+        "team": "ENG",
+    }
+
+    response = await _post(app, LINEAR_AUTOMATION_RULES.path, body)
+
+    rules = LinearAutomationRules.model_validate(response.json())
+    # The channel writes the run's prompt: the automation's own, and the issue, fenced
+    # unless its creator is an Open SWE user.
+    assert [(rule.id, rule.prompt) for rule in rules.automations] == [("a1", "Triage the bug")]
+    assert rules.creator_registered is (login is not None)
+    looked_up.assert_awaited_once_with("ada@example.com")
+
+
+@pytest.mark.asyncio
 async def test_every_automation_an_issue_event_fires_is_planned_in_one_call(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -338,12 +367,10 @@ async def test_every_automation_an_issue_event_fires_is_planned_in_one_call(
     body: dict[str, JsonValue] = {
         "delivery_id": "delivery-1",
         "automations": [
-            {"automation_id": "a1", "event": "issue.created"},
-            {"automation_id": "a2", "event": "issue.labeled"},
+            {"automation_id": "a1", "event": "issue.created", "prompt": "Triage it"},
+            {"automation_id": "a2", "event": "issue.labeled", "prompt": "Fix it"},
         ],
         "team": "ENG",
-        "issue": {"id": "issue-1"},
-        "labels": ["bug"],
     }
 
     response = await _post(app, PLAN_LINEAR_AUTOMATIONS.path, body)
@@ -351,7 +378,7 @@ async def test_every_automation_an_issue_event_fires_is_planned_in_one_call(
     # One run per automation, in order: none where the backend starts nothing.
     assert PlannedLinearAutomations.model_validate(response.json()).runs == [run, None]
     each = [call.args[0] for call in planned.await_args_list]
-    assert [(p.automation_id, p.event, p.delivery_id, p.team, p.labels) for p in each] == [
-        ("a1", "issue.created", "delivery-1", "ENG", ["bug"]),
-        ("a2", "issue.labeled", "delivery-1", "ENG", ["bug"]),
+    assert [(p.automation_id, p.event, p.delivery_id, p.team, p.prompt) for p in each] == [
+        ("a1", "issue.created", "delivery-1", "ENG", "Triage it"),
+        ("a2", "issue.labeled", "delivery-1", "ENG", "Fix it"),
     ]

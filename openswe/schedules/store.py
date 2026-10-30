@@ -79,14 +79,9 @@ SlackSenders = Literal["anyone", "people", "bots"]
 _SLACK_TRIGGER_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 _SLACK_MESSAGE_MAX_CHARS = 8_000
 LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
-LINEAR_EVENT_DESCRIPTIONS: dict[LinearTriggerEvent, str] = {
-    "issue.created": "an issue was created",
-    "issue.labeled": "a label was added to an issue",
-}
 _LINEAR_TEAM_KEY_RE = re.compile(TEAM_KEY_PATTERN)
 # Each automation run a Linear delivery starts gets a thread of its own, named by both.
 _LINEAR_AUTOMATION_THREADS = uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:linear-automation")
-_LINEAR_DESCRIPTION_MAX_CHARS = 8_000
 _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
@@ -1493,38 +1488,6 @@ async def launch_slack_automations(
     return results
 
 
-async def _linear_event_prompt(
-    record: dict[str, Any],
-    data: dict[str, Any],
-    event: LinearTriggerEvent,
-    *,
-    team: str,
-    labels: set[str],
-    project: str,
-) -> str:
-    creator = data.get("creator") if isinstance(data.get("creator"), dict) else {}
-    creator_email = creator.get("email") if isinstance(creator, dict) else None
-    state = data.get("state") if isinstance(data.get("state"), dict) else {}
-    lines = [
-        f"Issue: {data.get('identifier') or ''} {data.get('title') or ''}",
-        f"URL: {data.get('url') or ''}",
-        f"Team: {team}",
-        f"Project: {project or '(none)'}",
-        f"Labels: {', '.join(sorted(labels)) or '(none)'}",
-        f"State: {state.get('name') if isinstance(state, dict) else ''}",
-        f"Creator: {creator.get('name') if isinstance(creator, dict) else ''}",
-    ]
-    description = str(data.get("description") or "")[:_LINEAR_DESCRIPTION_MAX_CHARS]
-    context = "\n".join(lines) + f"\n\n{description}"
-    registered = bool(await User.login_for_email(creator_email))
-    return prompt(
-        "runs/linear-automation-event",
-        prompt=record["prompt"],
-        event_description=LINEAR_EVENT_DESCRIPTIONS[event],
-        event_context=fence_github_comment_body(context, registered=registered),
-    )
-
-
 async def linear_automation_rules(team: str) -> list[dict[str, Any]]:
     """The enabled automations with a Linear trigger on ``team``, for MDA's channel to match."""
     async with transaction() as conn:
@@ -1548,7 +1511,7 @@ def linear_trigger_configs(record: dict[str, Any], team: str) -> list[dict[str, 
 async def plan_linear_automation(request: PlanLinearAutomation) -> LinearAutomationRun | None:
     """The run an automation starts for a Linear issue event MDA's channel matched it to.
 
-    The channel matches; the backend claims the automation once per delivery, within
+    The channel matches and writes the run's prompt; the backend claims the automation once per delivery, within
     its trigger's hourly cap, and writes and signs the run, on a thread of its own the
     channel starts it on. The automation must be enabled and have a trigger on the
     event's team for that event, so a call can't start another automation. A repeat
@@ -1622,14 +1585,7 @@ async def _planned_linear_automation(
         "kind": "system",
     }
     run_input = build_run_input(
-        await _linear_event_prompt(
-            record,
-            request.issue,
-            request.event,
-            team=request.team,
-            labels=set(request.labels),
-            project=request.project,
-        ),
+        request.prompt,
         input_context,
         systems=[await _automation_identity(record)],
     )
