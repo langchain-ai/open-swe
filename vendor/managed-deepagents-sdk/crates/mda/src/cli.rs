@@ -11,7 +11,7 @@ use crate::connection::{self, ConnectionTarget};
 use crate::delete::{self, DeleteOptions};
 use crate::deploy::{self, AgentEnvironment, ContextStrategy, DeployOptions, DeploymentType};
 use crate::dev::{self, DevOptions};
-use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
+use crate::error::{categorized, is_cancellation, ErrorCategory, Failure};
 use crate::eval::{self as eval_cmd, CompileOptions, InitOptions};
 use crate::install::{Installation, INSTALL_CHANNEL_ENV};
 use crate::langsmith::{self, LogLevel};
@@ -35,6 +35,7 @@ const ROOT_HELP_EXAMPLES: &str = "  mda init research-assistant
   mda deploy
   mda connections list
   mda channels init slack
+  mda channels setup
   mda logs
   mda delete";
 
@@ -136,7 +137,7 @@ enum Command {
     /// Manage workspace connections (opaque secrets and OAuth slots).
     #[command(name = "connections", alias = "connection")]
     Connection(ConnectionArgs),
-    /// Initialize an external messaging channel in the current project.
+    /// Initialize an external messaging channel, or set up the project's channels for its deployment.
     #[command(name = "channels", alias = "channel")]
     Channel(ChannelArgs),
     /// Tail the Agent Server logs of a deployed Deep Agent.
@@ -239,6 +240,12 @@ struct DevArgs {
     /// while you iterate.
     #[arg(long)]
     no_schedules: bool,
+
+    /// Stage environment variables from this file instead of the project .env
+    /// (or .env.local), and reload when it changes. Prompted credentials are
+    /// saved back to it.
+    #[arg(long, value_name = "PATH")]
+    env_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -263,6 +270,12 @@ struct ChatArgs {
     /// Continue an existing thread instead of starting a new one.
     #[arg(short = 't', long)]
     thread: Option<String>,
+
+    /// Stage environment variables from this file instead of the project .env
+    /// (or .env.local) when chat starts a dev server. Prompted credentials are
+    /// saved back to it.
+    #[arg(long, value_name = "PATH", conflicts_with = "url")]
+    env_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -276,12 +289,13 @@ struct DeployArgs {
     name: Option<String>,
 
     /// Agent environment to target; the deployment name is used as the agent ID
-    /// (requires agent mode enabled for the workspace).
+    /// (requires agent mode enabled for the workspace). Defaults to
+    /// LANGSMITH_AGENT_ENVIRONMENT in .env.
     #[arg(long, value_enum)]
     agent_environment: Option<AgentEnvironment>,
 
     /// Deployment type when creating.
-    #[arg(long, value_enum, default_value_t = DeploymentType::Dev)]
+    #[arg(long, value_enum, default_value_t = DeploymentType::Serverless)]
     deployment_type: DeploymentType,
 
     /// Workspace ID to deploy into (overrides LANGSMITH_WORKSPACE_ID).
@@ -291,6 +305,11 @@ struct DeployArgs {
     /// Host backend URL override (advanced).
     #[arg(long, hide = true)]
     host_url: Option<String>,
+
+    /// Read environment variables from this file instead of the project .env.
+    /// Prompted credentials are saved back to it.
+    #[arg(long, value_name = "PATH")]
+    env_file: Option<PathBuf>,
 
     /// Build, push, and deploy through a customer-managed container registry.
     #[arg(long, value_name = "REPOSITORY[:TAG]")]
@@ -394,6 +413,11 @@ struct ConnectionCommonArgs {
     /// Host backend URL override (advanced).
     #[arg(long, hide = true)]
     host_url: Option<String>,
+
+    /// Read environment variables from this file instead of the project .env.
+    /// Prompted credentials are saved back to it.
+    #[arg(long, value_name = "PATH")]
+    env_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -577,6 +601,46 @@ struct ChannelArgs {
 enum ChannelCommand {
     /// Initialize a channel in the current project.
     Init(ChannelInitArgs),
+    /// Set up the project's channels for its deployment, as `mda deploy` does.
+    ///
+    /// Needs a deployed agent. In a terminal, asks which channels to set up and runs
+    /// their setup. Without a terminal, or with --json, only reports which channels are
+    /// set up. Exits non-zero unless every channel is set up.
+    Setup(ChannelSetupArgs),
+}
+
+#[derive(Args)]
+struct ChannelSetupArgs {
+    /// The one channel to set up (defaults to every channel of the project).
+    #[arg(value_enum)]
+    channel: Option<channel::ChannelKind>,
+
+    /// Deployment name (defaults to the agent `name` in the agent file).
+    #[arg(short = 'n', long)]
+    name: Option<String>,
+
+    /// Agent environment to target; the deployment name is used as the agent ID
+    /// (requires agent mode enabled for the workspace). Defaults to
+    /// LANGSMITH_AGENT_ENVIRONMENT in .env.
+    #[arg(long, value_enum)]
+    agent_environment: Option<AgentEnvironment>,
+
+    /// Workspace ID the deployment lives in (overrides LANGSMITH_WORKSPACE_ID).
+    #[arg(long)]
+    workspace_id: Option<String>,
+
+    /// Host backend URL override (advanced).
+    #[arg(long, hide = true)]
+    host_url: Option<String>,
+
+    /// Read environment variables from this file instead of the project .env.
+    /// Prompted credentials are saved back to it.
+    #[arg(long, value_name = "PATH")]
+    env_file: Option<PathBuf>,
+
+    /// Print where each channel stands as JSON, without setting anything up.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -589,10 +653,10 @@ struct ChannelInitArgs {
 enum ChannelInitCommand {
     /// Create a Slack channel definition.
     Slack,
-    /// Create a GitHub channel definition.
+    /// Create a GitHub channel definition (experimental).
     #[command(name = "github")]
     GitHub,
-    /// Create a Linear channel definition.
+    /// Create a Linear channel definition (experimental).
     Linear,
 }
 
@@ -629,6 +693,11 @@ struct LogsArgs {
     /// Host backend URL override (advanced).
     #[arg(long, hide = true)]
     host_url: Option<String>,
+
+    /// Read environment variables from this file instead of the project .env.
+    /// Prompted credentials are saved back to it.
+    #[arg(long, value_name = "PATH")]
+    env_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -642,7 +711,8 @@ struct DeleteArgs {
     name: Option<String>,
 
     /// Agent environment to target; the deployment name is used as the agent ID
-    /// (requires agent mode enabled for the workspace).
+    /// (requires agent mode enabled for the workspace). Defaults to
+    /// LANGSMITH_AGENT_ENVIRONMENT in .env.
     #[arg(long, value_enum)]
     agent_environment: Option<AgentEnvironment>,
 
@@ -653,6 +723,11 @@ struct DeleteArgs {
     /// Host backend URL override (advanced).
     #[arg(long, hide = true)]
     host_url: Option<String>,
+
+    /// Read environment variables from this file instead of the project .env.
+    /// Prompted credentials are saved back to it.
+    #[arg(long, value_name = "PATH")]
+    env_file: Option<PathBuf>,
 
     /// Delete without asking for confirmation.
     #[arg(short = 'y', long)]
@@ -802,7 +877,7 @@ pub fn run() -> ExitCode {
         Err(err) => {
             eprintln!("error: {err:#}");
             otel_logger::error(&err);
-            CommandCompletion::Failed(category_of(&err))
+            CommandCompletion::Failed(Failure::of(&err))
         }
     };
     deliver_at_exit(completion);
@@ -852,6 +927,7 @@ fn run_init(args: InitArgs) -> Result<CommandCompletion> {
         init::begin()?;
     }
     let summary = init::init(&cwd, &blueprint)?;
+    channel::warn_experimental(&blueprint.channels)?;
     if coding_agent_handoff {
         init::show_interactive_created(&summary.root)?;
         let outcome = init::offer_handoff(&summary.root, init::coding_agent_prompt())?;
@@ -922,6 +998,7 @@ fn run_dev(args: DevArgs) -> Result<CommandCompletion> {
         no_reload: args.no_reload,
         tunnel: args.tunnel,
         no_schedules: args.no_schedules,
+        env_file: deploy::resolve_env_file_flag(args.env_file)?,
     })
 }
 
@@ -931,6 +1008,7 @@ fn run_chat(args: ChatArgs) -> Result<CommandCompletion> {
         url: args.url,
         assistant: args.assistant,
         thread: args.thread,
+        env_file: deploy::resolve_env_file_flag(args.env_file)?,
     })
 }
 
@@ -947,6 +1025,7 @@ fn run_deploy(args: DeployArgs) -> Result<CommandCompletion> {
         context_strategy: args.context_strategy,
         yes: args.yes,
         wait_timeout: std::time::Duration::from_secs(args.wait_timeout_seconds),
+        env_file: deploy::resolve_env_file_flag(args.env_file)?,
     })
 }
 
@@ -967,13 +1046,16 @@ fn run_prepare(
     })
 }
 
-impl From<ConnectionCommonArgs> for ConnectionTarget {
-    fn from(args: ConnectionCommonArgs) -> Self {
-        Self {
+impl TryFrom<ConnectionCommonArgs> for ConnectionTarget {
+    type Error = anyhow::Error;
+
+    fn try_from(args: ConnectionCommonArgs) -> Result<Self> {
+        Ok(Self {
             path: args.path,
             workspace_id: args.workspace_id,
             host_url: args.host_url,
-        }
+            env_file: deploy::resolve_env_file_flag(args.env_file)?,
+        })
     }
 }
 
@@ -990,7 +1072,7 @@ impl ConnectionValueArgs {
 fn run_connection(args: ConnectionArgs) -> Result<CommandCompletion> {
     match args.command {
         ConnectionCommand::Create(args) => connection::create(connection::CreateOptions {
-            target: args.common.into(),
+            target: args.common.try_into()?,
             slug: args.slug,
             value: args.value.source(),
             authorize: args.authorize,
@@ -1011,16 +1093,16 @@ fn run_connection(args: ConnectionArgs) -> Result<CommandCompletion> {
             }),
         }),
         ConnectionCommand::List(args) => connection::list(connection::ListOptions {
-            target: args.common.into(),
+            target: args.common.try_into()?,
             json: args.json,
         }),
         ConnectionCommand::Get(args) => connection::get(connection::GetOptions {
-            target: args.common.into(),
+            target: args.common.try_into()?,
             slug: args.slug,
             json: args.json,
         }),
         ConnectionCommand::Delete(args) => connection::delete(connection::DeleteOptions {
-            target: args.common.into(),
+            target: args.common.try_into()?,
             slug: args.slug,
             yes: args.yes,
         }),
@@ -1041,6 +1123,18 @@ fn run_channel(args: ChannelArgs) -> Result<CommandCompletion> {
             let path = channel::init_channel(Path::new("."), kind)?;
             channel::show_added(kind, &path)?;
         }
+        ChannelCommand::Setup(args) => {
+            return channel::setup::run(channel::setup::SetupOptions {
+                path: PathBuf::from("."),
+                kind: args.channel,
+                name: args.name,
+                agent_environment: args.agent_environment,
+                workspace_id: args.workspace_id,
+                host_url: args.host_url,
+                env_file: deploy::resolve_env_file_flag(args.env_file)?,
+                json: args.json,
+            });
+        }
     }
     Ok(CommandCompletion::Succeeded)
 }
@@ -1060,6 +1154,7 @@ fn run_logs(args: LogsArgs) -> Result<CommandCompletion> {
         follow,
         workspace_id: args.workspace_id,
         host_url: args.host_url,
+        env_file: deploy::resolve_env_file_flag(args.env_file)?,
     })
 }
 
@@ -1070,6 +1165,7 @@ fn run_delete(args: DeleteArgs) -> Result<CommandCompletion> {
         agent_environment: args.agent_environment,
         workspace_id: args.workspace_id,
         host_url: args.host_url,
+        env_file: deploy::resolve_env_file_flag(args.env_file)?,
         yes: args.yes,
     })
 }
@@ -1990,13 +2086,38 @@ mod tests {
         deploy.clone().write_long_help(&mut help).unwrap();
         let help = String::from_utf8(help).unwrap();
 
-        assert!(help.contains("dev"));
-        assert!(help.contains("prod"));
+        assert!(help.contains("[default: serverless]"));
+        assert!(help.contains("[possible values: serverless, dedicated]"));
         assert!(help.contains("static agent `name`, or `agent` for a dynamic entry"));
         assert!(
             !help.contains("--host-url"),
             "advanced --host-url should be hidden from default help"
         );
+    }
+
+    #[test]
+    fn deploy_defaults_to_serverless() {
+        let cli = Cli::try_parse_from(["mda", "deploy"]).unwrap();
+        let Command::Deploy(args) = cli.command else {
+            panic!("expected deploy command");
+        };
+        assert_eq!(args.deployment_type, DeploymentType::Serverless);
+    }
+
+    #[test]
+    fn deploy_accepts_deployment_types_and_legacy_aliases() {
+        for (value, expected) in [
+            ("serverless", DeploymentType::Serverless),
+            ("dedicated", DeploymentType::Dedicated),
+            ("dev", DeploymentType::Dev),
+            ("prod", DeploymentType::Dedicated),
+        ] {
+            let cli = Cli::try_parse_from(["mda", "deploy", "--deployment-type", value]).unwrap();
+            let Command::Deploy(args) = cli.command else {
+                panic!("expected deploy command");
+            };
+            assert_eq!(args.deployment_type, expected, "{value}");
+        }
     }
 
     #[test]
@@ -2051,6 +2172,59 @@ mod tests {
             let argv = ["mda", command, "--agent-id", "support"];
             assert!(Cli::try_parse_from(argv).is_err(), "{command}");
         }
+    }
+
+    #[test]
+    fn deployment_commands_accept_env_file() {
+        for argv in [
+            &["mda", "deploy", "--agent-environment", "staging"][..],
+            &["mda", "delete", "--agent-environment", "staging"],
+            &["mda", "logs"],
+            &["mda", "connections", "list"],
+            &["mda", "channels", "setup"],
+        ] {
+            let argv = [argv, &["--env-file", ".env.staging"]].concat();
+            let cli = Cli::try_parse_from(&argv).unwrap();
+            let env_file = match cli.command {
+                Command::Deploy(args) => args.env_file,
+                Command::Delete(args) => args.env_file,
+                Command::Logs(args) => args.env_file,
+                Command::Connection(ConnectionArgs {
+                    command: ConnectionCommand::List(args),
+                }) => args.common.env_file,
+                Command::Channel(ChannelArgs {
+                    command: ChannelCommand::Setup(args),
+                }) => args.env_file,
+                _ => unreachable!(),
+            };
+            assert_eq!(env_file, Some(PathBuf::from(".env.staging")), "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn local_commands_accept_env_file() {
+        let argv = ["--env-file", ".env.staging"];
+        let cli = Cli::try_parse_from([&["mda", "dev"][..], &argv].concat()).unwrap();
+        let Command::Dev(args) = cli.command else {
+            unreachable!()
+        };
+        assert_eq!(args.env_file, Some(PathBuf::from(".env.staging")));
+
+        let cli = Cli::try_parse_from([&["mda", "chat"][..], &argv].concat()).unwrap();
+        let Command::Chat(args) = cli.command else {
+            unreachable!()
+        };
+        assert_eq!(args.env_file, Some(PathBuf::from(".env.staging")));
+
+        // A pinned server stages its own env.
+        assert!(Cli::try_parse_from(
+            [
+                &["mda", "chat", "--url", "http://localhost:2024"][..],
+                &argv
+            ]
+            .concat()
+        )
+        .is_err());
     }
 
     #[test]

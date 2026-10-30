@@ -31,6 +31,12 @@ _VALIDATION_MESSAGES = {
     ),
     "allowed_tools": "Allowed tools must be a list of non-empty names (1-128 characters)",
     "oauth": "OAuth requires an HTTPS token URL, client ID, and client secret; use the client_credentials grant",
+    "connection": (
+        "Connection must name an MDA connection made for MCP servers, open-swe-mcp-<server> "
+        "(lowercase letters, digits, and single hyphens, at most 64 characters), and its "
+        "owner, agent or user"
+    ),
+    "connection_header": "Connection header must be a valid header name, such as DD_API_KEY",
 }
 
 
@@ -77,7 +83,9 @@ async def prepare_workspace_mcp(
     """Validate a draft and resolve saved authentication without persisting it."""
     if name != update.name:
         raise ValueError("Connection name must match its URL path")
-    return await prepare_connection(update, await get_workspace_mcp(workspace, name))
+    return await prepare_connection(
+        update, await get_workspace_mcp(workspace, name), scope=_connections(workspace).scope
+    )
 
 
 async def save_workspace_mcp(

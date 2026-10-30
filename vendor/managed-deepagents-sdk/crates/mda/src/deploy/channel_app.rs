@@ -125,7 +125,7 @@ pub(crate) fn is_interactive() -> bool {
 
 /// A CLI-only setting from the shell, else from the project's `.env`, like
 /// other CLI settings. The deploy never uploads these as secrets (see
-/// `RESERVED_ENV_VARS`).
+/// `RESERVED_CLI_ENV_VARS`).
 pub(crate) fn override_value(key: &str, env_vars: &BTreeMap<String, String>) -> Option<String> {
     langsmith::lookup_env_or_process(key, env_vars)
 }

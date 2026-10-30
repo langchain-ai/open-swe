@@ -214,8 +214,9 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
             None,
         )
 
-    async def fake_trigger_or_queue_run(*args: Any, **kwargs: Any) -> None:
-        return None
+    async def fake_trigger_or_queue_run(*args: object, **kwargs: object) -> bool:
+        # The 👀 comes once the run is dispatched.
+        return True
 
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": {"source": "github"}})

@@ -44,7 +44,7 @@ pub(crate) mod test_support;
 #[path = "tests.rs"]
 mod tests;
 
-pub(crate) use discovery::{find_sandbox_entry, read_setup_script};
+pub(crate) use discovery::{declares_slack_channel, find_sandbox_entry, read_setup_script};
 pub use identity::IdentitySummary;
 pub(crate) use identity::{
     identity_requires_ingress_secret, read_identity_summary, INGRESS_SECRET_ENV,
@@ -81,7 +81,7 @@ use entry::{
     RuntimeContext,
 };
 pub(crate) use exports::project_needs_events_public_url;
-use exports::{scan_exported_channels, scan_exported_connectors};
+use exports::{experimental_channel_warnings, scan_exported_channels, scan_exported_connectors};
 use local_packages::vendor_local_packages;
 use manifest::{
     configure_python_packaging, generate_lockfile, inject_managed_dependencies,
@@ -827,6 +827,7 @@ fn compile_inner(
     let channel_scan = scan_exported_channels(project)?;
     let channel_entries = channel_scan.entries;
     let channel_providers = channel_scan.providers;
+    warnings.extend(experimental_channel_warnings(&channel_providers));
     let channels_import = if channel_entries.is_empty() {
         None
     } else {

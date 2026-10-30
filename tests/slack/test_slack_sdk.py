@@ -14,6 +14,53 @@ from openswe.slack.client import remove_slack_reaction
 from tests.support.slack_api import SlackAPI, slack_api_server
 
 
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "SLACK_APP_ID",
+        "SLACK_BOT_USER_ID",
+        "SLACK_BOT_USERNAME",
+    ],
+)
+@pytest.mark.parametrize("value", [None, "   "])
+async def test_app_refuses_to_start_with_missing_slack_configuration(
+    monkeypatch: pytest.MonkeyPatch, variable: str, value: str | None
+) -> None:
+    from openswe.api.app import app, lifespan
+
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("MDA_RUNTIME_URL", "http://127.0.0.1:2025")
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-runtime-secret")
+    for name in (
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "SLACK_APP_ID",
+        "SLACK_BOT_USER_ID",
+        "SLACK_BOT_USERNAME",
+    ):
+        monkeypatch.setenv(name, "test-value")
+    if value is None:
+        monkeypatch.delenv(variable)
+    else:
+        monkeypatch.setenv(variable, value)
+
+    with pytest.raises(http.SlackConfigurationError, match=f"{variable} is required"):
+        async with lifespan(app):
+            pytest.fail("A deployment without Slack started")
+
+
+async def test_message_lookup_does_not_hide_missing_slack_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.slack.client import fetch_slack_message_by_ts
+
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    with pytest.raises(http.SlackConfigurationError, match="SLACK_BOT_TOKEN is required"):
+        await fetch_slack_message_by_ts("C1", "1.0")
+
+
 async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-token")
     with slack_api_server() as api:

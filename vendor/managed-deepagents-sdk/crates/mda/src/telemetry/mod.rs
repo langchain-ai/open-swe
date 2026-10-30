@@ -15,7 +15,7 @@ pub mod stage;
 mod transport;
 
 #[cfg(test)]
-pub use command::CommandInvocation;
+pub(crate) use command::CommandInvocation;
 pub use exit::{deliver_at_exit, hold_for_exit, report_panics};
 pub use facts::{init_facts, refresh_identity, update_facts, DeploymentInfo, ReportableFacts};
 pub use gates::is_telemetry_disabled;
