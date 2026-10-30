@@ -1,12 +1,13 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import closing
+from contextlib import ExitStack, closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
+from urllib.error import URLError
 from uuid import UUID, uuid4
 
 import anthropic
@@ -40,6 +41,7 @@ from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph_sdk.errors import (
     APIStatusError,
@@ -50,6 +52,9 @@ from langgraph_sdk.errors import (
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree, WriteReplica
 from managed_deepagents import (
+    ConnectionNotFoundError,
+    CredentialAuthorizationRequiredError,
+    CredentialStoreError,
     DeepAgentDefinition,
     ManagedServerRuntime,
     define_deep_agent,
@@ -70,6 +75,7 @@ from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import box
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
+from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
@@ -82,6 +88,7 @@ from runtime_api.catalog import (
     SandboxSpec,
     ToolSpec,
 )
+from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -93,6 +100,7 @@ from runtime_api.loop import (
     GitBaseline,
     Inbox,
     InboxItems,
+    InboxRead,
     InboxReceipt,
     ModelCall,
     PhaseResult,
@@ -421,6 +429,92 @@ async def test_a_tool_call_the_backend_never_answered(
     assert client.post.await_count == attempts
 
 
+@pytest.mark.parametrize("code_mode", [False, True])
+@pytest.mark.parametrize(
+    ("owner", "failure", "outcome"),
+    [
+        ("agent", None, {"open-swe-exa": "exa-key"}),
+        ("user", CredentialStoreError("service callers cannot own OAuth grants"), {}),
+        ("user", CredentialAuthorizationRequiredError(["open-swe-exa"]), {}),
+        ("user", URLError(ConnectionRefusedError()), {}),
+        ("user", GraphInterrupt(), "pauses"),
+        ("agent", ConnectionNotFoundError("open-swe-exa", "agent"), "fails"),
+        ("agent", URLError(ConnectionRefusedError()), "fails"),
+    ],
+)
+async def test_an_operation_carries_what_the_run_reads_of_its_connections(
+    monkeypatch: pytest.MonkeyPatch,
+    owner: Literal["agent", "user"],
+    failure: Exception | None,
+    outcome: dict[str, str] | Literal["pauses", "fails"],
+    code_mode: bool,
+) -> None:
+    from rt.backend import reporting, subagent_of
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+
+    async def read() -> str:
+        if failure is not None:
+            raise failure
+        return "exa-key"
+
+    monkeypatch.setattr("rt.tools.connections", MagicMock(get=lambda slug, owner: read()))
+    backend = _run_backend()
+    calls: list[dict[str, JsonValue]] = []
+
+    async def answer(_name: str, body: dict[str, JsonValue]) -> BaseModel:
+        calls.append(body)
+        return OperationResult(content="done")
+
+    _answering(monkeypatch, backend, answer)
+    started = MagicMock()
+    finished = MagicMock()
+    monkeypatch.setattr(backend.outbox, "started", started)
+    monkeypatch.setattr(backend.outbox, "finished", finished)
+    spec = ToolSpec(
+        name="web_search",
+        description="Search",
+        parameters={"type": "object"},
+        connections=[ConnectionRef(slug="open-swe-exa", owner=owner)],
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id=None if code_mode else "call-1",
+        store=None,
+    )
+    served = operation_tool(spec, backend)
+    assert served.coroutine is not None
+    # Code mode reports the calls it makes itself, under the eval call that ran them.
+    with ExitStack() as stack:
+        if code_mode:
+            stack.enter_context(subagent_of("eval-1"))
+            stack.enter_context(reporting("eval-1"))
+        if outcome == "pauses":
+            with pytest.raises(GraphInterrupt):
+                await served.coroutine(runtime=runtime)
+        else:
+            result = await served.coroutine(runtime=runtime)
+    # A call that paused runs again once the person answers: it leaves no report open.
+    assert started.call_count == finished.call_count == (code_mode and outcome != "pauses")
+    if outcome == "pauses":
+        assert calls == []
+        return
+    assert isinstance(result, ToolMessage)
+    if outcome == "fails":
+        assert result.status == "error"
+        assert ("mda connections create open-swe-exa" in result.text) == (
+            isinstance(failure, ConnectionNotFoundError)
+        )
+        assert calls == []
+    else:
+        assert result.status == "success"
+        assert [body["credentials"] for body in calls] == [outcome]
+
+
 @pytest.mark.parametrize(
     ("arguments", "takes", "succeeds"),
     [({}, 121.0, False), ({"timeout": 1200}, 1500.0, True)],
@@ -567,19 +661,23 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    # Nothing waits long for the receipt, which the backend takes only after the next read.
+    monkeypatch.setattr("rt.outbox.DRAIN_SECONDS", 0.05)
     backend = _run_backend(invocation_id="invocation-1", catalog=Catalog(inbox=_INBOX))
     report = HumanMessage(content="The worker finished", id="event-match:report-1")
     items = InboxItems(queued=[7], events=[UUID("0199a1b2-0000-7000-8000-000000000001")])
-    called: list[str] = []
-    reads: list[dict[str, JsonValue]] = []
+    reads: list[InboxRead] = []
+    read_again, took = asyncio.Event(), asyncio.Event()
     received: list[InboxReceipt] = []
     planned: list[RunCall] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        called.append(name)
         if name == "inbox":
-            reads.append(body)
-            if received:
+            reads.append(InboxRead.model_validate(body))
+            if len(reads) > 1:
+                read_again.set()
+            # What a receipt or the read itself names as received is owed no more.
+            if received or reads[-1].received == items:
                 return Inbox()
             return Inbox.model_validate(
                 {
@@ -589,7 +687,9 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
                 }
             )
         if name == "inbox_received":
+            await read_again.wait()
             received.append(InboxReceipt.model_validate(body))
+            took.set()
         if name == "before_model":
             planned.append(RunCall.model_validate(body))
         if name == "after_model" and len(planned) == 1:
@@ -603,15 +703,16 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
+    await asyncio.wait_for(took.wait(), 5)
 
     # The run and how its catalog reads the inbox; never its conversation or state.
-    assert reads == [{"run_id": "run-1", "spec": _INBOX.model_dump(mode="json")}] * 2
+    assert [(read.run_id, read.spec) for read in reads] == [("run-1", _INBOX)] * 2
     assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
     assert planned[0].state["reply_surface"] == "web"
     assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
     assert [receipt.items for receipt in received] == [items]
-    # The next read waits for the receipt, so it cannot hand the same items back.
-    assert called.index("inbox_received") < len(called) - called[::-1].index("inbox") - 1
+    # The next read names what the unsent receipt holds, so it cannot hand it back.
+    assert reads[1].received == items
 
 
 async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
@@ -988,6 +1089,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
         return BeforeModel(
             call=ModelCall(
                 system_prompt="You are Open SWE.",
+                thread_prompt="This thread is yours.",
                 model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
             )
         )
@@ -996,9 +1098,18 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     # deepagents installs its own 5m cache; the guards' must take its place.
     middleware = cast(
         list[AgentMiddleware],
-        [BackendRunMiddleware(backend), *model_call_guards()],
+        [
+            BackendRunMiddleware(backend),
+            RunPromptMiddleware(),
+            ThreadPromptMiddleware(),
+            *model_call_guards(),
+        ],
     )
-    graph = create_deep_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+    graph = create_deep_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        system_prompt="The graph's own instructions.",
+        middleware=middleware,
+    )
 
     await graph.ainvoke({"messages": [HumanMessage("hi")]})
 
@@ -1006,9 +1117,12 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     hour = {"type": "ephemeral", "ttl": "1h"}
     system = cast(list[dict[str, object]], payload["system"])
     tools = cast(list[dict[str, object]], payload["tools"])
-    assert system[-1]["cache_control"] == hour
-    assert tools[-1]["cache_control"] == hour
+    # The graph's prompt, the run's, the thread's and the conversation's end: Anthropic
+    # rejects a request with more than four breakpoints.
+    assert [block.get("cache_control") for block in system] == [hour, hour, hour]
     assert payload["cache_control"] == hour
+    assert all("cache_control" not in tool for tool in tools)
+    assert json.dumps(payload).count('"cache_control"') == 4
     assert '"5m"' not in json.dumps(payload)
 
 
@@ -2143,6 +2257,33 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+async def test_a_model_call_paused_for_a_connection_is_not_retried_on_the_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    paused = GraphInterrupt()
+    handler = AsyncMock(side_effect=[paused, ModelResponse(result=[AIMessage(content="fallback")])])
+    state: RunState = {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=None,
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+    middleware = BackendRunMiddleware(_run_backend("token", invocation_id="run"))
+    with pytest.raises(GraphInterrupt) as caught:
+        await middleware.awrap_model_call(
+            ModelRequest(model=model, messages=[], state=state), handler
+        )
+    assert caught.value is paused
 
 
 @pytest.mark.parametrize("managed", [False, True])

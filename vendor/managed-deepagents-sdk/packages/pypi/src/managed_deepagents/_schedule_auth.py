@@ -19,7 +19,11 @@ from typing_extensions import TypedDict
 from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
 from managed_deepagents._channels.source_providers import is_trusted_source_provider
 from managed_deepagents._identity_runtime import _auth_user_fields, _field, is_studio_auth_user
-from managed_deepagents._loopback import is_loopback_url, resolve_loopback_api_url
+from managed_deepagents._langsmith_env import resolve_server_api_key
+from managed_deepagents._loopback import (
+    is_loopback_url,
+    resolve_loopback_api_url,
+)
 from managed_deepagents._thread_record import (
     THREAD_CONVERSATION_METADATA,
     THREAD_PARTICIPANTS_METADATA,
@@ -146,7 +150,7 @@ def _handoff_request_config(header: str, value: object) -> tuple[str, dict[str, 
     hosted = os.environ.get("LANGSMITH_HOST_API_URL", "").strip().rstrip("/")
     base = hosted or resolve_loopback_api_url()
     secret = os.environ.get("MDA_HANDOFF_SECRET")
-    api_key = os.environ.get("LANGSMITH_API_KEY", "").strip()
+    api_key = resolve_server_api_key()
     if not secret or (
         not is_loopback_url(base) and not (hosted.startswith("https://") and api_key)
     ):

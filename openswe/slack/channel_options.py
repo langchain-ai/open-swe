@@ -13,7 +13,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from openswe.config import ENV
 from openswe.jobs import queue
 from openswe.slack.channels import SlackChannel
 from openswe.ui_invalidations.topics import Topic
@@ -67,8 +66,6 @@ async def list_slack_channels() -> SlackChannelDirectory:
 
 async def ensure_directory_sync(*, by: UUID | None = None) -> None:
     """Keep the recurring walk queued; the first one runs right away."""
-    if not ENV.SLACK_BOT_TOKEN.get():
-        return
     await queue.schedule(
         DIRECTORY_JOB,
         cron=_WALK_SCHEDULE,

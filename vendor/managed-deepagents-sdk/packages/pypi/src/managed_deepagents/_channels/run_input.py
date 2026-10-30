@@ -29,7 +29,10 @@ ChannelRunInput = str | BaseMessage | Mapping[str, object]
 
 
 class ChannelRunOptions(TypedDict, total=False):
-    """Run options a handler may set with its input."""
+    """Run options a handler may set with its input.
+
+    Experimental: this may change in a minor release.
+    """
 
     context: Mapping[str, object]
     """Run context, as ``agent.invoke(input, context=...)`` takes it."""
@@ -48,7 +51,10 @@ class ChannelRunOptions(TypedDict, total=False):
 
 ChannelRunResult = ChannelRunInput | tuple[ChannelRunInput, ChannelRunOptions]
 """What a channel handler may return to start a run: the input, or the input
-with run options."""
+with run options.
+
+Experimental: this may change in a minor release.
+"""
 
 
 class NormalizedRunInput(TypedDict):
