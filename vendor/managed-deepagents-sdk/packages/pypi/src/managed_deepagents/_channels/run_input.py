@@ -217,6 +217,24 @@ def normalize_run_inputs(value: object, channel: RunChannel) -> list[NormalizedR
     return runs
 
 
+def starts_on_conversation(result: object) -> bool:
+    """Whether a handler's result starts a run on the event's conversation:
+    anything but nothing, or a list whose every run has a ``thread``."""
+    if result is None:
+        return False
+    if not isinstance(result, list):
+        return True
+    return any(
+        not (
+            isinstance(item, tuple)
+            and len(item) > 1
+            and isinstance(item[1], Mapping)
+            and item[1].get("thread") is not None
+        )
+        for item in cast("list[object]", result)
+    )
+
+
 def _normalize_result(
     value: object, channel: RunChannel | None, *, listed: bool = False
 ) -> NormalizedRunInput:

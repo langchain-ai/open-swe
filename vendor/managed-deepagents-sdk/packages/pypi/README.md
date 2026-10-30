@@ -1013,8 +1013,11 @@ run with `thread` may set `deliver_to`, for now to the event's own conversation
 (`current_thread`). `multitask_strategy` overrides the channel's for one run.
 A persistent id must be a UUID; which ids an event may reach is yours to
 check. The handler is asked once per delivery, before any thread is read, and
-not at all while the conversation waits on a decision or has seen the delivery.
-An empty list starts nothing.
+not at all once the conversation has seen the delivery. While the conversation
+waits on a decision, the handler is still asked (on GitHub with
+`thread.interrupted` set): its runs on other threads start, and a run on the
+conversation is skipped, with the usual waiting notice. An empty list starts
+nothing.
 
 Handlers can call GitHub with a client of your choice and the App's installation
 token from `await connections.get("mda/github-token", {"type": "agent"})`, which
