@@ -95,7 +95,7 @@ const {
   updateSharedConfig,
 } = require("./shared-config.js");
 
-const { DesktopDistribution } = require("./distribution.cjs");
+const { DesktopDistribution } = require("./config.cjs");
 const distribution = new DesktopDistribution(require("./app-variant.cjs"));
 const appRuntime = distribution.runtime({
   argv: process.argv,

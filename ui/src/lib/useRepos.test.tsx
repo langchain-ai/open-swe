@@ -9,15 +9,10 @@ import { writeCachedRepos } from "./repoCache"
 import type * as ApiModule from "./api"
 import type { ReposPayload } from "./api"
 
-const sessionLogin = vi.hoisted(() => ({
-  current: "octocat",
-  provider: "github",
-}))
+const sessionLogin = vi.hoisted(() => ({ current: "octocat" }))
 
 vi.mock("./session", () => ({
-  useSession: () => ({
-    data: { login: sessionLogin.current, auth_provider: sessionLogin.provider },
-  }),
+  useSession: () => ({ data: { login: sessionLogin.current } }),
 }))
 
 const reposMock = vi.hoisted(() => vi.fn())
@@ -57,18 +52,9 @@ afterEach(() => {
   window.localStorage.clear()
   reposMock.mockReset()
   sessionLogin.current = "octocat"
-  sessionLogin.provider = "github"
 })
 
 describe("useRepos", () => {
-  it("does not request GitHub repositories for a LangSmith-only account", () => {
-    sessionLogin.current = "user:01900000-0000-7000-8000-000000000001"
-    sessionLogin.provider = "langsmith"
-    const { seen } = renderRepos()
-    expect(seen.at(-1)).toBeUndefined()
-    expect(reposMock).not.toHaveBeenCalled()
-  })
-
   it("serves the localStorage payload while the network call is in flight", async () => {
     writeCachedRepos("octocat", payloadFor("octocat"))
     reposMock.mockReturnValue(new Promise(() => {}))

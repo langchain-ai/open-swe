@@ -6,7 +6,7 @@
  */
 
 import { dashboardApiBase } from "./api-base"
-import { appDistribution } from "./app-distribution"
+import { appDistribution } from "./pageTitle"
 import {
   DashboardRequestError,
   REQUEST_ID_HEADER,

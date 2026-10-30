@@ -60,10 +60,7 @@ class AgentParts(RunParts):
         return cfg.offload_conversation or cfg.source == "incidents_agent"
 
     async def credentials(self, config: RunnableConfig) -> None:
-        cfg = RunConfig.from_config(config)
-        if cfg.auth_provider == "langsmith":
-            return
-        thread_id = cfg.thread_id
+        thread_id = RunConfig.from_config(config).thread_id
         if thread_id is None or get_github_token(config) is not None:
             return
         try:

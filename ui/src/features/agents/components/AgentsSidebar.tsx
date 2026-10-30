@@ -35,7 +35,7 @@ import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
 import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
-import { appDistribution } from "@/lib/app-distribution"
+import { appDistribution } from "@/lib/pageTitle"
 import type {
   PullRequestSnapshot,
   SidebarRepo,

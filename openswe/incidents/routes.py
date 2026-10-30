@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import session_is_admin
+from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import require_session
 from openswe.incidents.models import IncidentId
 
@@ -38,15 +38,13 @@ async def _responder(
     session: Annotated[dict[str, Any], Depends(require_session)],
 ) -> dict[str, Any]:
     """Any signed-in dashboard user may read incidents; settings stay admin-only."""
-    if session.get("provider", "github") != "github":
-        raise HTTPException(403, "Incidents require GitHub authentication")
     return session
 
 
 async def _administrator(
     session: Annotated[dict[str, Any], Depends(require_session)],
 ) -> dict[str, Any]:
-    if not session_is_admin(session):
+    if not is_admin(session.get("email"), login=session.get("sub")):
         raise HTTPException(403, "admin only")
     return session
 
@@ -103,7 +101,7 @@ async def list_incidents(
         q=q,
         limit=limit,
         cursor=cursor,
-        include_setup=session_is_admin(session),
+        include_setup=is_admin(session.get("email"), login=session.get("sub")),
     )
 
 
@@ -114,7 +112,9 @@ async def get_incident(
 ) -> dict[str, Any]:
     from openswe.incidents import service
 
-    return await service.get_incident(incident_id, include_setup=session_is_admin(session))
+    return await service.get_incident(
+        incident_id, include_setup=is_admin(session.get("email"), login=session.get("sub"))
+    )
 
 
 @router.post("/records/{incident_id}/commands", status_code=202)

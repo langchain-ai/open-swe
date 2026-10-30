@@ -1,5 +1,5 @@
 import { LogoMark } from "@/components/Branding"
-import { appDistribution } from "@/lib/app-distribution"
+import { appDistribution } from "@/lib/pageTitle"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,

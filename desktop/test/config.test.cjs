@@ -22,7 +22,7 @@ const {
   validateBackendUrl,
 } = require("../build/config.cjs");
 
-const { DesktopDistribution } = require("../build/distribution.cjs");
+const { DesktopDistribution } = require("../build/config.cjs");
 
 test("Agent Workspace cannot be redirected by Open SWE backend settings", () => {
   const workspace = new DesktopDistribution("agent-workspace");

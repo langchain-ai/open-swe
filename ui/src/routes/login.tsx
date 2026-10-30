@@ -9,7 +9,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import { LogoMark } from "@/components/Branding"
 import { loginUrl } from "@/lib/api"
-import { appDistribution } from "@/lib/app-distribution"
+import { appDistribution } from "@/lib/pageTitle"
 import { pageTitle } from "@/lib/pageTitle"
 import {
   DEFAULT_AUTH_REDIRECT,
