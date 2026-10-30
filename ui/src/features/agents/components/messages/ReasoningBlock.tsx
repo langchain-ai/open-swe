@@ -11,11 +11,23 @@ function reasoningLabel(elapsedMs: number | null): string {
   return `Thought for ${formatElapsed(elapsedMs)}`
 }
 
+const MAX_PREVIEW_LENGTH = 200
+
+/** The thought's first line as plain text; the row's own truncation handles overflow. */
+function thoughtPreview(text: string): string {
+  const firstLine = text.split("\n").find((line) => line.trim()) ?? ""
+  return firstLine
+    .replace(/^\s*#+\s*/, "")
+    .replace(/[*_`]/g, "")
+    .trim()
+    .slice(0, MAX_PREVIEW_LENGTH)
+}
+
 /**
  * Renders a model's reasoning ("thinking") tokens. While the reasoning is live
  * it streams in muted gray text under a shimmering "Thinking…" header; once the
- * reasoning ends it auto-collapses into a "Thought for …" toggle the user can
- * expand on demand.
+ * reasoning ends it auto-collapses into a "Thought for …" toggle, previewing the
+ * thought itself, that the user can expand on demand.
  */
 export function ReasoningBlock({
   text,
@@ -45,6 +57,7 @@ export function ReasoningBlock({
   if (!trimmed && !isLive) return null
 
   const expanded = isLive || userExpanded
+  const preview = thoughtPreview(trimmed)
 
   return (
     <div className="my-space-1">
@@ -57,7 +70,7 @@ export function ReasoningBlock({
         onClick={() => {
           if (!isLive) setUserExpanded((value) => !value)
         }}
-        className="group/reasoning h-auto justify-start gap-space-1 border-0 px-0 text-left text-inherit focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
+        className="group/reasoning h-auto max-w-full justify-start gap-space-1 border-0 px-0 text-left text-inherit focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
         aria-expanded={expanded}
         disabled={isLive}
       >
@@ -80,6 +93,9 @@ export function ReasoningBlock({
             <span className="text-secondary transition-colors duration-normal group-hover/reasoning:text-primary">
               {reasoningLabel(elapsedMs)}
             </span>
+            {!expanded && preview && (
+              <span className="min-w-0 truncate text-tertiary">{preview}</span>
+            )}
           </>
         )}
       </Button>

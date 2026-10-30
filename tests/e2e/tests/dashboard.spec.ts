@@ -687,6 +687,36 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
+  test("previews each collapsed thought instead of only labelling it", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page, {
+      message: "<@U0BOT> E2E_THOUGHT please add a greet() helper and open a PR",
+    });
+    await expectTranscriptVisible(page);
+
+    for (const fold of await page
+      .getByRole("button", { name: /^Worked(?: for .+)? · \d+ actions?$/ })
+      .all()) {
+      await fold.click();
+    }
+
+    const thought = page
+      .getByRole("button", { name: /^Thought/ })
+      .filter({ hasText: "Checking the snapshot status" })
+      .first();
+    await expect(thought).toBeVisible();
+    await expect(
+      page.getByText(/compare it with the latest capture/),
+    ).toHaveCount(0);
+
+    await thought.click();
+    await expect(
+      page.getByText(/compare it with the latest capture/).first(),
+    ).toBeVisible();
+  });
+
   test("stops a Slack-started run from the web app", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");
