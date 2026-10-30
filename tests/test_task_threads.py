@@ -435,10 +435,12 @@ async def test_task_wakeup_preserves_current_model_selection(
         model="anthropic:claude-opus-5-5",
         effort="high",
         model_selection=selection,
+        experience="agent_workspace",
     )
 
     config = await service.recipient_config(COORDINATOR)
 
+    assert config["experience"] == "agent_workspace"
     assert config["model_selection"] == selection
     if selection == "explicit":
         assert config["agent_model_id"] == "anthropic:claude-opus-5-5"
@@ -456,6 +458,7 @@ async def test_desktop_worker_cannot_be_shared(
         sandbox_id="bridge:desktop",
         sandbox_kind="bridge",
         sandbox_bridge_client="desktop",
+        experience="agent_workspace",
     )
     current_task = task()
     delegation = store.TaskDelegation(
@@ -473,6 +476,7 @@ async def test_desktop_worker_cannot_be_shared(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
+    assert client.metadata[delegation.worker_thread_id]["experience"] == "agent_workspace"
     with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409

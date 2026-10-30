@@ -9,7 +9,6 @@ class UserPreferences(BaseModel):
     # The person's Slack DM with the bot is one conversation instead of a thread per message.
     concierge_mode: bool = False
     pr_failure_reactions: bool = False
-    # Show the Open SWE / Fleet switch and let Fleet chats through the dashboard proxy.
     experimental_fleet: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
     experimental_act_as_approval: bool = False
