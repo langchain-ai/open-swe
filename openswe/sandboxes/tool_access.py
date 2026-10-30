@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from openswe.config import ENV
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import public_dashboard_api_base_url
 from openswe.utils.thread_reads import read_thread
 
 # Under /dashboard/api so a dashboard deployment that fronts the backend forwards it.
@@ -31,17 +31,8 @@ class ToolAccess(BaseModel):
 
 
 def tools_base_url() -> str | None:
-    base = dashboard_api_base_url()
-    parsed = urlsplit(base)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        return None
-    return base.rstrip("/") + TOOLS_PATH
+    base = public_dashboard_api_base_url()
+    return None if base is None else base + TOOLS_PATH
 
 
 async def sandbox_host_thread_id(thread_id: str) -> str:

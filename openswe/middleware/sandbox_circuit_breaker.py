@@ -34,7 +34,7 @@ def sandbox_unreachable_message(
 
     Deliberately does not claim the sandbox is gone for good — all we observed is
     that it stopped responding, and it may come back. ``handed_to_mda`` is for a
-    box Open SWE set aside (deleted, or a reviewer's that stopped answering), where
+    sandbox Open SWE set aside (deleted, or a reviewer's that stopped answering), where
     the thread's next run starts in a fresh one and "will not start a replacement"
     would be untrue.
     """

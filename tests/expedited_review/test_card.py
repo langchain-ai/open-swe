@@ -7,8 +7,38 @@ from openswe.expedited_review.eligibility import ChangedFile, Exclusion
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard
-from openswe.human_review.requests import HumanReviewRequest
+from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack.blocks import SECTION_TEXT_MAX_CHARS
+from openswe.users.models import User, UserIdentity
+
+
+@pytest.mark.parametrize(
+    ("display_name", "expected"),
+    [("Grace <@U_OTHER> & Co", "Grace &lt;@U_OTHER&gt; &amp; Co"), ("", "grace")],
+)
+def test_approved_card_names_the_approver_without_pinging_them(
+    display_name: str, expected: str
+) -> None:
+    user = User(
+        display_name=display_name,
+        identities=[
+            UserIdentity(provider="github", external_id="2", login="grace"),
+            UserIdentity(provider="slack", external_id="U_GRACE"),
+        ],
+    )
+    vote = HumanReviewParticipant(user_id=user.id)
+    vote.user = user
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    approval = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="expedited")
+    approval.pull_request = pr
+    approval.participants = [vote]
+
+    text, blocks = open_card(approval, title="t", author="<@U_ADA>", files=[])
+
+    assert f"Approved by {expected}." in text
+    assert f"Approved by {expected}." in blocks[0]["text"]["text"]
+    assert "<@" not in text
+    assert "<@" not in str(blocks)
 
 
 def test_long_test_paths_stay_under_the_slack_limit_and_count_the_rest() -> None:

@@ -37,6 +37,9 @@ class SlackRequestTarget(BaseModel):
     thread_ts: str = ""
     event_id: str = ""
     agent_thread_id: str | None = None
+    user_id: str = ""
+    message_ts: str = ""
+    reply_thread_ts: str = ""
 
 
 async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -> str:
@@ -58,11 +61,33 @@ async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -
     if not target.channel_id or not target.thread_ts:
         logger.error("Slack failure has no thread to reply to", extra=fields)
         return error_id
+    from openswe.slack.retry import SlackRetry
+
+    retry = SlackRetry(
+        channel_id=target.channel_id,
+        thread_ts=target.thread_ts,
+        user_id=target.user_id,
+        message_ts=target.message_ts,
+        reply_thread_ts=target.reply_thread_ts,
+        nonce=error_id,
+    )
+    blocks = None
+    if not isinstance(exc, SlackRequestError) and (target.message_ts or target.agent_thread_id):
+        retry_text = warning(
+            f"Open SWE hit an unexpected error and cannot respond to this message. "
+            f"Click Retry to try again.\nError ID: `{error_id}`"
+        )
+        blocks = retry.blocks(retry_text)
+        if blocks is not None:
+            text = retry_text
+    if blocks is None:
+        text = warning(f"{text}\nError ID: `{error_id}`")
     try:
         posted = await post_slack_thread_reply(
             target.channel_id,
-            target.thread_ts,
-            warning(f"{text}\nError ID: `{error_id}`"),
+            target.reply_thread_ts or target.thread_ts,
+            text,
+            blocks=blocks,
             agent_thread_id=target.agent_thread_id,
         )
     except Exception:  # noqa: BLE001

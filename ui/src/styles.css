@@ -88,6 +88,54 @@ body.version-mismatch {
     --color-primary-foreground: var(--text-brand-on-fill);
 }
 
+html[data-agent-workspace] {
+    --workspace-canvas: oklch(from var(--bg-surface-level-1) l 0 h);
+    --workspace-sidebar: oklch(from var(--bg-surface-level-2) l 0 h);
+    --workspace-surface: oklch(from var(--bg-elevated) l 0 h);
+    --workspace-border: oklch(from var(--border-subtle) l 0 h);
+    --workspace-text: oklch(from var(--text-primary) l 0 h);
+    --workspace-secondary: color-mix(in oklch, oklch(from var(--text-secondary) l 0 h) 90%, var(--workspace-canvas));
+    --workspace-muted: color-mix(in oklch, oklch(from var(--text-quaternary) l 0 h) 85%, oklch(from var(--text-secondary) l 0 h));
+    --workspace-disabled: oklch(from var(--text-disabled) l 0 h);
+}
+
+html.dark[data-agent-workspace] {
+    --workspace-canvas: color-mix(in oklch, oklch(from var(--bg-surface-level-2) l 0 h), oklch(from var(--bg-surface-level-3) l 0 h));
+    --workspace-sidebar: oklch(from var(--bg-surface-level-3) l 0 h);
+    --workspace-surface: oklch(from var(--bg-surface-level-4) l 0 h);
+}
+
+html[data-agent-workspace] body {
+    --bg-surface-level-1: var(--workspace-canvas);
+    --bg-surface-level-2: var(--workspace-sidebar);
+    --bg-elevated: var(--workspace-surface);
+    --border-default: var(--workspace-border);
+    --border-subtle: color-mix(in oklch, var(--workspace-border) 60%, var(--workspace-canvas));
+    --border-muted: var(--border-subtle);
+    --border-strong: color-mix(in oklch, var(--workspace-border) 75%, var(--workspace-muted));
+    --text-primary: var(--workspace-text);
+    --text-secondary: var(--workspace-secondary);
+    --text-secondary-hover: var(--workspace-text);
+    --text-tertiary: var(--workspace-muted);
+    --text-tertiary-hover: var(--workspace-secondary);
+    --text-placeholder: var(--workspace-muted);
+    --text-disabled: var(--workspace-disabled);
+    --icon-primary: var(--workspace-text);
+    --icon-secondary: var(--workspace-secondary);
+    --icon-tertiary: var(--workspace-muted);
+    --icon-disabled: var(--workspace-disabled);
+    --popover: var(--bg-elevated);
+    --bg-primary: var(--bg-surface-level-1);
+    --bg-primary-hover: var(--bg-surface-level-1-hover);
+    --bg-secondary: var(--bg-surface-level-2);
+    --bg-secondary-hover: var(--bg-surface-level-2-hover);
+    --bg-tertiary: var(--bg-surface-level-3);
+    --bg-quaternary: var(--bg-surface-level-4);
+    --border-primary: var(--border-default);
+    --border-secondary: var(--border-subtle);
+    --border-tertiary: var(--border-muted);
+}
+
 :root {
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
