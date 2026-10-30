@@ -12065,6 +12065,41 @@
         ]
       }
     },
+    "/dashboard/api/l/{link_id}": {
+      "get": {
+        "operationId": "open_sandbox_file_link_dashboard_api_l__link_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "link_id",
+            "required": true,
+            "schema": {
+              "title": "Link Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Sandbox File Link",
+        "tags": [
+          "sandbox-file-links"
+        ]
+      }
+    },
     "/dashboard/api/langsmith/callback": {
       "get": {
         "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",

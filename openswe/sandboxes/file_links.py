@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 
+LINKS_PATH = "/dashboard/api/l"
 _THREAD_FOREIGN_KEY = "sandbox_file_link_thread_id_fkey"
 
 ContentDisposition = Literal["attachment", "inline"]
