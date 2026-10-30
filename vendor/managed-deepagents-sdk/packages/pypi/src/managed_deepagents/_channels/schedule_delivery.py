@@ -1,33 +1,20 @@
-"""Deliver trusted schedule results through captured or explicit channel targets."""
+"""Deliver trusted schedule results to a static ``deliver_to`` target.
+
+The run's delivery step (``_channels/delivery.py``) posts there for a scheduled
+run without a thread origin (``runtime.thread.origin``).
+"""
 
 from __future__ import annotations
 
 import os
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
-from langgraph.config import get_config
-from langgraph.runtime import Runtime
-
-from managed_deepagents._channels.assistant_text import (
-    extract_assistant_content,
-    extract_assistant_text,
-)
-from managed_deepagents._channels.binding import (
-    SLACK_BOT_TOKEN_ENV,
-    _current_routing,
-    resolve_runtime_channel,
-)
+from managed_deepagents._channels.binding import SLACK_BOT_TOKEN_ENV
 from managed_deepagents._channels.trigger.client import create_trigger_client
-from managed_deepagents._identity_runtime import (
-    _ambient_configurable,
-    _configurable_from_runtime,
-    _field,
-)
+from managed_deepagents._identity_runtime import _field
 from managed_deepagents._log import logger
-from managed_deepagents._memory.async_util import await_if_needed
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.trigger.types import TriggerChannelActionRequest
@@ -37,17 +24,6 @@ if TYPE_CHECKING:
         ChannelDestinationProviderThread,
         JsonValue,
     )
-
-_schedule_metadata_for_tests: Callable[[], Mapping[str, object] | None] | None = None
-
-
-def set_schedule_metadata_for_tests(
-    loader: Callable[[], Mapping[str, object] | None] | None = None,
-) -> None:
-    """Override LangGraph run metadata resolution. Test-only."""
-    global _schedule_metadata_for_tests  # noqa: PLW0603
-    _schedule_metadata_for_tests = loader
-
 
 PostFn = Callable[..., Awaitable[object] | object]
 DeliverOutcome = Literal["posted", "skipped", "failed"]
@@ -88,8 +64,9 @@ def read_schedule_deliver_to(  # noqa: PLR0911 - validation short-circuits
     conversation_id = to_raw.get("conversation_id", to_raw.get("conversationId"))
     if not isinstance(conversation_id, str) or not conversation_id.strip():
         return None
+    normalized_to: ChannelDestinationProviderConversation | ChannelDestinationProviderThread
     if dest_type == "provider_conversation":
-        normalized_to: ChannelDestinationProviderConversation | ChannelDestinationProviderThread = {
+        normalized_to = {
             "type": "provider_conversation",
             "conversation_id": conversation_id.strip(),
         }
@@ -97,14 +74,11 @@ def read_schedule_deliver_to(  # noqa: PLR0911 - validation short-circuits
         thread_id = to_raw.get("thread_id", to_raw.get("threadId"))
         if not isinstance(thread_id, str) or not thread_id.strip():
             return None
-        normalized_to = cast(
-            "ChannelDestinationProviderThread",
-            {
-                "type": "provider_thread",
-                "conversation_id": conversation_id.strip(),
-                "thread_id": thread_id.strip(),
-            },
-        )
+        normalized_to = {
+            "type": "provider_thread",
+            "conversation_id": conversation_id.strip(),
+            "thread_id": thread_id.strip(),
+        }
     else:
         return None
     auto_post_raw = raw.get("auto_post", raw.get("autoPost"))
@@ -136,7 +110,7 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
     bot_token: str | None = None,
     post: PostFn | None = None,
 ) -> DeliverOutcome:
-    """Post result text; the middleware fails the run on a failed outcome."""
+    """Post result text; the run's delivery step fails the run on a failed outcome."""
     text = reply_text.strip()
     if not text or not deliver_to["auto_post"]:
         return "skipped"
@@ -162,6 +136,7 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
             logger.error(
                 "schedule Slack delivery failed (%s)",
                 logger.safe_error_label(error),
+                error=error,
             )
             return "failed"
 
@@ -188,6 +163,7 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
             logger.error(
                 "schedule Trigger channel delivery failed (%s)",
                 logger.safe_error_label(error),
+                error=error,
             )
             return "failed"
 
@@ -207,125 +183,38 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
         )
 
         transport = create_slack_web_api_transport(bot_token=token)
-        posted = transport.post(
+        await transport.post(
             message={"type": "content", "content": text},
             target=cast("JsonValue", dict(address)),
         )
-        if hasattr(posted, "__await__"):
-            await cast("Awaitable[object]", posted)
         return "posted"
     except Exception as error:  # noqa: BLE001 - return a failed delivery outcome
         logger.error(
             "schedule Slack delivery failed (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         return "failed"
 
 
-def is_trusted_schedule_delivery_run(configurable: Mapping[str, object] | None) -> bool:
+def is_trusted_schedule_delivery_run(
+    configurable: Mapping[str, object] | None, metadata: object
+) -> bool:
     """True when this run is a managed cron fire (not a caller-forged HTTP invoke).
 
     Only the server writes the principal, so its cron marker cannot be forged.
+    ``metadata`` is the run's, which marks a managed cron fire.
     """
     if not isinstance(configurable, Mapping):
         return False
     if _field(configurable.get("langgraph_auth_user"), "mda_scheduled_run") is not True:
         return False
-    metadata = _resolve_schedule_metadata()
     return isinstance(metadata, Mapping) and metadata.get("mda_managed") is True
-
-
-def _resolve_schedule_metadata() -> Mapping[str, object] | None:
-    if _schedule_metadata_for_tests is not None:
-        return _schedule_metadata_for_tests()
-    try:
-        config = get_config()
-    except RuntimeError:
-        return None
-    if isinstance(config, Mapping):
-        metadata = config.get("metadata")
-        if isinstance(metadata, Mapping):
-            return cast("Mapping[str, object]", metadata)
-    return None
-
-
-async def _deliver_captured_result(
-    configurable: Mapping[str, object] | None,
-    output: Mapping[str, object],
-    deliver: Callable[..., Awaitable[object]],
-) -> None:
-    reply_text = extract_assistant_text(output)
-    routing = _current_routing.get() or {}
-    saved_channel = routing.get("mda_channel")
-    if saved_channel is not None:
-        channel = resolve_runtime_channel({"mda_channel": saved_channel}, configurable)
-        if channel is None or channel.post is None:
-            raise RuntimeError("Scheduled channel delivery is unavailable")
-        content = (
-            reply_text or None
-            if isinstance(saved_channel, Mapping)
-            and saved_channel.get("transport") == "trigger_server"
-            else extract_assistant_content(output)
-        )
-        if content is not None:
-            await channel.post({"type": "content", "content": content})
-        return
-    deliver_to = read_schedule_deliver_to(_field(routing.get("mda_schedule"), "deliver_to"))
-    if deliver_to is not None:
-        outcome = await deliver(deliver_to=deliver_to, reply_text=reply_text)
-        if outcome == "failed":
-            raise RuntimeError("Scheduled channel delivery failed")
-
-
-def create_schedule_delivery_middleware(
-    *,
-    deliver: Callable[..., Awaitable[object]] | None = None,
-) -> AgentMiddleware:
-    """Post trusted schedule results and propagate delivery failures."""
-    deliver_fn = deliver or deliver_schedule_result
-
-    class _ScheduleDeliveryMiddleware(AgentMiddleware[AgentState[Any], Any, Any]):
-        """Always-on middleware that auto-posts schedule results on trusted cron runs."""
-
-        def __init__(self, deliver_impl: Callable[..., Awaitable[object]] | None = None) -> None:
-            self._deliver = deliver_impl or deliver_schedule_result
-
-        @property
-        def name(self) -> str:
-            return "mda-schedule-delivery"
-
-        def after_agent(
-            self, state: AgentState[Any], runtime: Runtime[Any]
-        ) -> dict[str, Any] | None:
-            # Local langgraph may invoke the sync hook; bridge to the async deliver path.
-            return await_if_needed(self._deliver_after_agent(state, runtime))
-
-        async def aafter_agent(
-            self, state: AgentState[Any], runtime: Runtime[Any]
-        ) -> dict[str, Any] | None:
-            return await self._deliver_after_agent(state, runtime)
-
-        async def _deliver_after_agent(
-            self, state: AgentState[Any], runtime: Runtime[Any]
-        ) -> dict[str, Any] | None:
-            # Keep schedule config even when langgraph_auth_user is absent.
-            from_runtime = _configurable_from_runtime(runtime)
-            configurable = from_runtime if from_runtime is not None else _ambient_configurable()
-            if not is_trusted_schedule_delivery_run(configurable):
-                return None
-            messages = None
-            if isinstance(state, Mapping):
-                messages = state.get("messages")
-            await _deliver_captured_result(configurable, {"messages": messages}, self._deliver)
-            return None
-
-    return _ScheduleDeliveryMiddleware(deliver_impl=deliver_fn)
 
 
 __all__ = [
     "NormalizedScheduleDeliverTo",
     "address_from_deliver_to",
-    "create_schedule_delivery_middleware",
     "deliver_schedule_result",
     "get_deployment_id",
     "is_trusted_schedule_delivery_run",

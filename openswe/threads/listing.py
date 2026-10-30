@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -13,8 +13,10 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
-from openswe.tasks.flags import task_coordination_enabled
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.records import lookup_slack_link_thread_id
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
+from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
@@ -133,6 +135,16 @@ def _search_rank(thread: ThreadLike) -> float:
 
 
 def _search_matches(values: Sequence[object], query: str) -> bool:
+    if expected := parse_github_pr_url(query):
+        return any(
+            actual is not None
+            and actual.owner.lower() == expected.owner.lower()
+            and actual.repo.lower() == expected.repo.lower()
+            and actual.number == expected.number
+            for value in values
+            if isinstance(value, str)
+            for actual in [parse_github_pr_url(value)]
+        )
     needle = query.lower()
     return any(isinstance(value, (str, int)) and needle in str(value).lower() for value in values)
 
@@ -150,6 +162,7 @@ def _metadata_matches_filters(
     ownerless: bool = False,
     admin_threads: bool | None = None,
     owner: str | None = None,
+    exclude_sources: Collection[str] = (),
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     if thread_is_unlisted(metadata):
@@ -177,6 +190,8 @@ def _metadata_matches_filters(
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and thread_source(metadata) != source:
+        return False
+    if thread_source(metadata) in exclude_sources:
         return False
     if query:
         pull_requests = metadata.get("pull_requests")
@@ -262,7 +277,9 @@ async def settle_review_walkthrough(client: Any, thread: ThreadLike) -> ThreadLi
     if review is None or review.walkthrough_state != "building" or not thread_id:
         return thread
     try:
-        runs = await client.runs.list(review.scout_thread_id, limit=1)
+        runs = await client.runs.list(
+            await index.current_thread_id(review.scout_thread_id), limit=1
+        )
     except NotFoundError:
         runs = []
     except Exception:
@@ -393,7 +410,8 @@ def _attach_task_membership(
             }
         ):
             label = " ".join(membership.instructions.split())[:64].strip() or "Worker"
-            summary["title"] = f"{label} · {membership.thread_id[:8]}"
+            # The tail, as worker launch chips show it: a UUIDv7 starts with a shared timestamp.
+            summary["title"] = f"{label} · {membership.thread_id[-8:]}"
         if membership.cancelled:
             summary["status"] = "interrupted"
         elif membership.launch_error:
@@ -415,9 +433,6 @@ async def attach_task_workers(
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
-        return
-    if not await task_coordination_enabled(login):
-        _attach_flat_task_memberships(summaries, memberships)
         return
     coordinator_ids = [
         key for key, membership in memberships.items() if membership.role == "coordinator"
@@ -576,6 +591,7 @@ async def _collect_thread_candidates(
     ownerless: bool = False,
     owned: bool = False,
     admin_threads: bool | None = None,
+    exclude_sources: Collection[str] = (),
     viewer_login: str | None = None,
     viewer_email: str | None = None,
     include_private: bool = True,
@@ -639,6 +655,7 @@ async def _collect_thread_candidates(
                     ownerless=ownerless,
                     admin_threads=admin_threads,
                     owner=viewer_login if owned else None,
+                    exclude_sources=exclude_sources,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -800,6 +817,7 @@ async def list_dashboard_thread_repos(
     include_automations: bool = False,
     owned: bool = False,
     include_all: bool = False,
+    exclude_sources: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
 
@@ -815,6 +833,7 @@ async def list_dashboard_thread_repos(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
         owned=owned,
+        exclude_sources=exclude_sources,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -870,6 +889,7 @@ async def list_dashboard_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     owned: bool = False,
+    exclude_sources: Collection[str] = (),
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
@@ -878,10 +898,30 @@ async def list_dashboard_threads_page(
     hierarchy: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
+    normalized_query = query.strip() if query else ""
+    if parse_slack_thread_url(normalized_query):
+        thread_id = await lookup_slack_link_thread_id(normalized_query)
+        items = []
+        if thread_id and offset <= 0:
+            try:
+                thread = await client.threads.get(thread_id)
+            except NotFoundError:
+                thread = None
+            if thread is not None:
+                metadata = _thread_metadata(thread)
+                if thread_is_readable(metadata, login, email) and (
+                    include_private or metadata.get("visibility", "public") == "public"
+                ):
+                    items = [await _summarize_thread(client, thread)]
+        return {"items": items, "limit": 1, "offset": max(offset, 0), "hasMore": False}
+    pr_ref = parse_github_pr_url(normalized_query)
+    if pr_ref:
+        query = pr_ref.url
     search_login = filter_participant_login or login
-    hierarchy = hierarchy and await task_coordination_enabled(login)
     search_email = email if search_login == login else None
-    if scope == "automation" and filter_participant_login is None:
+    if pr_ref and filter_participant_login is None:
+        searches = [{}]
+    elif scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
     elif scope == "bot" and filter_participant_login is None:
         # Bot threads have no participants, and every signed-in user may read them.
@@ -908,6 +948,7 @@ async def list_dashboard_threads_page(
         ownerless=ownerless,
         owned=owned,
         admin_threads=admin_threads,
+        exclude_sources=exclude_sources,
         viewer_login=login,
         viewer_email=email,
         include_private=include_private,
@@ -944,6 +985,7 @@ async def list_dashboard_threads_page(
                     ownerless=ownerless,
                     admin_threads=admin_threads,
                     owner=login if owned else None,
+                    exclude_sources=exclude_sources,
                 )
                 and (
                     not surfaced_only

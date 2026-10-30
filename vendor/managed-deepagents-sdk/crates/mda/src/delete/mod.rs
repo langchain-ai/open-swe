@@ -13,7 +13,9 @@
 //!    not touched by host teardown; and
 //! 4. the **managed sandboxes** the runtime provisioned, which carry no
 //!    deployment reference of their own and are therefore matched by the
-//!    `{name}--` prefix the runtimes give them.
+//!    `{name}--` prefix the runtimes give them; and
+//! 5. the **Agent Auth connections** the deployment's channels set up, e.g. a
+//!    GitHub channel's App; what only the user can remove is linked instead.
 //!
 //! Managed crons live on the deployment's Agent Server, and they do go away
 //! with it — but not promptly. Host teardown of the running container is
@@ -27,7 +29,7 @@
 //! so a partially torn-down deployment can be cleaned up by running the command
 //! again.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -37,23 +39,22 @@ use cliclack::{confirm, log, note, outro, outro_cancel, spinner};
 use crate::agent_config;
 use crate::cli_output::show_wordmark_intro;
 use crate::command::CommandCompletion;
+use crate::deploy::channel_setup::{self, ChannelTeardown};
 use crate::deploy::helpers::{
-    bake_snapshot_list_prefix, deployment_runtime_url, is_deployment_bake_snapshot,
-    is_deployment_sandbox, resolve_context_hub_base_url, resolve_langsmith_api_bases,
-    resolve_platform_api_url, sandbox_name_prefixes, sandbox_registry_name,
-    REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV,
+    bake_snapshot_list_prefix, is_deployment_bake_snapshot, is_deployment_sandbox,
+    sandbox_name_prefixes, sandbox_registry_name,
 };
+use crate::deploy::langsmith_context::{LangSmithContext, WORKSPACE_FLAG_HINT};
 use crate::deploy::{
-    agent_target, delete_managed_crons, ensure_project, env_file, find_target_deployment,
-    resolve_api_key, step,
+    agent_environment, agent_target, delete_managed_crons, ensure_project, env_file,
+    find_target_deployment, live_deployment, resolve_api_key, step,
 };
-use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
+use crate::error::{categorized, is_cancellation, ErrorCategory, Failure};
 use crate::install::Installation;
-use crate::langsmith::{
-    self, resolve_preferred_env, AgentEnvironment, ContextHubClient, DeploymentAgent,
-};
+use crate::langsmith::{self, AgentEnvironment, ContextHubClient, DeploymentAgent};
 use crate::naming::normalize_name;
 use crate::project;
+use crate::telemetry::{otel_logger, update_facts};
 
 /// Docs page explaining managed sandbox lifetime and retention.
 const SANDBOX_DOCS_URL: &str = "https://docs.langchain.com/langsmith/sandboxes";
@@ -69,6 +70,8 @@ pub struct DeleteOptions {
     pub workspace_id: Option<String>,
     /// Host backend URL override.
     pub host_url: Option<String>,
+    /// Env file to read instead of the project `.env` (`--env-file`).
+    pub env_file: Option<PathBuf>,
     /// Skip the confirmation prompt.
     pub yes: bool,
 }
@@ -99,6 +102,10 @@ struct Plan {
     recipe_lookup_error: Option<String>,
     /// Set when the deployment-owned registry could not be queried.
     registry_lookup_error: Option<String>,
+    /// The Agent Auth connections the deployment's channels set up.
+    channel_connections: Option<ChannelTeardown>,
+    /// Set when Agent Auth could not be asked for them.
+    channel_lookup_error: Option<String>,
 }
 
 impl Plan {
@@ -108,6 +115,30 @@ impl Plan {
             && self.sandboxes.is_empty()
             && self.recipe_snapshots.is_empty()
             && self.registry.is_none()
+            && self.channel_connections.is_none()
+    }
+
+    fn lookup_failed(&self) -> bool {
+        self.sandbox_lookup_error.is_some()
+            || self.recipe_lookup_error.is_some()
+            || self.registry_lookup_error.is_some()
+            || self.channel_lookup_error.is_some()
+    }
+
+    fn warn_lookup_errors(&self) -> Result<()> {
+        if self.sandbox_lookup_error.is_some() {
+            warn_sandboxes_not_deleted()?;
+        }
+        if self.recipe_lookup_error.is_some() {
+            warn_recipes_not_deleted()?;
+        }
+        if self.registry_lookup_error.is_some() {
+            warn_registry_not_deleted()?;
+        }
+        if self.channel_lookup_error.is_some() {
+            warn_channel_connections_not_deleted()?;
+        }
+        Ok(())
     }
 }
 
@@ -132,9 +163,10 @@ pub fn run(opts: DeleteOptions) -> Result<CommandCompletion> {
             Ok(CommandCompletion::Cancelled)
         }
         Err(err) => {
-            let category = category_of(&err);
+            let failure = Failure::of(&err);
+            otel_logger::error(&err);
             outro_cancel(format!("{err:#}"))?;
-            Ok(CommandCompletion::Failed(category))
+            Ok(CommandCompletion::Failed(failure))
         }
     }
 }
@@ -145,62 +177,37 @@ fn run_session(
     project: &project::Project,
     root: &Path,
 ) -> Result<CommandCompletion> {
-    let env_path = root.join(".env");
+    let env_path = env_file::project_env_path(root, opts.env_file.as_deref());
     let env_vars = env_file::parse_env_file(&env_path);
-    let (default_host, _) = resolve_langsmith_api_bases(&env_vars);
-    let host_url = opts
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_host.as_str());
-    let platform_api_url = resolve_platform_api_url(host_url, &env_vars);
-    let credential = resolve_api_key(&env_vars, &env_path, &platform_api_url)?;
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        opts.workspace_id.as_deref(),
+    let ctx = LangSmithContext::resolve_verified(
         &env_vars,
-        |key| std::env::var(key).ok(),
-        " or pass --workspace-id instead",
+        opts.host_url.as_deref(),
+        opts.workspace_id.as_deref(),
+        WORKSPACE_FLAG_HINT,
+        |platform_api_url| resolve_api_key(&env_vars, &env_path, platform_api_url),
     )?;
 
     let base_name = match &opts.name {
         Some(name) => normalize_name(name)?,
         None => agent_config::agent_assistant_id(project)?,
     };
-    let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
+    let environment = agent_environment(opts.agent_environment, &env_vars)?;
+    let (name, deployment_agent) = agent_target(base_name, environment)?;
+    update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
 
-    let client = langsmith::Client::with_credential_and_platform(
-        host_url,
-        Some(platform_api_url.as_str()),
-        credential.clone(),
-        workspace_id.clone(),
-    )?;
-    let context_client = ContextHubClient::with_credential_and_host(
-        &resolve_context_hub_base_url(host_url, &platform_api_url),
-        host_url,
-        credential,
-        workspace_id,
-    )?;
+    let client = ctx.client()?;
+    let context_client = ctx.context_hub_client()?;
 
-    let plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
+    let mut plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
+    update_facts(|facts| facts.deployment.deployment_id = plan.deployment_id.clone());
+    if let Some(deployment_id) = plan.deployment_id.clone() {
+        resolve_channel_connections(&mut plan, &client, &env_vars, &deployment_id);
+    }
     if plan.is_empty() {
         // Everything else is gone, but an unreadable sandbox list means we
         // cannot claim teardown is complete — sandboxes may still be running.
-        if plan.sandbox_lookup_error.is_some() {
-            warn_sandboxes_not_deleted()?;
-        }
-        if plan.recipe_lookup_error.is_some() {
-            warn_recipes_not_deleted()?;
-        }
-        if plan.registry_lookup_error.is_some() {
-            warn_registry_not_deleted()?;
-        }
-        if plan.sandbox_lookup_error.is_some()
-            || plan.recipe_lookup_error.is_some()
-            || plan.registry_lookup_error.is_some()
-        {
+        plan.warn_lookup_errors()?;
+        if plan.lookup_failed() {
             outro(format!("Nothing else to delete for '{name}'."))?;
         } else {
             outro(format!("Nothing to delete for '{name}'."))?;
@@ -228,21 +235,21 @@ fn run_session(
     // which stays reachable after the deployment is marked deleted but is no
     // longer discoverable, so there would be no way back to it afterwards.
     if let Some(deployment_url) = &plan.deployment_url {
-        delete_crons(&client, deployment_url)?;
+        delete_crons(&client, deployment_url);
+    }
+    // The connections are found through the deployment ID, so they go first:
+    // a failure here leaves the deployment for a second run to find them by.
+    if let Some(teardown) = &plan.channel_connections {
+        delete_channel_connections(&client, &env_vars, teardown)?;
     }
     if let Some(deployment_id) = &plan.deployment_id {
         delete_deployment(&client, deployment_id, &name, delete_tracing_project)?;
     }
     delete_context_hub_repos(&context_client, &plan.repos)?;
 
-    if plan.sandbox_lookup_error.is_some() {
-        warn_sandboxes_not_deleted()?;
-    }
-    if plan.recipe_lookup_error.is_some() {
-        warn_recipes_not_deleted()?;
-    }
-    if plan.registry_lookup_error.is_some() {
-        warn_registry_not_deleted()?;
+    plan.warn_lookup_errors()?;
+    for (title, message) in plan.channel_connections.iter().flat_map(|t| &t.notes) {
+        note(title, message)?;
     }
     outro(format!("Deleted '{name}'."))?;
     Ok(CommandCompletion::Succeeded)
@@ -284,6 +291,42 @@ fn warn_registry_not_deleted() -> Result<()> {
     Ok(())
 }
 
+fn warn_channel_connections_not_deleted() -> Result<()> {
+    note(
+        "Channel connections were not deleted",
+        "Looking up the deployment's channel connections in Agent Auth failed, so they \
+         were not removed. You can remove them with `mda connections delete`.",
+    )?;
+    Ok(())
+}
+
+/// Find the Agent Auth connections the deployment's channels set up.
+/// Best-effort, like sandboxes: an unreachable Agent Auth must not block
+/// tearing down the deployment.
+fn resolve_channel_connections(
+    plan: &mut Plan,
+    client: &langsmith::Client,
+    env_vars: &BTreeMap<String, String>,
+    deployment_id: &str,
+) {
+    let sp = spinner();
+    sp.start("Looking up channel connections");
+    match channel_setup::find_teardown(client, env_vars, deployment_id) {
+        Ok(Some(teardown)) => {
+            sp.stop(format!(
+                "Found {} channel connection(s)",
+                teardown.apps.len() + teardown.connections.len()
+            ));
+            plan.channel_connections = Some(teardown);
+        }
+        Ok(None) => sp.clear(),
+        Err(error) => {
+            sp.stop("Could not look up channel connections");
+            plan.channel_lookup_error = Some(format!("{error:#}"));
+        }
+    }
+}
+
 /// Discover which of the deployment's resources still exist.
 fn resolve_plan(
     client: &langsmith::Client,
@@ -302,10 +345,16 @@ fn resolve_plan(
         .as_ref()
         .and_then(|deployment| deployment.get("id")?.as_str())
         .map(str::to_string);
+    // List responses are trimmed, so a live deployment can appear with an id
+    // but no runtime URL. Missing the URL would silently skip the cron sweep
+    // and leave the schedules firing for the whole teardown window, which is
+    // the case this command exists to prevent, so `live_deployment` asks for
+    // the full deployment. `None` means there is nothing to sweep, or that the
+    // lookup failed, which [`delete_crons`] already treats as best-effort.
     let deployment_url = deployment
         .as_ref()
-        .zip(deployment_id.as_deref())
-        .and_then(|(deployment, id)| resolve_runtime_url(client, deployment, id));
+        .and_then(|deployment| live_deployment(client, deployment).ok().flatten())
+        .map(|(_, url)| url);
     match &deployment_id {
         Some(id) => sp.stop(format!("Found deployment {id}")),
         None => sp.stop(format!("No deployment named '{name}'")),
@@ -419,30 +468,9 @@ fn resolve_plan(
         sandbox_lookup_error,
         recipe_lookup_error,
         registry_lookup_error,
+        channel_connections: None,
+        channel_lookup_error: None,
     })
-}
-
-/// Find the Agent Server URL to sweep crons on, preferring the list response
-/// and falling back to the full deployment object.
-///
-/// List responses are trimmed, so a live deployment can appear here with an id
-/// but no runtime URL. Missing the URL would silently skip the cron sweep and
-/// leave the schedules firing for the whole teardown window, which is the case
-/// this command exists to prevent, so it is worth a second request to rule out.
-///
-/// `None` means there is genuinely nothing to sweep — a deployment that never
-/// finished building has no Agent Server — or that the lookup failed, which
-/// [`delete_crons`] already treats as best-effort.
-fn resolve_runtime_url(
-    client: &langsmith::Client,
-    listed_deployment: &serde_json::Value,
-    deployment_id: &str,
-) -> Option<String> {
-    if let Some(url) = deployment_runtime_url(listed_deployment) {
-        return Some(url);
-    }
-    let deployment = client.get_deployment(deployment_id).ok()?;
-    deployment_runtime_url(&deployment)
 }
 
 /// Select the Context Hub repos owned by the deployment `name`, ordered so
@@ -501,6 +529,22 @@ fn report_plan(plan: &Plan, delete_tracing_project: bool) -> Result<()> {
         (None, Some(name)) => log::warning(format!("Will delete sandbox registry '{name}'"))?,
         (None, None) => {}
     }
+    match (&plan.channel_lookup_error, &plan.channel_connections) {
+        (Some(error), _) => log::warning(format!(
+            "Could not look up channel connections, so none will be deleted: {error}"
+        ))?,
+        (None, Some(teardown)) => {
+            for (_, slug) in &teardown.apps {
+                log::warning(format!(
+                    "Will delete the Agent Auth app behind connection '{slug}'"
+                ))?;
+            }
+            for (_, slug) in &teardown.connections {
+                log::warning(format!("Will delete Agent Auth connection '{slug}'"))?;
+            }
+        }
+        (None, None) => {}
+    }
     Ok(())
 }
 
@@ -531,7 +575,7 @@ fn confirm_delete(name: &str, yes: bool) -> Result<bool> {
 /// Best-effort: an Agent Server that is already unreachable means the crons
 /// cannot fire either, and a deployment that failed to build may never have had
 /// any. Neither should block tearing down the resources that do exist.
-fn delete_crons(client: &langsmith::Client, deployment_url: &str) -> Result<()> {
+fn delete_crons(client: &langsmith::Client, deployment_url: &str) {
     let sp = spinner();
     sp.start("Deleting schedules");
     match delete_managed_crons(client, deployment_url) {
@@ -539,7 +583,6 @@ fn delete_crons(client: &langsmith::Client, deployment_url: &str) -> Result<()> 
         Ok(deleted) => sp.stop(format!("Deleted {deleted} schedule(s)")),
         Err(_) => sp.stop("Could not delete schedules; they stop when the deployment is torn down"),
     }
-    Ok(())
 }
 
 /// Drop the tracing project with a name-mode deployment: it is a separate
@@ -649,6 +692,22 @@ fn delete_registry(client: &langsmith::Client, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn delete_channel_connections(
+    client: &langsmith::Client,
+    env_vars: &BTreeMap<String, String>,
+    teardown: &ChannelTeardown,
+) -> Result<()> {
+    let sp = spinner();
+    sp.start("Deleting channel connections");
+    let deleted = step(
+        &sp,
+        "Could not delete the channel connections",
+        channel_setup::tear_down(client, env_vars, teardown),
+    )?;
+    sp.stop(format!("Deleted {deleted} channel connection(s)"));
+    Ok(())
+}
+
 fn delete_context_hub_repos(context_client: &ContextHubClient, repos: &[String]) -> Result<()> {
     if repos.is_empty() {
         return Ok(());
@@ -674,7 +733,7 @@ fn delete_context_hub_repos(context_client: &ContextHubClient, repos: &[String])
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deploy::helpers::find_deployment_by_name;
+    use crate::deploy::helpers::{deployment_runtime_url, find_deployment_by_name};
 
     fn handles(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -741,6 +800,15 @@ mod tests {
         .is_empty());
         assert!(!Plan {
             registry: Some("my-agent--registry".into()),
+            ..Plan::default()
+        }
+        .is_empty());
+        assert!(!Plan {
+            channel_connections: Some(ChannelTeardown {
+                apps: vec![("a1".into(), "mda/github-app/dep-1".into())],
+                connections: vec![],
+                notes: vec![],
+            }),
             ..Plan::default()
         }
         .is_empty());
@@ -812,7 +880,14 @@ mod tests {
             ..Plan::default()
         };
         assert!(plan.is_empty());
-        assert!(plan.sandbox_lookup_error.is_some());
+        assert!(plan.lookup_failed());
+
+        let plan = Plan {
+            channel_lookup_error: Some("Agent Auth unavailable".to_string()),
+            ..Plan::default()
+        };
+        assert!(plan.is_empty());
+        assert!(plan.lookup_failed());
     }
 
     #[test]

@@ -13,6 +13,13 @@ use std::path::Path;
 /// `(file, prompts in it, how a non-interactive caller answers them)`.
 const PROMPTS: &[(&str, usize, &str)] = &[
     (
+        "channel/setup.rs",
+        1,
+        "choosing which channels to set up is only asked in a terminal, and not when a \
+         channel is named (`mda channels setup slack`); without a terminal, or with --json, \
+         the command only reports each channel's status",
+    ),
+    (
         "chat/mod.rs",
         6,
         "interactive-only command: message, tool-review, per-call tool-approval, \
@@ -30,15 +37,61 @@ const PROMPTS: &[(&str, usize, &str)] = &[
     ),
     ("delete/mod.rs", 1, "--yes; refuses without a terminal"),
     (
+        "deploy/channel_app.rs",
+        1,
+        "the try-again-or-skip prompt after a failed GitHub, Linear or Slack setup step is \
+         only asked in a terminal; without one, the failure ends the deploy once every \
+         channel had its turn",
+    ),
+    (
+        "deploy/github_channel/mod.rs",
+        10,
+        "GitHub App setup prompts run only in an interactive terminal, and the CLI-only env \
+         vars answer them with or without one: MDA_GITHUB_APP_OWNER creates a new App there \
+         (with neither it nor an existing App, deploy fails before uploading), \
+         MDA_GITHUB_APP_ID, MDA_GITHUB_APP_PRIVATE_KEY_FILE and MDA_GITHUB_WEBHOOK_SECRET \
+         bring an existing App, MDA_GITHUB_APP_INSTALLATION_ID picks its installation when \
+         GitHub reports none or several, and MDA_GITHUB_WEBHOOK_SECRET alone supplies a \
+         brought App's missing webhook secret. Deploy prints the setup link instead of \
+         opening a browser, and a brought App whose webhook points elsewhere fails the \
+         deploy with how to change it on GitHub or keep it (MDA_GITHUB_WEBHOOK_ELSEWHERE). \
+         Moving an App from another deployment and picking one of several installations \
+         are only asked in a terminal",
+    ),
+    (
+        "deploy/linear_channel/mod.rs",
+        7,
+        "Linear app setup prompts run only in an interactive terminal, and the CLI-only env \
+         vars answer them with or without one: MDA_LINEAR_CLIENT_ID, \
+         MDA_LINEAR_CLIENT_SECRET and MDA_LINEAR_WEBHOOK_SECRET skip choosing a new or an \
+         existing app and the credential prompts (without a terminal and without them, \
+         deploy fails before uploading with that hint and the create-app link), \
+         MDA_LINEAR_WORKSPACE answers the workspace prompt, and MDA_LINEAR_WEBHOOK_SECRET \
+         alone answers the signing-secret prompt of an installed app; a failed setup fails \
+         the deploy instead of offering to try again; the redirect URI confirmation, and \
+         the confirmation that an app from those env vars has the settings deploy lists, \
+         are only asked in a terminal, without one deploy prints what to set and goes on",
+    ),
+    (
         "deploy/mod.rs",
         3,
         "collision overwrite takes --yes; Context Hub conflicts take --context-strategy; \
          API key comes from LANGSMITH_API_KEY",
     ),
     (
+        "deploy/slack_app.rs",
+        3,
+        "choosing a new Slack channel's app and entering its credentials only happens in an \
+         interactive terminal; MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET supply the \
+         user's own app with or without one. Without a terminal and without them, hosted \
+         LangSmith creates a managed app in a workspace the user already authorized it in \
+         and says so; otherwise deploy fails before uploading with that hint",
+    ),
+    (
         "deploy/trigger_channels.rs",
         1,
-        "browser hand-off only shown in an interactive terminal",
+        "moving a Slack app another deployment uses is only offered in an interactive terminal; \
+         without one, deploy fails saying the app stays there",
     ),
     (
         "secret_input.rs",

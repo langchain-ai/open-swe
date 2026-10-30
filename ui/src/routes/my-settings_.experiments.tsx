@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
-import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
+import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
@@ -19,7 +19,12 @@ function ExperimentsPage() {
       description="Features under test. They may change or go away."
     >
       <SettingsSection title="Interface">
-        <AssistantUiPreference />
+        <StreamPreference />
+        <ProfileSwitchRow
+          field="experimental_fleet"
+          label="Fleet chats"
+          description="Add an Open SWE / Fleet switch to the sidebar to chat with Fleet in your LangSmith workspace, as you. Needs a LangSmith connection."
+        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
@@ -35,19 +40,9 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="experimental_task_coordination"
-          label="Asynchronous task coordination"
-          description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
-        />
-        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
-        />
-        <ProfileSwitchRow
-          field="experimental_monitor"
-          label="Monitors"
-          description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
         <ProfileSwitchRow
           field="experimental_act_as_approval"

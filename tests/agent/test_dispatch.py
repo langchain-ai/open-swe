@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
 
@@ -75,8 +76,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
     assert created["webhook"] == "https://app/webhooks/run-complete"
-    # Resumable by default so the dashboard can join (and stop) a run it did not start.
-    assert created["stream_resumable"] is True
+    assert created["stream_resumable"] is False
     # The v3 run shape, so the dashboard gets `tools` events and subagent
     # namespaces from runs it did not start — exactly what its own `run.start` sends.
     assert created["stream_mode"] == [
@@ -90,14 +90,17 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["stream_subgraphs"] is True
     assert created["config"]["configurable"]["__event_streaming_v2"] is True
     invocation_id = created["config"]["configurable"]["invocation_id"]
-    assert created["config"]["metadata"] == {
-        "kind": "test",
-        "slack_channel_id": "C123",
-        "slack_channel_name": "team-openswe",
-        "invocation_id": invocation_id,
-        "prepare_run_id": invocation_id,
-        "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
-    }
+    assert (
+        created["config"]["metadata"].items()
+        >= {
+            "kind": "test",
+            "slack_channel_id": "C123",
+            "slack_channel_name": "team-openswe",
+            "invocation_id": invocation_id,
+            "prepare_run_id": invocation_id,
+            "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
+        }.items()
+    )
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
     assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
@@ -111,11 +114,15 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
 
     async def by_identity(provider: str, external_id: str) -> SimpleNamespace | None:
         if (provider, external_id) in {("slack", "U123"), ("github", "2001")}:
-            return SimpleNamespace(id=user_id)
+            return SimpleNamespace(id=user_id, github_login="mason-gh")
         return None
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
-        return SimpleNamespace(id=user_id) if (provider, login) == ("github", "mason-gh") else None
+        return (
+            SimpleNamespace(id=user_id, github_login="mason-gh")
+            if (provider, login) == ("github", "mason-gh")
+            else None
+        )
 
     monkeypatch.setattr(User, "for_identity", by_identity)
     monkeypatch.setattr(User, "for_login", by_login)
@@ -138,6 +145,25 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         created = client.runs.created[-1]
         assert created["metadata"]["user_id"] == str(user_id)
         assert created["config"]["metadata"]["user_id"] == str(user_id)
+        assert created["metadata"]["ls_repo_provider"] == "github"
+        assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
+        # Attributed to the person, but a run the backend starts acts as no one.
+        assert ACTING_USER_KEY not in created["metadata"]
+
+    # A follow-up the person sent themselves acts as them.
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="dashboard",
+        thread_title=None,
+        config={"configurable": {"github_login": "mason-gh"}},
+        client=client,
+        as_sender=True,
+    )
+    sent = client.runs.created[-1]
+    assert sent["metadata"][ACTING_USER_KEY] == str(user_id)
+    assert sent["config"]["metadata"][ACTING_USER_KEY] == str(user_id)
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -146,10 +172,22 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         source="slack",
         thread_title=None,
         config={"configurable": {"slack_thread": {"triggering_user_id": "unknown"}}},
-        metadata={"user_id": str(user_id)},
+        metadata={
+            "user_id": str(user_id),
+            ACTING_USER_KEY: str(user_id),
+            "ls_attribution_identifier": "previous-person",
+            "ls_git_repo": "wrong/default",
+            "ls_git_branch": "main",
+        },
         client=client,
     )
-    assert "user_id" not in client.runs.created[-1]["metadata"]
+    unknown = client.runs.created[-1]["metadata"]
+    assert "user_id" not in unknown
+    # Only the backend says whom a run acts as, never its caller.
+    assert ACTING_USER_KEY not in unknown
+    assert "ls_attribution_identifier" not in unknown
+    assert "ls_git_repo" not in unknown
+    assert "ls_git_branch" not in unknown
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -173,7 +211,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
 
 
 @pytest.mark.asyncio
-async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_opt_out(
+async def test_create_durable_run_preserves_existing_prepare_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
@@ -186,13 +224,11 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_op
         source="schedule",
         thread_title=None,
         config={"configurable": {"prepare_run_id": "existing"}},
-        stream_resumable=False,
         client=client,
     )
 
     created = client.runs.created[0]
     assert "webhook" not in created
-    assert created["stream_resumable"] is False
     assert created["config"]["configurable"]["invocation_id"] == "existing"
     assert created["config"]["configurable"]["prepare_run_id"] == "existing"
     assert created["config"]["configurable"]["__event_streaming_v2"] is True

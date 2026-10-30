@@ -52,13 +52,11 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             ".env".to_string(),
             "API keys (LangSmith + model providers); never commit".to_string(),
         ),
-    ];
-    if blueprint.identity {
-        entries.push((
+        (
             identity_entry.to_string(),
             "managed authentication".to_string(),
-        ));
-    }
+        ),
+    ];
     if let Some(choice) = blueprint.memory {
         entries.push((
             memory_entry.to_string(),
@@ -80,6 +78,18 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             "Slack messaging channel".to_string(),
         ));
     }
+    if blueprint.channels.contains(&InitChannel::GitHub) {
+        entries.push((
+            format!("channels/github.{ext}"),
+            "GitHub channel, experimental (GitHub App set up on deploy)".to_string(),
+        ));
+    }
+    if blueprint.channels.contains(&InitChannel::Linear) {
+        entries.push((
+            format!("channels/linear.{ext}"),
+            "Linear channel, experimental (Linear app set up on deploy)".to_string(),
+        ));
+    }
     entries.extend(
         [
             ("tools/", "optional custom tools"),
@@ -93,7 +103,7 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
 
     let evaluate = evaluate();
     let sandbox = sandbox_section(sandbox_entry, blueprint);
-    let identity = identity_section(identity_entry, blueprint);
+    let identity = identity_section(identity_entry);
     let memory = memory_section(memory_entry, blueprint, language);
 
     format!(
@@ -145,10 +155,13 @@ This copies your files verbatim, generates a managed entry module, and writes a
 deployable build (including `langgraph.json`) to `.mda/build`. The CLI uploads
 that build to LangSmith to run your agent on the managed runtime.
 
+The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
+for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+
 Common options:
 
 ```bash
-mda deploy --name {name}-dev --deployment-type dev
+mda deploy --name {name}-dev --deployment-type serverless
 mda deploy --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy --no-wait
 ```
@@ -189,6 +202,14 @@ secrets. Provider keys must be in `.env` or configured as LangSmith workspace
 secrets — a value exported in your shell is not read. Set
 `LANGSMITH_WORKSPACE_ID` or pass `--workspace-id` if your LangSmith API key
 requires a workspace selection.
+
+To keep separate settings per environment, pass `--env-file` to `mda dev`,
+`mda chat`, `mda deploy`, `mda delete`, `mda logs` or `mda connections` in
+place of `.env`:
+
+```bash
+mda deploy --agent-environment staging --env-file .env.staging
+```
 "#
     )
 }
@@ -296,15 +317,8 @@ fn memory_section(memory_entry: &str, blueprint: &Blueprint, language: Language)
     )
 }
 
-/// The identity section, or a warning that the deployment is open.
-fn identity_section(identity_entry: &str, blueprint: &Blueprint) -> String {
-    if !blueprint.identity {
-        return format!(
-            "## Identity\n\n\
-             This project declares no identity, so the deployment is open to any caller.\n\
-             Add `{identity_entry}` to say who may call it and how runs are scoped.\n"
-        );
-    }
+/// The identity section.
+fn identity_section(identity_entry: &str) -> String {
     format!(
         "## Identity\n\n\
          `{identity_entry}` enables managed authentication: threads are owned\n\

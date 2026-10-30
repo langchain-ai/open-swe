@@ -5,7 +5,7 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import httpx2
@@ -14,6 +14,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.config import ENV
 from openswe.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from openswe.dispatch import channel_of
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -31,13 +32,14 @@ from openswe.threads.runs import (
     queue_follow_up_run,
     steer_running_thread,
 )
+from openswe.threads.store import ACTING_COMMANDS, POSTING_COMMANDS, THREADS, CommandReply
 from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
     _now_ms,
-    _thread_is_busy,
 )
 from openswe.transcript.turns import fail_unstarted_turn, steer_target
+from openswe.users.models import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -50,9 +52,6 @@ _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
 _DISCOVERY_HISTORY_LIMIT = 5
-_THREAD_POST_COMMAND_METHODS = frozenset(
-    {"run.start", "input.respond", "input.inject", "state.fork"}
-)
 
 
 def require_json_content_type(content_type: str) -> None:
@@ -192,10 +191,7 @@ async def proxy_dashboard_thread_commands(
     # commands on admin threads require an admin; other threads keep unattributed
     # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except NotFoundError:
-        thread = None
+    thread = await THREADS.get(thread_id)
 
     creating = False
     if thread is None:
@@ -205,8 +201,8 @@ async def proxy_dashboard_thread_commands(
         metadata: dict[str, Any] = {}
         thread_busy = False
     else:
-        metadata = thread_metadata(thread)
-        post_command = method in _THREAD_POST_COMMAND_METHODS
+        metadata = dict(thread.metadata)
+        post_command = method in POSTING_COMMANDS
         if post_command:
             principal.assert_can_post(metadata)
         else:
@@ -214,7 +210,7 @@ async def proxy_dashboard_thread_commands(
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
             principal.assert_can_read(metadata)
         metadata_run_status = metadata.get("latest_run_status")
-        thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
+        thread_busy = thread.status == "busy" or metadata_run_status in {"pending", "running"}
 
     start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
     start_params.pop(RELAYED_FROM_KEY, None)
@@ -255,9 +251,6 @@ async def proxy_dashboard_thread_commands(
         else None
     )
 
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = langgraph_proxy_headers(content_type=content_type)
-
     if principal.machine:
         enriched = await _enrich_system_run_start_command(
             thread_id,
@@ -287,29 +280,45 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
-    ) as client:
-        response = await client.post(url, content=outgoing, headers=headers)
+    sender = (
+        await _sender_user_id(principal, login, metadata)
+        if method in ACTING_COMMANDS and not relayed_from
+        else None
+    )
+    try:
+        reply = await THREADS.command(thread_id, outgoing, user_id=sender)
+    except Exception:
+        # Answered like the runtime's own failure, so a refused start still closes its turn.
+        logger.exception("Delivering a thread command failed", extra={"thread_id": thread_id})
+        reply = CommandReply(
+            500,
+            json.dumps({"detail": "the command could not be delivered"}).encode(),
+            "application/json",
+        )
 
     try:
-        response_payload = json.loads(response.content) if response.content else None
+        response_payload = json.loads(reply.content) if reply.content else None
     except json.JSONDecodeError:
         response_payload = None
     run_id = _extract_run_id_from_command_response(response_payload)
     run_start_succeeded = (
         parsed.get("method") == "run.start"
-        and response.status_code in {200, 202, 204}
+        and reply.status in {200, 202, 204}
         and isinstance(response_payload, dict)
         and response_payload.get("type") == "success"
         and run_id is not None
+    )
+    # The store answers a start the runtime refused with a 200 carrying an error envelope.
+    run_start_refused = method == "run.start" and (
+        reply.status >= 400
+        or (isinstance(response_payload, dict) and response_payload.get("type") == "error")
     )
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
             return 200, json.dumps(requeued).encode(), "application/json"
-        if response.status_code >= 400:
-            await _fail_requested_turn(thread_id, enriched)
+    if run_start_refused:
+        await _fail_requested_turn(thread_id, enriched)
     if run_start_succeeded and not creating and not relayed_from:
         try:
             await _notify_slack_web_handoff(thread_id, metadata)
@@ -329,9 +338,9 @@ async def proxy_dashboard_thread_commands(
         _TTFT_OBSERVER_TASKS.add(task)
         task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
         try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
+            await THREADS.update(
+                thread_id,
+                {
                     "latest_run_id": run_id,
                     "latest_run_status": "pending",
                     "updated_at_ms": _now_ms(),
@@ -344,8 +353,23 @@ async def proxy_dashboard_thread_commands(
                 thread_id,
                 exc_info=True,
             )
-    media_type = response.headers.get("content-type")
-    return response.status_code, response.content, media_type
+    return reply.status, reply.content, reply.media_type
+
+
+async def _sender_user_id(
+    principal: Principal, login: str, metadata: Mapping[str, object]
+) -> str | None:
+    """The Open SWE user a person's own command on a channel's thread acts as there.
+
+    The one ``_run_user_metadata`` attributes the person's dashboard runs to, so a
+    follow-up has the principal their channel runs have. ``None`` for a machine,
+    which is no person, and on any other thread. An agent's relayed message is not the
+    person's own, so its caller asks for none.
+    """
+    if principal.machine or channel_of(metadata) is None:
+        return None
+    user = await User.for_login("github", login)
+    return None if user is None else str(user.id)
 
 
 async def _queue_if_thread_turned_busy(
@@ -357,7 +381,7 @@ async def _queue_if_thread_turned_busy(
     ending, so a start sent right after can find the thread taken.
     """
     try:
-        thread = await langgraph_client().threads.get(thread_id)
+        thread = await THREADS.get(thread_id)
     except Exception:
         logger.warning(
             "Could not re-read a thread after a refused start",
@@ -365,10 +389,10 @@ async def _queue_if_thread_turned_busy(
             extra={"start": {"thread_id": thread_id}},
         )
         return None
-    if not _thread_is_busy(thread):
+    if thread is None or thread.status != "busy":
         return None
     return await queue_follow_up_run(
-        thread_id, login, command, metadata=thread_metadata(thread), email=email
+        thread_id, login, command, metadata=dict(thread.metadata), email=email
     )
 
 

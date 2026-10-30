@@ -84,14 +84,6 @@ impl MemoryDecision {
             Self::None => false,
         }
     }
-
-    /// The declaration path, when the project has one.
-    pub fn path(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Declared(summary) => Some(&summary.path),
-            Self::None => None,
-        }
-    }
 }
 
 /// Resolve the project's memory decision, rejecting the retired knobs.
@@ -491,7 +483,7 @@ fn object_memory_layers(options: &ObjectExpression<'_>) -> MemoryLayersValue {
         .map(|element| match element {
             ArrayExpressionElement::ObjectExpression(object) => layer_entry_value(object),
             ArrayExpressionElement::StringLiteral(literal) => {
-                MemoryLayersValue::Shorthand(format!("{:?}", literal.value.as_str()))
+                MemoryLayersValue::Shorthand(format!("{:?}", literal.value))
             }
             other => match other.as_expression().and_then(static_string_expression) {
                 Some(text) => MemoryLayersValue::Shorthand(format!("{text:?}")),
@@ -529,7 +521,7 @@ fn layer_entry_value(object: &ObjectExpression<'_>) -> MemoryLayersValue {
             let name = property
                 .key
                 .static_name()
-                .map(|name| format!("the key `{name}`"))
+                .map(|name| format!("the key `{}`", name.display()))
                 .unwrap_or_else(|| "a computed key".to_string());
             return MemoryLayersValue::Reserved(name);
         }

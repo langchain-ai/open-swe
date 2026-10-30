@@ -109,6 +109,20 @@ impl Client {
             Some(payload),
             CREATE_DEPLOYMENT_TIMEOUT,
         )
+        .map_err(|err| {
+            let unsupported_serverless = deployment_type == DeploymentType::Serverless
+                && err.downcast_ref::<ApiError>().is_some_and(|api| {
+                    api.status == reqwest::StatusCode::BAD_REQUEST
+                        && api.detail.contains("not supported")
+                        && (api.detail.contains("dev_zero")
+                            || api.detail.to_lowercase().contains("scale to zero"))
+                });
+            if unsupported_serverless {
+                err.context("Serverless deployments are not supported in this environment. Use --deployment-type dedicated for always-on capacity, or --deployment-type dev to retain legacy deployment behavior")
+            } else {
+                err
+            }
+        })
     }
 
     /// Create a deployment from an image in a customer-managed registry.
@@ -291,7 +305,7 @@ impl Client {
             &http,
             Method::PUT,
             &format!("{}{path}", self.host_backend_url),
-            &self.api_key()?,
+            self.api_key(),
             self.tenant_id.as_deref(),
             &[],
             Some(&artifacts),
@@ -319,7 +333,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::{ApiError, Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::ApiError;
     use reqwest::StatusCode;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -328,14 +342,8 @@ mod tests {
 
     fn client_for_host(host_backend_url: String) -> Client {
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
             host_backend_url,
-            platform_api_url: None,
+            ..Client::for_test("http://unused.invalid")
         }
     }
 
@@ -493,12 +501,12 @@ mod tests {
     }
 
     #[test]
-    fn create_deployment_requests_caller_type_and_managed_deep_agent_flag() {
+    fn create_deployment_maps_serverless_to_dev_zero_and_keeps_managed_deep_agent_flag() {
         let (url, rx) = serve_json_once(r#"{"id":"deployment-1"}"#);
         let client = client_for_host(url);
 
         client
-            .create_deployment("agent", DeploymentType::Dev, &[])
+            .create_deployment("agent", DeploymentType::Serverless, &[])
             .unwrap();
 
         let request = rx.recv().unwrap();
@@ -506,17 +514,17 @@ mod tests {
         // The caller-selected deployment type is sent, and the deployment is
         // still tagged with the request-only `managed_deep_agent` flag.
         assert_eq!(body["source"], "internal_source");
-        assert_eq!(body["source_config"]["deployment_type"], "dev");
+        assert_eq!(body["source_config"]["deployment_type"], "dev_zero");
         assert_eq!(body["managed_deep_agent"], true);
     }
 
     #[test]
-    fn create_deployment_forwards_prod_type_and_keeps_managed_deep_agent_flag() {
+    fn create_deployment_maps_dedicated_to_prod_and_keeps_managed_deep_agent_flag() {
         let (url, rx) = serve_json_once(r#"{"id":"deployment-1"}"#);
         let client = client_for_host(url);
 
         client
-            .create_deployment("agent", DeploymentType::Prod, &[])
+            .create_deployment("agent", DeploymentType::Dedicated, &[])
             .unwrap();
 
         let request = rx.recv().unwrap();
@@ -524,6 +532,41 @@ mod tests {
         assert_eq!(body["source"], "internal_source");
         assert_eq!(body["source_config"]["deployment_type"], "prod");
         assert_eq!(body["managed_deep_agent"], true);
+    }
+
+    #[test]
+    fn create_deployment_preserves_legacy_dev_wire_value() {
+        let (url, rx) = serve_json_once(r#"{"id":"deployment-1"}"#);
+        let client = client_for_host(url);
+
+        client
+            .create_deployment("agent", DeploymentType::Dev, &[])
+            .unwrap();
+
+        let body = request_json_body(&rx.recv().unwrap());
+        assert_eq!(body["source_config"]["deployment_type"], "dev");
+    }
+
+    #[test]
+    fn create_deployment_explains_unsupported_serverless_without_losing_api_error() {
+        for detail in [
+            "Scale to zero deployments are not supported in AWS environments",
+            "Scale to zero deployments are not supported in Azure environments",
+            "dev_zero deployments are not supported in self-hosted or hybrid environments",
+        ] {
+            let (url, _rx) = serve_once("400 Bad Request", &json!({"detail": detail}).to_string());
+            let client = client_for_host(url);
+
+            let err = client
+                .create_deployment("agent", DeploymentType::Serverless, &[])
+                .unwrap_err();
+
+            assert!(err.to_string().contains("--deployment-type dedicated"));
+            assert!(err.to_string().contains("--deployment-type dev"));
+            let api = err.downcast_ref::<ApiError>().unwrap();
+            assert_eq!(api.status, reqwest::StatusCode::BAD_REQUEST);
+            assert_eq!(api.detail, detail);
+        }
     }
 
     #[test]
@@ -536,7 +579,7 @@ mod tests {
         };
 
         client
-            .create_agent_deployment(&agent, DeploymentType::Dev, &[])
+            .create_agent_deployment(&agent, DeploymentType::Serverless, &[])
             .unwrap();
 
         let body = request_json_body(&rx.recv().unwrap());
@@ -593,7 +636,7 @@ mod tests {
         let client = client_for_host(url);
 
         let err = client
-            .create_deployment("agent", DeploymentType::Dev, &[])
+            .create_deployment("agent", DeploymentType::Serverless, &[])
             .unwrap_err();
 
         let api = err

@@ -80,7 +80,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
-    use crate::compile::{MemoryLayers, MemorySummary};
+    use crate::compile::memory::{MemoryLayers, MemorySummary};
     use crate::project::Language;
     use crate::test_support::write_file;
 

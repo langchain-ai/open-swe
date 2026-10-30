@@ -224,7 +224,7 @@ async def test_notification_times_out_without_retrying(
     linear_mcp: LinearMCP, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     deadline = asyncio.timeout(None)
-    monkeypatch.setattr(notifications.asyncio, "timeout", lambda _: deadline)
+    monkeypatch.setattr(notifications, "asyncio", SimpleNamespace(timeout=lambda _: deadline))
     calls = []
 
     async def never_finishes(transport, name, arguments):

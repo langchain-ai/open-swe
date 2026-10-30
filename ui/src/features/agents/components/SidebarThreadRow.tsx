@@ -32,6 +32,7 @@ import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -59,7 +60,6 @@ import {
 } from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 
 /** Phosphor has no Linear mark; this is Linear's own logo. */
 function LinearLogoIcon({
@@ -94,6 +94,10 @@ const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
     slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
     linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
     schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+    claude_code: {
+      icon: TerminalWindowIcon,
+      label: "Mirrored from Claude Code",
+    },
   }
 
 const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
@@ -249,6 +253,82 @@ function sidebarRowClassName({
   )
 }
 
+export function SidebarConversationRow({
+  title,
+  threadId,
+  active,
+  compact,
+  onNavigate,
+  pinned,
+  archived,
+  pending,
+  onPin,
+  onArchive,
+}: {
+  title: string
+  threadId: string
+  active: boolean
+  compact: boolean
+  onNavigate: () => void
+  pinned: boolean
+  archived: boolean
+  pending: boolean
+  onPin: () => void
+  onArchive: () => void
+}) {
+  const marquee = useTitleMarquee()
+  return (
+    <div
+      className="group/row relative mb-0.5"
+      onMouseEnter={marquee.measure}
+      onMouseLeave={marquee.reset}
+    >
+      <Link
+        to="/agents/chat"
+        search={{ chat: threadId }}
+        aria-current={active ? "page" : undefined}
+        onClick={onNavigate}
+        className={sidebarRowClassName({
+          compact,
+          active,
+          paddingLeft: "pl-space-2",
+          archived,
+        })}
+      >
+        <SidebarRowTitle title={title} marquee={marquee} />
+      </Link>
+      <span className="absolute inset-y-0 right-0 mr-space-1 flex items-center rounded-lg bg-surface-level-2 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+        <IconButton
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+          label={pinned ? "Unpin chat" : "Pin chat"}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onPin()
+          }}
+        />
+        <IconButton
+          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+          label={archived ? "Unarchive chat" : "Archive chat"}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onArchive()
+          }}
+        />
+      </span>
+    </div>
+  )
+}
+
 function RunningIndicator({ label }: { label: string }) {
   return (
     <span role="img" aria-label={label} className="flex shrink-0">
@@ -328,7 +408,6 @@ export function SidebarThreadRow({
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const chat = useChatRoutes()
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
   const worktreeThread = useLocalThread(item.id)
@@ -563,7 +642,7 @@ export function SidebarThreadRow({
     </Link>
   ) : (
     <Link
-      to={chat.thread}
+      to="/agents/$threadId"
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}

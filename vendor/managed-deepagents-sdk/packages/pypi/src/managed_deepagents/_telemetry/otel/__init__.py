@@ -1,0 +1,41 @@
+"""Internal OTel log forwarder; not part of the public SDK."""
+
+from managed_deepagents._telemetry.otel.context import (
+    TRACE_ID_METADATA_KEY,
+    LogAttributes,
+    LogAttributeValue,
+    LogContext,
+    LogRecord,
+    LogSeverity,
+    current_log_context,
+    enter_log_context,
+    exception_attributes,
+    exit_log_context,
+    hold_log_context,
+    new_span_id,
+    new_trace_id,
+    record_log,
+    set_log_attributes,
+    trace_id_from_metadata,
+    trace_id_from_traceparent,
+)
+
+__all__ = [
+    "TRACE_ID_METADATA_KEY",
+    "LogAttributeValue",
+    "LogAttributes",
+    "LogContext",
+    "LogRecord",
+    "LogSeverity",
+    "current_log_context",
+    "enter_log_context",
+    "exception_attributes",
+    "exit_log_context",
+    "hold_log_context",
+    "new_span_id",
+    "new_trace_id",
+    "record_log",
+    "set_log_attributes",
+    "trace_id_from_metadata",
+    "trace_id_from_traceparent",
+]

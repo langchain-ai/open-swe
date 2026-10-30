@@ -1,11 +1,11 @@
-import { LogoMark } from "@/components/Branding"
+import { AgentChatEmptyState } from "@/features/agents/components/AgentChatEmptyState"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
-import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
@@ -14,6 +14,7 @@ import {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
+import type { ComposerSubmission } from "@/features/agents/components/composer/ChatComposer"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { OnboardingDialog } from "@/features/agents/components/OnboardingDialog"
 import { Messages } from "@/features/agents/components/messages"
@@ -438,7 +439,7 @@ export function AgentsHome({
     resetPendingSubmit()
   }
 
-  const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
+  const handleSubmit = ({ text: prompt, images }: ComposerSubmission) => {
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
@@ -599,17 +600,7 @@ export function AgentsHome({
             contentWidthClass="max-w-3xl"
           />
         ) : (
-          <div className="flex min-h-0 flex-1 overflow-y-auto px-space-3 py-space-5 sm:px-space-5 sm:py-space-6">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-space-5">
-              <LogoMark
-                alt=""
-                className="size-14 opacity-30 grayscale dark:opacity-20"
-              />
-              <h1 className="text-center text-2xl tracking-tight sm:text-3xl">
-                What should we build?
-              </h1>
-            </div>
-          </div>
+          <AgentChatEmptyState />
         )}
         <AgentComposerDock>
           {localError && (
@@ -687,6 +678,8 @@ export function AgentsHome({
           collapsed={panelCollapsed}
           onCollapsedChange={handlePanelCollapsedChange}
           renderDiff={() => null}
+          renderBrowser={() => null}
+          browserAvailable={false}
         />
       )}
     </>

@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, Literal, TypedDict
 
+from deepagents.backends.protocol import SandboxBackendProtocol
+
 from managed_deepagents._connections import ConnectionReference, is_connection_reference
 
 
@@ -87,15 +89,17 @@ class SandboxDefinition:
         "snapshot",
         "image_name",
         "template_name",
-        "scope",
     )
 
     #: Options that shape how MDA resolves the box rather than the create request.
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
         "_openswe_per_thread",
         "_openswe_thread_id",
+        "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
+        "_openswe_select",
+        "_openswe_without_box",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -109,13 +113,13 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
     definition. A fixed definition reuses one sandbox per thread; a dynamic
     entrypoint may select a different definition for a run.
     """
-    if "scope" in options and options["scope"] != "thread":
+    if "scope" in options:
         raise TypeError(
-            'sandbox scope is managed as "thread". Remove scope or pass the legacy value "thread".'
+            "sandbox scope was removed: sandbox reuse is always one box per thread. "
+            "Remove scope from the sandbox declaration."
         )
 
     normalized = {**options}
-    normalized.pop("scope", None)
 
     managed = [key for key in SandboxDefinition.MANAGED_OPTION_KEYS if key in normalized]
     if managed:
@@ -155,6 +159,10 @@ _RESERVED_CREATE_FIELDS = frozenset(
 )
 
 
+class BoundSandboxMissingError(RuntimeError):
+    """The provider confirmed that the thread's bound workspace no longer exists."""
+
+
 @dataclass(frozen=True)
 class SandboxReplacement:
     """A thread's box replaced by a fresh one under its name; the old box is kept, renamed."""
@@ -176,7 +184,7 @@ async def open_sandbox(backend: object) -> str:
 
 
 async def replace_sandbox(
-    backend: object, sandbox: SandboxDefinition | None = None
+    backend: object, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
 ) -> SandboxReplacement:
     """Give the run's thread a fresh managed sandbox under the same name.
 
@@ -186,7 +194,12 @@ async def replace_sandbox(
     """
     from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox)
+    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
+
+
+def is_per_thread(options: Mapping[str, object]) -> bool:
+    """Whether the box is a thread's own, whose work a failure must never abandon."""
+    return options.get("_openswe_per_thread") is True
 
 
 def owning_thread(options: Mapping[str, object]) -> str | None:
@@ -195,9 +208,24 @@ def owning_thread(options: Mapping[str, object]) -> str | None:
     return thread_id if isinstance(thread_id, str) else None
 
 
-def is_per_thread(options: Mapping[str, object]) -> bool:
-    """Whether the thread keeps one box whatever a dynamic selection's options."""
-    return options.get("_openswe_per_thread") is True
+def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefinition | None:
+    """The box ``runtime``'s run uses: what ``_openswe_select`` picks for it, else ``sandbox``.
+
+    None when the run has no box.
+    """
+    select = sandbox.options.get("_openswe_select")
+    if not callable(select):
+        return sandbox
+    selected = select(runtime)
+    if selected is not None and not isinstance(selected, SandboxDefinition):
+        raise TypeError("_openswe_select must return define_sandbox(...) or None")
+    return selected
+
+
+def without_box(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
+    """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
+    backend = sandbox.options.get("_openswe_without_box")
+    return backend if isinstance(backend, SandboxBackendProtocol) else None
 
 
 def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:

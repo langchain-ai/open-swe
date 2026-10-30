@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
@@ -9,10 +10,11 @@ import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
-import { UserMessage } from "./UserMessage"
+import { SentReply, UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
+import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
@@ -48,6 +50,9 @@ function QueuedMessages({
             data-queued-pending={message.pending ? "true" : "false"}
             data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
           >
+            {message.replies?.map((reply, replyIndex) => (
+              <SentReply key={replyIndex} reply={reply} />
+            ))}
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
                 <SkillPromptText text={message.content} />
@@ -103,6 +108,7 @@ export const Messages = memo(function MessagesComponent({
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   onRemoveQueuedMessage,
+  onReply,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -125,8 +131,10 @@ export const Messages = memo(function MessagesComponent({
   const {
     scrollRef,
     contentRef,
+    reserveRef,
     showScrollToBottom,
     scrollToBottom,
+    pinMessage,
     capturePrependAnchor,
   } = useTranscriptScroll({ scrollKey, messages, isStreaming })
 
@@ -146,11 +154,11 @@ export const Messages = memo(function MessagesComponent({
 
   useEffect(() => {
     if (!scrollControlRef) return
-    scrollControlRef.current = { scrollToBottom }
+    scrollControlRef.current = { scrollToBottom, pinMessage }
     return () => {
       scrollControlRef.current = null
     }
-  }, [scrollToBottom, scrollControlRef])
+  }, [pinMessage, scrollToBottom, scrollControlRef])
 
   useEffect(() => {
     onShowScrollToBottomChange?.(showScrollToBottom)
@@ -182,19 +190,27 @@ export const Messages = memo(function MessagesComponent({
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
             {loadEarlier && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={
+                  loadEarlier.loading
+                    ? "Loading earlier turns…"
+                    : "Load earlier turns"
+                }
                 type="button"
                 disabled={loadEarlier.loading}
                 onClick={() => {
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-space-3 w-full rounded-sm py-space-1 text-center text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
+                className="mb-space-3 w-full py-space-1 text-center text-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
                   : "Load earlier turns"}
-              </button>
+              </Button>
             )}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
@@ -235,11 +251,7 @@ export const Messages = memo(function MessagesComponent({
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
-            <QueuedMessages
-              queuedMessages={queuedMessages}
-              onRemove={onRemoveQueuedMessage}
-            />
-            {footer}
+            {/* Above the queue: the live run's activity, then what waits for it. */}
             <ThinkingSpinner
               isActive={
                 !!reconnectLabel ||
@@ -259,8 +271,18 @@ export const Messages = memo(function MessagesComponent({
                 (isOffloading ? "Offloading conversation..." : activityLabel)
               }
             />
+            <QueuedMessages
+              queuedMessages={queuedMessages}
+              onRemove={onRemoveQueuedMessage}
+            />
+            {footer}
           </div>
+          <div ref={reserveRef} aria-hidden />
         </div>
+
+        {onReply && (
+          <SelectionReply containerRef={scrollRef} onReply={onReply} />
+        )}
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (
           <IconButton

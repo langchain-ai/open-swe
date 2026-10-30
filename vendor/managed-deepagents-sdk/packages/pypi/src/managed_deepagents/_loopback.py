@@ -6,6 +6,8 @@ import ipaddress
 import os
 import urllib.parse
 
+from managed_deepagents._langsmith_env import resolve_server_api_key
+
 
 def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
     """Return the Agent Server base URL for in-process/loopback SDK clients.
@@ -28,10 +30,10 @@ def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
 def resolve_loopback_api_key(*, explicit: str | None = None) -> str:
     """API key for trusted loopback LangGraph SDK clients.
 
-    Prefers ``explicit``, then ``LANGSMITH_API_KEY``, else ``"local"``
+    Prefers ``explicit``, then the deployment key, else ``"local"``
     (in-process / unit-test clients that do not authenticate against Host).
     """
-    key = (explicit if explicit is not None else os.environ.get("LANGSMITH_API_KEY") or "").strip()
+    key = (explicit if explicit is not None else resolve_server_api_key()).strip()
     return key or "local"
 
 
@@ -47,6 +49,15 @@ def is_loopback_url(value: str) -> bool:
     except ValueError:
         return False
     return is_loopback_host(parsed.hostname or "")
+
+
+def sends_key_securely(url: str) -> bool:
+    """Whether a credential sent to ``url`` would travel encrypted.
+
+    That is https, or plain http only to this machine.
+    """
+    scheme = urllib.parse.urlsplit(url).scheme
+    return scheme == "https" or (scheme == "http" and is_loopback_url(url))
 
 
 def is_loopback_host(host: str) -> bool:
@@ -67,4 +78,5 @@ __all__ = [
     "is_loopback_url",
     "resolve_loopback_api_key",
     "resolve_loopback_api_url",
+    "sends_key_securely",
 ]

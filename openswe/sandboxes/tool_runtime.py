@@ -1,35 +1,33 @@
-"""Execute the agent's tool node without invoking its model."""
+"""What a graph factory plans for a run: its tools, middleware, models and subagents.
 
-import math
-import re
-from collections import Counter
-from collections.abc import Mapping, Sequence
+The model loop runs on Managed Deep Agents, which builds a tool for each of the
+planned tools and calls the backend to run it (``openswe.agent_api``).
+"""
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
-from fastapi import HTTPException
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from langchain_core.tools import tool as as_tool
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.catalog import FileCheck, InboxSpec, LoopRules, McpServerSpec
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
-from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
 # Every surface lists the integration tools themselves, so none offers their loader.
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
-# Task workers share the sandbox's tool channel with their coordinator, so task
-# coordination stays the model's: a surface serving the sandbox never offers it.
-MODEL_ONLY_TOOLS = frozenset({"spawn_worker", "control_worker", "message_task_thread"})
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -49,50 +47,10 @@ def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
         )
     return ToolDescription(
         name=name,
-        description=tool.description
-        + "\n\n"
-        + prompt("tools/mcp-provenance", provenance=provenance.model_dump_json()),
+        description=f"{tool.description}\n\n{provenance.note()}",
         parameters=tool_parameters(tool),
         mcp_provenance=provenance,
     )
-
-
-_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
-
-
-def _tokens(text: str) -> list[str]:
-    return [word.casefold() for word in _WORD.findall(text)]
-
-
-def _tool_tokens(name: str, tool: BaseTool) -> list[str]:
-    properties = tool_parameters(tool).get("properties")
-    parameters = " ".join(properties) if isinstance(properties, dict) else ""
-    # A match on the name says more than one buried in a long description.
-    return [*_tokens(name) * 3, *_tokens(tool.description), *_tokens(parameters)]
-
-
-def bm25(
-    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
-) -> list[float]:
-    """Okapi BM25 score of each document for ``query``."""
-    if not documents:
-        return []
-    average = sum(map(len, documents)) / len(documents) or 1
-    counts = [Counter(document) for document in documents]
-    scores = [0.0] * len(documents)
-    for term in set(query):
-        having = sum(1 for count in counts if term in count)
-        if not having:
-            continue
-        idf = math.log(1 + (len(documents) - having + 0.5) / (having + 0.5))
-        for index, count in enumerate(counts):
-            frequency = count[term]
-            if frequency:
-                length = len(documents[index]) / average
-                scores[index] += (
-                    idf * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length))
-                )
-    return scores
 
 
 # The file and shell tools deepagents' FilesystemMiddleware gives every deep agent.
@@ -123,6 +81,8 @@ class SurfaceModels:
     # Model routes the agent's model selection picks between, by route name.
     routes: Mapping[str, ModelChoice] = field(default_factory=dict)
     fallback: ModelChoice | None = None
+    # What a text-only model's call goes to once the conversation holds an image.
+    vision: ModelChoice | None = None
 
 
 @dataclass(frozen=True)
@@ -134,87 +94,68 @@ class SurfaceSubagent:
     tools: tuple[str, ...] | None = None
 
 
+type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]
+
+
 @dataclass
 class ToolSurface:
-    graph: CompiledStateGraph | None = None
+    """A run as its graph factory plans it."""
+
+    # The factory's own tools; its middleware adds theirs.
+    base_tools: Sequence[PlannedTool] = ()
     dynamic: DynamicToolMiddleware | None = None
     excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
     integration_names: list[str] = field(default_factory=list)
+    # MCP servers whose credential is an MDA connection, which the MDA run connects to itself.
+    mcp_servers: Sequence[McpServerSpec] = ()
     # What a model loop running elsewhere needs from the graph: its own middleware,
     # in order, and the models and subagents the factory picked.
     middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
+    # The thread's files: its sandbox, with the paths this deployment serves routed in.
+    files: BackendProtocol | None = None
+    # Paths under ``files`` this deployment serves rather than the sandbox.
+    backend_paths: tuple[str, ...] = ()
+    # Where the run's skills are under ``files``, a later source's skill taking the
+    # place of an earlier one's of the same name.
+    skill_sources: tuple[str, ...] = ()
+    # Where large tool results and binary reads are offloaded.
+    artifacts_root: str = "/"
+    # The guards on the shell commands the run's tools run, as tool-call middleware.
+    shell_guards: Sequence[AgentMiddleware] = ()
+    # The checks on what the run's ``read_file`` calls return.
+    file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
-    # Whether a model loop running elsewhere calls these tools, rather than the sandbox.
-    for_model: bool = False
+    # How the run reads what is sent to its thread while it runs, before each model call.
+    inbox: InboxSpec | None = None
+    # What the hooks around each model call are built from, without the rest of the plan.
+    loop: LoopRules | None = None
 
-    async def prepare(self, state: Mapping[str, object]) -> None:
-        if self.graph is None:
-            raise RuntimeError("Tool graph was not initialized")
-        node = self.graph.builder.nodes["tools"].runnable
-        if not isinstance(node, ToolNode):
-            raise RuntimeError("Agent tools node is unavailable")
-        tools = dict(node.tools_by_name)
+    async def prepare(self) -> None:
+        planned = [
+            *self.base_tools,
+            *(tool for middleware in self.middleware for tool in getattr(middleware, "tools", ())),
+        ]
+        tools = {
+            tool.name: tool
+            for tool in (
+                item if isinstance(item, BaseTool) else as_tool(item)
+                for item in planned
+                if not isinstance(item, dict)
+            )
+        }
         if self.dynamic:
             integrations = await self.dynamic.catalog_tools()
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
-        excluded = (
-            self.excluded | EXCLUDED_TOOLS | (frozenset() if self.for_model else MODEL_ONLY_TOOLS)
-        )
+        excluded = self.excluded | EXCLUDED_TOOLS
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
     def catalog(self) -> list[ToolDescription]:
         return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
-
-    def search(self, query: str, limit: int) -> list[ToolDescription]:
-        """The tools whose name, description and parameters best match ``query``, by BM25."""
-        names = sorted(self.tools)
-        scores = bm25(_tokens(query), [_tool_tokens(name, self.tools[name]) for name in names])
-        ranked = sorted(
-            (item for item in zip(names, scores, strict=True) if item[1] > 0),
-            key=lambda item: -item[1],
-        )
-        return [describe_tool(name, self.tools[name]) for name, _ in ranked[:limit]]
-
-    async def run(
-        self,
-        config: RunnableConfig,
-        state: Mapping[str, object],
-        name: str,
-        arguments: Mapping[str, JsonValue],
-        *,
-        call_id: str | None = None,
-    ) -> ToolNodeResult:
-        """Run one call through the graph's own tools node, keeping its state updates."""
-        tool = self.tools.get(name)
-        if tool is None:
-            raise HTTPException(404, "Tool is unavailable")
-        parameters = tool_parameters(tool)
-        properties = parameters.get("properties", {})
-        if not isinstance(properties, dict) or set(arguments) - properties.keys():
-            raise HTTPException(422, "Unexpected tool arguments")
-        if self.graph is None:
-            raise RuntimeError("Tool graph was not initialized")
-        node = self.graph.builder.nodes["tools"].runnable
-        if not isinstance(node, ToolNode):
-            raise RuntimeError("Agent tools node is unavailable")
-        loaded = state.get("loaded_integration_tools", [])
-        integration_names = list(loaded) if isinstance(loaded, list) else []
-        if name in self.integration_names and name not in integration_names:
-            integration_names.append(name)
-        return await run_tool_node(
-            node,
-            self.graph.builder.state_schema,
-            {**state, "loaded_integration_tools": integration_names},
-            config,
-            name,
-            arguments,
-            call_id=call_id,
-        )
 
 
 @dataclass(frozen=True)

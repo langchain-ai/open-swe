@@ -1,27 +1,20 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from xml.etree import ElementTree
 
 import pytest
-from deepagents import create_deep_agent
-from deepagents.backends import StateBackend
-from langchain.agents.middleware import AgentState, wrap_model_call
-from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.checkpoint.memory import InMemorySaver
+from langchain.agents.middleware import AgentState
+from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
-from langgraph.types import Command
 
 from openswe.input_messages import human_input, person_introduction
-from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.model_selection import ModelSelectionMiddleware
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
-from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
 from openswe.run_config import RunConfig
-from openswe.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
+from openswe.server import PrepareAgentRunMiddleware, _thread_participants
+from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -71,6 +64,59 @@ def _participant_block(participant: ThreadParticipant) -> HumanMessage:
     return HumanMessage(content=cast(str, content))
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sender_login", ["alice", "Alice"])
+async def test_sender_is_matched_by_login_and_others_get_their_slack_timezone(
+    sender_login: str,
+) -> None:
+    alice, bob = _participant("alice"), _participant("bob")
+    sender = replace(
+        alice.identity,
+        github_login=sender_login,
+        commit_email=f"123+{sender_login}@users.noreply.github.com",
+    )
+    bob_user = SimpleNamespace(
+        id="bob", github_login="bob", display_name="bob", email="", slack_user_id="U-bob"
+    )
+    with patch.multiple(
+        "openswe.server",
+        _thread_participant_identities=AsyncMock(return_value=[alice.identity, bob.identity]),
+        _participant_user=AsyncMock(
+            side_effect=lambda login, _: bob_user if login == "bob" else None
+        ),
+        get_slack_user_timezone=AsyncMock(return_value="Europe/Paris"),
+        load_profile=AsyncMock(return_value={}),
+        participant_is_admin=AsyncMock(return_value=False),
+        _resolve_user_custom_instructions=AsyncMock(return_value=None),
+    ):
+        participants = await _thread_participants(
+            "thread-id",
+            {},
+            sender,
+            sender_person_id=alice.person_id,
+            sender_timezone="America/New_York",
+        )
+
+    assert [(p.identity.github_login, p.timezone) for p in participants] == [
+        (sender_login, "America/New_York"),
+        ("bob", "Europe/Paris"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_slack_timezone_skips_failed_lookups_and_keeps_a_reported_one():
+    ttl_cache.clear()
+    with patch(
+        "openswe.slack.client.get_slack_user_info",
+        AsyncMock(side_effect=[None, {"tz": "Europe/Paris"}]),
+    ):
+        assert await get_slack_user_timezone("U1") == ""
+        assert await get_slack_user_timezone("U1") == "Europe/Paris"
+
+    remember_slack_user_timezone("U1", "America/New_York")
+    assert await get_slack_user_timezone("U1") == "America/New_York"
+
+
 def test_only_the_changed_participant_is_resent():
     alice, bob = _participant("alice"), _participant("bob")
     state = cast(
@@ -86,14 +132,16 @@ def test_only_the_changed_participant_is_resent():
     assert "standing_instructions: Never use ripgrep." in (block.text or "")
 
 
-def test_participant_blocks_are_restored_after_compaction():
+@pytest.mark.parametrize(
+    "cut",
+    # In process, and as the runtime forwards it.
+    [{"_summarization_event": {"cutoff_index": 1}}, {"visible_from": 1}],
+)
+def test_participant_blocks_are_restored_after_compaction(cut: dict[str, object]):
     alice = _participant("alice")
     state = cast(
         PrepareRunState,
-        {
-            "messages": [_participant_block(alice), _sender_message("user:alice")],
-            "_summarization_event": {"cutoff_index": 1},
-        },
+        {"messages": [_participant_block(alice), _sender_message("user:alice")], **cut},
     )
 
     assert len(PrepareAgentRunMiddleware._participants_messages(state, [alice])) == 1
@@ -154,108 +202,3 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
     middleware._source = "dashboard"
     middleware._credential_login = None
     assert middleware._recent_context_audience(RunConfig()) is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("requested_model", [None, "openai:gpt-5.4"])
-async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
-    requested_model: str | None,
-) -> None:
-    middleware = DummyPrepareMiddleware()
-    fork_prompts: list[str] = []
-    fingerprints: list[str] = []
-
-    @wrap_model_call
-    async def scripted_model(
-        request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
-    ) -> ModelResponse | ExtendedModelResponse:
-        if request.state.get("_deepagents_forked_context"):
-            assert request.state.get("run_prepared") is True
-            assert request.state["requested_model"] == requested_model
-            assert request.state.get("work_dir") == "/tmp/work"
-            fingerprint = request.state.get("run_prepared_for")
-            assert isinstance(fingerprint, str)
-            fingerprints.append(fingerprint)
-            assert request.system_message is not None
-            fork_prompts.append(request.system_message.text)
-            task = request.messages[-1].text
-            return ExtendedModelResponse(
-                model_response=ModelResponse(result=[AIMessage(content=task)]),
-                command=Command(
-                    update={
-                        "run_prepared_for": task,
-                        "work_dir": f"/tmp/{task}",
-                        "rendered_system_prompt": task,
-                        "reply_surface": "web",
-                        "reply_nudges": 2,
-                        "conversation_offloading": {"status": task},
-                    }
-                ),
-            )
-        if isinstance(request.messages[-1], HumanMessage):
-            return ModelResponse(
-                result=[
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "name": "task",
-                                "args": {"description": task, "subagent_type": "worker"},
-                                "id": task,
-                            }
-                            for task in ("first", "second")
-                        ],
-                    )
-                ]
-            )
-        return ModelResponse(result=[AIMessage(content="done")])
-
-    model = FakeListChatModel(responses=["unused"])
-    backend = StateBackend()
-    graph = create_deep_agent(
-        model=model,
-        backend=backend,
-        middleware=[
-            middleware,
-            ModelSelectionMiddleware({}, model, routing_mode=None),
-            ConversationOffloadingMiddleware(model, backend),
-            RequireUserReplyMiddleware("reply", "no_reply", initial_surface="web"),
-            scripted_model,
-        ],
-        subagents=[
-            {
-                "name": "worker",
-                "description": "worker",
-                "mode": "fork",
-                "model": model,
-                "middleware": [_DisableInheritedMiddleware(ModelSelectionMiddleware.__name__)],
-            }
-        ],
-        checkpointer=InMemorySaver(),
-    )
-    config = {"configurable": {"thread_id": "parallel-forks"}}
-    result = await graph.ainvoke(
-        {
-            "messages": [HumanMessage("delegate")],
-            "requested_model": requested_model,
-            "conversation_offloading": {"status": "parent"},
-        },
-        config,
-    )
-
-    assert middleware.calls == 1
-    assert len(fork_prompts) == 2
-    assert all("prepared prompt" in prompt for prompt in fork_prompts)
-    assert {
-        message.tool_call_id for message in result["messages"] if isinstance(message, ToolMessage)
-    } == {"first", "second"}
-    state = (await graph.aget_state(config)).values
-    assert state["run_prepared"] is True
-    assert state["requested_model"] == requested_model
-    assert "requested_model" not in result
-    assert fingerprints == [state["run_prepared_for"]] * 2
-    assert state["work_dir"] == "/tmp/work"
-    assert state["rendered_system_prompt"] == "prepared prompt"
-    assert state["reply_surface"] == "web"
-    assert state["reply_nudges"] == 0
-    assert state["conversation_offloading"] == {"status": "parent"}

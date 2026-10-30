@@ -10,13 +10,15 @@ from openswe.github.http import (
     GitHubError,
     GitHubSignInRequired,
     GraphQLError,
+    github_reauth_message,
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def _sign_in_required(_request: Request, _exc: Exception) -> JSONResponse:
-    return JSONResponse({"detail": "GitHub token unavailable, re-login required"}, status_code=401)
+async def _sign_in_required(_request: Request, exc: Exception) -> JSONResponse:
+    login = exc.login if isinstance(exc, GitHubSignInRequired) else None
+    return JSONResponse({"detail": github_reauth_message(login)}, status_code=401)
 
 
 async def _app_unavailable(_request: Request, exc: Exception) -> JSONResponse:

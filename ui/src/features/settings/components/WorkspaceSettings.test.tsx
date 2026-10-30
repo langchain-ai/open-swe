@@ -131,7 +131,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         num_members: 3,
       },
     ],
-    partial: false,
+    refreshing: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
   vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
@@ -598,6 +598,9 @@ describe("WorkspaceSettingsPanel", () => {
       ).rules[0].name
     ).toBe("updated-service")
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("LangSmith Access"), {
+      target: { value: "projects:read, datasets:read" },
+    })
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
@@ -608,6 +611,10 @@ describe("WorkspaceSettingsPanel", () => {
           proxy_config: {
             ...proxy,
             rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+          access_delegation: {
+            mode: "EXPLICIT",
+            permissions: ["projects:read", "datasets:read"],
           },
         },
       })
@@ -774,7 +781,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The selector stays disabled until the workspace's settings have loaded.
     const trigger = await screen.findByRole("button", {
-      name: /Pick a repository/,
+      name: "No default repository",
     })
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)

@@ -12,7 +12,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from openswe.config import ENV
 from openswe.github.app import (
     PermissionKey,
     PermissionMap,
@@ -100,6 +99,11 @@ def get_recorded_proxy_base_config(thread_id: str | None) -> dict[str, Any] | No
     return dict(config) if config is not None else None
 
 
+def proxy_token_recorded(thread_id: str | None) -> bool:
+    """Whether a proxy token was configured and recorded for ``thread_id`` in this process."""
+    return bool(thread_id) and thread_id in _PROXY_TOKEN_EXPIRY
+
+
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
@@ -112,6 +116,18 @@ def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
     permissions = rest[0] if rest else ()
     permission_key = permissions if isinstance(permissions, tuple) else normalize_permissions(None)
     return expires_at, recorded_at, repositories, permission_key
+
+
+def proxy_token_set_since(thread_id: str | None, since: datetime) -> datetime | None:
+    """When the token this process put on ``thread_id``'s box at or after ``since`` expires.
+
+    None when it put none there since, or does not know when that one expires.
+    """
+    record = _PROXY_TOKEN_EXPIRY.get(thread_id) if thread_id else None
+    if record is None:
+        return None
+    expires_at, recorded_at, _scope, _permissions = _unpack_proxy_token_record(record)
+    return expires_at if recorded_at >= since else None
 
 
 def proxy_token_needs_refresh(thread_id: str | None, *, now: datetime | None = None) -> bool:
@@ -132,10 +148,9 @@ async def refresh_proxy_token(
     thread_id: str | None,
     *,
     repositories: Sequence[str] | None = None,
-    permissions: PermissionMap | None = None,
 ) -> bool:
     """Re-configure a LangSmith sandbox proxy with a freshly minted token."""
-    if ENV.SANDBOX_TYPE.get() != "langsmith" or not thread_id:
+    if not thread_id:
         return False
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
@@ -158,7 +173,7 @@ async def refresh_proxy_token(
                 else requested.intersection(repo.lower() for repo in recorded_repositories)
             )
         )
-    permission_key = normalize_permissions(permissions) or recorded_permissions
+    permission_key = recorded_permissions
     workspace_slug = _PROXY_WORKSPACES.get(thread_id, DEFAULT_WORKSPACE_SLUG)
     access = await workspace_token(
         workspace_slug,

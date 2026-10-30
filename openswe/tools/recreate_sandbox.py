@@ -1,4 +1,4 @@
-"""Tool for explicitly rebinding the current thread to a fresh sandbox."""
+"""Tool for explicitly giving the current thread a fresh sandbox, which MDA creates."""
 
 import logging
 from collections.abc import Mapping
@@ -9,8 +9,8 @@ from pydantic import JsonValue
 from openswe.audit_logs.tools import audit_tool
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import (
-    SandboxRecreationStopError,
     SandboxSource,
+    hand_sandbox_to_mda,
     request_mda_replacement,
 )
 from openswe.sandboxes.state import get_sandbox_metadata
@@ -24,9 +24,10 @@ class SandboxRecreationResult(TypedDict):
     success: bool
     error: NotRequired[str]
     old_sandbox_id: NotRequired[str]
-    new_sandbox_id: NotRequired[str]
     old_sandbox_stopped: NotRequired[bool]
     old_sandbox_stop_error: NotRequired[str | None]
+    # A box the backend made: the thread's next run starts in a fresh one MDA creates.
+    handed_to_mda: NotRequired[bool]
     # An MDA-owned box: what MDA replaces it with; MDA answers with the rest.
     replace: NotRequired[dict[str, JsonValue]]
 
@@ -61,30 +62,16 @@ async def recreate_sandbox(
         )
         return {"success": True, "replace": options.model_dump(mode="json")}
     try:
-        from openswe.sandboxes.lifecycle import recreate_sandbox_for_thread
-
-        old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
-            thread_id,
-            workspace_slug=workspace or thread_workspace,
-            source=source,
+        handed = await hand_sandbox_to_mda(
+            thread_id, workspace_slug=workspace or thread_workspace, source=source
         )
-    except SandboxRecreationStopError as exc:
-        logger.warning("Sandbox recreated but old sandbox did not stop", exc_info=True)
-        return {
-            "success": True,
-            "old_sandbox_id": exc.old_sandbox_id,
-            "new_sandbox_id": exc.new_sandbox_id,
-            "old_sandbox_stopped": False,
-            "old_sandbox_stop_error": str(exc),
-        }
     except Exception as exc:
         logger.exception("Failed to recreate sandbox", extra={"thread_id": thread_id})
         return {"success": False, "error": str(exc)}
-
     return {
         "success": True,
-        "old_sandbox_id": old_sandbox_id,
-        "new_sandbox_id": new_sandbox_id,
-        "old_sandbox_stopped": True,
-        "old_sandbox_stop_error": None,
+        "old_sandbox_id": handed.old_sandbox_id,
+        "old_sandbox_stopped": handed.stop_error is None,
+        "old_sandbox_stop_error": handed.stop_error,
+        "handed_to_mda": True,
     }

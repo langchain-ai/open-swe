@@ -1,9 +1,24 @@
 """Review links at the Slack delivery boundary."""
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import cast
 
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_review_url
+
+_PRESERVE_GITHUB_LINKS: ContextVar[bool] = ContextVar("preserve_github_links", default=False)
+
+
+@contextmanager
+def preserve_github_links(enabled: bool) -> Iterator[None]:
+    token = _PRESERVE_GITHUB_LINKS.set(enabled)
+    try:
+        yield
+    finally:
+        _PRESERVE_GITHUB_LINKS.reset(token)
+
 
 _PR_LINK = re.compile(
     r"https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/pull/([1-9]\d*)/?"
@@ -46,6 +61,10 @@ async def pr_review_links(
     blocks: list[dict[str, object]] | None,
 ) -> tuple[str, list[dict[str, object]] | None]:
     """Rewrite displayed PR links without changing stored URLs or button values."""
-    if not dashboard_base_url() or "github.com/" not in (text + str(blocks)).lower():
+    if (
+        _PRESERVE_GITHUB_LINKS.get()
+        or not dashboard_base_url()
+        or "github.com/" not in (text + str(blocks)).lower()
+    ):
         return text, blocks
     return _text(text), cast(list[dict[str, object]] | None, _block(blocks))

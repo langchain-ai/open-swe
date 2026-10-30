@@ -15,10 +15,13 @@ from unittest.mock import AsyncMock
 import httpx
 import httpx2
 import pytest
+from langgraph_sdk.errors import NotFoundError
 
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
-from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
+from openswe.threads import access, diffs, handlers, index, listing, proxy, runs, summary
+from openswe.threads.index import IndexedThread
+from openswe.threads.store import CommandReply, ThreadStore
 from openswe.tools import access as tool_access
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
@@ -29,6 +32,8 @@ from tests.support.postgres import MigratedTemplate, isolated_database
 # What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
 os.environ.setdefault("REDIS_URI", "fake")
 os.environ.setdefault("DATABASE_URI", ":memory:")
+# A test that wants the stall watchdog turns it back on.
+os.environ.setdefault("EVENT_LOOP_STALL_MS", "0")
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 _MAX_PARAM_ID_CHARS = 40
@@ -52,6 +57,51 @@ def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) 
         raise AttributeError(f"no dashboard thread module defines {name!r}")
     for module in modules:
         monkeypatch.setattr(module, name, value)
+
+
+class ThreadStoreOverClient(ThreadStore):
+    """The thread store, kept by whichever fake Agent Server client a test patched in.
+
+    Lets tests describe one fake thread for both the code that still reads threads
+    through ``langgraph_client`` and the code that reads them from the store.
+    """
+
+    async def get(self, thread_id: str) -> IndexedThread | None:
+        try:
+            raw = await proxy.langgraph_client().threads.get(thread_id)
+        except NotFoundError:
+            return None
+        if raw is None:
+            return None
+        now = datetime.now(UTC)
+        return IndexedThread(
+            thread_id=thread_id,
+            runtime="mda",
+            metadata=raw.get("metadata") or {},
+            status=index.as_status(raw.get("status")) or "idle",
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def update(self, thread_id: str, metadata: Mapping[str, Any]) -> IndexedThread | None:
+        # The code under test ignores the updated thread, and some fakes cannot read one back.
+        await proxy.langgraph_client().threads.update(thread_id=thread_id, metadata=dict(metadata))
+        return None
+
+    async def state(self, thread_id: str) -> dict[str, Any] | None:
+        return await proxy.langgraph_client().threads.get_state(thread_id)
+
+    async def command(
+        self, thread_id: str, body: bytes, *, user_id: str | None = None
+    ) -> CommandReply:
+        response = await proxy.langgraph_client().http.client.post(
+            f"/threads/{thread_id}/commands",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        return CommandReply(
+            response.status_code, response.content, response.headers.get("content-type")
+        )
 
 
 class FakeUserRecords:
@@ -176,6 +226,16 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
         return
     async with isolated_database(uri, monkeypatch):
         yield True
+
+
+@pytest.fixture
+def no_local_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every thread takes new activity itself, for tests without the thread index."""
+
+    async def itself(thread_id: str) -> str:
+        return thread_id
+
+    monkeypatch.setattr(index, "live_thread_id", itself)
 
 
 @pytest.fixture
@@ -337,18 +397,22 @@ def github_app(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return token
 
 
-@pytest.fixture
-def slack_api(monkeypatch: pytest.MonkeyPatch):
-    from openswe.slack import channels, client, code_channels, http
+@pytest.fixture(autouse=True)
+def _slack_api(monkeypatch: pytest.MonkeyPatch):
+    from openswe.slack import http
     from tests.support.slack_api import slack_api_server
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
-        monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
-        monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
-        monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        api.handler = lambda *_: (200, {"ok": False, "error": "missing_scope"}, {})
         yield api
+
+
+@pytest.fixture
+def slack_api(_slack_api):
+    _slack_api.handler = None
+    return _slack_api
 
 
 class MemoryEventClaims:

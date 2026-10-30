@@ -3,25 +3,47 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from langgraph_sdk.schema import MultitaskStrategy
+
 from managed_deepagents._channel import Channel, ChannelEventsContext
+from managed_deepagents._channels.http.threads import channel_thread_id
 from managed_deepagents._channels.http.types import (
+    ChannelName,
+    HttpChannelCancelMessage,
     HttpChannelInboundMessage,
     HttpChannelParseResult,
     HttpChannelPostInput,
     HttpChannelRequest,
+    HttpDelivery,
+    HttpFinish,
+    HttpFinishedDelivery,
+    HttpFinishedRun,
+    HttpInput,
     HttpOnError,
+    HttpOnFinish,
+    HttpOnReceived,
     HttpPost,
     HttpPostedMessage,
+    HttpRunStatus,
+    HttpSkipReason,
     ParseHttpRequest,
     VerifyHttpRequest,
 )
+from managed_deepagents._channels.types import CHANNEL_REPLIES
+from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES
 
 if TYPE_CHECKING:
     from starlette.responses import Response
 
     from managed_deepagents._channels.http.types import JsonValue
     from managed_deepagents._channels.manifest import ChannelManifest
-    from managed_deepagents._channels.types import ChannelMessage, PostedChannelMessage
+    from managed_deepagents._channels.messaging_registry import PausedNotice
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
+    from managed_deepagents._channels.types import (
+        ChannelMessage,
+        ChannelReply,
+        PostedChannelMessage,
+    )
 
 
 class HttpChannel(Channel):
@@ -29,17 +51,42 @@ class HttpChannel(Channel):
         self,
         *,
         provider: str,
+        provider_config: dict[str, JsonValue] | None = None,
         verify: VerifyHttpRequest,
         parse: ParseHttpRequest,
         post: HttpPost | None = None,
         on_error: HttpOnError | None = None,
+        input: HttpInput | None = None,
+        multitask_strategy: MultitaskStrategy = "enqueue",
+        reply: ChannelReply = "auto",
+        on_received: HttpOnReceived | None = None,
+        on_finish: HttpOnFinish | None = None,
     ) -> None:
+        if multitask_strategy not in MULTITASK_STRATEGIES:
+            raise TypeError(
+                "channel multitask_strategy must be enqueue, interrupt, rollback or reject"
+            )
+        if reply not in CHANNEL_REPLIES:
+            raise TypeError("channel reply must be auto or none")
+        self.multitask_strategy: MultitaskStrategy = multitask_strategy
+        self.reply: ChannelReply = reply
+        self.provider_config = provider_config or {}
         self.kind = _nonblank(provider, "channels.http provider")
         self.verify = verify
         self.parse = parse
         self.post = post
         self.on_error = on_error
+        self.input = input
+        self.on_received = on_received
+        self.on_finish = on_finish
         self.messaging = self._build_messaging if post is not None else None
+        #: Internal: the notice a paused run posts as it ends (GitHub, Linear).
+        self.paused_notice: PausedNotice | None = None
+        #: Internal: the ``mda/`` agent connections the channel's setup
+        #: provides, such as ``mda/github-token``, so deploy knows them.
+        self.agent_connections: list[str] = []
+        #: The channel's own ``resolve_user``, which overrides the identity's.
+        self.resolve_user: ChannelResolveUser | None = None
 
     def _build_messaging(self, _env: Mapping[str, str]) -> _HttpReplyTransport | None:
         if self.post is None:
@@ -52,15 +99,18 @@ class HttpChannel(Channel):
         return await handle_http_request(ctx, self)
 
     def requirements(self, name: str) -> ChannelManifest:
-        return {
+        manifest: ChannelManifest = {
             "name": name,
             "provider": self.kind,
             "eventsPath": f"/channels/{name}/events",
-            "autoReply": self.post is not None,
+            "autoReply": self.post is not None and self.reply != "none",
             "requiredPermissions": [],
             "requiredEnv": [],
-            "providerConfig": {},
+            "providerConfig": self.provider_config,
         }
+        if self.agent_connections:
+            manifest["agentConnections"] = list(self.agent_connections)
+        return manifest
 
 
 class _HttpReplyTransport:
@@ -98,17 +148,51 @@ class _HttpReplyTransport:
 def http_channel(
     *,
     provider: str,
+    provider_config: dict[str, JsonValue] | None = None,
     verify: VerifyHttpRequest,
     parse: ParseHttpRequest,
     post: HttpPost | None = None,
     on_error: HttpOnError | None = None,
+    input: HttpInput | None = None,
+    multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
+    on_received: HttpOnReceived | None = None,
+    on_finish: HttpOnFinish | None = None,
 ) -> HttpChannel:
+    """An HTTP channel.
+
+    ``multitask_strategy`` is what a message that starts a turn does while its
+    thread already runs: ``enqueue`` (the default) waits for the run and starts
+    after it, ``interrupt`` cancels the run, keeping its progress, and starts at
+    once, ``rollback`` cancels it and discards its progress, and ``reject``
+    starts nothing. Messages to a thread that waits on an interrupt start
+    nothing either way.
+
+    ``on_received`` hears about every message that reaches a thread, before
+    MDA decides what it does, for providers that expect a prompt
+    acknowledgement. ``on_finish`` then hears once it is done: with the run it
+    started and LangGraph's status for how that run ended (after ``on_error``
+    for ``error`` and ``timeout``), or no ``run`` when it started none, and the
+    interrupts the thread waits on. A ``parse`` result of type ``cancel``
+    cancels the thread's runs and finishes without a ``run``.
+
+    !!! warning "Experimental"
+
+        ``input``, ``multitask_strategy``, ``reply``, ``on_received``,
+        ``on_finish`` and ``cancel`` results may change in a minor release.
+    """
     return HttpChannel(
         provider=provider,
+        provider_config=provider_config,
         verify=verify,
         parse=parse,
         post=post,
         on_error=on_error,
+        input=input,
+        multitask_strategy=multitask_strategy,
+        reply=reply,
+        on_received=on_received,
+        on_finish=on_finish,
     )
 
 
@@ -119,11 +203,20 @@ def _nonblank(value: str, label: str) -> str:
 
 
 __all__ = [
+    "ChannelName",
     "HttpChannel",
+    "HttpChannelCancelMessage",
     "HttpChannelInboundMessage",
     "HttpChannelParseResult",
     "HttpChannelPostInput",
     "HttpChannelRequest",
+    "HttpDelivery",
+    "HttpFinish",
+    "HttpFinishedDelivery",
+    "HttpFinishedRun",
     "HttpPostedMessage",
+    "HttpRunStatus",
+    "HttpSkipReason",
+    "channel_thread_id",
     "http_channel",
 ]

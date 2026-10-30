@@ -25,6 +25,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.manifest import ChannelManifest
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
     from managed_deepagents._channels.runtime import ChannelMessagingAdapter
 else:
     ChannelManifest = Mapping[str, object]
@@ -62,6 +63,11 @@ class Channel:
     #: File-stem instance name, stamped by :func:`collect_channels`.
     name: str | None = None
 
+    #: A PNG or JPEG image in the project (e.g. ``assets/icon.png``) served
+    #: publicly at ``/channels/{name}/icon``, for providers that load an app's
+    #: icon from a URL.
+    icon: str | None = None
+
 
 class ChannelEventsContext(TypedDict, total=False):
     """Context handed to channel ``events`` for ``/channels/{name}/events``."""
@@ -70,6 +76,8 @@ class ChannelEventsContext(TypedDict, total=False):
     request: object
     raw_body: str | bytes
     channel: Channel
+    #: The channel's ``resolve_user``, or else the identity's.
+    resolve_user: ChannelResolveUser
 
 
 def is_channel(value: object) -> bool:
