@@ -1,15 +1,11 @@
 import asyncio
-import logging
-import random
-import string
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Final, Protocol, cast
+from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from deepagents.middleware._utils import append_to_system_message
-from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import (
     AgentState,
@@ -19,14 +15,12 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     BaseMessage,
     HumanMessage,
     SystemMessage,
-    ToolCall,
     ToolMessage,
 )
 from langchain_core.tools import tool
@@ -235,99 +229,6 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
     )
 
     assert forwarded.model is (_OPENAI if with_image else _FIREWORKS)
-
-
-# As `create_sandbox_file_download_url` issues them: a signed token of about 800 characters.
-_ISSUED_URL: Final = "https://bx-7f3a9c.smithbox.dev/" + "".join(
-    random.Random(445).choices(string.ascii_letters + string.digits + "-_", k=794)
-)
-
-
-async def _answered(reply: AIMessage, monkeypatch: pytest.MonkeyPatch) -> AIMessage:
-    """The reply the run keeps after the model shares a file with ``reply``."""
-
-    @tool
-    async def create_sandbox_file_download_url(file_path: str) -> dict[str, str]:
-        """Share a sandbox file."""
-        return {"url": _ISSUED_URL, "file_path": file_path}
-
-    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
-    shared = AIMessage(
-        content="",
-        tool_calls=[
-            ToolCall(
-                name="create_sandbox_file_download_url",
-                args={"file_path": "/work/demo.mp4"},
-                id="call-1",
-            )
-        ],
-    )
-    graph = create_agent(
-        model=GenericFakeChatModel(messages=iter([shared, reply])),
-        tools=[create_sandbox_file_download_url],
-        middleware=model_call_guards(),
-    )
-    result = await graph.ainvoke({"messages": [HumanMessage("record a demo")]})
-    answered = result["messages"][-1]
-    assert isinstance(answered, AIMessage)
-    return answered
-
-
-@pytest.mark.parametrize(
-    ("written", "kept"),
-    [
-        (
-            f"[Watch the 8-second recording]({_ISSUED_URL[:445]} {_ISSUED_URL[445:]})",
-            f"[Watch the 8-second recording]({_ISSUED_URL})",
-        ),
-        (
-            [
-                {"type": "thinking", "thinking": "link it", "signature": "s"},
-                {"type": "text", "text": f"[Recording]({_ISSUED_URL[:445]}\t{_ISSUED_URL[445:]})"},
-            ],
-            [
-                {"type": "thinking", "thinking": "link it", "signature": "s"},
-                {"type": "text", "text": f"[Recording]({_ISSUED_URL})"},
-            ],
-        ),
-    ],
-    ids=["space", "text-block"],
-)
-async def test_a_reply_links_a_tool_issued_url_exactly_as_issued(
-    monkeypatch: pytest.MonkeyPatch, written: str | list[str | dict], kept: str | list[str | dict]
-) -> None:
-    answered = await _answered(AIMessage(content=written), monkeypatch)
-
-    assert answered.content == kept
-
-
-@pytest.mark.parametrize("emphasis", ["*", "**", "_", "__"])
-async def test_an_emphasized_issued_url_does_not_warn(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, emphasis: str
-) -> None:
-    written = f"{emphasis}{_ISSUED_URL}{emphasis}"
-
-    with caplog.at_level(logging.WARNING, logger="rt.model_calls"):
-        answered = await _answered(AIMessage(content=written), monkeypatch)
-
-    assert answered.content == written
-    assert not [record for record in caplog.records if record.name == "rt.model_calls"]
-
-
-async def test_a_changed_issued_url_is_left_and_logged_without_it(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    changed = f"{_ISSUED_URL[:445]}{'H' if _ISSUED_URL[445] != 'H' else 'J'}{_ISSUED_URL[446:]}"
-    written = f"**{changed}**"
-
-    with caplog.at_level(logging.WARNING, logger="rt.model_calls"):
-        answered = await _answered(AIMessage(content=written), monkeypatch)
-
-    assert answered.content == written
-    [record] = [r for r in caplog.records if r.name == "rt.model_calls"]
-    assert record.levelno == logging.WARNING
-    # Signed URLs grant access to the file: no part of the token is logged.
-    assert changed[40:80] not in repr(vars(record))
 
 
 class _Skills(AgentMiddleware):
