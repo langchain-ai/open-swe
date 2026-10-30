@@ -154,8 +154,9 @@ async def start_automations(
     ]
     if not fired:
         return None
-    # A call that fails fails the delivery, so Linear sends it again: automations
-    # already claimed for it plan the same threads, which start their runs once.
+    # Linear has its answer already and won't send the delivery again, so the call is
+    # tried again for as long as a backend rollout takes: automations already claimed
+    # for the delivery plan the same threads, which start their runs once.
     planned_runs = (
         await ask_backend(
             PLAN_LINEAR_AUTOMATIONS,

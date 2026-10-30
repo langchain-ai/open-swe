@@ -24,8 +24,11 @@ from rt.backend import BACKEND_URL_ENV
 # MDA reads the channels to build the deployment, without its environment.
 _UNCONFIGURED: Final = "https://open-swe-backend.invalid"
 # The pauses before trying a call again after a network error, HTTP 429 or a 5xx,
-# as MDA tries a channel's endpoint.
+# with the same webhook ID. The provider has its answer before a handler asks, and
+# never sends the delivery again: a call the backend acts on once per delivery
+# ("idempotent") is tried for as long as a backend rollout takes, any other briefly.
 _RETRY_DELAYS_SECONDS: Final = (1.0, 5.0)
+_ROLLOUT_RETRY_DELAYS_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 
 
 def backend_endpoint(path: str) -> str:
@@ -46,12 +49,15 @@ async def ask_backend[Request: BaseModel, Response: BaseModel](
 
     Signed as webhook ``msg_id``, which a call sent again keeps, so the backend
     acts on a delivery once. A refused or failed call raises, and the channel
-    reports the failure in the conversation.
+    reports the failure in the conversation; the provider doesn't send it again.
     """
     client = EndpointClient(backend_endpoint(endpoint.path), endpoint.name, endpoint.name)
+    delays = (
+        _ROLLOUT_RETRY_DELAYS_SECONDS
+        if endpoint.delivery == "idempotent"
+        else _RETRY_DELAYS_SECONDS
+    )
     answer = await client.ask(
-        msg_id,
-        request.model_dump_json().encode(),
-        EndpointLimits(endpoint.seconds, _RETRY_DELAYS_SECONDS),
+        msg_id, request.model_dump_json().encode(), EndpointLimits(endpoint.seconds, delays)
     )
     return endpoint.response.model_validate(answer)
