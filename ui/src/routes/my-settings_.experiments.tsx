@@ -40,6 +40,11 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
+          field="experimental_memory"
+          label="Memory"
+          description="Threads you start include what your workspace's curator learned from everyone's threads, and what you offer the workspace to remember in your private threads applies to your own runs until the curator processes it."
+        />
+        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."

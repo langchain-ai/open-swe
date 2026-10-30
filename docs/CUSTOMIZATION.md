@@ -37,7 +37,7 @@ DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, d
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS="7200"                            # Optional, default 7200 (2 h); 0 disables
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, default 2592000 (30 d); 0 disables
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="604800"                 # Optional, default 604800 (7 d); 0 disables
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.

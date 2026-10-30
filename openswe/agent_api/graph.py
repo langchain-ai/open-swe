@@ -284,6 +284,20 @@ _SESSION_LIMIT: Final = 512
 # The graphs that review a pull request, which reach only its repository, read-only.
 _REVIEW_GRAPHS: Final = frozenset({"reviewer", "review-scout"})
 
+
+async def _tell_sandbox_gone(
+    config: RunnableConfig,
+    assistant_id: str | None,
+    *,
+    sandbox_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """Tell the person the run's sandbox is gone, unless a review's own notice tells its PR."""
+    if assistant_id in _REVIEW_GRAPHS:
+        return
+    await post_sandbox_unreachable_notification(config, sandbox_id=sandbox_id, reason=reason)
+
+
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
@@ -549,7 +563,7 @@ class RunSession:
                 workspace_slug=cfg.workspace_slug,
             )
         except SandboxUnreachableError as exc:
-            await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
+            await _tell_sandbox_gone(self.config, self.assistant_id, reason=exc.reason)
             raise
         if request.sandbox_id is not None and not proxy_token_recorded(cfg.thread_id):
             # MDA runs the agent's commands in the box itself, so nothing here connects
@@ -634,6 +648,7 @@ class RunSession:
             guards=self._shell_guards,
             client=self._client_tools,
             ready=self.rejoin_preparation,
+            assistant_id=self.assistant_id,
         )
 
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
@@ -723,7 +738,7 @@ class RunSession:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        await _tell_sandbox_gone(self.config, self.assistant_id, sandbox_id=request.sandbox_id)
         return Done()
 
     def _offered(self) -> list[BaseTool]:
@@ -789,6 +804,7 @@ async def run_operation(
     guards: ShellGuards,
     client: ClientToolsMiddleware | None,
     ready: Callable[[Runtime], Awaitable[None]],
+    assistant_id: str | None = None,
 ) -> OperationResult:
     """Do the work of ``tool`` for ``request``, as the run ``config`` names, once ``ready``."""
     if tool is None or request.name in _MDA_TOOLS:
@@ -814,7 +830,12 @@ async def run_operation(
                 # The run is being cancelled: that ends the call, not just its result.
                 raise
             except Exception as exc:
-                failure = await OperationFailure.of(exc, operation=request.name, config=config)
+                failure = await OperationFailure.of(
+                    exc,
+                    operation=request.name,
+                    config=config,
+                    notify=assistant_id not in _REVIEW_GRAPHS,
+                )
                 return OperationResult(
                     content=failure.content,
                     status="error",
@@ -1067,6 +1088,7 @@ class TokenRun:
             guards=ShellGuards(self.parts.shell_guards),
             client=client,
             ready=self._ready,
+            assistant_id=self.graph.assistant_id,
         )
 
     async def _tool_set(self) -> ToolSet:
@@ -1114,7 +1136,9 @@ class TokenRun:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        await _tell_sandbox_gone(
+            self.config, self.graph.assistant_id, sandbox_id=request.sandbox_id
+        )
         return Done()
 
     async def route_model(self, request: Routed) -> Route:

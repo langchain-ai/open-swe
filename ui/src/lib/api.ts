@@ -326,6 +326,7 @@ export interface Profile {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
+  experimental_memory?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -345,6 +346,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
   experimental_fleet?: boolean
+  experimental_memory?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
