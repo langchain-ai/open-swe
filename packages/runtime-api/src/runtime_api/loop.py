@@ -101,6 +101,9 @@ class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
     system_prompt: str
+    # What every thread of the workspace says, sent after ``system_prompt`` and ahead of
+    # the run's skills so the workspace's threads share it from the cache.
+    workspace_prompt: str = ""
     # What only this thread's prompt says, sent after ``system_prompt`` and the run's
     # skills so that every thread shares the cached prefix before it.
     thread_prompt: str = ""

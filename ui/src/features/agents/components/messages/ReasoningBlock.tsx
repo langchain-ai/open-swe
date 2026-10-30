@@ -1,21 +1,36 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
+import { BrainIcon } from "@phosphor-icons/react/dist/ssr/Brain"
 import { useEffect, useRef, useState } from "react"
 
 import { cn, formatElapsed } from "@/lib/utils"
 import { ElapsedSeconds } from "./ElapsedSeconds"
 
-function reasoningLabel(elapsedMs: number | null): string {
-  if (elapsedMs === null) return "Thought"
-  if (elapsedMs < 1000) return "Thought briefly"
-  return `Thought for ${formatElapsed(elapsedMs)}`
+function reasoningDuration(elapsedMs: number | null): string | undefined {
+  if (elapsedMs === null) return undefined
+  if (elapsedMs < 1000) return "Reasoned briefly"
+  return `Reasoned for ${formatElapsed(elapsedMs)}`
+}
+
+const MAX_PREVIEW_LENGTH = 200
+
+/** The thought's first line as plain text; the row's own truncation handles overflow. */
+function thoughtPreview(text: string): string {
+  const firstLine = text.split("\n").find((line) => line.trim()) ?? ""
+  // Underscores are emphasis only at a word edge; inside a name they are the name.
+  return firstLine
+    .replace(/^\s*#+\s*/, "")
+    .replace(/[*`]/g, "")
+    .replace(/(^|\W)_+|_+(?=\W|$)/g, "$1")
+    .trim()
+    .slice(0, MAX_PREVIEW_LENGTH)
 }
 
 /**
  * Renders a model's reasoning ("thinking") tokens. While the reasoning is live
  * it streams in muted gray text under a shimmering "Thinking…" header; once the
- * reasoning ends it auto-collapses into a "Thought for …" toggle the user can
- * expand on demand.
+ * reasoning ends it auto-collapses into a brain-icon toggle that previews the
+ * reasoning and that the user can expand on demand; how long it took is the tooltip.
  */
 export function ReasoningBlock({
   text,
@@ -45,6 +60,7 @@ export function ReasoningBlock({
   if (!trimmed && !isLive) return null
 
   const expanded = isLive || userExpanded
+  const label = thoughtPreview(trimmed) || "Reasoning"
 
   return (
     <div className="my-space-1">
@@ -52,12 +68,13 @@ export function ReasoningBlock({
         color="secondary"
         variant="plain"
         size="sm"
-        aria-label={isLive ? "Thinking..." : reasoningLabel(elapsedMs)}
+        aria-label={isLive ? "Thinking..." : label}
+        title={isLive ? undefined : reasoningDuration(elapsedMs)}
         type="button"
         onClick={() => {
           if (!isLive) setUserExpanded((value) => !value)
         }}
-        className="group/reasoning h-auto justify-start gap-space-1 border-0 px-0 text-left text-inherit focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
+        className="group/reasoning h-auto max-w-full justify-start gap-space-1 border-0 px-0 text-left text-inherit focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
         aria-expanded={expanded}
         disabled={isLive}
       >
@@ -77,8 +94,13 @@ export function ReasoningBlock({
               )}
               aria-hidden
             />
-            <span className="text-secondary transition-colors duration-normal group-hover/reasoning:text-primary">
-              {reasoningLabel(elapsedMs)}
+            <BrainIcon
+              size={12}
+              className="shrink-0 text-icon-tertiary"
+              aria-hidden
+            />
+            <span className="min-w-0 truncate text-secondary transition-colors duration-normal group-hover/reasoning:text-primary">
+              {label}
             </span>
           </>
         )}

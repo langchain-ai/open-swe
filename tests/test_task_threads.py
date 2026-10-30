@@ -97,6 +97,33 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
         await service.model_choice("default", metadata, None, "none")
 
 
+@pytest.mark.parametrize(
+    ("coordinator", "channel"),
+    [({"channel": "slack"}, "slack"), ({}, None)],
+    ids=["channel-conversation", "backend-thread"],
+)
+def test_a_channel_conversations_worker_belongs_to_its_channel(
+    coordinator: dict[str, JsonValue], channel: str | None
+) -> None:
+    """MDA creates the worker as the conversation's own, so the backend acts on it there."""
+    current_task = task()
+    delegation = store.TaskDelegation(
+        worker_thread_id=str(uuid4()),
+        task_id=current_task.id,
+        coordinator_thread_id=COORDINATOR,
+        instructions="Fix login",
+        model=MODEL,
+        effort="low",
+    )
+    metadata = ThreadMetadata.model_validate(
+        {"owner_type": "user", "owner_login": OWNER, "sandbox_id": "shared", **coordinator}
+    )
+
+    worker = service._worker_metadata(current_task, delegation, metadata)
+
+    assert worker.get("channel") == channel
+
+
 def task() -> store.Task:
     workspace = WorkspaceRow(slug="default", name="Default")
     task = store.Task(
@@ -435,10 +462,12 @@ async def test_task_wakeup_preserves_current_model_selection(
         model="anthropic:claude-opus-5-5",
         effort="high",
         model_selection=selection,
+        experience="agent_workspace",
     )
 
     config = await service.recipient_config(COORDINATOR)
 
+    assert config["experience"] == "agent_workspace"
     assert config["model_selection"] == selection
     if selection == "explicit":
         assert config["agent_model_id"] == "anthropic:claude-opus-5-5"
@@ -456,6 +485,7 @@ async def test_desktop_worker_cannot_be_shared(
         sandbox_id="bridge:desktop",
         sandbox_kind="bridge",
         sandbox_bridge_client="desktop",
+        experience="agent_workspace",
     )
     current_task = task()
     delegation = store.TaskDelegation(
@@ -473,6 +503,7 @@ async def test_desktop_worker_cannot_be_shared(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
+    assert client.metadata[delegation.worker_thread_id]["experience"] == "agent_workspace"
     with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409

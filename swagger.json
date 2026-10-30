@@ -5003,6 +5003,17 @@
             ],
             "title": "Experimental Fleet"
           },
+          "experimental_memory": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Memory"
+          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -5931,6 +5942,11 @@
             "default": false,
             "title": "Summary Updated",
             "type": "boolean"
+          },
+          "supplementary_refusal": {
+            "default": "",
+            "title": "Supplementary Refusal",
+            "type": "string"
           }
         },
         "required": [
@@ -11630,140 +11646,6 @@
         "tags": [
           "dashboard",
           "review"
-        ]
-      }
-    },
-    "/dashboard/api/fleet-chat/{path}": {
-      "get": {
-        "operationId": "proxy_dashboard_api_fleet_chat__path__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      },
-      "patch": {
-        "operationId": "proxy_dashboard_api_fleet_chat__path__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
-        ]
-      },
-      "post": {
-        "operationId": "proxy_dashboard_api_fleet_chat__path__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "dashboard",
-          "fleet-chat"
         ]
       }
     },

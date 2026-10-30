@@ -388,12 +388,13 @@ class RunLoop:
                 update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
         model = await self._model_for(current)
-        system_prompt, thread_prompt = self._system_prompt(current)
+        system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
                 system_prompt=system_prompt,
+                workspace_prompt=workspace_prompt,
                 thread_prompt=thread_prompt,
                 hidden_tools=self._hidden(current),
                 model=model,
@@ -497,20 +498,25 @@ class RunLoop:
             return await self._chosen_model(selected, held.get("selected_effort"))
         return self._models.model
 
-    def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str]:
-        """The prompt every thread shares and the part only this one's says, both fixed for
-        the thread's life: a changed byte misses the provider's cache.
+    def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
+        """The prompt every thread shares, the part its workspace's threads share, and the
+        part only this one's says, all fixed for the thread's life: a changed byte misses
+        the provider's cache.
 
-        The rendered prompt ends in the thread's part. A thread rendered before the
-        backend named that part has none, and all of its prompt is the first.
+        The rendered prompt ends in the workspace's part and then the thread's. A thread
+        rendered before the backend named a part has none, and the first holds the rest.
         """
         rendered = held.get("rendered_system_prompt")
-        rendered = rendered if isinstance(rendered, str) else ""
-        thread = held.get("rendered_thread_prompt")
-        thread = thread if isinstance(thread, str) and rendered.endswith(thread) else ""
-        shared = rendered.removesuffix(thread).rstrip()
-        sections = [self.rules.deployment_prompt, shared]
-        return "\n\n".join(section for section in sections if section), thread
+        rest = rendered if isinstance(rendered, str) else ""
+        parts: list[str] = []
+        for key in ("rendered_thread_prompt", "rendered_workspace_prompt"):
+            part = held.get(key)
+            part = part if isinstance(part, str) and rest.endswith(part) else ""
+            rest = rest.removesuffix(part).rstrip()
+            parts.append(part)
+        thread, workspace = parts
+        sections = [self.rules.deployment_prompt, rest]
+        return "\n\n".join(section for section in sections if section), workspace, thread
 
     def _hidden(self, held: Mapping[str, object]) -> list[str]:
         hidden = set(self.rules.hidden_tools)
