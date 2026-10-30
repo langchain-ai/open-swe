@@ -75,12 +75,6 @@ def _render_workspace_section(
     )
 
 
-def _render_workspace_memory_section(memory: str) -> str:
-    if not memory.strip():
-        return ""
-    return prompt("system/workspace-memory", memory=memory.strip())
-
-
 def _render_collaboration_section() -> str:
     return prompt(
         "system/collaboration",
@@ -164,7 +158,9 @@ def construct_system_prompt(
         section
         for section in (
             _render_workspace_section(workspace_name, workspace_instructions, workspace_repos),
-            _render_workspace_memory_section(workspace_memory),
+            prompt("system/workspace-memory", memory=workspace_memory.strip())
+            if workspace_memory.strip()
+            else "",
         )
         if section
     )

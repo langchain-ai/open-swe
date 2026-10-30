@@ -283,10 +283,15 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
         slack_bot_channel=slack_bot_channel,
+        # Only the run ``WorkspaceCurator.wake`` started: a person's message in the
+        # public thread starts a run that must not steer what every thread reads.
         curator=(
             scope.owner_type == "system"
             and scope.curator is not None
             and scope.curator == cfg.workspace_slug
+            and cfg.source == "curator"
+            and not cfg.github_login
+            and not cfg.started_by_id
         ),
     )
 

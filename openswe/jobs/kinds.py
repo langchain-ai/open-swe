@@ -33,7 +33,7 @@ from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
 from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
 from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
-from openswe.memories.curator import wake_curators
+from openswe.memories.curator import WorkspaceCurator
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
@@ -212,7 +212,7 @@ async def _tool_sets_purge(_job: Job) -> None:
     logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
 
 
-WORKER.register(CURATOR_WAKE)(wake_curators)
+WORKER.register(CURATOR_WAKE)(WorkspaceCurator.wake_pending)
 
 
 @WORKER.register(GITHUB_CHANNEL_FORWARD)

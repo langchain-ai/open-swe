@@ -484,7 +484,7 @@ async def _thread_participant(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
-        _personal_memories(user),
+        MEMORIES.personal(user.id if user else None),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
@@ -498,7 +498,7 @@ async def _thread_participant(
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
-        memories=memories,
+        memories=tuple(memory.line for memory in memories),
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -550,27 +550,6 @@ async def _thread_participants(
             *(_thread_participant(identity, config) for identity in others),
         )
     )
-
-
-async def _workspace_memory(slug: str) -> str:
-    """The prompt the workspace's curator last published, fixed into a new thread's prompt."""
-    try:
-        return await MEMORIES.workspace_prompt_for(slug)
-    except Exception:
-        logger.warning("Could not load a workspace's curated prompt", exc_info=True)
-        return ""
-
-
-async def _personal_memories(user: User | None) -> tuple[str, ...]:
-    """What the person asked their runs to remember, each with the id that forgets it."""
-    if user is None:
-        return ()
-    try:
-        memories = await MEMORIES.personal(user.id)
-    except Exception:
-        logger.warning("Could not load a participant's personal memories", exc_info=True)
-        return ()
-    return tuple(f"{memory.body} (memory {memory.id})" for memory in memories)
 
 
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
@@ -1717,7 +1696,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-            memory = await _workspace_memory(workspace.slug) if workspace else ""
+            memory = await MEMORIES.workspace_prompt(workspace.slug) if workspace else ""
         return construct_system_prompt(
             agent_workspace=cfg.experience == "agent_workspace",
             dashboard_base_url=dashboard_base_url(),

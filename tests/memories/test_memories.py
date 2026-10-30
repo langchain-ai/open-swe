@@ -17,7 +17,7 @@ async def test_the_curator_never_reads_what_a_private_thread_kept_to_itself(
             scope=scope,
             body=body,
             person=person.id,
-            workspace_id=workspace.id,
+            workspace=workspace.slug,
             thread_id=f"thread-{body}",
             from_private_thread=private,
             shared=shared,
@@ -28,13 +28,13 @@ async def test_the_curator_never_reads_what_a_private_thread_kept_to_itself(
     await save("shared on purpose", scope="workspace", private=True, shared=True)
     await save("learned in public", scope="workspace", private=False)
 
-    held = await MEMORIES.for_curator(workspace.id, "held")
+    held = await MEMORIES.for_curator(workspace.slug, "held")
     assert {(memory.scope, memory.body, memory.thread_id) for memory in held} == {
         ("workspace", None, None),
         ("personal", None, None),
     }
-    assert not await MEMORIES.decide(workspace.id, held[0].id, "adopted", "")
-    pending = await MEMORIES.for_curator(workspace.id, "pending")
+    assert not await MEMORIES.decide(workspace.slug, held[0].id, "adopted", "")
+    pending = await MEMORIES.for_curator(workspace.slug, "pending")
     assert {(memory.body, memory.thread_id) for memory in pending} == {
         ("shared on purpose", None),
         ("learned in public", "thread-learned in public"),
