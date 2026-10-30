@@ -11,6 +11,7 @@ thread an MDA channel owns stays its conversation's: the backend starts, answers
 and stops runs there through MDA's trusted-backend ingress, naming that conversation.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
@@ -22,6 +23,12 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
 from langsmith.utils import get_tracer_project
+from managed_deepagents._agent_auth import AgentAuth, AgentAuthContext
+from managed_deepagents._connections import (
+    PLATFORM_API_URL_ENV,
+    TRUSTED_BACKEND_PROVIDER,
+    resolve_agent_auth_base_url,
+)
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe import dispatch
@@ -36,6 +43,7 @@ from openswe.config import ENV
 from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.utils.langsmith import resolve_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +61,8 @@ _HOOK_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier")
 _CHANNEL_OWNER_PREFIX: Final = "mda:source-thread:"
 # Who the backend's runs on a channel's thread are from, as MDA records them.
 BACKEND_USER: Final = "openswe:backend"
+# Beside ``x-mda-user-id``, the Agent Auth principal MDA's channels stamp a run's sender with.
+_PRINCIPAL_HEADER: Final = "x-mda-agent-auth-principal-id"
 
 _object = TypeAdapter(dict[str, JsonValue])
 
@@ -187,7 +197,9 @@ class MdaRuntime:
             url=self.url, api_key=mda_runtime_api_key(), headers=dict(MDA_STUDIO_READ_HEADERS)
         )
 
-    async def channel_write_headers(self, thread_id: str) -> dict[str, str]:
+    async def channel_write_headers(
+        self, thread_id: str, *, user_id: str | None = None
+    ) -> dict[str, str]:
         """What lets the backend start, answer and stop runs on a thread an MDA channel owns.
 
         MDA's trusted-backend ingress: its ingress secret, the ``MDA_INGRESS_SECRET``
@@ -196,6 +208,10 @@ class MdaRuntime:
         from MDA once. The thread keeps that owner, so the conversation's later
         messages still reach it. Raises ``ChannelThreadError`` without the secret or
         when MDA names no channel conversation as the thread's owner.
+
+        ``user_id`` is the Open SWE user the write is for, so a person's run here has
+        the principal their channel runs have (:meth:`user_principal`); without one, or
+        when Agent Auth can't name it, the backend acts as itself.
         """
         secret = ENV.MDA_SERVICE_SECRET.optional()
         if not secret:
@@ -213,12 +229,47 @@ class MdaRuntime:
                 raise ChannelThreadError(f"MDA names no conversation owning thread {thread_id}")
             conversation = self._channel_conversations[thread_id] = (provider, key)
         provider, key = conversation
+        principal = await self.user_principal(user_id) if user_id else None
         return {
             "x-mda-ingress-secret": secret,
-            "x-mda-user-id": BACKEND_USER,
+            "x-mda-user-id": principal or BACKEND_USER,
+            **({_PRINCIPAL_HEADER: principal} if principal else {}),
             "x-mda-source-provider": provider,
             "x-mda-source-thread-id": key,
         }
+
+    async def user_principal(self, user_id: str) -> str | None:
+        """The Agent Auth principal an Open SWE user's channel runs have, or ``None``.
+
+        The backend's ``resolve_user`` names the user (``mda/identity.py``), and MDA
+        resolves that as the ``trusted_backend`` identity of the user's id in its
+        workspace; this resolves the same identity, with the key the backend calls MDA
+        with. The SDK caches each answer.
+        """
+        api_key = mda_runtime_api_key()
+        workspace = ENV.MDA_WORKSPACE_ID.optional() or await resolve_tenant_id()
+        extra = {"user_id": user_id}
+        if not api_key or not workspace:
+            logger.warning("No LangSmith key or workspace to resolve a principal", extra=extra)
+            return None
+        try:
+            agent_auth = AgentAuth(
+                AgentAuthContext(
+                    base_url=resolve_agent_auth_base_url(
+                        {PLATFORM_API_URL_ENV: ENV.LANGSMITH_ENDPOINT.get()}
+                    ),
+                    principal_id="",
+                    api_key=api_key,
+                    workspace_id=workspace,
+                )
+            )
+            return await asyncio.to_thread(
+                agent_auth.resolve_principal,
+                {"provider": TRUSTED_BACKEND_PROVIDER, "issuer": workspace, "subject": user_id},
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not resolve a user's principal", extra=extra, exc_info=True)
+            return None
 
     async def ensure_remote_thread(self, thread_id: str) -> None:
         if thread_id in self._mda_threads:
@@ -349,12 +400,13 @@ class MdaRuntime:
         thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
         channel: bool = False,
+        user_id: str | None = None,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
-        On a ``channel`` thread the run starts as the backend acting in its conversation
-        (:meth:`channel_write_headers`), which raises ``ChannelThreadError``.
+        On a ``channel`` thread the run starts in its conversation as ``user_id``, or as the
+        backend without one (:meth:`channel_write_headers`), which raises ``ChannelThreadError``.
         """
         starting_ms = now_ms()
         config = params.get("config")
@@ -384,8 +436,10 @@ class MdaRuntime:
         # As on dispatched runs: the run-complete webhook settles the thread in the index.
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
-        # On a channel's thread the run starts in its conversation.
-        headers = await self.channel_write_headers(thread_id) if channel else {}
+        # On a channel's thread the run starts in its conversation, as ``user_id``.
+        headers = (
+            await self.channel_write_headers(thread_id, user_id=user_id) if channel else {}
+        )
         rewritten = await self.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
