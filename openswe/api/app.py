@@ -26,8 +26,8 @@ from openswe.mda_channels.resolve_user import router as mda_resolve_user_router
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
-from openswe.sandboxes.file_link_routes import router as sandbox_file_link_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
+from openswe.short_links.routes import router as short_link_router
 from openswe.slack.channel import router as slack_channel_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
@@ -177,7 +177,7 @@ def create_app() -> FastAPI:
     app.include_router(slack_channel_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
-    app.include_router(sandbox_file_link_router)
+    app.include_router(short_link_router)
     app.include_router(sandbox_openai_router)
     app.include_router(reviewer_eval_report_router)
     # Routed at the exact path so no redirect sits between MDA and the agent API.

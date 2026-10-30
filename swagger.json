@@ -12082,7 +12082,7 @@
     },
     "/dashboard/api/l/{token}": {
       "get": {
-        "operationId": "open_sandbox_file_link_dashboard_api_l__token__get",
+        "operationId": "open_short_link_dashboard_api_l__token__get",
         "parameters": [
           {
             "in": "path",
@@ -12109,9 +12109,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Open Sandbox File Link",
+        "summary": "Open Short Link",
         "tags": [
-          "sandbox-file-links"
+          "short-links"
         ]
       }
     },
