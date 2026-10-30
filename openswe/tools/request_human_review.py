@@ -24,6 +24,7 @@ from openswe.human_review.standard import (
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
+from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     GitHubPrRef,
     fetch_slack_message_by_ts,
@@ -134,6 +135,7 @@ async def request_human_review(
             "success": True,
             "request_id": result.request_id,
             "slack_channel_id": result.channel,
+            "slack_channel_name": await SlackChannel.name_for(result.channel),
             "next": prompt(
                 "tools/human-review-channel-mismatch",
                 channel=result.channel,
@@ -156,6 +158,7 @@ async def request_human_review(
         "auto_merge": result.auto_merge,
         "request_id": result.request_id,
         "slack_channel_id": result.channel,
+        "slack_channel_name": await SlackChannel.name_for(result.channel),
         "next": f"{posted} People sign up from the card. {merge_note} "
         "You are woken if nobody signs up. Do not announce or link the card; do not poll."
         + _supplementary_note(result, supplementary_review),

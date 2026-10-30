@@ -294,6 +294,15 @@ class SlackChannel(Base):
         return known if known is not None and known.fresh else None
 
     @classmethod
+    async def name_for(cls, channel_id: str) -> str:
+        """A display name from the directory, fetching only when no name is stored."""
+        known = await cls._row(channel_id)
+        if known is not None and known.name:
+            return known.details.name or known.name
+        channel = await cls.load(channel_id, use_cache=False)
+        return (channel.details.name or channel.name) if channel is not None else ""
+
+    @classmethod
     async def load(
         cls, channel_id: str, *, use_cache: bool = True, raise_unavailable: bool = False
     ) -> Self | None:
