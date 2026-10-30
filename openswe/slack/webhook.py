@@ -926,6 +926,23 @@ async def _process_slack_mention_impl(
             treat_all_messages_as_mentions=treat_all_messages_as_mentions,
         )[0]
     )
+    if not any(str(message.get("ts")) == context_thread_ts for message in context_messages):
+        root_message = next(
+            (message for message in thread_messages if str(message.get("ts")) == context_thread_ts),
+            None,
+        )
+        if root_message is not None:
+            context_messages.insert(0, root_message)
+    common.logger.debug(
+        "Selected Slack thread context",
+        extra={
+            "thread_ts": request.thread_ts,
+            "context_thread_ts": request.context_thread_ts,
+            "reply_thread_ts": reply_thread_ts,
+            "thread_message_count": len(thread_messages),
+            "context_message_count": len(context_messages),
+        },
+    )
     source_messages = (
         [{"ts": event_ts, "text": text, "user": user_id, "attachments": attachments}]
         if message_update
