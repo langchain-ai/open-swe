@@ -1369,6 +1369,9 @@ async def queue_follow_up_run(
     with this browser long gone. The transcript records the turn as requested
     right away and learns the run id so it can be cancelled before it starts.
     """
+    params = command.get("params")
+    # An agent's relayed message is not its sender's own: it acts as no one.
+    relayed = isinstance(params, dict) and bool(params.get(RELAYED_FROM_KEY))
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )
@@ -1394,6 +1397,8 @@ async def queue_follow_up_run(
             thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
+            # On a channel's thread it starts as its sender, as their message would.
+            as_sender=not relayed,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else None
         if not isinstance(run_id, str) or not run_id:

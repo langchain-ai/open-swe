@@ -19,6 +19,7 @@ from openswe import dispatch
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
+from openswe.slack import failures as slack_failures
 from openswe.slack import mda_forwarding
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
@@ -134,13 +135,7 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
     [(task, (url, body, headers))] = tasks.tasks
     # The forward knows which message it carries, to tell its thread if it's lost.
     assert tasks.kwargs == [
-        {
-            "thread_id": _MDA_THREAD,
-            "message_ts": "1786573369.551099",
-            "event_id": "Ev-mda",
-            # It claimed the conversation, so the backend answers it if Trigger Server won't.
-            "claimed": True,
-        }
+        {"thread_id": _MDA_THREAD, "message_ts": "1786573369.551099", "event_id": "Ev-mda"}
     ]
     assert task is mda_forwarding.forward_to_trigger_server
     assert url == _EVENTS_URL
@@ -174,6 +169,29 @@ async def test_a_person_who_cant_run_is_asked_to_connect_before_anything_is_clai
     cast(AsyncMock, mda_forwarding.remember).assert_not_awaited()
 
 
+@pytest.mark.parametrize("failure", ["repo lookup fails", "duplicate delivery"])
+async def test_a_message_that_never_reaches_mda_leaves_its_conversation_unclaimed(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    monkeypatch.setattr(mda_forwarding, "startable_thread", AsyncMock(return_value=_MDA_THREAD))
+    if failure == "repo lookup fails":
+        monkeypatch.setattr(
+            webhook_common, "get_slack_repo_config", AsyncMock(side_effect=RuntimeError("down"))
+        )
+        monkeypatch.setattr(slack_failures, "report_slack_failure", AsyncMock(return_value="err-1"))
+    else:
+        monkeypatch.setattr(slack_events.event_claims, "claim", AsyncMock(return_value=False))
+    tasks = _FakeBackgroundTasks()
+
+    await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_mention(), dict(_SLACK_HEADERS))), cast(BackgroundTasks, tasks)
+    )
+
+    # Nothing was handed over, so the conversation stays free for the backend or a retry.
+    cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
+    assert tasks.tasks == []
+
+
 async def test_the_connect_prompt_is_posted_once_per_slack_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -204,6 +222,38 @@ async def test_every_other_conversation_stays_on_the_backend(
     [(task, (request, _repo))] = tasks.tasks
     assert task is slack_service.process_slack_mention
     assert request.thread_id == "backend-thread"
+
+
+@pytest.mark.parametrize("single_session", ["code_channel", "concierge_dm"])
+async def test_a_reply_in_a_thread_mda_held_stays_with_a_single_session(
+    monkeypatch: pytest.MonkeyPatch, single_session: str
+) -> None:
+    # A code channel or concierge DM turned on after MDA took one of its threads.
+    owned = AsyncMock(return_value=_MDA_THREAD)
+    monkeypatch.setattr(mda_forwarding, "owned_thread", owned)
+    monkeypatch.setattr(
+        webhook_common, "is_code_channel", AsyncMock(return_value=single_session == "code_channel")
+    )
+    monkeypatch.setattr(
+        slack_routes.User,
+        "concierge_mode_for_slack",
+        AsyncMock(return_value=single_session == "concierge_dm"),
+    )
+    reply = _mention()
+    reply["event"] |= {"type": "message", "text": "and also", "thread_ts": "1786573300.000001"}
+    if single_session == "concierge_dm":
+        reply["event"] |= {"channel": "D1", "channel_type": "im"}
+    tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(reply, dict(_SLACK_HEADERS))), cast(BackgroundTasks, tasks)
+    )
+
+    assert response["status"] == "accepted"
+    [(task, (request, _repo))] = tasks.tasks
+    assert task is slack_service.process_slack_mention
+    assert request.thread_id == "backend-thread"
+    owned.assert_not_awaited()
 
 
 async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_nowhere(
@@ -307,6 +357,7 @@ def _trigger_server(
     monkeypatch.setattr(mda_forwarding.time, "time", lambda: 1786573369.0)
     monkeypatch.setattr(mda_forwarding, "report_lost", AsyncMock(return_value=True))
     monkeypatch.setattr(mda_forwarding, "take_back", AsyncMock(return_value=True))
+    monkeypatch.setattr(mda_forwarding, "channel_started", AsyncMock(return_value=True))
     seen: list[httpx2.Request] = []
 
     def recording(request: httpx2.Request) -> httpx2.Response:
@@ -317,7 +368,7 @@ def _trigger_server(
     return seen
 
 
-async def _forward(message_ts: str = "1.1", *, claimed: bool = False) -> None:
+async def _forward(message_ts: str = "1.1") -> None:
     await mda_forwarding.forward_to_trigger_server(
         _EVENTS_URL,
         b"{}",
@@ -325,7 +376,6 @@ async def _forward(message_ts: str = "1.1", *, claimed: bool = False) -> None:
         thread_id=_MDA_THREAD,
         message_ts=message_ts,
         event_id="Ev-1",
-        claimed=claimed,
     )
 
 
@@ -371,13 +421,15 @@ async def test_a_refused_forward_tells_the_slack_thread(
 
 
 @pytest.mark.parametrize("status", [401, 503])
-async def test_a_new_conversation_trigger_server_refuses_is_answered_here(
+async def test_a_conversation_the_channel_never_started_is_answered_here_when_refused(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     # 401: no Slack app registered for MDA in this environment; 503 that never clears.
+    # Its first message or a later one: either way nothing ran on MDA yet.
     _trigger_server(monkeypatch, lambda _request: httpx2.Response(status))
+    monkeypatch.setattr(mda_forwarding, "channel_started", AsyncMock(return_value=False))
 
-    await _forward(claimed=True)
+    await _forward()
 
     cast(AsyncMock, mda_forwarding.take_back).assert_awaited_once_with(_MDA_THREAD, "1.1")
     cast(AsyncMock, mda_forwarding.report_lost).assert_not_awaited()

@@ -11,9 +11,11 @@ manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
 
 Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
-the backend hands the channel with the run. The channel answers in its own
-conversation, failures included, and starts every run on its threads, so a
-channel run gets no failure reply and starts no follow-up runs.
+the backend hands the channel with the run. A channel that answers failures in its
+own conversation gets no failure reply from here, and a channel run starts no
+follow-up pickup. Task messages and event wakes that arrived during it are
+delivered as after any run: the backend starts those runs on the channel's thread
+through MDA's trusted ingress.
 """
 
 import hmac
@@ -518,7 +520,6 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
-    # The channel starts every run on its threads and answers failures there itself.
     channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
@@ -546,7 +547,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
-    if channel is None and (status == "success" or status in _TERMINAL_FAILURE_STATUSES):
+    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
         await TaskMessage.deliver_to(thread_id)
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":

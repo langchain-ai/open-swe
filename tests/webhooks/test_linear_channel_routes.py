@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from standardwebhooks import Webhook
 
 from openswe import dispatch
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.linear import channel, session
 from openswe.linear.session import NO_REPOSITORY, UNREADABLE_SESSION
@@ -25,7 +26,7 @@ _THREAD = str(uuid.uuid4())
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
     record = AsyncMock(return_value=True)
-    monkeypatch.setattr("openswe.linear.channel.EventLog.record", record)
+    monkeypatch.setattr("openswe.linear.channel.EventLog.record_once", record)
     automations = AsyncMock()
     monkeypatch.setattr(channel, "_launch_automations", automations)
     api = FastAPI()
@@ -35,11 +36,14 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     return api
 
 
-def _call(key: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _call(key: str, payload: dict[str, Any], *, interrupted: bool = False) -> dict[str, Any]:
     """What MDA's channel POSTs its endpoint."""
+    thread: dict[str, Any] = {"id": _THREAD, "channel": {"name": "linear"}}
+    if interrupted:
+        thread["interrupted"] = True
     return {
         "event": {"key": key, "deliveryId": "delivery-1", "payload": payload},
-        "thread": {"id": _THREAD, "channel": {"name": "linear"}},
+        "thread": thread,
     }
 
 
@@ -153,6 +157,28 @@ async def test_a_session_turn_starts_the_run_prepared_on_the_sessions_thread(
 
 
 @pytest.mark.asyncio
+async def test_a_session_turn_on_an_interrupted_thread_prepares_nothing(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepare = AsyncMock()
+    monkeypatch.setattr(channel.LinearSessionTurn, "prepare_run", prepare)
+    payload = {
+        "type": "AgentSessionEvent",
+        "action": "prompted",
+        "organizationId": "org-1",
+        "webhookTimestamp": 1_700_000_000_000,
+        "agentSession": {"id": "session-1", "issue": {"id": "issue-1"}},
+        "agentActivity": {"content": {"type": "prompt", "body": "and the docs"}},
+    }
+
+    response = await _post(app, _call("AgentSessionEvent.prompted", payload, interrupted=True))
+
+    # Only tells the channel Open SWE would act: no thread adopted, no run token signed.
+    assert response.json() == {"input": channel._ACTS_WHILE_INTERRUPTED}
+    prepare.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_mda_starts_the_run_a_session_turn_prepares(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -204,12 +230,15 @@ async def test_mda_starts_the_run_a_session_turn_prepares(
     token = verify_runtime_token(answer["context"]["__run_token"])
     assert token.thread_id == _THREAD
     assert token.metadata["ls_attribution_identifier"] == "ada"
+    # MDA starts a channel's run as its sender, so its catalog may name their connections.
+    assert token.metadata[ACTING_USER_KEY] == "user-1"
     # MDA starts the run: the answer sets none of the metadata keys MDA keeps.
     metadata = mda_starts(answer)["metadata"]
     assert metadata == answer["metadata"]
     assert metadata["channel"] == "linear"
     assert "invocation_id" in metadata
-    assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
+    reserved = {"user_id", "ls_repo_provider", "ls_attribution_identifier", ACTING_USER_KEY}
+    assert not reserved & metadata.keys()
 
 
 @pytest.mark.asyncio

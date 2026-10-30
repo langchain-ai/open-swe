@@ -51,11 +51,18 @@ from openswe.agent_api.client import (
     RUNTIME_METADATA_KEY,
     mda_graph_for,
 )
+from openswe.agent_api.connections import ACTING_USER_KEY, acting_user
 from openswe.api.agent_server_auth import backend_call
 from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
-from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES, ChannelThreadError, now_ms
+from openswe.threads.runtimes import (
+    LOCAL_HEADER,
+    RUNTIMES,
+    ChannelThreadError,
+    ChannelWrite,
+    now_ms,
+)
 from openswe.threads.store import READ_COMMANDS, READ_ONLY, THREADS, channel_write_refusal, for_mda
 
 logger = logging.getLogger(__name__)
@@ -160,13 +167,14 @@ def channel_run_metadata(metadata: Mapping[str, JsonValue]) -> dict[str, JsonVal
 
     MDA refuses an answer that sets one of its own keys, or one it can't name, and
     starts nothing. It records who the run is from itself; the attribution the run's
-    hooks read rides in its run token.
+    hooks read, and whom it acts as, ride in its run token.
     """
     return {
         key: value
         for key, value in metadata.items()
         if _CHANNEL_METADATA_KEY.fullmatch(key)
         and not _CHANNEL_RESERVED_METADATA_KEY.fullmatch(key)
+        and key != ACTING_USER_KEY
     }
 
 
@@ -199,15 +207,15 @@ async def _refuse_channel_write(send: Send, thread: IndexedThread) -> bool:
     return True
 
 
-async def _channel_write_headers(
+async def _channel_write(
     send: Send, thread: IndexedThread, *, user_id: str | None = None
-) -> dict[str, str] | None:
-    """Headers for a write on ``thread``: none of its own, its channel conversation's for
-    ``user_id``, or ``None`` once the write was refused because they can't be had."""
+) -> ChannelWrite | None:
+    """Who a write on ``thread`` is from: the backend on its own, its channel conversation
+    for ``user_id``, or ``None`` once the write was refused because that can't be had."""
     if channel_of(thread.metadata) is None:
-        return {}
+        return ChannelWrite()
     try:
-        return await RUNTIMES.mda_runtime.channel_write_headers(thread.thread_id, user_id=user_id)
+        return await RUNTIMES.mda_runtime.channel_write(thread.thread_id, user_id=user_id)
     except ChannelThreadError, httpx.HTTPError:
         logger.warning(
             "Can't act on an MDA channel's thread", extra={"thread_id": thread.thread_id}
@@ -407,15 +415,15 @@ class ThreadRouter:
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
             return
-        # The person the run is attributed to, which only the backend writes
-        # (``dispatch.prepare_durable_run``); a run for none is the channel's own.
-        run_metadata = payload.get("metadata")
-        user_id = run_metadata.get("user_id") if isinstance(run_metadata, dict) else None
-        headers = await _channel_write_headers(
-            send, thread, user_id=user_id if isinstance(user_id, str) else None
-        )
-        if headers is None:
+        # The person the run acts as, which only the backend writes, for a run that
+        # person started (``dispatch.prepare_durable_run``); never whom it is attributed
+        # to. A run that acts as no one is the channel's own.
+        raw_metadata = payload.get("metadata")
+        run_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        write = await _channel_write(send, thread, user_id=acting_user(run_metadata))
+        if write is None:
             return
+        payload["metadata"] = write.acting(run_metadata)
         # Busy before the answer reaches the caller, so a run that ends at once
         # is not marked busy after its run-complete webhook settled it.
         recorder = StatusRecorder(
@@ -434,7 +442,9 @@ class ThreadRouter:
             thread_metadata=thread.metadata,
             graph_id=mda_graph_for(thread.metadata),
         )
-        await forward(mda.http, scope, recorder, json.dumps(rewritten).encode(), headers=headers)
+        await forward(
+            mda.http, scope, recorder, json.dumps(rewritten).encode(), headers=write.headers
+        )
 
     async def _command(self, send: Send, body: bytes, thread_id: str) -> None:
         reply = await THREADS.command(thread_id, body)
@@ -478,20 +488,21 @@ class ThreadRouter:
             rest = (match["rest"] or "") if match else ""
             reads = _reads(scope["method"], rest, body)
             if reads:
-                headers: dict[str, str] | None = {}
+                write: ChannelWrite | None = ChannelWrite()
             elif _stops_run(scope["method"], scope["path"], rest):
-                headers = await _channel_write_headers(send, thread)
+                write = await _channel_write(send, thread)
             elif await _refuse_channel_write(send, thread):
                 return
             else:
-                headers = {}
-            if headers is None:
+                write = ChannelWrite()
+            if write is None:
                 return
             mda = RUNTIMES.mda_runtime
             if channel_of(thread.metadata) is None:
                 # The channel created its threads there; the backend's own may need it.
                 await mda.ensure_remote_thread(thread_id)
-            await forward(mda.read_http if reads else mda.http, scope, send, body, headers=headers)
+            http = mda.read_http if reads else mda.http
+            await forward(http, scope, send, body, headers=write.headers)
             return
         if thread is not None:
             _warn_local(scope, thread)

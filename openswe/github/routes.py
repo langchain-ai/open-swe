@@ -17,16 +17,12 @@ from openswe.workspaces.routing import WorkspaceLookupError, repo_is_routable
 router = APIRouter()
 
 
-def _start_issue_run(
-    request: common.Request, body: bytes, background_tasks: common.BackgroundTasks
-) -> None:
+async def _start_issue_run(request: common.Request, body: bytes) -> None:
     """Hand an issue mention to MDA's GitHub channel, which owns the issue's conversation.
 
     The channel asks ``/github/channel/events`` what to start.
     """
-    background_tasks.add_task(
-        forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
-    )
+    await forwarding.queue_forward(body, request.headers)
 
 
 async def _launch_automations(
@@ -240,7 +236,7 @@ async def github_webhook(
             return gate_rejection
 
         common.logger.info("Accepted GitHub issue webhook, scheduling background task")
-        _start_issue_run(request, body, background_tasks)
+        await _start_issue_run(request, body)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     action = payload.get("action", "")
@@ -318,7 +314,7 @@ async def github_webhook(
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 
     if is_issue_comment:
-        _start_issue_run(request, body, background_tasks)
+        await _start_issue_run(request, body)
         return {"status": "accepted", "message": "Processing GitHub issue comment event"}
 
     common.logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)

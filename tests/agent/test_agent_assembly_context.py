@@ -13,6 +13,7 @@ from langgraph.graph.state import RunnableConfig
 from runtime_api.catalog import McpServerSpec
 from runtime_api.connections import ConnectionRef
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.loop import ModelChoices
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.mcp.runtime import MCPTools
@@ -184,19 +185,21 @@ async def test_unknown_scope_omits_workspace_and_personal_mcps():
 
 
 @pytest.mark.parametrize(
-    ("background", "attributed", "personal"),
+    ("background", "attributed", "acting", "personal"),
     [
-        (False, "OctoCat", True),
+        (False, "OctoCat", True, True),
         # A background task's completion runs for no person: on a channel's thread as MDA's
         # channel service, which reads no user connections, and elsewhere as the backend's
         # own key, which every such run shares: one person's grant would reach them all.
-        (True, None, False),
-        (False, None, False),
-        (False, "someone-else", False),
+        (True, None, False, False),
+        (False, None, False, False),
+        (False, "someone-else", True, False),
+        # A wakeup attributed to its owner that they didn't start acts as no one.
+        (False, "OctoCat", False, False),
     ],
 )
 async def test_a_personal_mda_mcp_server_goes_only_to_a_run_that_acts_for_its_owner(
-    background: bool, attributed: str | None, personal: bool
+    background: bool, attributed: str | None, acting: bool, personal: bool
 ) -> None:
     def server(name: str, owner: Literal["agent", "user"]) -> McpServerSpec:
         return McpServerSpec(
@@ -211,6 +214,8 @@ async def test_a_personal_mda_mcp_server_goes_only_to_a_run_that_acts_for_its_ow
     config["configurable"]["background_task_completion"] = background
     if attributed is not None:
         config["metadata"] = {"ls_attribution_identifier": attributed}
+    if acting:
+        config["metadata"] = {**config["metadata"], ACTING_USER_KEY: "user-1"}
     loaded = MCPTools(runtime_servers=[server("shared", "agent"), server("own", "user")])
     with patch(
         "openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=loaded

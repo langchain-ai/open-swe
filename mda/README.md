@@ -32,7 +32,7 @@ Every call is authenticated with the run token.
   The graph holds none of it: each model call is offered the run's own operations as tools under their in-process names, and LangGraph's tool node runs each call through the tool the run made for it (`rt/run_tools.py`, `rt/tools.py`), so the prompts, the transcript and the dashboard see what an in-process run shows.
   A tool call is this runtime's: it sends the operation its arguments and the run state its spec says it reads (`reads`, `reads_all`), and turns what it answers into the tool's result, the run state it changed, its stream events and git evidence.
   It also sends the credentials of the MDA connections the spec names (`connections`), read as the run (`managed_deepagents.connections`), which the backend hands that call's tool alone: the deployment's own always, and a person's own on a run that acts for one, who is asked to connect it if they have not.
-  The backend names a person's connection only in the catalog of a run that acts for one (the run token's `user_id`), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
+  The backend names a person's connection only in the catalog of a run that acts as one (the run token's `acting_user_id`, never `user_id`, whom the run is only attributed to), so a run it starts for no one asks no one to connect it: on a channel's thread MDA reads it as its channel service principal (`mda:channel`), which reads no user connections, and on any other thread as the backend's own key, one principal all such runs share.
   A person's connection the run cannot read otherwise (no grant given, Agent Auth not reached) is left out, and the tool works as it did without; a call whose deployment connection is missing or unreadable fails and names it.
   The backend runs no tools node and no tool-call middleware.
   An operation whose box stopped answering ends the run; the backend has told the person.
@@ -198,13 +198,15 @@ MDA's dev server also refuses loopback webhooks, so the completion webhook (`COM
 ## Who a channel's run is for
 
 Before every run a channel starts, MDA asks the backend who its verified sender is (`resolve_user` in `identity.py`, the backend's `POST /mda/resolve-user`, signed with `MDA_SERVICE_SECRET` as the channel endpoints are).
-The backend maps the sender as every other ingress does (`User.for_person`): a linked Slack account in the same workspace, a GitHub account by its numeric id, or a Linear user by email.
+The backend maps the sender as every other ingress does (`User.for_person`): a Slack account linked in the sender's own workspace (a link that names no workspace matches no one), a GitHub user by their numeric id, or a Linear user by email.
 A match runs as that Open SWE user (`{"type": "user", "id": <users.id>}`), the principal a trusted-backend call for that id gets, so one person is one principal on every channel.
-Anyone else, bots, and a sender the channel couldn't verify keep the channel's own principal (`null`); the channel endpoints still gate the run and ask the person to connect their account.
+Anyone else is answered `null`, as is every sender while the backend can't read its users: MDA runs a verified person as their own GitHub, Linear or Slack principal, which owns no user connections, and a bot, an app or a sender the channel couldn't verify as the channel.
+The channel endpoints still gate the run and ask the person to connect their account.
 
 The backend's own runs and answers on a channel's thread go through MDA's trusted-backend ingress (see [Linear](#linear)).
-One for a person, such as a dashboard follow-up, runs as the principal that person's channel runs have (`MDA_WORKSPACE_ID`).
-One for no person (stops, system runs, a machine's answers), or for a person whose principal Agent Auth can't name, runs as MDA's channel service principal, `mda:channel`, which owns no user connections.
+One a person started themselves, a dashboard follow-up or answer, runs as the principal that person's channel runs have (`MDA_WORKSPACE_ID`).
+Every other one runs as MDA's channel service principal, `mda:channel`, which owns no user connections: stops, system runs, a machine's answers, a message an agent relays, and runs the backend starts for a person it only attributes them to, such as a wakeup, an event match or a task message.
+So does one for a person whose principal Agent Auth can't name, and then its run token acts as no one either (`acting_user_id`).
 User-owned connections depend on it: any other id there is a person to MDA, so on Slack threads every such run would share that id's grants.
 
 ## Linear
@@ -258,7 +260,7 @@ Its threads are the channel's, as Linear sessions' are: the dashboard continues 
 
 The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake.
 Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
-When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until the run's metadata lands), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
+When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until its first metadata write, by the run or by the backend taking it back, says who sees it), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
 Later messages in that Slack thread, and Slack's Stop, go the same way.
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
 The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
@@ -267,9 +269,11 @@ The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` 
 There is no setting: an environment whose Slack app isn't registered with Trigger Server gets a 401, and the backend handles the conversation as before.
 
 A handed-over message never ends in silence.
-When Trigger Server doesn't take the first message of a new conversation (it refuses, or the forward gives up), the backend releases the conversation and runs the message itself, as it did before MDA.
-When it doesn't take a later message in a conversation MDA holds, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
+When Trigger Server doesn't take a message in a conversation the channel hasn't started a run in yet (it refuses, or the forward gives up), the backend releases the conversation and runs the message itself, as it did before MDA.
+The backend claims a new conversation only once it has gated and remembered the message, so a failure before the hand-off leaves the conversation unclaimed.
+When Trigger Server doesn't take a message in a conversation the channel started, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
 Taking it back is atomic, so the person gets either the run or the error.
+When MDA retries a call to `/slack/channel/events` it got no answer to (same `webhook-id`), the backend builds the run again from the request that call took; any other call for the message gets no run.
 Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 

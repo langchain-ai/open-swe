@@ -6,7 +6,9 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
+from langgraph_sdk.errors import NotFoundError
 
 from openswe.github import routes as github_routes
 from openswe.github import webhook as github_webhooks
@@ -706,9 +708,7 @@ def test_a_github_issue_followup_keeps_the_threads_workspace(monkeypatch) -> Non
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
     )
-    monkeypatch.setattr(
-        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=True)
-    )
+    monkeypatch.setattr(github_webhooks, "_conversation_started", AsyncMock(return_value=True))
     monkeypatch.setattr(
         webhook_common, "get_thread_workspace", lambda thread_id: asyncio.sleep(0, result="core")
     )
@@ -755,6 +755,33 @@ def test_a_github_issue_followup_keeps_the_threads_workspace(monkeypatch) -> Non
     assert run.configurable["workspace"] == "core"
 
 
+def _thread_not_on_mda() -> NotFoundError:
+    response = httpx2.Response(404, request=httpx2.Request("GET", "http://test"))
+    return NotFoundError("not found", response=response, body=None)
+
+
+@pytest.mark.parametrize(
+    ("state", "started"),
+    [
+        (_thread_not_on_mda(), False),
+        # Adopted by a delivery whose run never took a turn: a retry still starts afresh.
+        ({"values": {"messages": []}}, False),
+        ({"values": {"messages": [{"type": "human", "content": "Fix it"}]}}, True),
+    ],
+)
+async def test_an_issue_thread_continues_only_once_a_run_took_the_issue(
+    monkeypatch: pytest.MonkeyPatch, state: object, started: bool
+) -> None:
+    read = (
+        AsyncMock(side_effect=state)
+        if isinstance(state, Exception)
+        else AsyncMock(return_value=state)
+    )
+    monkeypatch.setattr(github_webhooks.THREADS, "state", read)
+
+    assert await github_webhooks._conversation_started("thread-1") is started
+
+
 @pytest.mark.parametrize(
     ("private", "persisted", "scope", "prepared"),
     [
@@ -787,9 +814,7 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
     monkeypatch.setattr(
         webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
     )
-    monkeypatch.setattr(
-        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
-    )
+    monkeypatch.setattr(github_webhooks, "_conversation_started", AsyncMock(return_value=False))
     monkeypatch.setattr(
         webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
     )

@@ -56,9 +56,15 @@ async def test_only_mda_may_ask() -> None:
         # A Slack account linked in another workspace is someone else's.
         ({"provider": "slack", "id": "U1", "teamId": "T2"}, False),
         ({"provider": "slack", "id": "U-unknown", "teamId": "T1"}, False),
+        # A link that names no workspace could be anyone's in any of them.
+        ({"provider": "slack", "id": "U2", "teamId": "T1"}, False),
         ({"provider": "github", "id": "1001", "name": "ada", "type": "User"}, True),
         ({"provider": "github", "id": "1001", "name": "ada", "type": "Bot"}, False),
+        # Only the numeric id is GitHub's word for who it is; a login can change hands.
+        ({"provider": "github", "id": "2002", "name": "ada", "type": "User"}, False),
         ({"provider": "linear", "id": "lin-1", "email": "ada@example.com"}, True),
+        ({"provider": "linear", "id": "lin-1", "type": "user", "email": "ada@example.com"}, True),
+        ({"provider": "linear", "id": "app-1", "type": "app", "email": "ada@example.com"}, False),
         ({"provider": "linear", "id": "lin-1"}, False),
     ],
 )
@@ -67,6 +73,7 @@ async def test_a_linked_sender_runs_as_their_open_swe_user(
 ) -> None:
     user = await User.sign_in("github", "1001", login="ada", email="ada@example.com")
     await user.link("slack", "U1", team_id="T1")
+    await user.link("slack", "U2")
 
     response = await _ask({"actor": actor, "channel": {"name": actor["provider"]}})
 

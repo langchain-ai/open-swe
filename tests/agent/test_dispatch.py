@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.slack import thinking as slack_thinking
 from openswe.users import User
 
@@ -146,6 +147,23 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         assert created["config"]["metadata"]["user_id"] == str(user_id)
         assert created["metadata"]["ls_repo_provider"] == "github"
         assert created["metadata"]["ls_attribution_identifier"] == "mason-gh"
+        # Attributed to the person, but a run the backend starts acts as no one.
+        assert ACTING_USER_KEY not in created["metadata"]
+
+    # A follow-up the person sent themselves acts as them.
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="dashboard",
+        thread_title=None,
+        config={"configurable": {"github_login": "mason-gh"}},
+        client=client,
+        as_sender=True,
+    )
+    sent = client.runs.created[-1]
+    assert sent["metadata"][ACTING_USER_KEY] == str(user_id)
+    assert sent["config"]["metadata"][ACTING_USER_KEY] == str(user_id)
 
     await dispatch.create_durable_run(
         "thread-1",
@@ -156,6 +174,7 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         config={"configurable": {"slack_thread": {"triggering_user_id": "unknown"}}},
         metadata={
             "user_id": str(user_id),
+            ACTING_USER_KEY: str(user_id),
             "ls_attribution_identifier": "previous-person",
             "ls_git_repo": "wrong/default",
             "ls_git_branch": "main",
@@ -164,6 +183,8 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     )
     unknown = client.runs.created[-1]["metadata"]
     assert "user_id" not in unknown
+    # Only the backend says whom a run acts as, never its caller.
+    assert ACTING_USER_KEY not in unknown
     assert "ls_attribution_identifier" not in unknown
     assert "ls_git_repo" not in unknown
     assert "ls_git_branch" not in unknown

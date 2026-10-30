@@ -13,6 +13,7 @@ from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
+from openswe import event_claims
 from openswe.database import configured, transaction
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.slack.payloads import SlackEventEnvelope
@@ -25,6 +26,8 @@ type WebhookSource = Literal["github", "slack", "linear", "deployment"]
 RETAINED_DAYS = 14
 _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
+# Longer than any sender keeps retrying one delivery.
+_DELIVERY_CLAIM_TTL = timedelta(hours=24)
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
@@ -304,6 +307,52 @@ class EventLog:
         task.add_done_callback(_POSTHOG_TASKS.discard)
         await EventSubscription.deliver(event)
         return True
+
+    @classmethod
+    async def record_once(
+        cls,
+        request: Request,
+        body: bytes,
+        source: WebhookSource,
+        *,
+        event_type: str,
+        delivery_id: str,
+        refs: EventRefs | None = None,
+    ) -> bool:
+        """``record`` a delivery the sender may send more than once, at most once.
+
+        A retry, or another call for the same delivery, logs and wakes nothing
+        again. A delivery that was not stored gives its claim back, so its next
+        try records it. Never raises; False means the row was not stored.
+        """
+        if not configured():
+            return False
+        scope = f"{_TABLE}:{source}"
+        claimed = False
+        try:
+            claimed = await event_claims.claim(scope, delivery_id, ttl=_DELIVERY_CLAIM_TTL)
+        except Exception:  # noqa: BLE001 - a duplicate row beats a lost one
+            logger.warning(
+                "Claiming a delivery for the event log failed; recording it unclaimed",
+                extra={"webhook_source": source, "webhook_delivery": delivery_id},
+                exc_info=True,
+            )
+        else:
+            if not claimed:
+                return True
+        stored = await cls.record(
+            request, body, source, event_type=event_type, delivery_id=delivery_id, refs=refs
+        )
+        if not stored and claimed:
+            try:
+                await event_claims.release(scope, delivery_id)
+            except Exception:  # noqa: BLE001 - the claim lapses on its own
+                logger.warning(
+                    "Releasing an unrecorded delivery's event log claim failed",
+                    extra={"webhook_source": source, "webhook_delivery": delivery_id},
+                    exc_info=True,
+                )
+        return stored
 
     @classmethod
     async def kinds(

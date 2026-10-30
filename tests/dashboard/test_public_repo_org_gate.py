@@ -219,7 +219,7 @@ async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) 
     async def fake_forward(*_args, **_kwargs) -> None:
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(forwarding, "forward_to_mda_channel", fake_forward)
+    monkeypatch.setattr(forwarding, "queue_forward", fake_forward)
 
     response = await _post_github_webhook(
         "issues",
