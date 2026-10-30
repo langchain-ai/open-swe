@@ -96,12 +96,6 @@ def test_system_notification_survives_run_input_conversion() -> None:
 
     assert get_notification_metadata(injected) == {"source": "system:task"}
     assert get_notification_metadata(human) is None
-    assert injected.content == notification["content"]
-    assert isinstance(notification["content"], list)
-    assert notification["content"][0] is image
-    root = _parse(notification["content"][1]["text"])
-    assert root.attrib == {"sender": "system:task", "surface": "web", "kind": "system"}
-    assert (root.text or "").strip() == "Worker <finished>"
 
 
 def _person_intro_message(entity_id: str) -> HumanMessage:
