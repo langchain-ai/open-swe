@@ -292,6 +292,7 @@ class DescriptionReview(BaseModel):
     title: str
     body: str
     issues: list[str] = Field(max_length=20)
+    verbosity_suggestions: list[str] = Field(default_factory=list, max_length=5)
 
     @field_validator("issues")
     @classmethod
@@ -343,6 +344,11 @@ def render_review_body(
                 "Correct these material inaccuracies or omissions in the PR description:",
                 *[f"- {escape(issue)}" for issue in description_review.issues],
             ]
+        )
+    if description_review is not None and description_review.verbosity_suggestions:
+        parts.append("**Description brevity suggestions (advisory only)**")
+        parts.extend(
+            f"- {escape(suggestion)}" for suggestion in description_review.verbosity_suggestions
         )
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"

@@ -13,6 +13,9 @@ Args:
   A ranking with missing, unknown, or repeated IDs publishes nothing and returns ``expected_finding_ids`` so you can rank that exact set.
 - description_review: Required only when the reviewer instructions enable the PR author’s description-verification experiment; omitted otherwise and in eval mode.
   Your verified description verdict: exact full `head_sha`, current `title`, current `body` (empty string if absent), and `issues` (a list of evidence-backed material inaccuracies or omissions, empty when clean).
+  Optional `verbosity_suggestions` lists up to five actionable ways to remove repetition, boilerplate or unnecessary narration without losing useful context.
+  These render as advisory suggestions only; they never request changes, prevent dismissal of the description block, or change the approval assessment.
+  Never put verbosity-only concerns in `issues`.
   The tool rechecks the live PR text and head before publication and rejects stale verdicts.
   Nonempty issues submit a real `REQUEST_CHANGES` review even with no inline findings or approval policy, and prevent automatic approval.
   Startup already placed a description change request; failures or incomplete verification leave it standing.

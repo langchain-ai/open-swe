@@ -1350,7 +1350,14 @@ async def test_description_verdict_posts_real_change_request_or_clears_its_block
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
 
-    verdict = DescriptionReview(head_sha="a" * 40, title="T", body="B", issues=issues)
+    suggestion = "Combine the repeated implementation summaries into one sentence."
+    verdict = DescriptionReview(
+        head_sha="a" * 40,
+        title="T",
+        body="B",
+        issues=issues,
+        verbosity_suggestions=[suggestion],
+    )
     github = MagicMock()
     pull = github.repo.return_value.pull_request.return_value
     pull.pull = AsyncMock(return_value={"head": {"sha": "a" * 40}, "title": "T", "body": "B"})
@@ -1390,6 +1397,8 @@ async def test_description_verdict_posts_real_change_request_or_clears_its_block
     assert result["description_blocked"] is bool(issues)
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == ("REQUEST_CHANGES" if issues else "COMMENT")
+    assert "Description brevity suggestions (advisory only)" in post.await_args.kwargs["body"]
+    assert suggestion in post.await_args.kwargs["body"]
     if issues:
         assert "No issues found" not in post.await_args.kwargs["body"]
         assert issues[0] in post.await_args.kwargs["body"]

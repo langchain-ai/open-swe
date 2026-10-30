@@ -23,6 +23,10 @@ Fetch current PR text with `gh pr view` when needed.
 Identify only materially false claims or important omissions that would mislead a reviewer about behavior, scope, compatibility, security, data/schema changes, migrations or required rollout steps.
 An empty description of a substantive change is an important omission.
 Concise but accurate descriptions are fine; do not demand an exhaustive file list, boilerplate, test sections, formatting or stylistic changes.
+Detect unnecessary verbosity separately: repeated summaries, duplicated points, boilerplate or implementation narration that adds no useful context.
+When there is a concrete simplification, include a short, actionable `verbosity_suggestions` entry identifying what to cut or combine while preserving important details.
+These suggestions are advisory only: never put verbosity or stylistic preferences in `issues`, request changes for them, or leave the description block standing because of them.
+Length alone is not a problem; omit suggestions when the detail helps reviewers understand the change.
 Do not infer unverified test results or invent requirements.
 Pass `description_review` to `publish_review` with the exact reviewed `head_sha`, `title`, `body` (empty string when absent), and `issues` (empty when clean).
 Each issue must explain the incorrect claim or omission, cite concrete code evidence (file and lines), and say what the description needs to communicate.
