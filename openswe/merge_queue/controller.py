@@ -93,6 +93,18 @@ class QueueController:
             )
             config = None
         current = QueueController(config) if config is not None else self
+        if config is not None and config.sync_workflow_policy:
+            assert current.dispatcher is not None
+            try:
+                approved = await current.dispatcher.workflow_policy()
+                config = await self.queue.adopt_workflow_policy(config, approved)
+                current = QueueController(config)
+            except Exception:
+                logger.exception(
+                    "Merge queue workflow policy synchronization failed",
+                    extra={"queue_id": str(self.queue.id)},
+                )
+                config = None
         await NativeQueueRuntime(
             self.queue.id,
             self.config.repository_id,

@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, cast, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -45,6 +45,7 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # Open SWE asked who has not accepted yet, so the request is still open to anyone;
 # ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
 ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
+SUPPLEMENTARY_REVIEWS_KEY = "supplementary_reviews"
 
 
 class ChannelChoice(TypedDict):
@@ -345,6 +346,44 @@ class HumanReviewRequest(Base):
                 .order_by(cls.created_at, cls.id)
             )
             return list(rows)
+
+    @asynccontextmanager
+    async def supplementary_rotation(
+        self, policy_id: str
+    ) -> AsyncIterator[tuple[Self | None, dict[str, datetime]]]:
+        """Read one supplementary review's rotation history and reserve a reviewer atomically."""
+        cls = type(self)
+        pr = self.pull_request
+        repository = f"{pr.owner}/{pr.repo}".lower()
+        review = cls.run_config[SUPPLEMENTARY_REVIEWS_KEY][policy_id]
+        login = review["github_login"].astext
+        assigned_at = cast(review["assigned_at"].astext, DateTime(timezone=True))
+        async with postgres.session() as session:
+            await session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(f"supplementary-review:{repository}:{policy_id}", 0)
+                    )
+                )
+            )
+            row = await session.scalar(
+                cls._loaded(select(cls))
+                .where(cls.id == self.id)
+                .with_for_update(of=cls)
+                .execution_options(populate_existing=True)
+            )
+            rows = await session.execute(
+                select(login, func.max(assigned_at))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == repository,
+                    login.is_not(None),
+                    login != "",
+                )
+                .group_by(login)
+            )
+            yield row, {name.lower(): at for name, at in rows if name and at is not None}
 
     @classmethod
     async def open_review_counts(
