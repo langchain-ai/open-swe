@@ -5014,17 +5014,6 @@
             ],
             "title": "Experimental Memory"
           },
-          "pr_failure_reactions": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Failure Reactions"
-          },
           "review_draft_prs": {
             "anyOf": [
               {

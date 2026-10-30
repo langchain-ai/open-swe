@@ -88,7 +88,6 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
-    pr_failure_reactions: bool | None = None
     experimental_fleet: bool | None = None
     experimental_memory: bool | None = None
     draft_prs: bool | None = None
@@ -407,7 +406,6 @@ async def put_my_profile(
         login,
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
-            pr_failure_reactions=update.pr_failure_reactions,
             experimental_fleet=update.experimental_fleet,
             experimental_memory=update.experimental_memory,
             experimental_act_as_approval=update.experimental_act_as_approval,
@@ -419,7 +417,6 @@ async def put_my_profile(
     )
     if preferences is None and (
         update.concierge_mode
-        or update.pr_failure_reactions
         or update.experimental_fleet
         or update.experimental_memory
         or update.experimental_act_as_approval

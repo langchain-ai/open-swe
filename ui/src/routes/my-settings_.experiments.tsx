@@ -32,11 +32,6 @@ function ExperimentsPage() {
           label="Concierge mode"
           description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
         />
-        <ProfileSwitchRow
-          field="pr_failure_reactions"
-          label="React to failing checks"
-          description="Add ⚠️ to watched pull request posts when checks fail on a pull request you own."
-        />
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
