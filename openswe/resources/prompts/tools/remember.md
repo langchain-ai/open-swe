@@ -5,7 +5,7 @@ Remember something for the person you are working for, or offer it to the worksp
   Use it only when they asked you to remember it for themselves; if it is unclear whether they mean just themselves or everyone, ask.
 - `scope: "workspace"`: something you or they learned that would help anyone working in this workspace: how a repository's tests run, a setup step every thread rediscovers, a convention reviewers keep enforcing.
   It reaches other people only through the workspace's curator, which reads what many threads remember and may, much later, fold what holds up into the workspace's prompt.
-  Until the curator processes it, it applies to this person's own runs as if personal when they have Memory on; the result says which.
+  Saved in their own private thread with Memory on, it also applies to their own runs in this workspace until the curator processes it; the result says which.
   Say why you believe it ("`make mda-test`, because plain pytest fails on imports") so the curator can check it.
   Remember lessons you learned yourself here; a person's preference is personal unless they say it is for everyone.
 

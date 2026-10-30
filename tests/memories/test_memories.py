@@ -51,16 +51,20 @@ async def test_the_curator_never_reads_what_a_private_thread_kept_to_itself(
     assert len({memory.person for memory in [*held, *pending]}) == 1
     # A personal memory applies to its person whether or not the curator may read it.
     assert [memory.body for memory in await MEMORIES.personal(person.id)] == ["my own habit"]
-    # Until the curator processes them, their own workspace memories apply to them too.
-    unprocessed = await MEMORIES.personal(person.id, unprocessed_workspace=True)
+    # Until the curator processes them, the workspace memories they saved in their own
+    # private threads apply to them too, but only in that workspace; one from a shared
+    # thread waits for the curator.
+    unprocessed = await MEMORIES.personal(person.id, unprocessed_in=workspace.slug)
     assert {memory.body for memory in unprocessed} == {
         "kept quiet",
         "my own habit",
         "shared on purpose",
-        "learned in public",
     }
+    elsewhere = await MEMORIES.personal(person.id, unprocessed_in="billing")
+    assert [memory.body for memory in elsewhere] == ["my own habit"]
+    assert pending[0].body == "shared on purpose"
     assert await MEMORIES.decide(workspace.slug, pending[0].id, "adopted", "")
-    still = await MEMORIES.personal(person.id, unprocessed_workspace=True)
+    still = await MEMORIES.personal(person.id, unprocessed_in=workspace.slug)
     assert pending[0].id not in {memory.id for memory in still}
 
 

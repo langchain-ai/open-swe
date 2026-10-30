@@ -202,21 +202,31 @@ class Memories:
         return row
 
     async def personal(
-        self, person: UUID | None, *, unprocessed_workspace: bool = False
+        self, person: UUID | None, *, unprocessed_in: str | None = None
     ) -> list[PersonalMemory]:
         """``person``'s personal memories, newest first; none for no person.
 
-        With ``unprocessed_workspace``, also the workspace memories they saved that the
-        curator has not adopted or declined yet: until it does, they apply to their person
-        as if personal.
+        With ``unprocessed_in``, also the workspace memories they saved for that workspace
+        that the curator has not adopted or declined yet: until it does, they apply to their
+        person as if personal. Only those saved in the person's own private thread, which
+        passed the bar a personal memory must: one from a shared thread may carry text
+        someone else put there, and only the curator may pass that on.
         """
         if person is None or not postgres.configured():
             return []
         scopes = MemoryRow.scope == "personal"
-        if unprocessed_workspace:
+        if unprocessed_in is not None:
             scopes = or_(
                 scopes,
-                and_(MemoryRow.scope == "workspace", MemoryRow.status.in_(("pending", "held"))),
+                and_(
+                    MemoryRow.scope == "workspace",
+                    MemoryRow.status.in_(("pending", "held")),
+                    MemoryRow.from_private_thread.is_(True),
+                    MemoryRow.workspace_id
+                    == select(WorkspaceRow.id)
+                    .where(WorkspaceRow.slug == unprocessed_in)
+                    .scalar_subquery(),
+                ),
             )
         async with postgres.session() as session:
             rows = await session.scalars(

@@ -12,7 +12,8 @@ class UserPreferences(BaseModel):
     pr_failure_reactions: bool = False
     experimental_fleet: bool = False
     # Threads this person starts carry what their workspace's curator learned, and the
-    # workspace memories they saved reach their own runs until the curator processes them.
+    # workspace memories they saved in their private threads reach their own runs there
+    # until the curator processes them.
     experimental_memory: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
     experimental_act_as_approval: bool = False

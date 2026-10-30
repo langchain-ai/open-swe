@@ -486,7 +486,11 @@ async def _thread_participant(
         _resolve_user_custom_instructions(login),
         MEMORIES.personal(
             user.id if user else None,
-            unprocessed_workspace=user is not None and user.typed_preferences.experimental_memory,
+            unprocessed_in=(
+                RunConfig.from_config(config).workspace_slug
+                if user is not None and user.typed_preferences.experimental_memory
+                else None
+            ),
         ),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
@@ -1004,6 +1008,9 @@ _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
     "open_pull_request",
     "web_search",
     "fetch_url",
+    # A lesson is worth keeping the moment it is learned, not after a search for the tool.
+    "remember",
+    "forget",
 }
 
 
