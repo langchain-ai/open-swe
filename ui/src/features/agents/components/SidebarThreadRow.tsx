@@ -289,18 +289,18 @@ export function SidebarConversationRow({
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
         className={cn(
-          "flex items-center rounded-xl px-space-2 text-chat-text transition-colors group-focus-within/row:bg-chat-hover group-focus-within/row:pr-14 group-hover/row:bg-chat-hover group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
           compact ? "h-7" : "h-8",
-          active && "bg-chat-hover"
+          active && "bg-surface-level-3"
         )}
       >
         <SidebarRowTitle title={title} marquee={marquee} />
       </Link>
-      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-chat-hover opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
+      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
         <IconButton
           icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? "Unpin chat" : "Pin chat"}
-          className="text-chat-muted hover:text-chat-text"
+          className="text-tertiary hover:text-secondary"
           size="xs"
           color="secondary"
           variant="plain"
@@ -314,7 +314,7 @@ export function SidebarConversationRow({
         <IconButton
           icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
           label={archived ? "Unarchive chat" : "Archive chat"}
-          className="text-chat-muted hover:text-chat-text"
+          className="text-tertiary hover:text-secondary"
           size="xs"
           color="secondary"
           variant="plain"

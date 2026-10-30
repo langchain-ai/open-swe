@@ -1,4 +1,6 @@
 import { AgentChatEmptyState } from "@/features/agents/components/AgentChatEmptyState"
+import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
+import { cn } from "@/lib/utils"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
@@ -77,6 +79,7 @@ export function AgentsHome({
   initialLocalRepo?: string
   initialNoRepo?: boolean
 }) {
+  const agentWorkspace = useAgentWorkspace()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -593,72 +596,85 @@ export function AgentsHome({
             submittedDraft ? undefined : setVisibilityOverride
           }
         />
-        {optimisticDraftThread ? (
-          <Messages
-            messages={optimisticDraftThread.messages}
-            isStreaming
-            contentWidthClass="max-w-3xl"
-          />
-        ) : (
-          <AgentChatEmptyState />
-        )}
-        <AgentComposerDock>
-          {localError && (
-            <Banner intent="error" className="mb-space-3 w-full">
-              {localError}
-            </Banner>
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            agentWorkspace &&
+              !optimisticDraftThread &&
+              "justify-center overflow-y-auto py-space-6"
           )}
-          <AgentPromptBar
-            activeRun={
-              optimisticDraftThread
-                ? { threadId: pendingThreadId ?? "", running: true }
-                : undefined
-            }
-            autoFocus
-            compact
-            placeholder="Do anything"
-            onSubmit={handleSubmit}
-            onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
-            disabled={Boolean(submittedDraft)}
-            busy={Boolean(optimisticDraftThread)}
-            models={models}
-            selection={activeSelection}
-            onSelectionChange={handleSelectionChange}
-            repos={workspaceRepos}
-            selectedRepo={repo}
-            onRepoChange={optimisticDraftThread ? undefined : selectRepo}
-            runTarget={isDesktop ? runTarget : undefined}
-            onRunTargetChange={
-              !optimisticDraftThread && isDesktop && cloudEnabled
-                ? handleRunTargetChange
-                : undefined
-            }
-            localRepos={localRepos}
-            selectedLocalRepoPath={localRepoPath}
-            selectedLocalRepoBranch={localRepoBranch}
-            localRepoBranches={localRepoBranches}
-            onSelectLocalRepo={handleSelectLocalRepo}
-            onAddLocalRepo={() => void handleAddLocalRepo()}
-            onRemoveLocalRepo={(cwd) => void handleRemoveLocalRepo(cwd)}
-            onRefreshLocalRepoBranch={() => void refreshLocalRepoBranch()}
-            onSelectLocalRepoBranch={(branch) =>
-              void selectLocalRepoBranch(branch)
-            }
-            localWorkspaceMode={localWorkspaceMode}
-            localWorktreeLabel={
-              selectedLocalRef?.worktreePath ? "Worktree" : undefined
-            }
-            onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
-            workspaceOptions={workspaces}
-            selectedWorkspace={selectedWorkspace}
-            onWorkspaceChange={
-              !optimisticDraftThread && runTarget === "cloud"
-                ? selectWorkspace
-                : undefined
-            }
-            skills={skills.data}
-          />
-        </AgentComposerDock>
+        >
+          {optimisticDraftThread ? (
+            <Messages
+              messages={optimisticDraftThread.messages}
+              isStreaming
+              contentWidthClass="max-w-3xl"
+            />
+          ) : (
+            <AgentChatEmptyState />
+          )}
+          <AgentComposerDock>
+            {localError && (
+              <Banner intent="error" className="mb-space-3 w-full">
+                {localError}
+              </Banner>
+            )}
+            <AgentPromptBar
+              activeRun={
+                optimisticDraftThread
+                  ? { threadId: pendingThreadId ?? "", running: true }
+                  : undefined
+              }
+              autoFocus
+              compact
+              placeholder={
+                agentWorkspace
+                  ? "Describe a task or ask a question…"
+                  : "Do anything"
+              }
+              onSubmit={handleSubmit}
+              onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
+              disabled={Boolean(submittedDraft)}
+              busy={Boolean(optimisticDraftThread)}
+              models={models}
+              selection={activeSelection}
+              onSelectionChange={handleSelectionChange}
+              repos={workspaceRepos}
+              selectedRepo={repo}
+              onRepoChange={optimisticDraftThread ? undefined : selectRepo}
+              runTarget={isDesktop ? runTarget : undefined}
+              onRunTargetChange={
+                !optimisticDraftThread && isDesktop && cloudEnabled
+                  ? handleRunTargetChange
+                  : undefined
+              }
+              localRepos={localRepos}
+              selectedLocalRepoPath={localRepoPath}
+              selectedLocalRepoBranch={localRepoBranch}
+              localRepoBranches={localRepoBranches}
+              onSelectLocalRepo={handleSelectLocalRepo}
+              onAddLocalRepo={() => void handleAddLocalRepo()}
+              onRemoveLocalRepo={(cwd) => void handleRemoveLocalRepo(cwd)}
+              onRefreshLocalRepoBranch={() => void refreshLocalRepoBranch()}
+              onSelectLocalRepoBranch={(branch) =>
+                void selectLocalRepoBranch(branch)
+              }
+              localWorkspaceMode={localWorkspaceMode}
+              localWorktreeLabel={
+                selectedLocalRef?.worktreePath ? "Worktree" : undefined
+              }
+              onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
+              workspaceOptions={workspaces}
+              selectedWorkspace={selectedWorkspace}
+              onWorkspaceChange={
+                !optimisticDraftThread && runTarget === "cloud"
+                  ? selectWorkspace
+                  : undefined
+              }
+              skills={skills.data}
+            />
+          </AgentComposerDock>
+        </div>
       </div>
       {localRepo ? (
         <LocalRepoRightPanel

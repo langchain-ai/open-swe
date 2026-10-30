@@ -34,6 +34,7 @@ import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
+import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
 import type {
   PullRequestSnapshot,
   SidebarRepo,
@@ -643,7 +644,7 @@ export function AgentsSidebar({
       {...layout}
       className={cn(
         "border-r border-default bg-surface-level-2",
-        agentWorkspaceEnabled && "border-chat-border bg-chat-sidebar"
+        agentWorkspaceEnabled && "border-subtle"
       )}
     >
       <div
@@ -654,15 +655,22 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className={cn(
-            "flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary",
-            agentWorkspaceEnabled && "text-chat-text"
-          )}
+          className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <LogoMark alt="" className="size-5 shrink-0" />
-          <span>
-            {agentWorkspaceEnabled ? "LangSmith Agent Workspace" : "Open SWE"}
-          </span>
+          {agentWorkspaceEnabled ? (
+            <span
+              className="flex min-w-0 flex-col gap-0.5"
+              aria-label="LangSmith Agent Workspace"
+            >
+              <span className="text-sm font-semibold">LangSmith</span>
+              <span className="text-xxs font-normal tracking-normal text-tertiary">
+                Agent Workspace
+              </span>
+            </span>
+          ) : (
+            "Open SWE"
+          )}
         </Link>
         <div className="flex shrink-0 items-center gap-space-1">
           <IconButton
@@ -1351,6 +1359,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const agentWorkspaceEnabled = useProfile().data?.experimental_fleet === true
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1431,20 +1440,22 @@ export function AgentsShell({
   useRegisterAppCommands(sidebarCommands)
 
   return (
-    <SidebarLayoutProvider value={layout}>
-      <TooltipProvider delayDuration={500} skipDelayDuration={100}>
-        <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
-          <AgentsSidebar
-            user={user}
-            activeThreadId={activeThreadId}
-            layout={layout}
-          />
-          <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
-            {children}
-          </main>
-        </div>
-      </TooltipProvider>
-    </SidebarLayoutProvider>
+    <AgentWorkspaceProvider enabled={agentWorkspaceEnabled}>
+      <SidebarLayoutProvider value={layout}>
+        <TooltipProvider delayDuration={500} skipDelayDuration={100}>
+          <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
+            <AgentsSidebar
+              user={user}
+              activeThreadId={activeThreadId}
+              layout={layout}
+            />
+            <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
+              {children}
+            </main>
+          </div>
+        </TooltipProvider>
+      </SidebarLayoutProvider>
+    </AgentWorkspaceProvider>
   )
 }
 
@@ -1491,7 +1502,7 @@ function AgentWorkspaceThreadList({
       <Link
         to="/agents"
         onClick={onNavigate}
-        className="mb-space-4 flex h-8 shrink-0 items-center gap-space-2 rounded-xl px-space-2 text-sm font-normal text-chat-text transition-colors hover:bg-chat-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        className="mb-space-4 flex h-8 shrink-0 items-center gap-space-2 rounded-xl px-space-2 text-sm font-normal text-secondary transition-colors hover:bg-surface-level-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         <NotePencilIcon size={18} weight="regular" className="shrink-0" />
         New chat
@@ -1512,7 +1523,7 @@ function AgentWorkspaceThreadList({
             <div key={label} className="shrink-0">
               <SidebarSectionHeader
                 label={label}
-                headingClassName="mb-space-2 py-space-1 text-xs font-medium text-chat-muted hover:text-chat-text"
+                headingClassName="mb-space-2 py-space-1 text-xs font-medium text-tertiary hover:text-secondary"
                 collapsed={collapsible ? !archivedOpen : undefined}
                 onToggleCollapsed={
                   collapsible ? () => setArchivedOpen(!archivedOpen) : undefined

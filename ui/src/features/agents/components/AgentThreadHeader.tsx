@@ -19,6 +19,7 @@ import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
 import { useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -106,6 +107,7 @@ export function AgentThreadHeader({
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
+  const agentWorkspace = useAgentWorkspace()
   const worktreeThread = useLocalThread(thread?.id ?? "")
   const sidebarCollapsed = useSidebarCollapsed()
   const TargetIcon = TARGET_ICONS[target]
@@ -213,7 +215,10 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
+      className={cn(
+        "relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent",
+        agentWorkspace && "h-14 border-transparent bg-transparent after:hidden"
+      )}
     >
       <div
         className={cn(
