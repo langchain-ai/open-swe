@@ -90,13 +90,9 @@ async def forget(memory_id: str, scope: Literal["personal", "workspace"]) -> dic
         parsed = UUID(memory_id)
     except ValueError:
         return {"ok": False, "error": "memory_id is not a memory id"}
-    if scope == "personal":
-        if not await MEMORIES.forget(parsed, person.id):
-            return {"ok": False, "error": "No personal memory of yours has that id."}
-        return {"ok": True, "memory_id": memory_id, "status": "forgotten"}
-    withdrawal = await MEMORIES.withdraw(parsed, person.id)
+    withdrawal = await MEMORIES.withdraw(parsed, person.id, scope)
     if withdrawal is None:
-        return {"ok": False, "error": "No workspace memory you saved has that id."}
+        return {"ok": False, "error": f"No {scope} memory you saved has that id."}
     return {
         "ok": True,
         "memory_id": memory_id,
@@ -104,6 +100,9 @@ async def forget(memory_id: str, scope: Literal["personal", "workspace"]) -> dic
         "applies": (
             "at once: the curator never saw it"
             if withdrawal == "deleted"
+            else "at once for this person's runs, and the workspace's curator decides what "
+            "leaves its prompt"
+            if scope == "personal"
             else "once the workspace's curator decides it, even if it already adopted it"
         ),
     }

@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.config import ENV
 from openswe.credential_scope import private_owner_login
+from openswe.memories.store import CURATOR_SOURCE
 from openswe.run_config import RunConfig
 from openswe.slack.client import SLACK_THREAD_MAX_MESSAGES, fetch_slack_thread_messages
 from openswe.source_context import SourceContext
@@ -289,7 +290,7 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
             scope.owner_type == "system"
             and scope.curator is not None
             and scope.curator == cfg.workspace_slug
-            and cfg.source == "curator"
+            and cfg.source == CURATOR_SOURCE
             and not cfg.github_login
             and not cfg.started_by_id
         ),

@@ -15,7 +15,7 @@ from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.jobs.queue import Job
-from openswe.memories.store import MEMORIES
+from openswe.memories.store import CURATOR_SOURCE, CURATOR_THREAD_KEY, MEMORIES
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.threads import succession
@@ -25,10 +25,6 @@ logger = logging.getLogger(__name__)
 
 WAKE_JOB: Final = "workspace_curator_wake"
 WAKE_SCHEDULE: Final = "17 6 * * *"
-# The thread metadata key naming the workspace a curator thread curates.
-CURATOR_KEY: Final = "curator"
-# The source of the runs the curator's wake starts, the only runs its tools serve.
-CURATOR_SOURCE: Final = "curator"
 _SENDER_ID: Final = "system:curator"
 _ASSISTANT_ID: Final = "agent"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
@@ -66,7 +62,7 @@ class WorkspaceCurator:
                 "owner_type": "system",
                 "visibility": "public",
                 "workspace": self.slug,
-                CURATOR_KEY: self.slug,
+                CURATOR_THREAD_KEY: self.slug,
             },
         )
         configurable = {"thread_id": thread_id, "workspace": self.slug, "source": CURATOR_SOURCE}

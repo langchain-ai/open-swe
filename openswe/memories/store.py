@@ -7,6 +7,7 @@ reads a memory saved in a private thread unless its person agreed to share it.
 """
 
 import hashlib
+import hmac
 from datetime import datetime
 from typing import Final, Literal, Self
 from uuid import UUID, uuid7
@@ -16,6 +17,7 @@ from sqlalchemy import ForeignKey, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.users.models import User
@@ -26,6 +28,10 @@ Status = Literal["pending", "held", "adopted", "declined"]
 Decision = Literal["adopted", "declined"]
 Withdrawal = Literal["deleted", "requested"]
 
+# The thread metadata key naming the workspace a curator thread curates; nobody posts there.
+CURATOR_THREAD_KEY: Final = "curator"
+# The source of the runs the curator's wake starts, the only runs its tools serve.
+CURATOR_SOURCE: Final = "curator"
 MAX_MEMORY_CHARS: Final = 2_000
 MAX_WORKSPACE_PROMPT_CHARS: Final = 40_000
 # The personal memories a person's runs see, newest first.
@@ -58,10 +64,18 @@ class MemoryRow(Base):
 
     @property
     def person_key(self) -> str | None:
-        """The same for every memory one person saved in one workspace, and nothing else."""
+        """The same for every memory one person saved in one workspace, and nothing else.
+
+        Keyed by a server secret: the curator's thread is public, and a plain hash of ids
+        anyone can guess would name who saved each memory.
+        """
         if self.created_by is None:
             return None
-        return hashlib.sha256(f"{self.workspace_id}:{self.created_by}".encode()).hexdigest()[:12]
+        secret = ENV.REMOTE_RUNTIME_TOKEN_SECRET.optional()
+        if not secret:
+            raise RuntimeError("REMOTE_RUNTIME_TOKEN_SECRET keys the curator's person keys")
+        message = f"memory-person:{self.workspace_id}:{self.created_by}".encode()
+        return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()[:16]
 
 
 class WorkspacePromptVersion(Base):
@@ -188,36 +202,26 @@ class Memories:
         async with postgres.session() as session:
             rows = await session.execute(
                 select(MemoryRow.id, MemoryRow.body)
-                .where(MemoryRow.scope == "personal", MemoryRow.created_by == person)
+                .where(
+                    MemoryRow.scope == "personal",
+                    MemoryRow.created_by == person,
+                    MemoryRow.withdrawal_requested.is_(False),
+                )
                 .order_by(MemoryRow.created_at.desc())
                 .limit(_PERSONAL_LIMIT)
             )
         return [PersonalMemory(id=row.id, body=row.body) for row in rows]
 
-    async def forget(self, memory_id: UUID, person: UUID) -> bool:
-        """Delete one of ``person``'s personal memories; False when they have no such one."""
-        async with postgres.session() as session:
-            deleted = await session.scalar(
-                delete(MemoryRow)
-                .where(
-                    MemoryRow.id == memory_id,
-                    MemoryRow.scope == "personal",
-                    MemoryRow.created_by == person,
-                )
-                .returning(MemoryRow.id)
-            )
-        return deleted is not None
-
-    async def withdraw(self, memory_id: UUID, person: UUID) -> Withdrawal | None:
-        """Ask the curator to take back one of ``person``'s workspace memories; None when they
-        saved no such one.
+    async def withdraw(self, memory_id: UUID, person: UUID, scope: Scope) -> Withdrawal | None:
+        """Take back one of ``person``'s memories in ``scope``; None when they saved no such one.
 
         One the curator never saw, held from a private thread, is simply deleted. Any other
-        goes back to the curator, adopted or not, since only it may change the prompt.
+        goes back to the curator, adopted or not, since only it may change the workspace's
+        prompt; a personal one stops applying to its person at once.
         """
         mine = (
             MemoryRow.id == memory_id,
-            MemoryRow.scope == "workspace",
+            MemoryRow.scope == scope,
             MemoryRow.created_by == person,
         )
         async with postgres.session() as session:
@@ -225,18 +229,18 @@ class Memories:
                 delete(MemoryRow).where(*mine, MemoryRow.status == "held").returning(MemoryRow.id)
             ):
                 return "deleted"
-            requested = await session.scalar(
+            await session.execute(
                 update(MemoryRow)
-                .where(*mine)
+                .where(*mine, MemoryRow.withdrawal_requested.is_(False))
                 .values(
                     status="pending",
                     withdrawal_requested=True,
                     updated_by=person,
                     updated_at=func.clock_timestamp(),
                 )
-                .returning(MemoryRow.id)
             )
-        return "requested" if requested else None
+            withdrawn = await session.scalar(select(MemoryRow.id).where(*mine))
+        return "requested" if withdrawn else None
 
     async def for_curator(self, workspace: str, status: Status) -> list[CuratedMemory]:
         async with postgres.session() as session:
