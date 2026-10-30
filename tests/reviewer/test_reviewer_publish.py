@@ -212,48 +212,86 @@ async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() ->
 
 
 @pytest.mark.asyncio
-async def test_advisory_summary_updates_latest_commented_review() -> None:
+@pytest.mark.parametrize("cleanup_status", [200, 404, 500])
+async def test_advisory_summary_supersedes_after_publication(cleanup_status: int) -> None:
+    import httpx2
+
     from openswe.review.publish import review_summary_marker
 
     marker = review_summary_marker(1)
-    import httpx2
-
-    request_url = "https://api.github.com/repos/o/r/pulls/1/reviews"
-    reviews = [
-        {"id": 10, "state": "COMMENTED", "body": marker},
-        {
-            "id": 11,
-            "state": "COMMENTED",
-            "body": f"## ✅ Open SWE Review: No issues found\n{marker}",
-        },
-        {"id": 12, "state": "APPROVED", "body": marker},
-        {
-            "id": 13,
-            "state": "COMMENTED",
-            "body": f"**Open SWE Review** found 3 potential issues.\n{marker}",
-        },
-    ]
-    responses = [
-        httpx2.Response(200, json=reviews, request=httpx2.Request("GET", request_url)),
-        httpx2.Response(
-            200,
-            json={"id": 11, "body": f"Updated assessment {marker}"},
-            request=httpx2.Request("PUT", f"{request_url}/11"),
-        ),
-    ]
-    with patch("openswe.github.http.github_request", AsyncMock(side_effect=responses)) as request:
+    url = "https://api.github.com/repos/o/r/pulls/1/reviews"
+    old = {
+        "id": 11,
+        "state": "COMMENTED",
+        "body": f"## ✅ Open SWE Review: No issues found\n{marker}",
+    }
+    published = {"id": 14, "state": "COMMENTED", "body": f"New assessment {marker}"}
+    post = AsyncMock(
+        return_value=httpx2.Response(200, json=published, request=httpx2.Request("POST", url))
+    )
+    cleanup = AsyncMock(
+        side_effect=[
+            httpx2.Response(
+                200,
+                json=[
+                    old,
+                    {"id": 12, "state": "APPROVED", "body": old["body"]},
+                    {"id": 13, "state": "COMMENTED", "body": f"Found issues {marker}"},
+                    published,
+                ],
+                request=httpx2.Request("GET", url),
+            ),
+            httpx2.Response(
+                cleanup_status, json={"id": 11}, request=httpx2.Request("PUT", f"{url}/11")
+            ),
+        ]
+    )
+    with (
+        patch("openswe.review.publish.github_request", post),
+        patch("openswe.github.http.github_request", cleanup),
+    ):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
             pr_number=1,
             head_sha="new-sha",
-            body=f"Updated assessment {marker}",
+            body=published["body"],
             inline_comments=[],
             token="t",
         )
-    assert result == {"id": 11, "body": f"Updated assessment {marker}"}
-    assert [call.args[1] for call in request.await_args_list] == ["GET", "PUT"]
-    assert request.await_args_list[-1].args[2].endswith("/reviews/11")
+    assert result == published
+    assert post.await_args is not None
+    assert cleanup.await_args is not None
+    assert post.await_args.kwargs["json"]["commit_id"] == "new-sha"
+    assert cleanup.await_args.kwargs["json"] == {"body": "Superseded"}
+    assert cleanup.await_args.args[2].endswith("/reviews/11")
+
+
+@pytest.mark.asyncio
+async def test_failed_publication_leaves_previous_summary_unchanged() -> None:
+    import httpx2
+
+    from openswe.review.publish import review_summary_marker
+
+    url = "https://api.github.com/repos/o/r/pulls/1/reviews"
+    response = httpx2.Response(
+        422, json={"message": "Rejected"}, request=httpx2.Request("POST", url)
+    )
+    with (
+        patch("openswe.review.publish.github_request", AsyncMock(return_value=response)),
+        patch("openswe.github.http.github_request", AsyncMock()) as cleanup,
+    ):
+        result = await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="new-sha",
+            body=f"New assessment {review_summary_marker(1)}",
+            inline_comments=[],
+            token="t",
+        )
+    assert result is not None and result["_status"] == 422
+    cleanup.assert_not_awaited()
 
 
 @pytest.mark.asyncio

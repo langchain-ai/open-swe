@@ -291,6 +291,9 @@ def apply() -> None:
     from openswe.github import checks as github_checks
 
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
+    from openswe.review import publish as review_publish
+
+    review_publish._GITHUB_API_BASE = FAKE_GITHUB_API
 
     # LangSmith's sandbox service: another external boundary. MDA creates every
     # thread's box (mda_entrypoint.py) and the backend reconnects to it by id, both

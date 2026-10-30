@@ -632,7 +632,7 @@ async def post_pull_request_review(
     token: str,
     event: Literal["COMMENT", "APPROVE"] = "COMMENT",
 ) -> dict[str, Any] | None:
-    """Update an advisory summary or publish a review with new findings or approval."""
+    """Publish a fresh review, then supersede the previous advisory summary."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload: dict[str, Any] = {
         "commit_id": head_sha,
@@ -642,27 +642,6 @@ async def post_pull_request_review(
     }
     async with github_client(token=token) as client:
         try:
-            if (
-                event == "COMMENT"
-                and not inline_comments
-                and review_summary_marker(pr_number) in body
-            ):
-                async with GitHubClient.connect(token=token) as github:
-                    pull = github.repo(owner, repo).pull_request(pr_number)
-                    for review in reversed(await pull.reviews()):
-                        previous_body = review.get("body")
-                        review_id = review.get("id")
-                        if (
-                            review.get("state") == "COMMENTED"
-                            and isinstance(previous_body, str)
-                            and review_summary_marker(pr_number) in previous_body
-                            and previous_body.startswith("## ✅ Open SWE Review: No issues found")
-                            and isinstance(review_id, int)
-                        ):
-                            updated = await pull.edit_review(review_id, body)
-                            if not isinstance(updated, dict):
-                                raise ValueError("GitHub returned an invalid PR review")
-                            return updated
             response = await github_request(client, "POST", url, json=payload)
             if response.status_code == 401:
                 raise GitHubAuthError(
@@ -724,6 +703,28 @@ async def post_pull_request_review(
             return {"_error": f"{type(e).__name__}: {e}"}
     data = response.json()
     if isinstance(data, dict):
+        if event == "COMMENT" and not inline_comments and review_summary_marker(pr_number) in body:
+            try:
+                async with GitHubClient.connect(token=token) as github:
+                    pull = github.repo(owner, repo).pull_request(pr_number)
+                    for review in reversed(await pull.reviews()):
+                        previous_body = review.get("body")
+                        review_id = review.get("id")
+                        if (
+                            review_id != data.get("id")
+                            and review.get("state") == "COMMENTED"
+                            and isinstance(previous_body, str)
+                            and review_summary_marker(pr_number) in previous_body
+                            and previous_body.startswith("## ✅ Open SWE Review: No issues found")
+                            and isinstance(review_id, int)
+                        ):
+                            await pull.edit_review(review_id, "Superseded")
+                            break
+            except httpx2.HTTPError, ValueError:
+                logger.exception(
+                    "Failed to supersede advisory review",
+                    extra={"owner": owner, "repo": repo, "pr_number": pr_number},
+                )
         return data
     body_excerpt = (response.text or "")[:500]
     logger.error(

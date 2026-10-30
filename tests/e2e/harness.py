@@ -357,6 +357,30 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
     return pull
 
 
+@app.post("/control/publish-advisory")
+async def control_publish_advisory(request: Request) -> JSONResponse:
+    from openswe.review.publish import post_pull_request_review, review_summary_marker
+
+    body = await request.json()
+    number = int(body["number"])
+    pull = fakes.find_pull(number, OWNER, REPO)
+    if pull is None:
+        raise HTTPException(404, "Pull request not found")
+    result = await post_pull_request_review(
+        owner=OWNER,
+        repo=REPO,
+        pr_number=number,
+        head_sha=pull["head_sha"],
+        body=(
+            "## ✅ Open SWE Review: No issues found\n\n"
+            f"{body['assessment']}\n\n{review_summary_marker(number)}"
+        ),
+        inline_comments=[],
+        token="dummy-user-oauth-token:alice",
+    )
+    return JSONResponse(result)
+
+
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
     """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
@@ -1414,6 +1438,19 @@ def gh_submit_pending_review(
         body=str(body.get("body") or ""),
     )
     return JSONResponse(payload, status_code=status)
+
+
+@app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}")
+def gh_edit_review(
+    owner: str, repo: str, number: int, review_id: int, request: Request, body: _JsonBody
+) -> JSONResponse:
+    pull = fakes.find_pull(number, owner, repo)
+    if pull is not None:
+        for review in pull["reviews"]:
+            if review["id"] == review_id and review["author"] == _token_login(request):
+                review["body"] = str(body.get("body") or "")
+                return JSONResponse(review)
+    return JSONResponse({"message": "Not Found"}, status_code=404)
 
 
 @app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}")

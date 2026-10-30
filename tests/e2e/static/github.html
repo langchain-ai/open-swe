@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mock GitHub — pull requests</title>
     <style>
+      :root { color-scheme: dark; background: #0d1117; color: #e6edf3; }
       body { font-family: system-ui, sans-serif; max-width: 680px; margin: 1.5rem auto; padding: 0 1rem; }
       h1 { font-size: 1.1rem; }
-      .pr { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+      .pr { border: 1px solid #30363d; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
       .pr-title { font-weight: 700; }
-      .meta { color: #666; font-size: 0.85rem; }
-      code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 4px; }
-      a { color: #1264a3; }
+      .meta { color: #9198a1; font-size: 0.85rem; }
+      code { background: #21262d; padding: 0 0.25rem; border-radius: 4px; }
+      a { color: #58a6ff; }
     </style>
   </head>
   <body>
@@ -19,6 +20,11 @@
     <div id="list"></div>
 
     <script>
+      function escapeHtml(value) {
+        const element = document.createElement("span");
+        element.textContent = value || "";
+        return element.innerHTML;
+      }
       async function load() {
         const res = await fetch("/mock/github/data");
         const prs = await res.json();
@@ -34,6 +40,11 @@
               <div class="pr-title"><a href="${p.url}">#${p.number} ${p.title}</a>${p.draft ? " (draft)" : ""}</div>
               <div class="meta"><code>${p.head}</code> → <code>${p.base}</code> · ${p.state} · by ${p.author}</div>
               <div class="files">${p.files.map((f) => `<code>${f.filename}</code>`).join(" ")}</div>
+              ${(p.reviews || []).filter((r) => r.state !== "PENDING").map((r) => `
+                <section class="pr" data-review="${r.id}">
+                  <div class="meta">${escapeHtml(r.author)} · ${escapeHtml(r.state)} · review #${r.id}</div>
+                  <pre style="white-space: pre-wrap">${escapeHtml(r.body)}</pre>
+                </section>`).join("")}
             </div>`,
           )
           .join("");
