@@ -17,10 +17,10 @@ const MAX_PREVIEW_LENGTH = 200
 /** The thought's first line as plain text; the row's own truncation handles overflow. */
 function thoughtPreview(text: string): string {
   const firstLine = text.split("\n").find((line) => line.trim()) ?? ""
+  // Underscores are emphasis only at a word edge; inside a name they are the name.
   return firstLine
     .replace(/^\s*#+\s*/, "")
     .replace(/[*`]/g, "")
-    // Underscores are emphasis only at a word edge; inside a name they are the name.
     .replace(/(^|\W)_+|_+(?=\W|$)/g, "$1")
     .trim()
     .slice(0, MAX_PREVIEW_LENGTH)
