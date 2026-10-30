@@ -52,8 +52,6 @@ class EventName(StrEnum):
     FINDING_RESOLVED = "finding.resolved"
     FINDING_DISMISSED = "finding.dismissed"
     FINDING_REOPENED = "finding.reopened"
-    WORKSPACE_REFRESH_SUCCEEDED = "workspace.refresh_succeeded"
-    WORKSPACE_REFRESH_FAILED = "workspace.refresh_failed"
 
 
 class EntryPoint(StrEnum):
@@ -189,24 +187,6 @@ class FindingStatePayload(StrictPayload):
     previous_state: Literal["open", "resolved", "dismissed", "unknown"] | None = None
 
 
-class WorkspaceRefreshStepPayload(StrictPayload):
-    label: str = Field(max_length=100)
-    status: Literal["running", "success", "failed"]
-    exit_code: int | None = None
-    seconds: int | None = Field(default=None, ge=0)
-
-
-class WorkspaceRefreshPayload(StrictPayload):
-    workspace_slug: str = Field(min_length=1, max_length=100)
-    refresh_kind: Literal["full", "update"]
-    refresh_run_id: str | None = Field(default=None, max_length=100)
-    snapshot_id: str | None = Field(default=None, max_length=100)
-    duration_seconds: int | None = Field(default=None, ge=0)
-    steps: tuple[WorkspaceRefreshStepPayload, ...] = ()
-    error: str | None = Field(default=None, max_length=1000)
-    log_tail: str | None = Field(default=None, max_length=4000)
-
-
 EventPayload = Annotated[
     RunStartedPayload
     | RunCompletedPayload
@@ -226,8 +206,7 @@ EventPayload = Annotated[
     | PRDistanceMeasuredPayload
     | ReviewPublishedPayload
     | FindingSurfacedPayload
-    | FindingStatePayload
-    | WorkspaceRefreshPayload,
+    | FindingStatePayload,
     Field(union_mode="left_to_right"),
 ]
 
@@ -255,8 +234,6 @@ _PAYLOAD_MODELS: dict[EventName, type[StrictPayload]] = {
     EventName.FINDING_RESOLVED: FindingStatePayload,
     EventName.FINDING_DISMISSED: FindingStatePayload,
     EventName.FINDING_REOPENED: FindingStatePayload,
-    EventName.WORKSPACE_REFRESH_SUCCEEDED: WorkspaceRefreshPayload,
-    EventName.WORKSPACE_REFRESH_FAILED: WorkspaceRefreshPayload,
 }
 
 

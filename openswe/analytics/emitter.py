@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 from hashlib import sha256
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 from uuid import UUID
 
 from openswe.analytics.capture import fail_soft
@@ -30,20 +30,12 @@ from openswe.analytics.events import (
     TaskAcceptedPayload,
     TaskMarkedCompletePayload,
     TaskReworkRequestedPayload,
-    WorkspaceRefreshPayload,
-    WorkspaceRefreshStepPayload,
     make_event,
 )
 from openswe.analytics.identity import opaque_id, opaque_person
 from openswe.analytics.outbox import enqueue
 from openswe.config import ENV
 from openswe.database.analytics import workspace_id
-from openswe.utils.time import parse_iso
-
-if TYPE_CHECKING:
-    from openswe.workspaces.store import Workspace
-
-_REFRESH_LOG_TAIL_CHARS = 4000
 
 _ENTRY_POINTS = {
     "dashboard": EntryPoint.DASHBOARD,
@@ -527,45 +519,4 @@ async def finding_observed(
         review_id=opaque_id("review", f"{thread_key}:{head_sha}"),
         pr_id=opaque_id("pr", pr_key),
         repository_id=opaque_id("repository", f"{owner.lower()}/{repo.lower()}"),
-    )
-
-
-def _elapsed_seconds(started: datetime | None, finished: datetime | None) -> int | None:
-    if started is None or finished is None:
-        return None
-    return max(0, int((finished - started).total_seconds()))
-
-
-@fail_soft
-async def workspace_refreshed(record: Workspace) -> None:
-    """Keep a settled refresh past the next one, which overwrites it on the workspace record."""
-    if record.refresh_kind is None or record.refresh_status not in {"success", "failed"}:
-        return
-    failed = record.refresh_status == "failed"
-    finished = parse_iso(record.refresh_finished_at) or datetime.now(UTC)
-    name = EventName.WORKSPACE_REFRESH_FAILED if failed else EventName.WORKSPACE_REFRESH_SUCCEEDED
-    await emit(
-        name,
-        f"workspace:{record.slug}:refresh:{record.refresh_started_at}",
-        WorkspaceRefreshPayload(
-            workspace_slug=record.slug,
-            refresh_kind=record.refresh_kind,
-            refresh_run_id=record.refresh_run_id,
-            snapshot_id=None if failed else record.snapshot_id,
-            duration_seconds=_elapsed_seconds(parse_iso(record.refresh_started_at), finished),
-            steps=tuple(
-                WorkspaceRefreshStepPayload(
-                    label=step.label,
-                    status=step.status,
-                    exit_code=step.exit_code,
-                    seconds=_elapsed_seconds(
-                        parse_iso(step.started_at), parse_iso(step.finished_at)
-                    ),
-                )
-                for step in record.refresh_steps
-            ),
-            error=record.refresh_error,
-            log_tail=record.refresh_log_tail(chars=_REFRESH_LOG_TAIL_CHARS) if failed else None,
-        ),
-        occurred_at=finished,
     )

@@ -55,13 +55,13 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openswe.analytics.emitter import workspace_refreshed
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
+from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.cloud_identity import validate_access_delegation, validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
@@ -713,6 +713,20 @@ class Workspace(BaseModel):
             return None
         return self.refresh_log.strip()[-chars:]
 
+    def refresh_outcome(self) -> dict[str, JsonValue]:
+        """The settled refresh as an admin-only event-log payload, which outlives the next refresh."""
+        return {
+            "workspace_slug": self.slug,
+            "refresh_kind": self.refresh_kind,
+            "refresh_run_id": self.refresh_run_id,
+            "snapshot_id": self.snapshot_id if self.refresh_status == "success" else None,
+            "started_at": self.refresh_started_at,
+            "finished_at": self.refresh_finished_at,
+            "steps": [step.model_dump(mode="json") for step in self.refresh_steps],
+            "error": self.refresh_error,
+            "log_tail": self.refresh_log_tail(),
+        }
+
     @property
     def instructions(self) -> str | None:
         return self.prompt.strip() or None
@@ -805,8 +819,15 @@ class RefreshAttempt:
         record = await WORKSPACES.mark_refresh_settled(
             self.slug, status, log=log, error=error, attempt=self
         )
-        if record is not None:
-            await workspace_refreshed(record)
+        if record is None:
+            return
+        await EventLog.append(
+            "workspace",
+            record.refresh_outcome(),
+            event_type=f"refresh.{record.refresh_status}",
+            delivery_id=f"{record.slug}:{record.refresh_started_at}",
+            refs=EventRefs(workspace_id=await WORKSPACES.id_for_slug(record.slug)),
+        )
 
 
 class WorkspaceStore:

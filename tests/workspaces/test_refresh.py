@@ -1,13 +1,12 @@
 import asyncio
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 
-from openswe.analytics import emitter
-from openswe.analytics.events import EventName
-from openswe.database import analytics
+from openswe.database import transaction
+from openswe.webhooks import event_log
 from openswe.workspaces import refresh
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -143,16 +142,14 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_failed_capture_is_kept_as_an_event_with_its_cause_and_log() -> None:
-    """The record is overwritten by the next refresh; the event is what stays queryable."""
+async def test_a_failed_capture_is_kept_in_the_event_log_with_its_cause_and_log() -> None:
+    """The record is overwritten by the next refresh; the event log is what stays queryable."""
     backend = _backend(_Result("Updating repo", 0))
-    enqueue = AsyncMock()
     with (
         patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
         patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
         patch.object(refresh, "capture_workspace_snapshot", AsyncMock(side_effect=TimeoutError())),
-        patch.object(analytics, "_WORKSPACE_ID", uuid4()),
-        patch.object(emitter, "enqueue", enqueue),
+        patch.object(event_log, "_ROTATED_AT", None),
     ):
         await WORKSPACES.create(
             WorkspaceCreate(
@@ -168,15 +165,22 @@ async def test_a_failed_capture_is_kept_as_an_event_with_its_cause_and_log() -> 
 
     assert record is not None
     assert record.refresh_error == "TimeoutError"
-    [event] = [call.args[0] for call in enqueue.await_args_list]
-    assert event.event_name == EventName.WORKSPACE_REFRESH_FAILED
-    assert event.payload.error == "TimeoutError"
-    assert [(step.label, step.status) for step in event.payload.steps] == [
+    async with transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT event_type, payload, workspace_id FROM event_log WHERE source = 'workspace'"
+            )
+        )
+        [(event_type, payload, workspace_id)] = rows.tuples().all()
+    assert event_type == "refresh.failed"
+    assert workspace_id == await WORKSPACES.id_for_slug("base")
+    assert payload["error"] == "TimeoutError"
+    assert [(step["label"], step["status"]) for step in payload["steps"]] == [
         ("boot", "success"),
         ("setup", "success"),
         ("capture", "failed"),
     ]
-    assert "Updating repo" in event.payload.log_tail
+    assert "Updating repo" in payload["log_tail"]
 
 
 @pytest.mark.usefixtures("registry_db")
