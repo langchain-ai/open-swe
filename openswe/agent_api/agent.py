@@ -8,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
 from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.preparation import AgentPreparation
 from openswe.agent_api.run_parts import RunParts
 from openswe.github.thread_token import get_github_token
 from openswe.github.token import resolve_github_token
@@ -16,7 +17,15 @@ from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.run_config import RunConfig
-from openswe.server import ThreadFiles, agent_tools_by_name, integration_tools, plan_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import (
+    PrepareAgentRunMiddleware,
+    ThreadFiles,
+    agent_preparation,
+    agent_tools_by_name,
+    integration_tools,
+    plan_agent,
+)
 from openswe.skill_store.run_skills import RunSkillStores
 
 logger = logging.getLogger(__name__)
@@ -30,6 +39,20 @@ class AgentParts(RunParts):
 
     reporters = (_TRANSCRIPT, record_run_usage)
     shell_guards = (PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware())
+
+    def preparation_plan(self, surface: ToolSurface) -> AgentPreparation | None:
+        return next(
+            (
+                middleware.planning.bounded()
+                for middleware in surface.middleware
+                if isinstance(middleware, PrepareAgentRunMiddleware)
+                and middleware.planning is not None
+            ),
+            None,
+        )
+
+    async def preparation(self, config: RunnableConfig, plan: AgentPreparation) -> ToolSurface:
+        return await agent_preparation(config, plan)
 
     def legacy(self, cfg: RunConfig) -> bool:
         # A requested offload needs the conversation's model, and an incident the

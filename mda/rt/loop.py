@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
@@ -53,8 +53,10 @@ from runtime_api.loop import (
     AfterAgent,
     BeforeModel,
     ChosenModel,
+    GitHubProxyRefreshed,
     ModelCall,
     PhaseResult,
+    Prepared,
     ReplyOnBehalf,
     Route,
     Routed,
@@ -173,22 +175,48 @@ def _latest(messages: Sequence[BaseMessage], prefix: str) -> str | None:
     return None
 
 
-def _run_guidance(messages: Sequence[BaseMessage]) -> dict[str, str]:
-    """The latest run guidance for each block id in the conversation."""
-    latest: dict[str, str] = {}
-    for message in messages:
-        if not isinstance(message, HumanMessage):
-            continue
-        for text in _texts(message.content):
-            root = _root(text, "dynamic-context")
-            if root is not None and root.get("kind") == "run" and (key := root.get("id")):
-                latest[key] = text
-    return latest
+class _RunGuidance:
+    """A run's bounded cache of guidance ids, keyed by the exact current text."""
+
+    def __init__(self) -> None:
+        self._keys: dict[str, str | None] = {}
+
+    def _key(self, text: str) -> str | None:
+        if "<dynamic-context" not in text:
+            return None
+        if text in self._keys:
+            return self._keys[text]
+        root = _root(text, "dynamic-context")
+        key = root.get("id") if root is not None and root.get("kind") == "run" else None
+        if len(text) <= 16_384:
+            if len(self._keys) >= 512:
+                self._keys.clear()
+            self._keys[text] = key
+        return key
+
+    def latest(self, messages: Sequence[BaseMessage]) -> dict[str, str]:
+        """The latest run guidance for each block id in the current conversation."""
+        latest: dict[str, str] = {}
+        for message in messages:
+            if isinstance(message, HumanMessage):
+                for text in _texts(message.content):
+                    if key := self._key(text):
+                        latest[key] = text
+        return latest
 
 
 def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     held = state.get(STATE_KEY)
     return held if isinstance(held, Mapping) else {}
+
+
+def _github_proxy_due(refreshed: GitHubProxyRefreshed, now: datetime) -> dict[str, JsonValue]:
+    due = (
+        refreshed.expires_at - _GITHUB_PROXY_WINDOW
+        if refreshed.expires_at is not None
+        else now + _GITHUB_PROXY_RECHECK
+    )
+    return {_GITHUB_PROXY_DUE: due.isoformat()}
 
 
 def _moment(value: object) -> datetime | None:
@@ -245,6 +273,30 @@ class _Turn:
         return ""
 
 
+class Asked:
+    """The task context and GitHub token refresh a model call waits on, asked for at once."""
+
+    def __init__(
+        self, context: Awaitable[TaskContext], proxy: Awaitable[dict[str, JsonValue]]
+    ) -> None:
+        self._context = asyncio.ensure_future(context)
+        self._proxy = asyncio.ensure_future(proxy)
+        self._answered = False
+
+    async def answers(self) -> tuple[TaskContext, dict[str, JsonValue]]:
+        self._answered = True
+        return await self._context, await self._proxy
+
+    async def close(self) -> None:
+        """Stop what is still asked; what failed unread is logged."""
+        asked = (self._context, self._proxy)
+        for task in asked:
+            task.cancel()
+        for result in await asyncio.gather(*asked, return_exceptions=True):
+            if not self._answered and isinstance(result, Exception):
+                logger.warning("A call before the model call failed unread", exc_info=result)
+
+
 class RunLoop:
     """What happens around each of the run's model calls, as its ``LoopRules`` say."""
 
@@ -252,6 +304,7 @@ class RunLoop:
         self._backend = backend
         # Models each run calls by id, such as one a person asked for, as the backend sets them.
         self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
+        self._guidance = RunLocal(_RunGuidance)
 
     @staticmethod
     def runs(catalog: Catalog) -> bool:
@@ -277,34 +330,48 @@ class RunLoop:
     def looks_at_answers(self) -> bool:
         return self.rules.reply is not None or self.rules.cli_result is not None
 
-    async def before_model(self, state: Mapping[str, object]) -> BeforeModel:
+    def ask(self, state: Mapping[str, object]) -> Asked | None:
+        """Start what the backend is asked before a model call whose answer the inbox does
+        not change; None when the run stops here whatever the inbox holds."""
         held = _held(state)
-        if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
+        if self._stops(held):
+            return None
+        return Asked(self._task_context(), self._github_proxy(held))
+
+    def _stops(self, held: Mapping[str, object]) -> bool:
+        return any(held.get(key) for key in self.rules.stop_when)
+
+    async def before_model(
+        self, state: Mapping[str, object], asked: Asked | None = None
+    ) -> BeforeModel:
+        held = _held(state)
+        if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        proxy = asyncio.create_task(self._github_proxy(held))
+        if asked is None:
+            asked = Asked(self._task_context(), self._github_proxy(held))
         try:
-            context = await self._task_context()
-            update = await proxy
+            context, update = await asked.answers()
         finally:
-            proxy.cancel()
-            await asyncio.gather(proxy, return_exceptions=True)
+            await asked.close()
+        messages = _messages(state)
         visible = _visible(state)
-        visible_guidance = _run_guidance(visible)
+        guidance = self._guidance.get(self._backend.run)
+        visible_guidance = guidance.latest(visible)
         added: list[BaseMessage] = [
             HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}")
-            for key, text in _run_guidance(_messages(state)).items()
+            for key, text in guidance.latest(messages).items()
             if key != "task-role" and text != visible_guidance.get(key)
         ]
         if context.instructions and context.instructions != _latest(visible, _ROLE):
             added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
-        run_context = _latest(_messages(state), _RUN_CONTEXT)
+        run_context = _latest(messages, _RUN_CONTEXT)
         if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
             added.append(HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"))
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in visible
         ):
             added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
-        route = await self._route(held, [*_visible(state), *added])
+        route = await self._route(held, [*visible, *added])
         if route is not None:
             if route.persist:
                 update["model_route"] = route.route
@@ -312,11 +379,13 @@ class RunLoop:
                 update["model_route_attempted_for"] = run_id()
         current = {**held, **update}
         model = await self._model_for(current)
+        system_prompt, thread_prompt = self._system_prompt(current)
         return BeforeModel(
             update=update,
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
-                system_prompt=self._system_prompt(current),
+                system_prompt=system_prompt,
+                thread_prompt=thread_prompt,
                 hidden_tools=self._hidden(current),
                 model=model,
                 vision=None if model.reads_images else self._models.vision,
@@ -354,12 +423,13 @@ class RunLoop:
         except Exception:
             logger.warning("Could not refresh the box's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
-        due = (
-            refreshed.expires_at - _GITHUB_PROXY_WINDOW
-            if refreshed.expires_at is not None
-            else now + _GITHUB_PROXY_RECHECK
-        )
-        return {_GITHUB_PROXY_DUE: due.isoformat()}
+        return _github_proxy_due(refreshed, now)
+
+    def prepared(self, prepared: Prepared) -> dict[str, JsonValue]:
+        """Held state that keeps the token preparation put on the box until it is due."""
+        if prepared.github_proxy is None or not self.rules.refresh_github_proxy:
+            return {}
+        return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
     async def _task_context(self) -> TaskContext:
         if not self.rules.task_coordination:
@@ -418,11 +488,20 @@ class RunLoop:
             return await self._chosen_model(selected, held.get("selected_effort"))
         return self._models.model
 
-    def _system_prompt(self, held: Mapping[str, object]) -> str:
-        """Only parts fixed for the thread's life: a changed byte misses the provider's cache."""
+    def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str]:
+        """The prompt every thread shares and the part only this one's says, both fixed for
+        the thread's life: a changed byte misses the provider's cache.
+
+        The rendered prompt ends in the thread's part. A thread rendered before the
+        backend named that part has none, and all of its prompt is the first.
+        """
         rendered = held.get("rendered_system_prompt")
-        sections = [self.rules.deployment_prompt, rendered if isinstance(rendered, str) else ""]
-        return "\n\n".join(section for section in sections if section)
+        rendered = rendered if isinstance(rendered, str) else ""
+        thread = held.get("rendered_thread_prompt")
+        thread = thread if isinstance(thread, str) and rendered.endswith(thread) else ""
+        shared = rendered.removesuffix(thread).rstrip()
+        sections = [self.rules.deployment_prompt, shared]
+        return "\n\n".join(section for section in sections if section), thread
 
     def _hidden(self, held: Mapping[str, object]) -> list[str]:
         hidden = set(self.rules.hidden_tools)

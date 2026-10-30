@@ -79,7 +79,13 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => stub.noop,
-  useRouterState: () => undefined,
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: {
+      location: { pathname: string; search: Record<string, unknown> }
+    }) => unknown
+  }) => select({ location: { pathname: "/agents/thread-1", search: {} } }),
   useSearch: () => undefined,
   useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))

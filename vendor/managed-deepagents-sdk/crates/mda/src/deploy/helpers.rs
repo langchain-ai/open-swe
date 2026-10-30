@@ -76,8 +76,8 @@ pub fn is_interrupted_status(status: &str) -> bool {
     matches!(status, "INTERRUPTED")
 }
 
-/// Env vars that must never be forwarded as deployment secrets (auth, runtime
-/// wiring, reserved platform configuration). Mirrors `RESERVED_ENV_VARS`.
+/// Env vars that the platform or `mda deploy` sets on the deployment (auth,
+/// runtime wiring, reserved platform configuration). Mirrors `RESERVED_ENV_VARS`.
 pub const RESERVED_ENV_VARS: &[&str] = &[
     crate::langsmith::BUILD_ARTIFACTS_TOKEN_ENV,
     "LANGCHAIN_TRACING_V2",
@@ -132,15 +132,20 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     // Deploy-owned: runtime sandbox calls must use the same platform API surface
     // as deploy preflight, rather than deriving one from the tracing endpoint.
     "MDA_SANDBOX_API_ENDPOINT",
-    // CLI-only: point channel app setup at another Agent Auth. The key belongs
+];
+
+/// Env vars that only `mda` reads, from the shell or `.env`. The deployment
+/// never gets them.
+pub const RESERVED_CLI_ENV_VARS: &[&str] = &[
+    // Point channel app setup at another Agent Auth. The key belongs
     // to that LangSmith, never to the deployment.
     "MDA_AGENT_AUTH_URL",
     "MDA_AGENT_AUTH_API_KEY",
     "MDA_AGENT_AUTH_TENANT_ID",
-    // CLI-only: Agent Auth's OAuth callback, which a new Linear app lists, when
+    // Agent Auth's OAuth callback, which a new Linear app lists, when
     // the CLI cannot derive it (the local stack sets it).
     "MDA_AGENT_AUTH_OAUTH_CALLBACK_URL",
-    // CLI-only: where a new GitHub App is created, or an existing App with its
+    // Where a new GitHub App is created, or an existing App with its
     // webhook secret and installation, without a prompt. Agent Auth keeps the
     // App; the deployment never gets them as env vars (`GH_WEBHOOK_SECRET` is
     // the runtime's own override and is uploaded).
@@ -149,29 +154,54 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     "MDA_GITHUB_APP_PRIVATE_KEY_FILE",
     "MDA_GITHUB_APP_INSTALLATION_ID",
     "MDA_GITHUB_WEBHOOK_SECRET",
-    // CLI-only: a Linear app's credentials instead of the prompts. Agent Auth
+    // A Linear app's credentials instead of the prompts. Agent Auth
     // keeps them; the deployment never gets them as env vars.
     "MDA_LINEAR_CLIENT_ID",
     "MDA_LINEAR_CLIENT_SECRET",
     "MDA_LINEAR_WEBHOOK_SECRET",
     "MDA_LINEAR_WORKSPACE",
-    // CLI-only: a brought GitHub App's webhook URL that stays where it is.
+    // A brought GitHub App's webhook URL that stays where it is.
     "MDA_GITHUB_WEBHOOK_ELSEWHERE",
-    // CLI-only: the user's own Slack app's credentials instead of the prompts.
+    // The user's own Slack app's credentials instead of the prompts.
     // Trigger Server keeps them; the deployment never gets them as env vars.
     "MDA_SLACK_BOT_TOKEN",
     "MDA_SLACK_SIGNING_SECRET",
+    // The deployment name is the agent ID, and the environment is
+    // the `--agent-environment` default. Host sets the agent environment's
+    // tracing project, and the LangSmith SDK skips tracing when it also sees
+    // an agent address.
+    "LANGSMITH_AGENT_ID",
+    "LANGSMITH_AGENT_ENVIRONMENT",
 ];
+
+/// Whether the deployment must never get `name` as a secret.
+pub fn is_reserved_env_var(name: &str) -> bool {
+    RESERVED_ENV_VARS.contains(&name) || RESERVED_CLI_ENV_VARS.contains(&name)
+}
 
 /// Convert env vars into deployment secrets, dropping reserved and empty values.
 pub fn secrets_from_env(env_vars: &BTreeMap<String, String>) -> Vec<Secret> {
     env_vars
         .iter()
-        .filter(|(name, value)| !value.is_empty() && !RESERVED_ENV_VARS.contains(&name.as_str()))
+        .filter(|(name, value)| !value.is_empty() && !is_reserved_env_var(name))
         .map(|(name, value)| Secret {
             name: name.clone(),
             value: value.clone(),
         })
+        .collect()
+}
+
+/// `.env` names that a user may expect on the deployment but that the platform
+/// sets instead. The API key is left out: it is the CLI's own credential.
+pub fn dropped_reserved_env_vars(env_vars: &BTreeMap<String, String>) -> Vec<&str> {
+    env_vars
+        .iter()
+        .filter(|(name, value)| {
+            !value.is_empty()
+                && RESERVED_ENV_VARS.contains(&name.as_str())
+                && name.as_str() != crate::langsmith::API_KEY_ENV
+        })
+        .map(|(name, _)| name.as_str())
         .collect()
 }
 
@@ -1099,6 +1129,25 @@ mod tests {
         assert_eq!(secrets.len(), 1);
         assert_eq!(secrets[0].name, MDA_LANGSMITH_URL_ENV);
         assert_eq!(secrets[0].value, "https://eu.smith.langchain.com");
+    }
+
+    #[test]
+    fn dropped_reserved_env_vars_skips_cli_inputs_and_empty_values() {
+        let env = BTreeMap::from([
+            (
+                LANGSMITH_ENDPOINT_ENV.to_string(),
+                "https://dev.example".to_string(),
+            ),
+            ("LANGSMITH_PROJECT".to_string(), "mine".to_string()),
+            ("LANGCHAIN_ENDPOINT".to_string(), String::new()),
+            ("LANGSMITH_API_KEY".to_string(), "key".to_string()),
+            ("MDA_SLACK_BOT_TOKEN".to_string(), "xoxb".to_string()),
+            ("OPENAI_API_KEY".to_string(), "sk".to_string()),
+        ]);
+        assert_eq!(
+            dropped_reserved_env_vars(&env),
+            [LANGSMITH_ENDPOINT_ENV, "LANGSMITH_PROJECT"]
+        );
     }
 
     #[test]

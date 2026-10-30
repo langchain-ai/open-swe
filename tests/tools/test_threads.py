@@ -8,11 +8,14 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe import run_config
 from openswe.input_messages import human_input, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.slack import allowed_bots
 
 threads_tool = importlib.import_module("openswe.tools.threads")
+slack_channels = importlib.import_module("openswe.slack.tools.channels")
+delivery = importlib.import_module("openswe.schedules.delivery")
 
 
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:
@@ -331,30 +334,24 @@ _AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
 def _automation_run(
     monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, object]
 ) -> AsyncMock:
+    config = {
+        "configurable": {
+            "source": "schedule",
+            "schedule_id": _AUTOMATION_ID,
+            "thread_id": "automation-thread",
+        }
+    }
+    monkeypatch.setattr(threads_tool, "get_config", lambda: config)
+    monkeypatch.setattr(run_config, "get_config", lambda: config)
     monkeypatch.setattr(
-        threads_tool,
-        "get_config",
-        lambda: {
-            "configurable": {
-                "source": "schedule",
-                "schedule_id": _AUTOMATION_ID,
-                "thread_id": "automation-thread",
-            }
-        },
+        threads_tool.schedules.THREADS,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(metadata=thread_metadata)),
     )
-    client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(
-                return_value={"thread_id": "automation-thread", "metadata": thread_metadata}
-            )
-        )
-    )
-    monkeypatch.setattr(threads_tool.schedules, "langgraph_client", lambda: client)
-    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         threads_tool.schedules,
         "get_agent_schedule",
-        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch"}),
+        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch", "created_by": "octocat"}),
     )
     page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
@@ -373,14 +370,96 @@ async def test_automation_run_reads_public_threads_but_cannot_write(
     sent = await threads_tool.manage_thread(
         action="send_message", thread_id="dm-thread", message="digest"
     )
+    started = await threads_tool.start_thread(title="Digest", instructions="digest")
 
     assert listed["success"] is True
     awaited = page.await_args
     assert awaited is not None
     assert awaited.kwargs["include_all"] is True
     assert awaited.kwargs["include_private"] is False
-    assert sent["success"] is False
-    assert "cannot message" in sent["error"]
+    for refused in (sent, started):
+        assert refused["success"] is False
+        assert "cannot message" in refused["error"]
+
+
+def _creator_dm(
+    monkeypatch: pytest.MonkeyPatch, *, gate: HTTPException | None = None
+) -> tuple[AsyncMock, AsyncMock]:
+    monkeypatch.setattr(delivery, "enforce_github_login_gate", AsyncMock(side_effect=gate))
+    monkeypatch.setattr(
+        delivery.User,
+        "for_login",
+        AsyncMock(return_value=SimpleNamespace(slack_user_id="U_CREATOR")),
+    )
+    recorded = AsyncMock()
+    monkeypatch.setattr(delivery, "record_run_error", recorded)
+    post = AsyncMock(return_value=("D_CREATOR", "1.2"))
+    monkeypatch.setattr(delivery, "post_dm", post)
+    return post, recorded
+
+
+async def test_automation_run_delivers_only_to_its_creator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    post, _ = _creator_dm(monkeypatch)
+
+    other = await slack_channels.slack_post_message("U_OTHER", "digest")
+    post.assert_not_awaited()
+    result = await slack_channels.slack_post_message("U_CREATOR", "**12** PRs need review")
+
+    assert other == {
+        "success": False,
+        "error": "An automation run can DM only the automation's creator.",
+    }
+    assert result == {"success": True, "channel_id": "D_CREATOR", "message_ts": "1.2"}
+    awaited = post.await_args
+    assert awaited is not None
+    assert awaited.args[0] == "U_CREATOR"
+    assert "12" in awaited.args[1]
+
+
+async def test_automation_delivery_refuses_creator_failing_login_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    post, recorded = _creator_dm(
+        monkeypatch, gate=HTTPException(403, "your GitHub account is not authorized")
+    )
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result["success"] is False
+    assert "octocat is no longer authorized" in result["error"]
+    post.assert_not_awaited()
+    recorded.assert_awaited_once()
+
+
+async def test_automation_delivery_refuses_unrelated_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    monkeypatch.setattr(
+        run_config,
+        "get_config",
+        lambda: {"configurable": {"source": "dashboard", "thread_id": "some-thread"}},
+    )
+    post, _ = _creator_dm(monkeypatch)
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result["success"] is False
+    assert "Only an automation run" in result["error"]
+    post.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -692,7 +771,7 @@ async def test_list_threads_resolves_slack_reply_link(
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     lookup = AsyncMock(return_value="thread-1")
-    monkeypatch.setattr(threads_tool, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(threads_tool, "lookup_slack_link_thread_id", lookup)
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: object())
     get_dashboard_thread = AsyncMock(return_value={"id": "thread-1", "messages": []})
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
@@ -709,7 +788,7 @@ async def test_list_threads_resolves_slack_reply_link(
         "channel_id": "C123",
         "thread_ts": "1788425314.774339",
     }
-    lookup.assert_awaited_once_with("C123", "1788425314.774339")
+    lookup.assert_awaited_once_with(locator)
     get_dashboard_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )

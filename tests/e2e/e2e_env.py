@@ -74,6 +74,7 @@ _DEFAULTS = {
     "SLACK_SIGNING_SECRET": "test-slack-secret",
     "RUN_COMPLETE_WEBHOOK_SECRET": "test-run-complete-secret",
     "SLACK_BOT_TOKEN": "xoxb-test-token",
+    "SLACK_APP_ID": "A_TEST",
     "SLACK_BOT_USER_ID": BOT_USER_ID,
     "SLACK_BOT_USERNAME": BOT_USERNAME,
     "SLACK_TEAM_ID": "T_TEST",

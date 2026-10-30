@@ -27,8 +27,7 @@ from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
 from openswe.slack.allowed_bots import authorized_slack_bot_run
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
-from openswe.slack.records import lookup_slack_thread_id
+from openswe.slack.records import lookup_slack_link_thread_id
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -95,7 +94,8 @@ _NO_ACTOR = "No verified triggering user is available"
 _NO_READER = f"Thread lookup was unavailable. {_NO_ACTOR}"
 _NO_WRITER = (
     f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
-    "but cannot message, manage, or start them."
+    "but cannot message, manage, or start them; to send a result to the automation's "
+    "creator, DM them with slack_post_message."
 )
 
 
@@ -806,11 +806,7 @@ async def _authorized_locator(
         if not thread_id:
             return _failure("Could not resolve LangSmith trace to an Open SWE thread")
     elif slack_locator:
-        thread_id = await lookup_slack_thread_id(*slack_locator) or ""
-        if not thread_id:
-            thread_id = (
-                await lookup_slack_thread_id(slack_locator[0], CODE_CHANNEL_SESSION_TS) or ""
-            )
+        thread_id = await lookup_slack_link_thread_id(locator) or ""
         if not thread_id:
             return _failure("Could not resolve Slack link to an Open SWE thread")
     if not thread_id:
