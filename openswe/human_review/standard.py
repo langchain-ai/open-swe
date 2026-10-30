@@ -246,7 +246,7 @@ async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     return blockers
 
 
-async def _target_channel(
+async def target_channel(
     pr_ref: GitHubPrRef, pull: PullRequestClient, override: str
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
@@ -479,7 +479,7 @@ async def _request_review(
                 supplementary_review_area,
             )
         if active.kind == "standard" and channel.strip():
-            target = await _target_channel(pr_ref, pull, channel)
+            target = await target_channel(pr_ref, pull, channel)
             if isinstance(target, RequestResult):
                 return target
             if target.id != active.slack_channel_id:
@@ -501,7 +501,7 @@ async def _request_review(
             + prompt("tools/human-review-blocked")
         )
 
-    target = await _target_channel(pr_ref, pull, channel)
+    target = await target_channel(pr_ref, pull, channel)
     if isinstance(target, RequestResult):
         return target
     recorded = await record_pull_request(pull)
