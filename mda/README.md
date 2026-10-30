@@ -263,7 +263,8 @@ Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
 When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until its first metadata write, by the run or by the backend taking it back, says who sees it), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
 Later messages in that Slack thread, and Slack's Stop, go the same way.
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
-The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop. It adds no reaction to the message that starts a run (`reactions=False`).
+The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
+It adds no reaction to the message that starts a run (`reactions=False`).
 
 The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.
 There is no setting: an environment whose Slack app isn't registered with Trigger Server gets a 401, and the backend handles the conversation as before.
