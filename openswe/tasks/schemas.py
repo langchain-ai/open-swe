@@ -7,12 +7,16 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, Type
 from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
+from openswe.threads.identity import ThreadIdentity
 from openswe.users import User
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
 
 async def user_for_login(login: str) -> User | None:
+    identity_key = ThreadIdentity(login)
+    if identity_key.user_id is not None:
+        return await identity_key.user()
     user = await User.for_login("github", login)
     if user is None:
         return None

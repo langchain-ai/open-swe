@@ -130,6 +130,13 @@ async def start_remote_run(
     back with the token rather than reading it. A run that cannot be planned is not
     started: planning raises here, to whoever asked for the run.
     """
+    if configurable.get("auth_provider") == "langsmith":
+        from openswe.threads.identity import ThreadIdentity
+
+        user_id = configurable.get("user_id")
+        if not isinstance(user_id, str):
+            raise PermissionError("Agent Workspace requires a user identity")
+        await ThreadIdentity(f"user:{user_id}").authorize()
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
     graph = _hosted_graph.validate_python(assistant_id)

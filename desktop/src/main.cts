@@ -77,7 +77,6 @@ const {
   desktopExchangeUrl,
   connectExchangeUrl,
   connectLoginUrl,
-  desktopLoginUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -85,8 +84,6 @@ const {
   isTrustedProxyRequest,
   localCallbackUrl,
   parseDesktopEnvironments,
-  resolveBackendUrl,
-  resolveAppRuntime,
   validateBackendUrl,
 } = require("./config.cjs");
 const {
@@ -98,7 +95,9 @@ const {
   updateSharedConfig,
 } = require("./shared-config.js");
 
-const appRuntime = resolveAppRuntime({
+const { DesktopDistribution } = require("./distribution.cjs");
+const distribution = new DesktopDistribution(require("./app-variant.cjs"));
+const appRuntime = distribution.runtime({
   argv: process.argv,
   isPackaged: app.isPackaged,
   appDataPath: app.getPath("appData"),
@@ -207,8 +206,8 @@ function failDesktopUpdate(error: unknown) {
   quitting = false;
   dialog.showErrorBox(
     "Could not install the update",
-    "The update did not complete. Quit and reopen Open SWE before continuing. " +
-      "If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases/latest.\n\n" +
+    `The update did not complete. Quit and reopen ${appRuntime.name} before continuing. ` +
+      `If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases${distribution.isAgentWorkspace ? "/tag/agent-workspace-updates" : "/latest"}.\n\n` +
       String(error),
   );
 }
@@ -1017,15 +1016,15 @@ function profileConfigPath() {
   return path.join(app.getPath("userData"), "desktop-config.json");
 }
 
-/** Development builds keep their own profile, so they never repoint the packaged app or the CLI. */
+/** Only packaged Open SWE shares configuration with the CLI. */
 function configPath() {
-  return isDevelopment
-    ? profileConfigPath()
-    : sharedConfigPath(require("node:os").homedir());
+  return distribution.usesSharedConfig(isDevelopment)
+    ? sharedConfigPath(require("node:os").homedir())
+    : profileConfigPath();
 }
 
 function migrateStoredConfig() {
-  if (isDevelopment) return;
+  if (!distribution.usesSharedConfig(isDevelopment)) return;
   try {
     migrateDesktopConfig({
       home: require("node:os").homedir(),
@@ -1047,7 +1046,7 @@ function isBackendSessionCookie(cookie) {
 
 /** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
 async function shareBackendSession() {
-  if (isDevelopment) return;
+  if (!distribution.usesSharedConfig(isDevelopment)) return;
   session.defaultSession.cookies.on(
     "changed",
     (_event, cookie, cause, removed) => {
@@ -1094,6 +1093,7 @@ function storeBackendUrl(value) {
 
 /** Ask the backend the app started on which others it offers to switch to. */
 async function loadAlternativeEnvironments() {
+  if (distribution.isAgentWorkspace) return;
   const url = primaryBackendUrl;
   if (!url) return;
   let environments = [];
@@ -1159,7 +1159,7 @@ function errorPage(error) {
     <meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
     <meta name="color-scheme" content="light dark">
-    <title>Startup error - Open SWE</title>
+    <title>Startup error - ${appRuntime.name}</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 14px system-ui, sans-serif; }
       main { max-width: 520px; padding: 32px; text-align: center; }
@@ -1169,7 +1169,7 @@ function errorPage(error) {
   </head>
   <body>
     <main>
-      <h1>Open SWE could not start</h1>
+      <h1>${appRuntime.name} could not start</h1>
       <p>${escapeHtml(message)}</p>
       <p>Use View → Reload to try again.</p>
     </main>
@@ -1304,9 +1304,8 @@ async function serveDesktopUi(request: Request) {
       () =>
         void dialog.showMessageBox({
           type: "warning",
-          message: "Open SWE needs an update",
-          detail:
-            "Your backend has a newer UI than this version of Open SWE can run. You are still on the previous UI; update the desktop app to get the new one.",
+          message: `${appRuntime.name} needs an update`,
+          detail: `Your backend has a newer UI than this version of ${appRuntime.name} can run. You are still on the previous UI; update the desktop app to get the new one.`,
         }),
     );
   }
@@ -1348,9 +1347,11 @@ function createMenu() {
     click: () => createSetupWindow(),
   };
   const environmentItem = environmentMenuItem();
-  const backendItems = environmentItem
-    ? [backendSettingsItem, environmentItem]
-    : [backendSettingsItem];
+  const backendItems = distribution.isAgentWorkspace
+    ? []
+    : environmentItem
+      ? [backendSettingsItem, environmentItem]
+      : [backendSettingsItem];
   const settingsItem = {
     id: "open-settings",
     label: "Settings…",
@@ -1468,7 +1469,7 @@ function createMenu() {
         },
         { type: "separator" },
         {
-          label: "Open SWE on GitHub",
+          label: `${appRuntime.name} on GitHub`,
           click: () =>
             void shell.openExternal("https://github.com/langchain-ai/open-swe"),
         },
@@ -1499,7 +1500,7 @@ async function startExternalLogin() {
     return;
   }
   loginFlow = flow;
-  void shell.openExternal(desktopLoginUrl(backendUrl, flow));
+  void shell.openExternal(distribution.loginUrl(backendUrl, flow));
 
   const code = await flow.code;
   if (loginFlow !== flow) return;
@@ -1667,6 +1668,7 @@ function createWindow(initialUrl = APP_URL) {
       navigateOnDragDrop: false,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
+      additionalArguments: [`--open-swe-app-variant=${distribution.variant}`],
       sandbox: true,
     },
   });
@@ -1879,11 +1881,13 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     migrateStoredConfig();
     try {
-      backendUrl = resolveBackendUrl({
+      backendUrl = distribution.backendUrl({
         argv: process.argv.slice(1),
         env: process.env,
         isPackaged: app.isPackaged,
-        storedUrl: readStoredBackendUrl(),
+        storedUrl: distribution.isAgentWorkspace
+          ? undefined
+          : readStoredBackendUrl(),
       });
     } catch (error) {
       dialog.showErrorBox(

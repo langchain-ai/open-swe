@@ -6,6 +6,7 @@
  */
 
 import { dashboardApiBase } from "./api-base"
+import { appDistribution } from "./app-distribution"
 import {
   DashboardRequestError,
   REQUEST_ID_HEADER,
@@ -232,6 +233,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  auth_provider?: "github" | "langsmith"
+  github_login?: string | null
   /** How the server labels this user's messages; empty until they have a name. */
   display_name?: string
   email: string | null
@@ -325,7 +328,6 @@ export interface Profile {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
-  experimental_fleet?: boolean
   experimental_memory?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -345,7 +347,6 @@ export interface ProfileUpdate {
   auto_human_review_enabled?: boolean
   concierge_mode?: boolean
   pr_failure_reactions?: boolean
-  experimental_fleet?: boolean
   experimental_memory?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
@@ -2107,7 +2108,7 @@ export function loginUrl(redirectTo?: string): string {
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  return `${API_BASE}/dashboard/api/auth/login${qs}`
+  return `${API_BASE}/dashboard/api${appDistribution.loginPath}${qs}`
 }
 
 /**

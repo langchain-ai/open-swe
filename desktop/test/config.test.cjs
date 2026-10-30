@@ -22,6 +22,79 @@ const {
   validateBackendUrl,
 } = require("../build/config.cjs");
 
+const { DesktopDistribution } = require("../build/distribution.cjs");
+
+test("Agent Workspace cannot be redirected by Open SWE backend settings", () => {
+  const workspace = new DesktopDistribution("agent-workspace");
+  assert.equal(
+    workspace.backendUrl({
+      argv: ["--backend-url=https://other.example"],
+      env: { OPEN_SWE_BACKEND_URL: "https://env.example" },
+      isPackaged: true,
+      storedUrl: "https://stored.example",
+    }),
+    "https://openswe.langchain.dev/",
+  );
+  assert.equal(
+    workspace.backendUrl({ argv: [], env: {}, isPackaged: false }),
+    "https://openswe.langchain.dev/",
+  );
+  assert.equal(workspace.usesSharedConfig(false), false);
+  assert.equal(workspace.usesSharedConfig(true), false);
+});
+
+test("Agent Workspace isolates packaged and development Electron storage", () => {
+  const workspace = new DesktopDistribution("agent-workspace");
+  const appDataPath = path.join("/tmp", "app-data");
+  const packaged = workspace.runtime({
+    argv: [],
+    isPackaged: true,
+    appDataPath,
+  });
+  const development = workspace.runtime({
+    argv: [],
+    isPackaged: false,
+    appDataPath,
+  });
+  assert.equal(packaged.name, "Agent Workspace");
+  assert.equal(
+    packaged.userDataPath,
+    path.join(appDataPath, "Agent Workspace"),
+  );
+  assert.notEqual(packaged.userDataPath, development.userDataPath);
+  assert.notEqual(packaged.appUserModelId, development.appUserModelId);
+  assert.equal(
+    new DesktopDistribution("open-swe").usesSharedConfig(false),
+    true,
+  );
+});
+
+test("Agent Workspace starts LangSmith login with the same PKCE loopback handoff", () => {
+  const flow = { challenge: "pkce-challenge", port: 4567 };
+  const backend = "https://openswe.langchain.dev/";
+  const workspaceUrl = new URL(
+    new DesktopDistribution("agent-workspace").loginUrl(backend, flow),
+  );
+  const codingUrl = new URL(
+    new DesktopDistribution("open-swe").loginUrl(backend, flow),
+  );
+  assert.equal(workspaceUrl.pathname, "/dashboard/api/auth/langsmith/login");
+  assert.equal(codingUrl.pathname, "/dashboard/api/auth/login");
+  assert.equal(
+    workspaceUrl.searchParams.get("desktop_handoff"),
+    flow.challenge,
+  );
+  assert.equal(
+    workspaceUrl.searchParams.get("desktop_port"),
+    String(flow.port),
+  );
+  assert.equal(workspaceUrl.searchParams.get("desktop"), "true");
+  assert.equal(
+    isAppLoginUrl(`${APP_URL}dashboard/api/auth/langsmith/login`),
+    true,
+  );
+});
+
 test("uses the local backend for development", () => {
   assert.equal(
     resolveBackendUrl({ argv: [], env: {}, isPackaged: false }),

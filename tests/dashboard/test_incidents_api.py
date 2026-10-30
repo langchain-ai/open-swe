@@ -65,6 +65,21 @@ def test_all_incidents_routes_require_a_session(client, method, path, body) -> N
     assert response.status_code == 401
 
 
+async def test_langsmith_session_cannot_operate_incidents_or_inherit_admin_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.incidents.routes import _administrator, _responder
+    from openswe.ui_invalidations.topics import Topic
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    session = {"sub": f"user:{uuid7()}", "provider": "langsmith", "email": "admin@example.com"}
+    for authorize in (_responder, _administrator):
+        with pytest.raises(HTTPException) as rejected:
+            await authorize(session)
+        assert rejected.value.status_code == 403
+    assert await Topic.ANNOUNCEMENTS.authorize(session, {""}) == set()
+
+
 @pytest.mark.parametrize("method", ["GET", "PATCH"])
 def test_non_admins_cannot_change_settings(client, method) -> None:
     _login(client)

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.github.http import GitHubClient
@@ -28,6 +28,8 @@ async def list_repos(
     ``refresh=true``, because the fan-out over every installation takes 10s+
     for users with hundreds of accessible repos.
     """
+    if session.get("provider", "github") != "github":
+        raise HTTPException(403, "GitHub repositories require a GitHub account")
     login = session["sub"]
     if not refresh:
         cached = await read_cached_repos(login)
@@ -43,5 +45,7 @@ async def list_repos(
 async def api_repository_merge_methods(
     owner: str, repo: str, session: dict[str, Any] = SESSION_DEP
 ) -> RepositoryMergeMethods:
+    if session.get("provider", "github") != "github":
+        raise HTTPException(403, "GitHub repositories require a GitHub account")
     async with GitHubClient.as_user(session["sub"]) as github:
         return await repository_merge_methods(github.repo(owner, repo))

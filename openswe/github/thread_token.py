@@ -163,6 +163,8 @@ def _principal_from_config(run_config: Mapping[str, Any]) -> str | None:
 def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
     """Resolve the current thread's GitHub token from process memory."""
     resolved = run_config if run_config is not None else get_config()
+    if RunConfig.from_config(resolved).auth_provider == "langsmith":
+        return None
     token, _expires_at = _cached_token_if_fresh(
         _thread_id_from_config(resolved), _principal_from_config(resolved)
     )
@@ -172,6 +174,8 @@ def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
 async def resolve_thread_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
     """Resolve the current thread's GitHub token, re-minting an expired bot token."""
     resolved = run_config if run_config is not None else get_config()
+    if RunConfig.from_config(resolved).auth_provider == "langsmith":
+        return None
     if token := get_github_token(resolved):
         return token
     thread_id = _thread_id_from_config(resolved)

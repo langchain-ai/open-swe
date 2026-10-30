@@ -1,4 +1,8 @@
+from unittest.mock import AsyncMock
+from uuid import UUID
+
 import pytest
+from fastapi import HTTPException
 from langgraph_api.auth.custom import normalize_user
 from langgraph_sdk import Auth
 from starlette.types import Scope
@@ -43,6 +47,36 @@ async def test_only_the_backend_key_or_a_dashboard_session_authenticates() -> No
         with pytest.raises(Auth.exceptions.HTTPException) as exc:
             await agent_server_auth.authenticate(_scope(*headers))
         assert exc.value.status_code == 401
+
+
+@pytest.mark.parametrize("denied", [False, True])
+async def test_langsmith_sessions_reauthorize_before_agent_server_access(
+    monkeypatch: pytest.MonkeyPatch, denied: bool
+) -> None:
+    user_id = UUID("019a0e48-1111-7000-8000-000000000001")
+    authorize = AsyncMock(
+        side_effect=HTTPException(403, "organization access revoked") if denied else None
+    )
+    monkeypatch.setattr(agent_server_auth.DashboardPrincipal, "authorize", authorize)
+    token = issue_session(
+        login=f"user:{user_id}",
+        email=None,
+        avatar_url=None,
+        user_id=str(user_id),
+        provider="langsmith",
+        langsmith_subject="ls-user",
+    )
+    scope = _scope((b"cookie", f"{COOKIE_NAME}={token}".encode()))
+    if denied:
+        with pytest.raises(Auth.exceptions.HTTPException) as exc:
+            await agent_server_auth.authenticate(scope)
+        assert exc.value.status_code == 403
+    else:
+        assert await agent_server_auth.authenticate(scope) == {
+            "identity": f"user:{user_id}",
+            "permissions": [],
+        }
+    authorize.assert_awaited_once()
 
 
 async def test_people_read_only_their_own_threads_and_change_nothing() -> None:

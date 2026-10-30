@@ -4,7 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from langgraph.runtime import Runtime
 
+from openswe.agent_api.runs import in_graph_context
 from openswe.github import app as github_app
 from tests.support.github_sdk import mock_github_sdk
 
@@ -165,3 +167,20 @@ async def test_unknown_permissions_cannot_be_silently_dropped(
     assert (
         await github_app.get_github_app_installation_token(permissions={"unknown": "read"}) is None
     )
+
+
+async def test_langsmith_run_cannot_borrow_a_cached_installation_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    mock_github_sdk(
+        monkeypatch,
+        lambda request: httpx.Response(201, json={"token": "cached-secret", "expires_at": expiry}),
+    )
+    assert await github_app.get_github_app_installation_token() == "cached-secret"
+
+    async def mint(runtime: Runtime) -> str | None:
+        return await github_app.get_github_app_installation_token()
+
+    with pytest.raises(PermissionError, match="cannot use GitHub App credentials"):
+        await in_graph_context({"configurable": {"auth_provider": "langsmith"}}, mint)

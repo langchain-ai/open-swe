@@ -72,7 +72,12 @@ function isAppUrl(value) {
 
 function isAppLoginUrl(value) {
   try {
-    return isAppUrl(value) && new URL(value).pathname === LOGIN_PATH;
+    return (
+      isAppUrl(value) &&
+      [LOGIN_PATH, "/dashboard/api/auth/langsmith/login"].includes(
+        new URL(value).pathname,
+      )
+    );
   } catch {
     return false;
   }
@@ -144,7 +149,7 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL");
   const source = new URL(appRequestUrl);
   const target = new URL(`${source.pathname}${source.search}`, backendUrl);
-  if (source.pathname === "/dashboard/api/auth/login") {
+  if (isAppLoginUrl(appRequestUrl)) {
     target.searchParams.set("desktop", "true");
   }
   return target.toString();
@@ -199,7 +204,7 @@ function staticFilePath(root, appRequestUrl) {
   return candidate;
 }
 
-module.exports = {
+export = {
   APP_ORIGIN,
   APP_URL,
   DEFAULT_DEVELOPMENT_BACKEND_URL,

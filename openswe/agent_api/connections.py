@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from runtime_api.connections import ConnectionRef
 
 from openswe.config import ENV, EnvVar
+from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,9 @@ def operation_connections(operation: str, config: RunnableConfig) -> list[Connec
     return [
         ref
         for read in _READ_BY.get(operation, ())
-        if (ref := read.ref()) is not None and (ref.owner == "agent" or for_person)
+        if not (read is GITHUB_USER and RunConfig.from_config(config).auth_provider == "langsmith")
+        and (ref := read.ref()) is not None
+        and (ref.owner == "agent" or for_person)
     ]
 
 

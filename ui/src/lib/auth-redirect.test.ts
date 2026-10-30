@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { loginUrl } from "./api"
 import {
@@ -20,7 +20,27 @@ beforeEach(() => {
   window.history.pushState({}, "", "/")
 })
 
+afterEach(() => {
+  Reflect.deleteProperty(window, "openSweDesktop")
+})
+
 describe("auth redirect helpers", () => {
+  it("only selects LangSmith login for the Agent Workspace desktop distribution", () => {
+    window.history.pushState({}, "", "/login?agent_workspace=true")
+    expect(loginUrl("/agents")).toContain("/auth/login?")
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: { isDesktop: true, appVariant: "agent-workspace" },
+    })
+    expect(loginUrl("/agents")).toContain("/auth/langsmith/login?")
+    expect(loginUrl("/agents")).toContain("redirect_to=%2Fagents")
+    Object.defineProperty(window, "openSweDesktop", {
+      configurable: true,
+      value: { isDesktop: true, appVariant: "open-swe" },
+    })
+    expect(loginUrl("/agents")).toContain("/auth/login?")
+  })
+
   it("captures protected route targets as relative paths", () => {
     const path = authRedirectPathFromLocation({
       pathname: "/agents/thread-1/plan",

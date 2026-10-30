@@ -19,7 +19,7 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.users.records import UnknownUser, user_id_for_login
 
-type OAuthProvider = Literal["langsmith"]
+type OAuthProvider = Literal["langsmith", "langsmith_login"]
 
 
 class OAuthCredential(Base):

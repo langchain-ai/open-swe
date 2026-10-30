@@ -132,11 +132,13 @@ export function AgentsHome({
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
     initialLocalRepo ? "local" : initialRepo || initialNoRepo ? "cloud" : null
   )
-  const runTarget: RunTarget = isDesktop
-    ? cloudEnabled
-      ? (runTargetOverride ?? desktopThreadSource)
-      : "local"
-    : "cloud"
+  const runTarget: RunTarget = agentWorkspace
+    ? "local"
+    : isDesktop
+      ? cloudEnabled
+        ? (runTargetOverride ?? desktopThreadSource)
+        : "local"
+      : "cloud"
   const [localRepoPath, setLocalRepoPath] = useState<string | null>(
     initialLocalRepo ?? null
   )
@@ -553,7 +555,7 @@ export function AgentsHome({
           // Awaited so the thread route already knows it is This Mac's.
           await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
-          if (local.repo) configurable.repo = local.repo
+          if (local.repo && !agentWorkspace) configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }
         await startRun(
@@ -625,7 +627,9 @@ export function AgentsHome({
   return (
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {session.data && !routePending && <OnboardingDialog />}
+        {session.data && !routePending && !agentWorkspace && (
+          <OnboardingDialog />
+        )}
         <AgentThreadHeader
           title={optimisticDraftThread?.title}
           target={runTarget === "local" ? "This Mac" : "Cloud"}
@@ -683,7 +687,10 @@ export function AgentsHome({
               onRepoChange={optimisticDraftThread ? undefined : selectRepo}
               runTarget={isDesktop ? runTarget : undefined}
               onRunTargetChange={
-                !optimisticDraftThread && isDesktop && cloudEnabled
+                !optimisticDraftThread &&
+                isDesktop &&
+                cloudEnabled &&
+                !agentWorkspace
                   ? handleRunTargetChange
                   : undefined
               }

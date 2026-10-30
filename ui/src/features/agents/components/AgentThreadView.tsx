@@ -1,4 +1,5 @@
 import { LogoMark } from "@/components/Branding"
+import { appDistribution } from "@/lib/app-distribution"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
@@ -235,6 +236,7 @@ export function AgentThreadView({
       : null
   const runsHere: RunTarget = runsOnAMac(thread) ? "local" : "cloud"
   const canMove =
+    !appDistribution.agentWorkspace &&
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
     Boolean(thread.repoFullName) &&

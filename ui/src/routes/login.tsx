@@ -9,6 +9,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import { LogoMark } from "@/components/Branding"
 import { loginUrl } from "@/lib/api"
+import { appDistribution } from "@/lib/app-distribution"
 import { pageTitle } from "@/lib/pageTitle"
 import {
   DEFAULT_AUTH_REDIRECT,
@@ -61,18 +62,22 @@ function Login() {
         className="flex w-full max-w-md flex-col gap-space-5 p-space-6 shadow-md"
       >
         <div className="flex flex-col items-center gap-space-3 text-center">
-          <LogoMark alt="Open SWE" className="size-8" />
+          <LogoMark alt={appDistribution.name} className="size-8" />
           <Text as="h1" variant="h3">
-            Sign in to Open SWE
+            Sign in to {appDistribution.name}
           </Text>
         </div>
         <Button
           as={<a href={loginUrl(intendedPath)} />}
           size="md"
-          leftDecorator={GithubLogoIcon}
+          leftDecorator={
+            appDistribution.agentWorkspace ? undefined : GithubLogoIcon
+          }
           className="w-full"
         >
-          Continue with GitHub
+          {appDistribution.agentWorkspace
+            ? "Sign in with LangSmith"
+            : "Continue with GitHub"}
         </Button>
       </Card>
     </main>

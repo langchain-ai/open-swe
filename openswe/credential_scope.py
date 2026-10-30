@@ -56,7 +56,9 @@ def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | No
     if metadata.get("visibility", "public") == "public":
         return None
     owner = metadata.get("owner_login")
-    login = (cfg.github_login or "").strip()
+    login = (
+        (cfg.sender_id or "") if cfg.auth_provider == "langsmith" else cfg.github_login or ""
+    ).strip()
     if not isinstance(owner, str) or not login or owner.strip().lower() != login.lower():
         return None
     return login
@@ -77,6 +79,14 @@ async def private_credential_login(
 ) -> str | None:
     """Personal integrations require the saved private owner to start the run."""
     cfg, metadata = await _thread_scope(config, thread_id=thread_id)
+    if cfg.auth_provider == "langsmith":
+        if (
+            not cfg.user_id
+            or metadata.get("owner_login") != f"user:{cfg.user_id}"
+            or metadata.get("visibility") != "private"
+        ):
+            raise PermissionError("Personal credentials require the private thread owner")
+        return f"user:{cfg.user_id}"
     if metadata.get("visibility", "public") == "public":
         return None
     return _private_owner_login(cfg, metadata)
@@ -90,6 +100,8 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
+    if cfg.auth_provider == "langsmith":
+        raise PermissionError("Agent Workspace has no GitHub repository access")
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
     owner = metadata.get("owner_login")

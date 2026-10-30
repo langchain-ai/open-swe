@@ -1,5 +1,7 @@
 # Open SWE Desktop
 
+For the separate fixed-backend LangSmith app, see [Agent Workspace Desktop](AGENT_WORKSPACE.md).
+
 > [!IMPORTANT]
 > This desktop client is experimental.
 > The web UI is the recommended way to use Open SWE.

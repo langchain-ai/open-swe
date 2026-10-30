@@ -17,6 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
+from fastapi import HTTPException
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
@@ -200,6 +201,21 @@ class RunTokenMiddleware:
                 'Bearer error="invalid_token"',
             )
             return
+        run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
+        if run.configurable.get("auth_provider") == "langsmith":
+            from openswe.threads.identity import ThreadIdentity
+
+            user_id = run.configurable.get("user_id")
+            if not isinstance(user_id, str):
+                await _refuse(scope, receive, send, "The run has no user identity", "Bearer")
+                return
+            try:
+                await ThreadIdentity(f"user:{user_id}").authorize()
+            except HTTPException as exc:
+                await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(
+                    scope, receive, send
+                )
+                return
         scope.setdefault("state", {})[_RUN_STATE_KEY] = principal
         await self.app(scope, receive, send)
 
