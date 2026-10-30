@@ -7,6 +7,8 @@ requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.32",
+    # Remove this explicit dependency after upgrading to deepagents 0.7.33 once released.
+    "langchain-core>=1.7.2,<2",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/),
     # from the vendored SDK the deployment runs (vendor/README.md).
     "managed-deepagents>=0.10.0",

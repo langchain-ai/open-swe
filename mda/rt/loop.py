@@ -26,6 +26,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     ToolMessage,
+    add_notification_metadata,
     messages_to_dict,
 )
 from langgraph.config import get_stream_writer
@@ -358,19 +359,36 @@ class RunLoop:
         guidance = self._guidance.get(self._backend.run)
         visible_guidance = guidance.latest(visible)
         added: list[BaseMessage] = [
-            HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}")
+            add_notification_metadata(
+                HumanMessage(content=text, id=f"run-guidance:{uuid.uuid4()}"), source="run_guidance"
+            )
             for key, text in guidance.latest(messages).items()
             if key != "task-role" and text != visible_guidance.get(key)
         ]
         if context.instructions and context.instructions != _latest(visible, _ROLE):
-            added.append(HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"))
+            added.append(
+                add_notification_metadata(
+                    HumanMessage(content=context.instructions, id=f"{_ROLE}{uuid.uuid4()}"),
+                    source="task_context",
+                )
+            )
         run_context = _latest(messages, _RUN_CONTEXT)
         if run_context is not None and run_context != _latest(visible, _RUN_CONTEXT):
-            added.append(HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"))
+            added.append(
+                add_notification_metadata(
+                    HumanMessage(content=run_context, id=f"{_RUN_CONTEXT}{uuid.uuid4()}"),
+                    source="run_context",
+                )
+            )
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in visible
         ):
-            added.append(HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"))
+            added.append(
+                add_notification_metadata(
+                    HumanMessage(content=context.message, id=f"task-context:{uuid.uuid4()}"),
+                    source="task_context",
+                )
+            )
         route = await self._route(held, [*visible, *added])
         if route is not None:
             if route.persist:
@@ -537,7 +555,9 @@ class RunLoop:
     ) -> list[dict[str, JsonValue]]:
         seen = {content_text(message.content) for message in _visible(state)}
         added = [
-            HumanMessage(content=text, id=str(uuid.uuid4()))
+            add_notification_metadata(
+                HumanMessage(content=text, id=str(uuid.uuid4())), source="run_nudge"
+            )
             for text in texts
             # An introduction the model still sees is not made twice.
             if not (text in seen and _dynamic_context(HumanMessage(content=text)))
