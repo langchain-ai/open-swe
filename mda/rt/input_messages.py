@@ -38,6 +38,7 @@ class InputMessageContext(TypedDict):
 class RunMessage(TypedDict):
     role: Literal["user"]
     content: Content
+    additional_kwargs: NotRequired[dict[str, object]]
 
 
 class RunInput(TypedDict):
@@ -158,4 +159,10 @@ def human_input(content: Content, context: InputMessageContext) -> RunMessage:
 def system_input(content: Content, context: InputMessageContext) -> RunMessage:
     if context["kind"] != "system":
         raise ValueError("system_input requires kind='system'")
-    return {"role": "user", "content": _structured_content(content, context)}
+    # LangChain's notification metadata (``add_notification_metadata``), which marks
+    # the message as one no person typed; chat models don't send it to the model.
+    return {
+        "role": "user",
+        "content": _structured_content(content, context),
+        "additional_kwargs": {"lc_source": context["sender_id"]},
+    }
