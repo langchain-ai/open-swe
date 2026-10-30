@@ -88,9 +88,9 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
     concierge_mode: bool | None = None
-    pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
     experimental_fleet: bool | None = None
+    experimental_memory: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -377,7 +377,11 @@ async def get_my_profile(
     profile, preferences = await asyncio.gather(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
-    return {**normalize_profile_for_response(profile or {}), **preferences.model_dump()}
+    return {
+        **normalize_profile_for_response(profile or {}),
+        **preferences.model_dump(),
+        "agent_workspace_tasks_supported": True,
+    }
 
 
 @router.post("/profile/slack-onboarding-dismissal")
@@ -403,9 +407,9 @@ async def put_my_profile(
         login,
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
-            pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
             experimental_fleet=update.experimental_fleet,
+            experimental_memory=update.experimental_memory,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -415,9 +419,9 @@ async def put_my_profile(
     )
     if preferences is None and (
         update.concierge_mode
-        or update.pr_review_links
         or update.pr_failure_reactions
         or update.experimental_fleet
+        or update.experimental_memory
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
@@ -425,4 +429,5 @@ async def put_my_profile(
     return {
         **normalize_profile_for_response(profile),
         **(preferences or UserPreferences()).model_dump(),
+        "agent_workspace_tasks_supported": True,
     }

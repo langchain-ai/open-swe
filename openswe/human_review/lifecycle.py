@@ -224,9 +224,7 @@ class ReviewCard:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
                 raise SlackRequestError("channel_not_found")
-            approval.slack_thread_ts = await channel.post(
-                text, blocks=block_payload(blocks), login=self.request.requester_login
-            )
+            approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
             return approval.slack_thread_ts
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
@@ -234,7 +232,6 @@ class ReviewCard:
             text,
             blocks=block_payload(blocks),
             agent_thread_id=approval.thread_id or None,
-            login=self.request.requester_login,
         )
 
     async def prompt_author_ready(self) -> str | None:
@@ -298,14 +295,11 @@ class ReviewCard:
                 blocks=block_payload(blocks),
                 agent_thread_id=request.thread_id or None,
                 reply_broadcast=True,
-                login=self.request.requester_login,
             )
         channel = await SlackChannel.load(request.slack_channel_id)
         if channel is None:
             raise SlackRequestError("channel_not_found")
-        return await channel.post(
-            text, blocks=block_payload(blocks), login=self.request.requester_login
-        )
+        return await channel.post(text, blocks=block_payload(blocks))
 
     async def _channel_choices(self) -> list[ChannelChoice]:
         pr = self.request.pull_request
@@ -338,7 +332,9 @@ class ReviewCard:
                 request, title=pr.title, author=author, outcome=outcome, review_states=states
             )
         from openswe.human_review.standard import merge_wait
+        from openswe.human_review.supplementary import SupplementaryReviews
 
+        states = await SupplementaryReviews(request).engineering_states(states)
         if (
             "CHANGES_REQUESTED" not in states.values()
             and merge_wait(
@@ -456,7 +452,6 @@ class ReviewCard:
                     current.slack_dm_message_ts,
                     text,
                     blocks=block_payload(blocks),
-                    login=current.requester_login,
                 )
             except SlackRequestError:
                 logger.warning(
@@ -543,7 +538,6 @@ class ReviewCard:
                 request.slack_message_ts,
                 text,
                 blocks=block_payload(blocks),
-                login=self.request.requester_login,
             )
         except SlackRequestError as exc:
             logger.warning(
@@ -557,9 +551,7 @@ class ReviewCard:
         if outcome is None and (copy := request.slack_copy) is not None:
             text, blocks = await self.render(None, copy=True)
             try:
-                await update_slack_message(
-                    *copy, text, blocks=block_payload(blocks), login=self.request.requester_login
-                )
+                await update_slack_message(*copy, text, blocks=block_payload(blocks))
             except SlackRequestError as exc:
                 logger.warning(
                     "Failed to update the copy of a human review card",
@@ -604,7 +596,6 @@ class ReviewCard:
             broadcast=broadcast,
             agent_thread_id=request.thread_id or None,
             adopt=adopt,
-            login=self.request.requester_login,
         )
 
     async def broadcast(self) -> bool:
@@ -618,9 +609,7 @@ class ReviewCard:
         approval = self.request
         text, blocks = await self.render(None, copy=True)
         try:
-            message_ts = await channel.post(
-                text, blocks=block_payload(blocks), login=self.request.requester_login
-            )
+            message_ts = await channel.post(text, blocks=block_payload(blocks))
         except SlackRequestError as exc:
             logger.warning(
                 "Could not copy an expedited review card to another channel",

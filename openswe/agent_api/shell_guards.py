@@ -1,6 +1,6 @@
 """The run's push and pull request guards, asked about a shell command before it runs.
 
-The guards read a command, inspect the push it makes in the thread's box, and may
+The guards read a command, inspect the push it makes in the thread's sandbox, and may
 need a person's approval, so they stay on the backend. The MDA run asks them about
 each ``execute`` it may let push or open a pull request, and the operations that run
 commands, such as ``background_execute``, ask them before they start.

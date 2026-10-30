@@ -10,7 +10,7 @@ No dashboard is embedded in the installer.
 First launch requires connectivity to download the UI; failure shows a retry screen.
 
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project.
-The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box.
+The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
 The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back.
 This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 
@@ -18,6 +18,18 @@ Commands run with your login shell's environment, minus anything secret-shaped e
 A thread runs only while the app that started it is open: quitting closes its bridge, and a run started meanwhile reports the Mac as unreachable.
 Opening the thread again, or sending a follow-up, reopens it.
 The thread is visible from the web and other computers, but only this Mac can continue it.
+
+In **LangSmith Agent Workspace**, new chats need no repository or folder selection.
+This Mac creates a private task folder per conversation under the app profile’s `tasks/<thread-id>` directory.
+**Use a folder** optionally selects existing material; several chats can select the same folder, without sharing their conversation histories.
+**Open task folder** opens the working location in Finder.
+Closing, archiving, or deleting a chat does not delete its automatic task files.
+These folders are starting locations, not filesystem security sandboxes.
+Git branch and worktree controls appear only for Git folders.
+
+The general-purpose experience is saved on new threads before their first run and inherited by later runs and task workers.
+Existing conversations retain their coding experience.
+Testing requires this branch’s desktop shell and backend; a local UI against an older backend cannot enable the new prompting.
 
 The composer's workspace selector chooses where a local thread runs.
 **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects.

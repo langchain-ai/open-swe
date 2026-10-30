@@ -1,6 +1,6 @@
 """Reaching the deployment's sandboxes, which LangSmith runs.
 
-Managed Deep Agents creates every thread's box; the backend only reconnects to one
+Managed Deep Agents creates every thread's sandbox; the backend only reconnects to one
 by its id, so nothing here can create a sandbox.
 """
 

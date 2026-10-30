@@ -32,7 +32,7 @@ class ThreadMetadata(BaseModel):
     task_id: UUID | None = None
     sandbox_host_thread_id: str | None = None
     sandbox_id: str | None = None
-    # "mda": Managed Deep Agents names, creates and replaces the box; the backend binds to it.
+    # "mda": Managed Deep Agents names, creates and replaces the sandbox; the backend binds to it.
     sandbox_owner: Literal["mda"] | None = None
     sandbox_bridge_client: str | None = None
     sandbox_base_proxy_config: dict[str, JsonValue] | None = None
@@ -45,6 +45,7 @@ class ThreadMetadata(BaseModel):
     repo_owner: str | None = None
     repo_name: str | None = None
     repo: dict[str, JsonValue] | None = None
+    experience: Literal["coding", "agent_workspace"] = "coding"
     repo_explicitly_none: bool = False
     model_selection: Literal["auto", "explicit"] | None = None
     model: str | None = None

@@ -121,6 +121,8 @@ export interface ToolExecutionChunk {
    */
   loadOutput?: () => Promise<string>
   display?: OutputIframeDisplay
+  /** Images the tool returned alongside its text, such as a browser screenshot. */
+  images?: Array<AnyImageChunk>
   elapsedMs?: number
   approvalRequestId?: string
   diffData?: DiffData
