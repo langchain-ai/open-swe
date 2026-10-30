@@ -25,7 +25,7 @@ def _http_url(url: str) -> tuple[str, str] | None:
     origin = _origin(parsed)
     if origin is None:
         return None
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if parsed.username or parsed.password or parsed.fragment:
         return None
     return origin, parsed.path
 

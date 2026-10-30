@@ -15,6 +15,7 @@ from langchain_core.tracers.schemas import Run
 from langgraph._internal._config import ensure_config, patch_configurable
 from langgraph._internal._constants import CONFIG_KEY_CHECKPOINTER, CONFIG_KEY_RUNTIME
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import StateSnapshot
@@ -28,6 +29,7 @@ from managed_deepagents._channels.binding import (
 )
 from managed_deepagents._channels.delivery import (
     INPUT_SOURCE,
+    deliver_run_failure,
     deliver_run_result,
     delivers_result,
 )
@@ -168,7 +170,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     """Remove ingress transport before native context conversion, on every execution.
 
     Each step sees the run's channel and thread; when the stream ends, the run's
-    result goes to its thread origin, or a scheduled run's ``deliver_to``.
+    result goes to its thread origin, or a scheduled run's ``deliver_to``. A
+    scheduled run that raises reports the failure there before it raises.
     """
 
     replicate_traces: bool = True
@@ -208,16 +211,20 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         iterator = super().stream(input, config, context=context, **kwargs)
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread, output)
-                log_token = enter_log_context(log)
+                tokens = _enter_step(binding, routing, thread, log, output)
                 try:
                     with self._tracing(config):
                         item = next(iterator)
                 except StopIteration:
                     self._deliver(thread, merged, routing, output)
                     return
+                except Exception as error:
+                    if not isinstance(error, GraphBubbleUp):
+                        await_if_needed(
+                            self._deliver_failure(thread, merged, routing, output, error)
+                        )
+                    raise
                 finally:
-                    exit_log_context(log_token)
                     _exit_step(tokens)
                 yield item
         finally:
@@ -248,8 +255,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         resources = AsyncExitStack()
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread, output)
-                log_token = enter_log_context(log)
+                tokens = _enter_step(binding, routing, thread, log, output)
                 try:
                     resource_token = _current_resources.set(resources)
                     try:
@@ -260,8 +266,11 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 except StopAsyncIteration:
                     await self._adeliver(thread, merged, routing, output)
                     return
+                except Exception as error:
+                    if not isinstance(error, GraphBubbleUp):
+                        await self._deliver_failure(thread, merged, routing, output, error)
+                    raise
                 finally:
-                    exit_log_context(log_token)
                     _exit_step(tokens)
                 yield item
         finally:
@@ -362,10 +371,50 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             stateless=True,
         )
 
+    async def _deliver_failure(
+        self,
+        thread: RunThread,
+        merged: RunnableConfig,
+        routing: Mapping[str, object] | None,
+        output: RunOutput | None,
+        error: Exception,
+    ) -> None:
+        """Report the raised run's failure where its result would have gone."""
+        if not delivers_result(thread, merged, routing):
+            return
+        await deliver_run_failure(
+            thread,
+            merged,
+            error,
+            routing=routing,
+            subagent=_lead_thread_id(self.config, merged) is not None,
+            stateless=output is not None,
+        )
+
     def _keeps_state(self, config: RunnableConfig) -> bool:
         """Whether the run's state can be read back; a stateless run's cannot."""
         checkpointer = config["configurable"].get(CONFIG_KEY_CHECKPOINTER, self.checkpointer)
         return isinstance(checkpointer, BaseCheckpointSaver)
+
+
+def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
+    """One log context per run, under the trace id ingress handed over.
+
+    A nested managed graph reuses its parent's context.
+    """
+    parent = current_log_context()
+    if parent is not None:
+        return parent
+    merged = ensure_config(defaults, config)
+    metadata: Mapping[str, object] = merged.get("metadata") or {}
+    log = LogContext(trace_id=trace_id_from_metadata(metadata))
+    for key, value in (
+        ("run_id", metadata.get("run_id")),
+        ("thread_id", merged["configurable"].get("thread_id")),
+    ):
+        if isinstance(value, str) and value:
+            log.attributes[key] = value
+    return log
 
 
 #: Lists the checkpoint LangGraph writes before a run's input.
@@ -375,6 +424,7 @@ _StepTokens = tuple[
     Token[ChannelBinding | None],
     Token[Mapping[str, object] | None],
     Token[RunThread | None],
+    Token[LogContext | None],
     Token[RunOutput | None],
 ]
 
@@ -383,19 +433,22 @@ def _enter_step(
     binding: ChannelBinding | None,
     routing: Mapping[str, object] | None,
     thread: RunThread,
+    log: LogContext,
     output: RunOutput | None,
 ) -> _StepTokens:
     return (
         _current_channel.set(binding),
         _current_routing.set(routing),
         _current_thread.set(thread),
+        enter_log_context(log),
         _current_output.set(output),
     )
 
 
 def _exit_step(tokens: _StepTokens) -> None:
-    channel, routing, thread, output = tokens
+    channel, routing, thread, log, output = tokens
     _current_output.reset(output)
+    exit_log_context(log)
     _current_thread.reset(thread)
     _current_routing.reset(routing)
     _current_channel.reset(channel)
@@ -458,26 +511,6 @@ def _lead_thread_id(
     ):
         return None
     return thread_id
-
-
-def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
-    """One log context per run, under the trace id ingress handed over.
-
-    A nested managed graph reuses its parent's context.
-    """
-    parent = current_log_context()
-    if parent is not None:
-        return parent
-    merged = ensure_config(defaults, config)
-    metadata: Mapping[str, object] = merged.get("metadata") or {}
-    log = LogContext(trace_id=trace_id_from_metadata(metadata))
-    for key, value in (
-        ("run_id", metadata.get("run_id")),
-        ("thread_id", merged["configurable"].get("thread_id")),
-    ):
-        if isinstance(value, str) and value:
-            log.attributes[key] = value
-    return log
 
 
 def execution_context(
