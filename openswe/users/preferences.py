@@ -11,6 +11,9 @@ class UserPreferences(BaseModel):
     pr_review_links: bool = False
     pr_failure_reactions: bool = False
     experimental_fleet: bool = False
+    # Threads this person starts carry what their workspace's curator learned, and their
+    # personal memories reach their runs.
+    experimental_memory: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
     experimental_act_as_approval: bool = False
     # Open SWE acts as this person in shared threads without asking first.
@@ -26,6 +29,9 @@ class UserPreferencesPatch(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_fleet: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_memory: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     # A consent control, so never agent-manageable.

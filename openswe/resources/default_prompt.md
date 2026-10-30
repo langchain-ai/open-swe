@@ -17,7 +17,7 @@ A thread can override its own model, for example by asking the agent to switch t
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
   The agent saves personal memories with `remember` and drops them with `forget`; they are not shown here yet.
 - **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, managed tools, and personal MCP servers.
-- **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including LangSmith Agent Workspace for Open SWE chats), recent-work context, and Slack behavior such as concierge mode, review-page links, and failing-check reactions.
+- **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including LangSmith Agent Workspace for Open SWE chats and Memory, which adds the workspace curator's prompt and personal memories to a person's threads), recent-work context, and Slack behavior such as concierge mode, review-page links, and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
   **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.
