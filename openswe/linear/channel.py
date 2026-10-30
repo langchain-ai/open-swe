@@ -2,10 +2,11 @@
 
 The channel receives Linear's webhooks in the MDA deployment, verifies each
 delivery, and decides what it starts there. It asks here only for what needs Open
-SWE's data or signing key: to log each delivery and wake the threads that listen
-for Linear events (``record_linear_delivery``); what Open SWE knows about a session
-turn, and its signed run (``openswe.linear.session``); and a team's automations, and
-the run each one it matched starts (``openswe.schedules.store``).
+SWE's data or signing key: what Open SWE knows about a session turn, and its signed
+run (``openswe.linear.session``); and a team's automations, and the runs the ones
+it matched start (``openswe.schedules.store``). The first call for a delivery logs it
+and wakes the threads that listen for Linear events; ``record_linear_delivery`` logs
+one that asks nothing else.
 """
 
 import json
@@ -20,9 +21,9 @@ from runtime_api.linear import (
     LinearSessionFactsRequest,
     LinearSessionStart,
     LinearTrigger,
-    PlanLinearAutomation,
+    PlanLinearAutomations,
     PlanLinearSession,
-    PlannedLinearAutomation,
+    PlannedLinearAutomations,
 )
 
 from openswe.linear import session
@@ -31,9 +32,7 @@ from openswe.schedules import store
 from openswe.webhooks.event_log import EventLog, EventRefs
 
 
-async def record_linear_delivery(
-    call: ChannelCall, delivery: LinearDelivery
-) -> LinearDeliveryRecorded:
+async def _record(call: ChannelCall, delivery: LinearDelivery) -> None:
     """Log the delivery, once per delivery: MDA's channel calls again for a delivery
     Linear retries, or after an answer it didn't get."""
     body = json.dumps(delivery.payload).encode()
@@ -45,12 +44,19 @@ async def record_linear_delivery(
         delivery_id=delivery.delivery_id,
         refs=EventRefs.linear(body),
     )
+
+
+async def record_linear_delivery(
+    call: ChannelCall, delivery: LinearDelivery
+) -> LinearDeliveryRecorded:
+    await _record(call, delivery)
     return LinearDeliveryRecorded()
 
 
 async def linear_session_facts(
-    _call: ChannelCall, request: LinearSessionFactsRequest
+    call: ChannelCall, request: LinearSessionFactsRequest
 ) -> LinearSessionFacts:
+    await _record(call, request.delivery)
     return await session.linear_session_facts(request)
 
 
@@ -59,8 +65,9 @@ async def plan_linear_session(_call: ChannelCall, plan: PlanLinearSession) -> Li
 
 
 async def linear_automation_rules(
-    _call: ChannelCall, request: LinearAutomationRulesRequest
+    call: ChannelCall, request: LinearAutomationRulesRequest
 ) -> LinearAutomationRules:
+    await _record(call, request.delivery)
     records = await store.linear_automation_rules(request.team)
     return LinearAutomationRules(
         automations=[
@@ -76,7 +83,11 @@ async def linear_automation_rules(
     )
 
 
-async def plan_linear_automation(
-    _call: ChannelCall, request: PlanLinearAutomation
-) -> PlannedLinearAutomation:
-    return PlannedLinearAutomation(run=await store.plan_linear_automation(request))
+async def plan_linear_automations(
+    _call: ChannelCall, plan: PlanLinearAutomations
+) -> PlannedLinearAutomations:
+    """Each automation's run, in order. One that fails fails the call, so Linear sends
+    the delivery again: the ones already claimed plan the same threads again."""
+    return PlannedLinearAutomations(
+        runs=[await store.plan_linear_automation(each) for each in plan.each()]
+    )

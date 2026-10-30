@@ -26,22 +26,25 @@ from runtime_api.endpoint import Endpoint
 from runtime_api.linear import (
     LINEAR_AUTOMATION_RULES,
     LINEAR_SESSION_FACTS,
-    PLAN_LINEAR_AUTOMATION,
+    PLAN_LINEAR_AUTOMATIONS,
     PLAN_LINEAR_SESSION,
     RECORD_LINEAR_DELIVERY,
     LinearAutomation,
     LinearAutomationRules,
+    LinearAutomationRulesRequest,
     LinearAutomationRun,
     LinearDelivery,
     LinearDeliveryRecorded,
     LinearSessionDeclined,
     LinearSessionFacts,
+    LinearSessionFactsRequest,
     LinearSessionRun,
     LinearSessionStart,
     LinearTrigger,
     PlanLinearAutomation,
+    PlanLinearAutomations,
     PlanLinearSession,
-    PlannedLinearAutomation,
+    PlannedLinearAutomations,
     RepositoryChoice,
     RepositoryPolicy,
 )
@@ -91,33 +94,41 @@ class _Backend:
         self.recorded: list[LinearDelivery] = []
         self.plans: list[PlanLinearSession] = []
         self.automations: list[PlanLinearAutomation] = []
+        # The endpoints called, in order.
+        self.calls: list[str] = []
 
     async def __call__(
         self, endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
     ) -> BaseModel:
+        self.calls.append(endpoint.name)
         if endpoint is RECORD_LINEAR_DELIVERY:
             self.recorded.append(cast(LinearDelivery, request))
             return LinearDeliveryRecorded()
         if endpoint is LINEAR_SESSION_FACTS:
+            self.recorded.append(cast(LinearSessionFactsRequest, request).delivery)
             return self.facts
         if endpoint is PLAN_LINEAR_SESSION:
             assert msg_id == "msg_delivery-1"
             self.plans.append(cast(PlanLinearSession, request))
             return LinearSessionStart(answer=self.answer)
         if endpoint is LINEAR_AUTOMATION_RULES:
+            self.recorded.append(cast(LinearAutomationRulesRequest, request).delivery)
             return LinearAutomationRules(automations=self.rules)
-        assert endpoint is PLAN_LINEAR_AUTOMATION
-        planned = cast(PlanLinearAutomation, request)
-        self.automations.append(planned)
-        if planned.automation_id in self.skip:
-            return PlannedLinearAutomation()
-        return PlannedLinearAutomation(
-            run=LinearAutomationRun(
-                thread_id=uuid.uuid5(uuid.NAMESPACE_URL, planned.automation_id),
-                input={"messages": [{"role": "user", "content": planned.automation_id}]},
-                context={"__run_token": "signed"},
-                metadata={"channel": "linear"},
-            )
+        assert endpoint is PLAN_LINEAR_AUTOMATIONS
+        planned = cast(PlanLinearAutomations, request).each()
+        self.automations.extend(planned)
+        return PlannedLinearAutomations(
+            runs=[
+                None
+                if each.automation_id in self.skip
+                else LinearAutomationRun(
+                    thread_id=uuid.uuid5(uuid.NAMESPACE_URL, each.automation_id),
+                    input={"messages": [{"role": "user", "content": each.automation_id}]},
+                    context={"__run_token": "signed"},
+                    metadata={"channel": "linear"},
+                )
+                for each in planned
+            ]
         )
 
 
@@ -171,8 +182,9 @@ async def test_a_session_turn_starts_the_run_the_backend_planned(
 
     result = await linear.start_session(_created(), _THREAD)
 
-    # Logged, as every delivery the channel handles.
+    # Logged, as every delivery the channel handles, by the first of its two calls.
     assert [delivery.key for delivery in backend.recorded] == ["AgentSessionEvent.created"]
+    assert backend.calls == ["linear_session_facts", "plan_linear_session"]
     (plan,) = backend.plans
     assert str(plan.turn.thread_id) == _THREAD.id
     assert (plan.turn.author.email, plan.turn.body, plan.turn.comment_id) == (
@@ -451,10 +463,12 @@ async def test_an_issue_event_starts_the_automations_it_fires_on_threads_of_thei
 
     result = await automations.start_automations(_issue_event(payload), _THREAD)
 
-    # Logged either way.
+    # Logged either way, and in at most two calls: one for the rules, one plan for every match.
     assert [delivery.key for delivery in backend.recorded] == [
         "Issue.create" if payload["action"] == "create" else "Issue.update"
     ]
+    assert len(backend.calls) <= 2
+    assert backend.calls.count("plan_linear_automations") == (1 if started else 0)
     assert [planned.automation_id for planned in backend.automations] == started
     if not started:
         assert result is None
@@ -499,8 +513,8 @@ async def test_an_automation_the_backend_cant_plan_fails_the_delivery_for_linear
     async def unreachable(
         endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
     ) -> BaseModel:
-        if endpoint is PLAN_LINEAR_AUTOMATION:
-            raise RuntimeError("plan_linear_automation answered HTTP 503")
+        if endpoint is PLAN_LINEAR_AUTOMATIONS:
+            raise RuntimeError("plan_linear_automations answered HTTP 503")
         return await backend(endpoint, request, msg_id=msg_id)
 
     monkeypatch.setattr(linear, "ask_backend", unreachable)

@@ -3,16 +3,17 @@
 The channel's handlers decide what each Linear delivery starts; the backend
 answers only what needs its data or its signing key:
 
-- ``record_linear_delivery``: every handled delivery goes to the event log, which
-  wakes the threads that listen for Linear events.
+- Every handled delivery goes to the event log, which wakes the threads that
+  listen for Linear events: the first call for a delivery logs it, so each event
+  takes at most two calls. ``record_linear_delivery`` logs one that asks nothing else.
 - ``linear_session_facts``, then ``plan_linear_session``: what Open SWE knows about
   a session turn's author, thread and repositories, from which the channel picks
   the repository and workspace; then the backend checks that choice again, indexes
   the thread and signs the run's context.
-- ``linear_automation_rules``, then ``plan_linear_automation``: a team's Linear
-  automations, which the channel matches against an issue event; then, for each
-  match, the backend claims it once per delivery, writes the run's input and signs
-  its context, on a thread of its own.
+- ``linear_automation_rules``, then ``plan_linear_automations``: a team's Linear
+  automations, which the channel matches against an issue event; then, for every
+  match at once, the backend claims each once per delivery, writes its run's input
+  and signs its context, on a thread of its own.
 """
 
 import json
@@ -88,6 +89,8 @@ class LinearSessionTurn(BaseModel):
 
 
 class LinearSessionFactsRequest(BaseModel):
+    # The turn's delivery, which the backend logs once before it answers.
+    delivery: LinearDelivery
     thread_id: UUID
     author_email: str = ""
 
@@ -196,6 +199,8 @@ class LinearAutomation(BaseModel):
 
 
 class LinearAutomationRulesRequest(BaseModel):
+    # The issue event's delivery, which the backend logs once before it answers.
+    delivery: LinearDelivery
     team: str = Field(pattern=TEAM_KEY_PATTERN)
 
 
@@ -203,6 +208,13 @@ class LinearAutomationRules(BaseModel):
     """The team's enabled Linear automations."""
 
     automations: list[LinearAutomation]
+
+
+class FiredLinearAutomation(BaseModel):
+    """An automation the channel matched an issue event to, and the event it fires on."""
+
+    automation_id: str = Field(min_length=1)
+    event: LinearTriggerEvent
 
 
 class PlanLinearAutomation(BaseModel):
@@ -220,6 +232,35 @@ class PlanLinearAutomation(BaseModel):
     _bounded_issue = field_validator("issue")(_bounded)
 
 
+class PlanLinearAutomations(BaseModel):
+    """Start every automation the channel matched one issue event to."""
+
+    delivery_id: str = Field(min_length=1)
+    automations: list[FiredLinearAutomation] = Field(min_length=1, max_length=100)
+    team: str = Field(pattern=TEAM_KEY_PATTERN)
+    # The delivery's issue (``data``), which each run's prompt quotes.
+    issue: dict[str, JsonValue]
+    labels: list[str] = []
+    project: str = ""
+
+    _bounded_issue = field_validator("issue")(_bounded)
+
+    def each(self) -> list[PlanLinearAutomation]:
+        """One plan per automation, in order."""
+        return [
+            PlanLinearAutomation(
+                automation_id=fired.automation_id,
+                delivery_id=self.delivery_id,
+                event=fired.event,
+                team=self.team,
+                issue=self.issue,
+                labels=self.labels,
+                project=self.project,
+            )
+            for fired in self.automations
+        ]
+
+
 class LinearAutomationRun(BaseModel):
     """Start the automation's run on ``thread_id``, a thread of its own for this delivery."""
 
@@ -230,10 +271,10 @@ class LinearAutomationRun(BaseModel):
     webhook: str | None = None
 
 
-class PlannedLinearAutomation(BaseModel):
-    # ``None`` when nothing starts: the delivery already ran it, or it hit its hourly
-    # limit, or it can't run any more.
-    run: LinearAutomationRun | None = None
+class PlannedLinearAutomations(BaseModel):
+    # One per automation, in the order asked: ``None`` when it starts nothing, because
+    # the delivery already ran it, it hit its hourly limit, or it can't run any more.
+    runs: list[LinearAutomationRun | None]
 
 
 RECORD_LINEAR_DELIVERY: Final = Endpoint(
@@ -250,6 +291,7 @@ LINEAR_SESSION_FACTS: Final = Endpoint(
     LinearSessionFactsRequest,
     LinearSessionFacts,
     seconds=60.0,
+    # Logs the delivery once per delivery ID, and only reads otherwise.
     delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )
@@ -265,15 +307,18 @@ LINEAR_AUTOMATION_RULES: Final = Endpoint(
     LinearAutomationRulesRequest,
     LinearAutomationRules,
     seconds=60.0,
+    # Logs the delivery once per delivery ID, and only reads otherwise.
     delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )
-PLAN_LINEAR_AUTOMATION: Final = Endpoint(
-    "plan_linear_automation",
-    PlanLinearAutomation,
-    PlannedLinearAutomation,
-    seconds=60.0,
-    # Claimed once per automation and delivery, so a repeat starts nothing again.
+PLAN_LINEAR_AUTOMATIONS: Final = Endpoint(
+    "plan_linear_automations",
+    PlanLinearAutomations,
+    PlannedLinearAutomations,
+    # Each automation's planning signs a run; a team rarely fires more than a few at once.
+    seconds=120.0,
+    # Claimed once per automation and delivery, so a repeat plans the same threads,
+    # whose runs start once.
     delivery="idempotent",
     prefix=CHANNEL_API_PREFIX,
 )
