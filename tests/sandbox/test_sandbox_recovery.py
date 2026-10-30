@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxOperationError,
@@ -84,3 +85,40 @@ async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
     assert payload["status"] == "error"
     assert payload["error_type"] == "SandboxOperationError"
     assert "recovery" not in payload
+
+
+@pytest.mark.parametrize(
+    ("kind", "posted"), [("reviewer", False), ("review-scout", False), (None, True)]
+)
+async def test_a_review_leaves_its_lost_sandbox_to_its_own_failure_notice(
+    monkeypatch: pytest.MonkeyPatch, kind: str | None, posted: bool
+) -> None:
+    """A review's failure notice and check already tell the PR; a second warning repeats it."""
+    from openswe.middleware import sandbox_circuit_breaker
+
+    monkeypatch.setattr(
+        sandbox_circuit_breaker, "get_active_slack_thread", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        sandbox_circuit_breaker,
+        "read_thread",
+        AsyncMock(return_value={"metadata": {"kind": kind} if kind else {}}),
+    )
+    monkeypatch.setattr(
+        sandbox_circuit_breaker, "resolve_thread_github_token", AsyncMock(return_value="token")
+    )
+    comment = AsyncMock()
+    monkeypatch.setattr(sandbox_circuit_breaker, "post_github_comment", comment)
+
+    await sandbox_circuit_breaker.post_sandbox_unreachable_notification(
+        {
+            "configurable": {
+                "thread_id": "thread-1",
+                "repo": {"owner": "acme", "name": "api"},
+                "pr_number": 7,
+            }
+        },
+        sandbox_id="sb-dead",
+    )
+
+    assert comment.await_count == (1 if posted else 0)

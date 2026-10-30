@@ -19,6 +19,8 @@ from openswe.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply,
 )
+from openswe.utils.json_types import thread_metadata
+from openswe.utils.thread_reads import read_thread
 from openswe.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,20 @@ def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
     return None
 
 
+async def _reviews(thread_id: str | None) -> bool:
+    """Whether the thread is a reviewer's or a review scout's."""
+    from openswe.review.run_failure import REVIEW_RUN_KINDS
+
+    if not thread_id:
+        return False
+    try:
+        metadata = thread_metadata(await read_thread(thread_id))
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read the thread for its sandbox notice", exc_info=True)
+        return False
+    return metadata.get("kind") in REVIEW_RUN_KINDS
+
+
 async def post_sandbox_unreachable_notification(
     config: Mapping[str, Any],
     *,
@@ -150,6 +166,10 @@ async def post_sandbox_unreachable_notification(
 
     github_target = _get_github_target(cfg)
     if github_target is not None:
+        if await _reviews(cfg.thread_id):
+            # A review's own failure notice and check tell the PR, once.
+            logger.info("Left the sandbox notice to the review's failure notice")
+            return
         token = (
             await resolve_thread_github_token(config) or await get_github_app_installation_token()
         )

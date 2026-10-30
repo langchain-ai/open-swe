@@ -24,7 +24,7 @@ from openswe.review.publish import render_failed_status_comment, settle_review_c
 logger = logging.getLogger(__name__)
 
 ReviewRunKind = Literal["reviewer", "review-scout"]
-_REVIEW_RUN_KINDS: frozenset[str] = frozenset({REVIEWER_THREAD_KIND, "review-scout"})
+REVIEW_RUN_KINDS: frozenset[str] = frozenset({REVIEWER_THREAD_KIND, "review-scout"})
 # ``BackendCallError`` messages name the endpoint first: "prepare failed (ReadTimeout)".
 _BACKEND_ERRORS = frozenset({"BackendCallError", "BackendTimeoutError", "BackendUnavailableError"})
 _PHASE = re.compile(r"^(\w+) failed\b")
@@ -95,7 +95,7 @@ class ReviewRunFailure(BaseModel):
         metadata: Mapping[str, object],
     ) -> Self | None:
         """The failure, or ``None`` for a thread that is not a reviewer's or a scout's."""
-        if metadata.get("kind") not in _REVIEW_RUN_KINDS:
+        if metadata.get("kind") not in REVIEW_RUN_KINDS:
             return None
         try:
             thread = _ReviewThread.model_validate(metadata)
