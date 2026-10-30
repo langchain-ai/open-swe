@@ -44,6 +44,11 @@ body.version-mismatch {
 }
 
 @theme inline {
+    --color-chat-sidebar: oklch(from var(--bg-surface-level-3) l 0 h);
+    --color-chat-hover: oklch(from var(--bg-surface-level-4) l 0 h);
+    --color-chat-text: color-mix(in oklch, oklch(from var(--text-secondary) l 0 h) 85%, var(--color-chat-sidebar));
+    --color-chat-muted: color-mix(in oklch, oklch(from var(--text-quaternary) l 0 h) 90%, oklch(from var(--text-secondary) l 0 h));
+    --color-chat-border: oklch(from var(--border-subtle) l 0 h);
     --font-heading: var(--font-sans);
     /* Duty-cycled indicator animation: long holds with stepped ramps, so the
        compositor updates discrete frames instead of every vsync. */

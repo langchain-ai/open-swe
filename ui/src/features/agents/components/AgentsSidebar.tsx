@@ -24,6 +24,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
+import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr/NotePencil"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -640,7 +641,10 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
-      className="border-r border-default bg-surface-level-2"
+      className={cn(
+        "border-r border-default bg-surface-level-2",
+        agentWorkspaceEnabled && "border-chat-border bg-chat-sidebar"
+      )}
     >
       <div
         className={cn(
@@ -650,7 +654,10 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className="flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
+          className={cn(
+            "flex min-w-0 items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary",
+            agentWorkspaceEnabled && "text-chat-text"
+          )}
         >
           <LogoMark alt="" className="size-5 shrink-0" />
           <span>
@@ -1484,27 +1491,28 @@ function AgentWorkspaceThreadList({
       <Link
         to="/agents"
         onClick={onNavigate}
-        className={cn(
-          NAV_ROW_CLASS,
-          "group mb-space-3 bg-surface-level-3 hover:bg-surface-level-4"
-        )}
+        className="mb-space-4 flex h-8 shrink-0 items-center gap-space-2 rounded-xl px-space-2 text-sm font-normal text-chat-text transition-colors hover:bg-chat-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
-        <PlusIcon size={20} className="-mx-0.5" />
+        <NotePencilIcon size={18} weight="regular" className="shrink-0" />
         New chat
       </Link>
       {error && (
         <ThreadSourceError label="Chats unavailable" onRetry={onRetry} />
       )}
-      <div ref={viewport} className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={viewport}
+        className="flex min-h-0 flex-1 flex-col gap-space-5 overflow-y-auto"
+      >
         {loading && <ThreadListSkeleton compact={compact} />}
         {CHAT_SECTIONS.map((label) => {
           const rows = items.filter((item) => section(item) === label)
           if (!rows.length) return null
           const collapsible = label === "Archived"
           return (
-            <div key={label}>
+            <div key={label} className="shrink-0">
               <SidebarSectionHeader
                 label={label}
+                headingClassName="mb-space-2 py-space-1 text-xs font-medium text-chat-muted hover:text-chat-text"
                 collapsed={collapsible ? !archivedOpen : undefined}
                 onToggleCollapsed={
                   collapsible ? () => setArchivedOpen(!archivedOpen) : undefined
