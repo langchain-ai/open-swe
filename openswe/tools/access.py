@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R", bound=Mapping[str, object])
 
-Place = Literal["anywhere", "private", "admin_thread", "admin_surface", "channel_history"]
+Place = Literal[
+    "anywhere", "private", "admin_thread", "admin_surface", "channel_history", "curator"
+]
 Actor = Literal["anyone", "owner", "admin"]
 Mode = Literal["full", "sole"]
 Projection = Callable[[Mapping[str, object]], Mapping[str, object]]
@@ -116,6 +118,8 @@ class Access:
     sole: bool = False
     direct: bool = False
     slack_bot_channel: str | None = None
+    # A workspace curator's own thread (``openswe.memories.curator``).
+    curator: bool = False
 
     def mode(self, policy: Policy) -> Mode | None:
         if policy.direct and not self.direct:
@@ -126,6 +130,7 @@ class Access:
             "admin_thread": self.admin_thread,
             "admin_surface": self.admin_surface,
             "channel_history": self.private or bool(self.slack_bot_channel),
+            "curator": self.curator,
         }[policy.trusted]
         if trusted and self._actor(policy.actor, sole=False):
             return "full"
@@ -221,6 +226,7 @@ class _ThreadScope(BaseModel):
     visibility: Literal["public", "private"] = "public"
     owner_type: Literal["user", "system"] | None = None
     admin_thread: bool | None = None
+    curator: str | None = None
 
 
 async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = None) -> Access:
@@ -277,6 +283,11 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
         slack_bot_channel=slack_bot_channel,
+        curator=(
+            scope.owner_type == "system"
+            and scope.curator is not None
+            and scope.curator == cfg.workspace_slug
+        ),
     )
 
 

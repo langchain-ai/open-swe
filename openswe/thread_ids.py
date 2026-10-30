@@ -46,6 +46,11 @@ def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> 
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}")
 
 
+def curator_thread_id(workspace_slug: str) -> str:
+    """The long-lived thread that curates a workspace's memories."""
+    return _url_uuid(f"workspace:{workspace_slug}:curator")
+
+
 def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> str:
     return _url_uuid(f"slack:{channel}:{timestamp}:{nonce or ''}")
 

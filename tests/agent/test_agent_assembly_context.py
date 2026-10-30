@@ -62,7 +62,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
         {
-            "save_user_instructions",
+            "forget",
             "save_user_settings",
             "save_user_skill",
             "delete_user_skill",

@@ -220,3 +220,15 @@ async def test_bot_channel_history_is_scoped_and_revocable(
 
     metadata["source_context"] = {}
     assert (await slack_read_channel_messages("C1"))["ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("owner_type", "curates", "expected"),
+    [("system", "platform", "full"), ("system", "billing", None), ("user", "platform", None)],
+)
+async def test_only_a_workspaces_own_curator_thread_curates_it(
+    metadata: dict[str, object], owner_type: str, curates: str, expected: tool_access.Mode | None
+) -> None:
+    metadata.update(owner_type=owner_type, curator=curates)
+    resolved = await resolve_access(_cfg(workspace="platform", github_login=None))
+    assert resolved.mode(Policy(trusted="curator")) == expected

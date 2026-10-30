@@ -1,0 +1,238 @@
+"""What threads remember, and the prompt each workspace's curator distils from it.
+
+A personal memory applies to the runs of the person who saved it at once. Every
+memory also waits for the curator of the workspace it was saved in, which may fold
+what many people's threads learned into the workspace's prompt. The curator never
+reads a memory saved in a private thread unless its person agreed to share it.
+"""
+
+import hashlib
+from datetime import datetime
+from typing import Final, Literal
+from uuid import UUID, uuid7
+
+from pydantic import BaseModel
+from sqlalchemy import ForeignKey, delete, func, select, update
+from sqlalchemy.orm import Mapped, mapped_column
+
+from openswe.database import postgres
+from openswe.database.orm import NOW, Base
+from openswe.users.models import User
+from openswe.workspaces.rows import WorkspaceRow
+
+Scope = Literal["personal", "workspace"]
+Status = Literal["pending", "held", "adopted", "declined"]
+Decision = Literal["adopted", "declined"]
+
+MAX_MEMORY_CHARS: Final = 2_000
+MAX_WORKSPACE_PROMPT_CHARS: Final = 40_000
+# The personal memories a person's runs see, newest first.
+_PERSONAL_LIMIT: Final = 50
+_CURATOR_PAGE: Final = 200
+
+
+class MemoryRow(Base):
+    __tablename__ = "memory"
+
+    scope: Mapped[str]
+    from_private_thread: Mapped[bool]
+    body: Mapped[str]
+    workspace_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(WorkspaceRow.id, ondelete="CASCADE"), default=None
+    )
+    thread_id: Mapped[str | None] = mapped_column(default=None)
+    status: Mapped[str] = mapped_column(server_default="pending", default="pending")
+    decision_note: Mapped[str] = mapped_column(server_default="", default="")
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+
+
+class WorkspacePromptVersion(Base):
+    __tablename__ = "workspace_prompt_version"
+
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id, ondelete="CASCADE"))
+    prompt: Mapped[str]
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey(User.id, ondelete="SET NULL"), default=None
+    )
+
+
+class PersonalMemory(BaseModel):
+    id: UUID
+    body: str
+
+
+class CuratedMemory(BaseModel):
+    """A memory as the curator sees it: never who saved it, and never what a private
+    thread said unless its person agreed to share it."""
+
+    id: UUID
+    scope: Scope
+    status: Status
+    saved_at: datetime
+    # The same for every memory one person saved in this workspace, so the curator
+    # can count how many people say a thing without learning who they are.
+    person: str | None
+    from_private_thread: bool
+    # None for a memory from a private thread whose person kept it to themselves.
+    body: str | None
+    # Where the curator can look for evidence; None for a private thread.
+    thread_id: str | None
+
+
+def _person_key(workspace_id: UUID, person: UUID | None) -> str | None:
+    if person is None:
+        return None
+    return hashlib.sha256(f"{workspace_id}:{person}".encode()).hexdigest()[:12]
+
+
+class Memories:
+    """Every ``memory`` row and every ``workspace_prompt_version``."""
+
+    async def save(
+        self,
+        *,
+        scope: Scope,
+        body: str,
+        person: UUID | None,
+        workspace_id: UUID | None,
+        thread_id: str | None,
+        from_private_thread: bool,
+        shared: bool,
+    ) -> MemoryRow:
+        """Keep a memory; one from a private thread its person did not share is held from
+        the curator, and a workspace one never takes effect without it."""
+        held = from_private_thread and not shared
+        row = MemoryRow(
+            scope=scope,
+            body=body,
+            workspace_id=workspace_id,
+            thread_id=thread_id,
+            from_private_thread=from_private_thread,
+            status="held" if held else "pending",
+            created_by=person,
+            updated_by=person,
+        )
+        async with postgres.session() as session:
+            session.add(row)
+        return row
+
+    async def personal(self, person: UUID) -> list[PersonalMemory]:
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(MemoryRow.id, MemoryRow.body)
+                .where(MemoryRow.scope == "personal", MemoryRow.created_by == person)
+                .order_by(MemoryRow.created_at.desc())
+                .limit(_PERSONAL_LIMIT)
+            )
+        return [PersonalMemory(id=row.id, body=row.body) for row in rows]
+
+    async def forget(self, memory_id: UUID, person: UUID) -> bool:
+        """Delete one of ``person``'s personal memories; False when they have no such one."""
+        async with postgres.session() as session:
+            deleted = await session.scalar(
+                delete(MemoryRow)
+                .where(
+                    MemoryRow.id == memory_id,
+                    MemoryRow.scope == "personal",
+                    MemoryRow.created_by == person,
+                )
+                .returning(MemoryRow.id)
+            )
+        return deleted is not None
+
+    async def for_curator(self, workspace_id: UUID, status: Status) -> list[CuratedMemory]:
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(MemoryRow)
+                .where(MemoryRow.workspace_id == workspace_id, MemoryRow.status == status)
+                .order_by(MemoryRow.created_at)
+                .limit(_CURATOR_PAGE)
+            )
+            memories = list(rows)
+        return [
+            CuratedMemory(
+                id=row.id,
+                scope="personal" if row.scope == "personal" else "workspace",
+                status=status,
+                saved_at=row.created_at,
+                person=_person_key(workspace_id, row.created_by),
+                from_private_thread=row.from_private_thread,
+                body=None if row.status == "held" else row.body,
+                thread_id=None if row.from_private_thread else row.thread_id,
+            )
+            for row in memories
+        ]
+
+    async def pending_workspaces(self) -> list[str]:
+        """The slugs of the workspaces with a memory their curator has not decided."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(WorkspaceRow.slug)
+                .join(MemoryRow, MemoryRow.workspace_id == WorkspaceRow.id)
+                .where(MemoryRow.status == "pending")
+                .distinct()
+            )
+            return list(rows)
+
+    async def decide(
+        self, workspace_id: UUID, memory_id: UUID, decision: Decision, note: str
+    ) -> bool:
+        """Record the curator's decision; False for a memory it may not decide."""
+        async with postgres.session() as session:
+            decided = await session.scalar(
+                update(MemoryRow)
+                .where(
+                    MemoryRow.id == memory_id,
+                    MemoryRow.workspace_id == workspace_id,
+                    MemoryRow.status != "held",
+                )
+                .values(status=decision, decision_note=note, updated_at=func.clock_timestamp())
+                .returning(MemoryRow.id)
+            )
+        return decided is not None
+
+    async def workspace_prompt(self, workspace_id: UUID) -> str:
+        """The workspace's latest curated prompt; empty before its curator publishes one."""
+        async with postgres.session() as session:
+            prompt = await session.scalar(
+                select(WorkspacePromptVersion.prompt)
+                .where(WorkspacePromptVersion.workspace_id == workspace_id)
+                .order_by(WorkspacePromptVersion.created_at.desc())
+                .limit(1)
+            )
+        return prompt or ""
+
+    async def workspace_prompt_for(self, slug: str) -> str:
+        """``workspace_prompt`` for the workspace stored under ``slug``."""
+        async with postgres.session() as session:
+            prompt = await session.scalar(
+                select(WorkspacePromptVersion.prompt)
+                .join(WorkspaceRow, WorkspaceRow.id == WorkspacePromptVersion.workspace_id)
+                .where(WorkspaceRow.slug == slug)
+                .order_by(WorkspacePromptVersion.created_at.desc())
+                .limit(1)
+            )
+        return prompt or ""
+
+    async def publish(self, workspace_id: UUID, prompt: str) -> WorkspacePromptVersion:
+        version = WorkspacePromptVersion(workspace_id=workspace_id, prompt=prompt)
+        async with postgres.session() as session:
+            session.add(version)
+        return version
+
+
+MEMORIES = Memories()

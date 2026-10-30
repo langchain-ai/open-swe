@@ -100,6 +100,7 @@ from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.runtime import MCPTools
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
+from openswe.memories.store import MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -194,6 +195,7 @@ from openswe.tools import (
     connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
+    decide_memory,
     delete_automation,
     delete_organization_skill,
     delete_user_skill,
@@ -203,12 +205,14 @@ from openswe.tools import (
     expedite_pr_approval,
     expose_port,
     fetch_url,
+    forget,
     get_human_review_status,
     get_thread,
     http_request,
     link_pull_request,
     list_automations,
     list_event_types,
+    list_memories,
     list_threads,
     list_workspaces,
     listen_events,
@@ -222,15 +226,17 @@ from openswe.tools import (
     output_iframe,
     publish_artifact,
     publish_workspace,
+    publish_workspace_prompt,
     read_only_sql,
     read_user_settings,
+    read_workspace_prompt,
     recreate_sandbox,
+    remember,
     report_platform_issue,
     request_human_review,
     request_pr_review,
     request_rollout_check,
     save_organization_skill,
-    save_user_instructions,
     save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
@@ -474,10 +480,11 @@ async def _thread_participant(
             slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
-    profile, workspace_admin, instructions = await asyncio.gather(
+    profile, workspace_admin, instructions, memories = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
+        _personal_memories(user),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
@@ -491,6 +498,7 @@ async def _thread_participant(
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
+        memories=memories,
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -542,6 +550,27 @@ async def _thread_participants(
             *(_thread_participant(identity, config) for identity in others),
         )
     )
+
+
+async def _workspace_memory(slug: str) -> str:
+    """The prompt the workspace's curator last published, fixed into a new thread's prompt."""
+    try:
+        return await MEMORIES.workspace_prompt_for(slug)
+    except Exception:
+        logger.warning("Could not load a workspace's curated prompt", exc_info=True)
+        return ""
+
+
+async def _personal_memories(user: User | None) -> tuple[str, ...]:
+    """What the person asked their runs to remember, each with the id that forgets it."""
+    if user is None:
+        return ()
+    try:
+        memories = await MEMORIES.personal(user.id)
+    except Exception:
+        logger.warning("Could not load a participant's personal memories", exc_info=True)
+        return ()
+    return tuple(f"{memory.body} (memory {memory.id})" for memory in memories)
 
 
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
@@ -638,6 +667,12 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_user_settings",
         "connect_managed_tools",
         "save_user_settings",
+        "remember",
+        "forget",
+        "list_memories",
+        "read_workspace_prompt",
+        "decide_memory",
+        "publish_workspace_prompt",
         "record_incident_report",
         "search_incidents",
         "start_thread",
@@ -694,7 +729,12 @@ AGENT_TOOLS: Final = (
     background_task,
     monitor,
     publish_artifact,
-    save_user_instructions,
+    remember,
+    forget,
+    list_memories,
+    read_workspace_prompt,
+    decide_memory,
+    publish_workspace_prompt,
     save_user_settings,
     save_user_skill,
     delete_user_skill,
@@ -1676,6 +1716,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
+            memory = await _workspace_memory(workspace.slug) if workspace else ""
         return construct_system_prompt(
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
@@ -1684,6 +1725,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_name=workspace.name if workspace else None,
             workspace_instructions=workspace.instructions if workspace else None,
             workspace_repos=workspace.repos if workspace else None,
+            workspace_memory=memory,
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
