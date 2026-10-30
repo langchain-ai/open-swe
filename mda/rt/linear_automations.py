@@ -9,7 +9,6 @@ and signs its context (``plan_linear_automation``); the channel starts the run o
 thread of its own, so automations never touch the issue's conversation.
 """
 
-import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -37,8 +36,6 @@ from runtime_api.linear import (
 
 from rt.intake import ask_backend
 from rt.linear import record
-
-logger = logging.getLogger(__name__)
 
 _TEAM_KEY: Final = re.compile(TEAM_KEY_PATTERN)
 
@@ -154,29 +151,23 @@ async def start_automations(
         fired = issue.firing(automation)
         if fired is None:
             continue
-        try:
-            planned = (
-                await ask_backend(
-                    PLAN_LINEAR_AUTOMATION,
-                    PlanLinearAutomation(
-                        automation_id=automation.id,
-                        delivery_id=event.delivery_id,
-                        event=fired,
-                        team=issue.team,
-                        issue=issue.data,
-                        labels=sorted(issue.labels),
-                        project=issue.project,
-                    ),
-                    msg_id=f"msg_{event.delivery_id}_automation_{automation.id}",
-                )
-            ).run
-        except Exception:
-            # One automation that can't start doesn't keep the others from starting.
-            logger.exception(
-                "A Linear automation could not be planned",
-                extra={"automation_id": automation.id, "linear_delivery": event.delivery_id},
+        # A call that fails fails the delivery, so Linear sends it again: automations
+        # already claimed for it plan the same threads, which start their runs once.
+        planned = (
+            await ask_backend(
+                PLAN_LINEAR_AUTOMATION,
+                PlanLinearAutomation(
+                    automation_id=automation.id,
+                    delivery_id=event.delivery_id,
+                    event=fired,
+                    team=issue.team,
+                    issue=issue.data,
+                    labels=sorted(issue.labels),
+                    project=issue.project,
+                ),
+                msg_id=f"msg_{event.delivery_id}_automation_{automation.id}",
             )
-            continue
+        ).run
         if planned is None:
             continue
         options: ChannelRunOptions = {

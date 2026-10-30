@@ -451,6 +451,27 @@ async def test_an_automation_the_backend_doesnt_claim_starts_nothing(
 
 
 @pytest.mark.asyncio
+async def test_an_automation_the_backend_cant_plan_fails_the_delivery_for_linear_to_resend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _Backend(rules=[_TRIAGE])
+
+    async def unreachable(
+        endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
+    ) -> BaseModel:
+        if endpoint is PLAN_LINEAR_AUTOMATION:
+            raise RuntimeError("plan_linear_automation answered HTTP 503")
+        return await backend(endpoint, request, msg_id=msg_id)
+
+    monkeypatch.setattr(linear, "ask_backend", unreachable)
+    monkeypatch.setattr(automations, "ask_backend", unreachable)
+
+    payload = _issue("create", labels={"l1": "bug"}, project="api")
+    with pytest.raises(RuntimeError):
+        await automations.start_automations(_issue_event(payload), _THREAD)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("url", "address"),
     [
