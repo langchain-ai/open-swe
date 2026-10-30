@@ -1,8 +1,10 @@
 """Deterministic reviewer picks: code owners and recent authors of the changed files.
 
-Candidates must have more than three commits or more than 20% of repository commits
-in the last 30 days, including a change of at least 20 relevant lines. They come
-from one CODEOWNERS area at a time, the one owning the most changed files first. Each scores the changed files they own plus those they changed within
+Top-ranked contributors have more than three commits or more than 20% of repository commits
+in the last 30 days, including a change of at least 20 relevant lines. If none
+qualifies, smaller recent contributors are considered instead. They come
+from one CODEOWNERS area at a time, the one owning the most changed files first.
+Each scores the changed files they own plus those they changed within
 ``HISTORY_WINDOW``, divided by one more than the open reviews they already have.
 Only people inside their work hours are picked; when nobody is, the pick waits
 for whoever's work day starts first. Anyone already on the request, or rotated
@@ -251,9 +253,9 @@ class Coverage:
 
 
 async def recent_contributors(
-    repo: RepoClient, ref: str | None, files: list[ChangedFile]
+    repo: RepoClient, ref: str | None, files: list[ChangedFile], *, include_small: bool = False
 ) -> Counter[str]:
-    """Count relevant files substantially changed by regular recent repository contributors."""
+    """Count recently changed files, normally limited to substantial regular contributors."""
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
     paths = {changed.filename for changed in files}
@@ -299,7 +301,9 @@ async def recent_contributors(
     }
 
     async def contribution(commit: _Commit) -> tuple[str, set[str]] | None:
-        if commit.author is None or commit.author.login.lower() not in regular:
+        if commit.author is None or (
+            not include_small and commit.author.login.lower() not in regular
+        ):
             return None
         async with gate:
             try:
@@ -314,7 +318,9 @@ async def recent_contributors(
                 )
                 return None
         relevant = [file for file in changed if file.filename in paths]
-        if sum(file.changed_lines for file in relevant) < _MIN_CHANGED_LINES:
+        if not relevant or (
+            not include_small and sum(file.changed_lines for file in relevant) < _MIN_CHANGED_LINES
+        ):
             return None
         return commit.author.login.lower(), {file.filename for file in relevant}
 
@@ -356,6 +362,8 @@ async def _choose_reviewer(
     pull: PullRequestClient,
     area: Area | None,
     extra: dict[str, object],
+    *,
+    include_small: bool = False,
 ) -> Pick | Wait | None:
     pr = request.pull_request
     files = await ChangedFile.of_pull(pull)
@@ -364,7 +372,8 @@ async def _choose_reviewer(
         return None
     ref = pr.base_ref or None
     codeowners, touched = await asyncio.gather(
-        CodeOwners.fetch(pull.repo, ref), recent_contributors(pull.repo, ref, files)
+        CodeOwners.fetch(pull.repo, ref),
+        recent_contributors(pull.repo, ref, files, include_small=include_small),
     )
     coverage = (
         await Coverage.build(codeowners, [changed.filename for changed in files])
@@ -427,6 +436,7 @@ async def _choose_reviewer(
         "Filtered reviewer candidates",
         extra={**extra, "eligible": sorted(people), "skipped": skipped},
     )
+    requested_area = area
     fallback = False
     if area is None and coverage.areas:
         on_request = [p.github_login for p in request.participants if p.decision != "expired"]
@@ -444,6 +454,8 @@ async def _choose_reviewer(
             people = owners
     if not people:
         logger.info("No Open SWE user owns or recently changed these files", extra=extra)
+        if not include_small:
+            return await _choose_reviewer(request, pull, requested_area, extra, include_small=True)
         return None
     loads = await HumanReviewRequest.open_review_counts(
         [user.id for user in people.values()], excluding=request.id
@@ -503,4 +515,6 @@ async def _choose_reviewer(
         )
         return Pick(people[candidate.login].login_for("github") or candidate.login, reason)
     logger.info("No candidate reviewer has write access", extra=extra)
+    if not include_small:
+        return await _choose_reviewer(request, pull, requested_area, extra, include_small=True)
     return None

@@ -721,12 +721,13 @@ async def assign(
                 pull.repo, pr.base_ref or None, await ChangedFile.of_pull(pull) or []
             )
         if github_login.lower() not in contributors:
-            return _failure(
-                f"@{github_login} is not a regular contributor to these files in the past 30 days. "
-                "Require more than three repository commits or more than 20% of repository commits, "
-                "plus a commit changing at least 20 relevant lines; "
-                "do not fall back to minor contributors or inactive code owners."
-            )
+            fallback = await choose_reviewer(request)
+            if not isinstance(fallback, Pick) or fallback.login.lower() != github_login.lower():
+                return _failure(
+                    f"@{github_login} is not the best eligible recent contributor. "
+                    "Prefer regular contributors; use a small contributor only when no suitable "
+                    "regular contributor qualifies."
+                )
         availability = await ReviewerAvailability.for_user(user)
         if availability.out_of_office is True:
             return _failure(f"@{github_login} is out of office; pick someone else.")
@@ -1220,9 +1221,8 @@ async def _assignment_failed(request: HumanReviewRequest, *, area: Area | None =
     scope = f" for {' '.join(area.handles)}" if area is not None else ""
     text = (
         f"Automatic reviewer assignment failed{scope} for <{pr.url}|{pr.label}>: "
-        "no suitable available regular contributor qualified from the past 30 days "
-        "(more than three repository commits or more than 20% of repository commits, "
-        "plus a commit changing at least 20 relevant lines). "
+        "no suitable available contributor qualified from the past 30 days, "
+        "even after considering smaller contributors. "
         "Please choose a reviewer yourself."
     )
     author = await User.for_login("github", pr.author) if pr.author else None
@@ -1236,9 +1236,8 @@ async def _assignment_failed(request: HumanReviewRequest, *, area: Area | None =
     async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
         await pull.comment(
             f"@{pr.author} Automatic reviewer assignment failed{scope}: no suitable available "
-            "regular contributor qualified from the past 30 days (more than three repository commits "
-            "or more than 20% of repository commits, plus a commit changing at least 20 relevant "
-            "lines). Please choose a reviewer yourself."
+            "contributor qualified from the past 30 days, even after considering smaller contributors. "
+            "Please choose a reviewer yourself."
         )
 
 

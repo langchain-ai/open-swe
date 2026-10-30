@@ -221,8 +221,12 @@ async def test_recent_contributors_require_volume_or_repo_share_and_substantial_
     result = await recent_contributors(
         repo, "main", [ChangedFile(filename="app.py"), ChangedFile(filename="second.py")]
     )
-    after = datetime.now(UTC) - timedelta(days=30)
     assert result == ({"regular": 1} if qualifies else {})
+    fallback = await recent_contributors(
+        repo, "main", [ChangedFile(filename="app.py")], include_small=True
+    )
+    assert fallback == ({"regular": 1, "tiny": 1, "unrelated": 1} if count else {})
+    after = datetime.now(UTC) - timedelta(days=30)
     assert all(
         before <= datetime.fromisoformat(call.kwargs["since"]) <= after
         and call.kwargs["ref"] == "main"
@@ -245,3 +249,50 @@ async def test_inactive_code_owner_does_not_qualify_without_recent_contributions
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
     monkeypatch.setattr(picking, "recent_contributors", AsyncMock(return_value=Counter()))
     assert await picking._choose_reviewer(request, MagicMock(), None, {}) is None
+
+
+@pytest.mark.parametrize("regular_eligible", [True, False])
+async def test_small_contributor_is_picked_only_without_a_suitable_regular_contributor(
+    monkeypatch: pytest.MonkeyPatch,
+    user_records: FakeUserRecords,
+    regular_eligible: bool,
+) -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review import picking
+
+    regular = User(identities=[UserIdentity(provider="github", external_id="1", login="regular")])
+    small = User(identities=[UserIdentity(provider="github", external_id="2", login="small")])
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="author")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    monkeypatch.setattr(
+        ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
+    )
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        picking,
+        "recent_contributors",
+        AsyncMock(
+            side_effect=lambda *args, include_small=False: (
+                Counter(regular=1, small=10) if include_small else Counter(regular=1)
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(side_effect=lambda _, login: {"regular": regular, "small": small}[login]),
+    )
+    monkeypatch.setattr(
+        picking.ReviewerAvailability, "for_user", AsyncMock(return_value=ReviewerAvailability(None))
+    )
+    monkeypatch.setattr(
+        HumanReviewRequest,
+        "open_review_counts",
+        AsyncMock(return_value={regular.id: 0, small.id: 0}),
+    )
+    pull = MagicMock()
+    pull.repo.can_write = AsyncMock(side_effect=lambda login: login == "small" or regular_eligible)
+    choice = await picking._choose_reviewer(request, pull, None, {})
+    assert isinstance(choice, picking.Pick)
+    assert choice.login == ("regular" if regular_eligible else "small")
