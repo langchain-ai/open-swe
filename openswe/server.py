@@ -31,6 +31,7 @@ from runtime_api.catalog import (
     CliResultRules,
     InboxSpec,
     LoopRules,
+    McpServerSpec,
     ModelSpec,
     ReplyRules,
     RoutingRules,
@@ -60,6 +61,7 @@ from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
 from pydantic import JsonValue, TypeAdapter
 
+from openswe.agent_api.connections import acting_user
 from openswe.agent_api.preparation import AgentPreparation
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
@@ -98,6 +100,7 @@ from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.runtime import MCPTools
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
+from openswe.memories.store import MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -192,6 +195,7 @@ from openswe.tools import (
     connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
+    decide_memory,
     delete_automation,
     delete_organization_skill,
     delete_user_skill,
@@ -201,12 +205,14 @@ from openswe.tools import (
     expedite_pr_approval,
     expose_port,
     fetch_url,
+    forget,
     get_human_review_status,
     get_thread,
     http_request,
     link_pull_request,
     list_automations,
     list_event_types,
+    list_memories,
     list_threads,
     list_workspaces,
     listen_events,
@@ -220,15 +226,17 @@ from openswe.tools import (
     output_iframe,
     publish_artifact,
     publish_workspace,
+    publish_workspace_prompt,
     read_only_sql,
     read_user_settings,
+    read_workspace_prompt,
     recreate_sandbox,
+    remember,
     report_platform_issue,
     request_human_review,
     request_pr_review,
     request_rollout_check,
     save_organization_skill,
-    save_user_instructions,
     save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
@@ -384,7 +392,7 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
     if cfg.repo:
         return {"owner": cfg.repo.owner, "name": cfg.repo.name}
 
-    if cfg.repo_explicitly_none is True:
+    if cfg.repo_explicitly_none is True or cfg.experience == "agent_workspace":
         return None
 
     try:
@@ -472,10 +480,18 @@ async def _thread_participant(
             slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
-    profile, workspace_admin, instructions = await asyncio.gather(
+    profile, workspace_admin, instructions, memories = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
+        MEMORIES.personal(
+            user.id if user else None,
+            unprocessed_in=(
+                RunConfig.from_config(config).workspace_slug
+                if user is not None and user.typed_preferences.experimental_memory
+                else None
+            ),
+        ),
     )
     display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
@@ -489,6 +505,7 @@ async def _thread_participant(
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
+        memories=tuple(memory.line for memory in memories),
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -636,6 +653,12 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_user_settings",
         "connect_managed_tools",
         "save_user_settings",
+        "remember",
+        "forget",
+        "list_memories",
+        "read_workspace_prompt",
+        "decide_memory",
+        "publish_workspace_prompt",
         "record_incident_report",
         "search_incidents",
         "start_thread",
@@ -692,7 +715,12 @@ AGENT_TOOLS: Final = (
     background_task,
     monitor,
     publish_artifact,
-    save_user_instructions,
+    remember,
+    forget,
+    list_memories,
+    read_workspace_prompt,
+    decide_memory,
+    publish_workspace_prompt,
     save_user_settings,
     save_user_skill,
     delete_user_skill,
@@ -910,6 +938,39 @@ async def _mcp_tools_for(
     return await load_mcp_tools(*sources)
 
 
+def _owned_mcp_servers(
+    config: RunnableConfig, credential_login: str | None, servers: Sequence[McpServerSpec]
+) -> list[McpServerSpec]:
+    """``servers`` without the personal ones, unless the MDA run acts as their owner.
+
+    MDA reads a personal server's connection as the person the run acts as there
+    (``acting_user``), whom the run is also attributed to. A run that acts as no one, such
+    as a wakeup or a background task's completion, has no person's principal, whoever it
+    is attributed to: MDA starts it as a service principal, MDA's channel one
+    (``mda:channel``) on a channel's thread and the backend key's own on any other, and
+    MDA refuses user connections to a service principal, so a grant there can be neither
+    made nor read.
+    """
+    metadata = config.get("metadata") or {}
+    attributed = metadata.get("ls_attribution_identifier")
+    for_owner = (
+        acting_user(metadata) is not None
+        and isinstance(attributed, str)
+        and credential_login is not None
+        and attributed.lower() == credential_login.lower()
+    )
+    owned: list[McpServerSpec] = []
+    for server in servers:
+        if server.connection.owner == "user" and not for_owner:
+            logger.warning(
+                "Leaving out a personal MCP server of a run that does not act for its owner",
+                extra={"mcp_name": server.name},
+            )
+            continue
+        owned.append(server)
+    return owned
+
+
 async def _run_mcp_tools(
     thread_id: str, credential_login: str | None, workspace: str
 ) -> tuple[str | None, MCPTools]:
@@ -947,6 +1008,9 @@ _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
     "open_pull_request",
     "web_search",
     "fetch_url",
+    # A lesson is worth keeping the moment it is learned, not after a search for the tool.
+    "remember",
+    "forget",
 }
 
 
@@ -1519,6 +1583,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 sender_messages = self._participants_messages(state, participants)
         turn = TurnContext(
             working_dir=work_dir,
+            agent_workspace=cfg.experience == "agent_workspace",
             source="background_task" if cfg.background_task_completion else self._source,
             slack_context=_slack_tools_enabled(cfg),
             slack_ask=_slack_ask_mode(cfg),
@@ -1641,7 +1706,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
+            memory = (
+                await MEMORIES.workspace_prompt(workspace.slug)
+                if workspace
+                and self._profile_login
+                and (await User.preferences_for_login(self._profile_login)).experimental_memory
+                else ""
+            )
         return construct_system_prompt(
+            agent_workspace=cfg.experience == "agent_workspace",
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
             default_repo=default_repo,
@@ -1649,6 +1722,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_name=workspace.name if workspace else None,
             workspace_instructions=workspace.instructions if workspace else None,
             workspace_repos=workspace.repos if workspace else None,
+            workspace_memory=memory,
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
@@ -2253,6 +2327,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     ]
     surface.dynamic = dynamic_tool_middleware
+    surface.mcp_servers = _owned_mcp_servers(
+        config,
+        credential_login,
+        mcp_tools.runtime_servers if isinstance(mcp_tools, MCPTools) else [],
+    )
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
     surface.backend_paths = tuple(

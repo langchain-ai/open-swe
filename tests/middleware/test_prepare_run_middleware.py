@@ -15,6 +15,7 @@ from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunS
 from openswe.run_config import RunConfig
 from openswe.server import PrepareAgentRunMiddleware, _thread_participants
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
+from openswe.users import UserPreferences
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -76,7 +77,12 @@ async def test_sender_is_matched_by_login_and_others_get_their_slack_timezone(
         commit_email=f"123+{sender_login}@users.noreply.github.com",
     )
     bob_user = SimpleNamespace(
-        id="bob", github_login="bob", display_name="bob", email="", slack_user_id="U-bob"
+        id="bob",
+        github_login="bob",
+        display_name="bob",
+        email="",
+        slack_user_id="U-bob",
+        typed_preferences=UserPreferences(),
     )
     with patch.multiple(
         "openswe.server",

@@ -10,6 +10,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import record_pull_request, settle
+from openswe.human_review.supplementary import SupplementaryReviews
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_review_pr_url
@@ -59,6 +60,7 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
             row.run_config = {**row.run_config, "posted_pr_urls": urls}
     for request in requests:
         await ReviewCard(request).link_on_github()
+        await SupplementaryReviews(request).start()
         await settle(request)
 
 
