@@ -1460,6 +1460,46 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     )
     assert work is not None and work.dispatch
     initial = work.request
+    old = datetime.now(UTC) - timedelta(days=2)
+    async with postgres.session() as session:
+        history = Batch(
+            queue_id=queue.id,
+            request_key="historical",
+            base_sha=work.batch.base_sha,
+            policy={},
+            deadline=old,
+            max_attempts=101,
+            max_plans=0,
+            state="invalidated",
+            finished_at=old,
+        )
+        session.add(history)
+        await session.flush()
+        for number in range(1, 102):
+            attempt = Attempt(
+                batch_id=history.id,
+                request_key=str(number),
+                number=number,
+                deadline=old,
+                state="timed_out",
+                finished_at=old,
+            )
+            attempt.created_at = old
+            session.add(attempt)
+            await session.flush()
+            session.add(
+                Evidence(
+                    attempt_id=attempt.id,
+                    key="native-request",
+                    reference=initial.model_copy(
+                        update={
+                            "batch_id": history.id,
+                            "attempt_id": attempt.id,
+                            "candidate_sha": "b" * 40,
+                        }
+                    ).model_dump(mode="json"),
+                )
+            )
     await queue.record_evidence(
         work.attempt.id, "workflow-policy", {"revision": 1, "digest": "a" * 64}, lease
     )
@@ -1504,6 +1544,11 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
         assert replay == pending
     async with queue.native_check_update(native_snapshot((1, 2, 3, 4, 5, 6)), lease) as repeated:
         assert repeated is None
+    async with postgres.session() as session:
+        cancelled = await session.execute(
+            select(func.count()).select_from(Evidence).where(Evidence.key == "check-cancelled")
+        )
+        assert cancelled.scalar_one() > 1
     recovered = await queue.prepare_native_validation(
         native_snapshot((1, 3, 4, 5, 6)), 600, lease, policy=tuned, trust="trusted-policy"
     )
@@ -2066,7 +2111,11 @@ async def test_native_check_expiry_does_not_cancel_live_policy_replacements(queu
                 update(Batch)
                 .where(Batch.id == work.batch.id)
                 .values(
-                    policy={**work.batch.policy, "superseded_attempts": 1},
+                    policy={
+                        **work.batch.policy,
+                        "superseded_attempts": 1,
+                        "trust": "replacement-policy",
+                    },
                 )
             )
         row = Batch if expiry == "batch" else Attempt
@@ -2078,8 +2127,9 @@ async def test_native_check_expiry_does_not_cancel_live_policy_replacements(queu
             )
         )
     if expiry == "superseded":
+        await queue.finish_native_validation(work, {}, lease, succeeded=False)
         replacement = await queue.prepare_native_validation(
-            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+            snapshot, 600, lease, policy=policy, trust="replacement-policy"
         )
         assert replacement is not None and replacement.attempt.id != work.attempt.id
     await queue.set_paused(True, actor=operator.id)

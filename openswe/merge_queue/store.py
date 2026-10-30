@@ -588,7 +588,7 @@ class MergeQueue(Record):
                         .where(Evidence.attempt_id == Attempt.id, Evidence.key == "check-cancelled")
                         .exists(),
                     )
-                    .order_by(Attempt.created_at)
+                    .order_by((Batch.state == "active").desc(), Attempt.created_at)
                     .limit(100)
                 )
             ).all()
@@ -637,6 +637,11 @@ class MergeQueue(Record):
                         "timed_out" if expired else "cancelled",
                         now,
                     )
+                if attempt.deadline <= now - timedelta(days=1):
+                    await self._save_evidence(
+                        session, attempt, "check-cancelled", {"reported": False}
+                    )
+                    continue
                 policy = references.get("workflow-policy", {})
                 envelope = DispatchEnvelope.model_validate(
                     {
