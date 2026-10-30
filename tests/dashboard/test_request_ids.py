@@ -1,14 +1,19 @@
 """The ID a dashboard error toast shows finds the server side of the failure."""
 
 import logging
+from collections import deque
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from openswe.api import request_ids
 from openswe.dashboard.client_errors import router as client_errors_router
 from openswe.dashboard.oauth import require_session
+from openswe.database import transaction
+from openswe.webhooks.error_log import ERROR_LOG
 
 REQUEST_ID = "req_0f8fad5b-d9cb-469f-a165-70867728950e"
 
@@ -70,6 +75,28 @@ def test_tracing_failures_do_not_break_the_response(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(request_ids, "_tag_root_span", explode)
 
     assert TestClient(_app()).put("/dashboard/api/settings").status_code == 409
+
+
+async def test_server_and_frontend_errors_are_persisted_without_changing_responses(
+    registry_db: None, span_tags: list[dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ERROR_LOG, "_recorded", deque())
+    transport = httpx.ASGITransport(app=_app(), raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/dashboard/api/boom", headers={"X-Request-ID": REQUEST_ID})
+        assert response.status_code == 500
+        response = await client.post(
+            "/dashboard/api/client-errors",
+            json={"error_id": REQUEST_ID, "title": "Failed", "error_message": "browser failure"},
+        )
+        assert response.status_code == 204
+    async with transaction() as conn:
+        rows = (await conn.execute(text("SELECT source, payload FROM event_log"))).all()
+    payloads = {row.source: row.payload for row in rows}
+    assert set(payloads) == {"internal", "frontend"}
+    assert "RuntimeError: boom" in payloads["internal"]["traceback"]
+    assert payloads["frontend"]["error_message"] == "browser failure"
+    assert payloads["frontend"]["login"] == "alice"
 
 
 def test_client_error_report_rejects_arbitrary_ids(span_tags: list[dict[str, str]]) -> None:

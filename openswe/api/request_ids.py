@@ -2,10 +2,13 @@
 
 import logging
 import re
+import traceback
 from uuid import uuid4
 
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from openswe.webhooks.error_log import ERROR_LOG
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,7 @@ class RequestIdMiddleware:
         _safe_tag({"request_id": request_id})
         method = scope.get("method", "GET")
         path = scope.get("path", "")
+        recorded_failure = False
 
         def failure_extra(status_code: int) -> dict[str, str | int]:
             route = getattr(scope.get("route"), "path", None)
@@ -72,6 +76,7 @@ class RequestIdMiddleware:
             }
 
         async def send_with_id(message: Message) -> None:
+            nonlocal recorded_failure
             if message["type"] == "http.response.start":
                 status_code = message["status"]
                 message["headers"] = [
@@ -84,14 +89,33 @@ class RequestIdMiddleware:
                     status_code >= 500 or (status_code >= 400 and method not in _READ_METHODS)
                 ):
                     logger.warning("Dashboard request failed", extra=failure_extra(status_code))
+                if status_code >= 500:
+                    recorded_failure = True
+                    await ERROR_LOG.record(
+                        "internal",
+                        endpoint=path,
+                        error_id=request_id,
+                        payload={**failure_extra(status_code)},
+                    )
             await send(message)
 
         try:
             await self.app(scope, receive, send_with_id)
-        except BaseException:
+        except Exception as exc:
             _safe_tag({"error_id": request_id})
             if path.startswith(_DASHBOARD_API_PREFIX):
                 logger.exception("Dashboard request raised", extra=failure_extra(500))
+            if not recorded_failure:
+                await ERROR_LOG.record(
+                    "internal",
+                    endpoint=path,
+                    error_id=request_id,
+                    payload={
+                        **failure_extra(500),
+                        "exception_type": type(exc).__name__,
+                        "traceback": "".join(traceback.format_exception(exc))[-16000:],
+                    },
+                )
             raise
 
 
