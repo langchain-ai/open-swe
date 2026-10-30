@@ -4969,17 +4969,6 @@
             ],
             "title": "Draft Prs"
           },
-          "experimental_act_as_approval": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Act As Approval"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
