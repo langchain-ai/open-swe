@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
@@ -486,6 +487,12 @@ async def slack_file_mention(monkeypatch, registry_db):
     monkeypatch.setattr(lifecycle, "client", client)
     monkeypatch.setattr(state, "get_client", lambda: client)
     monkeypatch.setattr(staged_files, "get_client", lambda: client)
+
+    async def indexed(thread_id: str) -> SimpleNamespace | None:
+        metadata = client.threads.metadata
+        return None if metadata is None else SimpleNamespace(metadata=dict(metadata))
+
+    monkeypatch.setattr(state.THREADS, "get", indexed)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
     await WORKSPACES.create(WorkspaceCreate(name="Staging", repos=["acme/staging"]), "alice")
@@ -529,10 +536,10 @@ async def slack_file_mention(monkeypatch, registry_db):
     # the instance default rather than leaving the sandbox unbound.
     [(False, "", "default"), (False, "env:staging", "staging"), (True, "", "staging")],
 )
-async def test_slack_files_wait_for_the_box_mda_opens_for_the_run(
+async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
     slack_file_mention, private, existing, tag, environment
 ):
-    """The webhook never gives the thread a box: it records where the files go."""
+    """The webhook never gives the thread a sandbox: it records where the files go."""
     from openswe.slack.staged_files import PENDING_SLACK_FILES_KEY
 
     request, threads, captured = slack_file_mention

@@ -1,6 +1,7 @@
 """Transcript middleware: paragraph batching and the emitted event sequence."""
 
 import asyncio
+import base64
 import itertools
 from collections.abc import Sequence
 from typing import Any
@@ -23,6 +24,7 @@ from openswe.transcript.events import (
     MessageSender,
     MessageUsage,
     ThreadCreated,
+    ToolCompleted,
     TurnCompleted,
     TurnFailed,
     TurnRequested,
@@ -640,13 +642,46 @@ async def test_a_cancelled_subagent_tool_leaves_the_parent_running(
     assert engine.types[-1] == "turn.completed"
 
 
+async def test_a_tool_results_image_is_stored_beside_its_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+    png = b"\x89PNG\r\n\x1a\n"
+    encoded = base64.b64encode(png).decode()
+
+    async def screenshot(request: ToolCallRequest) -> ToolMessage:
+        # The block MDA's browser `screenshot` tool returns.
+        return ToolMessage(
+            content=[
+                {"type": "text", "text": "Screenshot of the current page."},
+                {"type": "image", "url": f"data:image/png;base64,{encoded}"},
+            ],
+            tool_call_id="shot-1",
+        )
+
+    await middleware.awrap_tool_call(_tool_request("shot-1", {"messages": []}), screenshot)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    completed = next(c for c in engine.commands if isinstance(c.event, ToolCompleted))
+    event = completed.event
+    assert isinstance(event, ToolCompleted) and event.attachments
+    [attachment] = event.attachments
+    [stored] = completed.attachments
+    assert stored.attachment_id == attachment.attachment_id
+    assert (attachment.mime_type, stored.data) == ("image/png", png)
+    assert encoded not in event.model_dump_json()
+    assert completed.tool_output == "Screenshot of the current page."
+
+
 async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
     from openswe.sandboxes.managed import ManagedSandbox
 
-    # A thread with no box of MDA's, so preparing reads no thread metadata.
+    # A thread with no sandbox of MDA's, so preparing reads no thread metadata.
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     from langchain_core.messages import messages_to_dict
 

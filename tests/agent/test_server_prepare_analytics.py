@@ -1,12 +1,11 @@
-"""``PrepareAgentRunMiddleware._prepare`` with the services it reads faked.
+"""An agent turn's preparation and the record of its start, with the services they read faked.
 
-Covers the identity data the middleware hands to ``record_agent_invocation_usage``
-across public and private thread scopes, including the public GitHub profile
-lookup hit / null-name / failure / cache paths, and the system prompt a thread
-keeps from one turn to the next.
+Covers the identity data ``record_agent_run`` hands to ``record_agent_invocation_usage``
+across public and private thread scopes, including the public GitHub profile lookup
+hit / null-name / failure / cache paths, and the system prompt a thread keeps from
+one turn to the next.
 """
 
-import asyncio
 import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -14,8 +13,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
+from runtime_api.loop import RunStarted
 
 import openswe.server as server
+from openswe.agent_api.tokens import AgentTurnSettings
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.prompt import SystemPrompt, construct_system_prompt
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
@@ -73,20 +74,17 @@ def github_client(monkeypatch: pytest.MonkeyPatch) -> _FakeGitHubClient:
     return client
 
 
-def _middleware(config: dict[str, Any], *, credential_login: str | None = None) -> Any:
-    return server.PrepareAgentRunMiddleware(
-        thread_id="thread-1",
-        config=cast(Any, config),
+def _turn(config: dict[str, Any], *, credential_login: str | None = None) -> AgentTurnSettings:
+    return AgentTurnSettings(
         profile_login=config["configurable"].get("github_login"),
-        repo_instructions=None,
-        model_id="openai:gpt-5",
-        effort=None,
-        title_model=MagicMock(),
-        source=config["configurable"]["source"],
-        user_email="",
-        draft_prs=False,
-        admin_workspaces=False,
         credential_login=credential_login,
+        title_model_id="openai:gpt-5",
+    )
+
+
+def _middleware(config: dict[str, Any]) -> server.PrepareAgentRunMiddleware:
+    return server.PrepareAgentRunMiddleware(
+        cast(Any, config), _turn(config), repo_instructions=None
     )
 
 
@@ -160,51 +158,20 @@ def _slack_config(**extra: Any) -> dict[str, Any]:
     return {"configurable": configurable}
 
 
-async def _prepare(middleware: Any) -> dict[str, Any]:
-    return await middleware._prepare(
-        cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
-    )
+async def _record(config: dict[str, Any], turn: AgentTurnSettings) -> None:
+    started = RunStarted(run_id="run-1", model_id="openai:gpt-5")
+    await server.record_agent_run(cast(Any, config), turn, started, carried=False)
 
 
-async def test_prepare_records_start_before_return_even_when_metadata_is_slow_and_fails(
-    prepare_harness: dict[str, object],
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+async def test_a_thread_that_cannot_be_updated_still_records_the_runs_usage(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    usage_started = asyncio.Event()
-    release_usage = asyncio.Event()
-    metadata_started = asyncio.Event()
-    release_metadata = asyncio.Event()
-    monkeypatch.setattr(server, "resolve_triggering_user_identity", AsyncMock(return_value=None))
-    monkeypatch.setattr(server, "cached_workspace_settings", AsyncMock(return_value={}))
+    """Usage records the run's completion only once its start is there."""
+    monkeypatch.setattr(server.client.threads, "update", AsyncMock(side_effect=RuntimeError))
 
-    async def record_usage(**kwargs: object) -> None:
-        usage_started.set()
-        await release_usage.wait()
-        prepare_harness["recorded"] = kwargs
+    await _record(_slack_config(), _turn(_slack_config()))
 
-    async def update_metadata(**kwargs: object) -> None:
-        metadata_started.set()
-        await release_metadata.wait()
-        raise RuntimeError("metadata update failed")
-
-    monkeypatch.setattr(server, "record_agent_invocation_usage", record_usage)
-    monkeypatch.setattr(server.client.threads, "update", update_metadata)
-    preparing = asyncio.create_task(_prepare(_middleware(_slack_config())))
-    try:
-        await asyncio.wait_for(usage_started.wait(), timeout=1)
-        assert not preparing.done()
-        release_usage.set()
-        await asyncio.wait_for(asyncio.shield(preparing), timeout=1)
-        assert prepare_harness["recorded"] is not None
-        await asyncio.wait_for(metadata_started.wait(), timeout=1)
-    finally:
-        release_usage.set()
-        release_metadata.set()
-        await preparing
-        await asyncio.gather(*tuple(server._DETACHED))
-
-    assert "metadata update failed" in caplog.text
+    assert prepare_harness["recorded"]["invocation_id"] == "inv-1"
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
@@ -218,8 +185,8 @@ async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
         )
     )
 
-    middleware = _middleware(_slack_config(), credential_login="mason-gh")
-    await _prepare(middleware)
+    config = _slack_config()
+    await _record(config, _turn(config, credential_login="mason-gh"))
 
     assert github_client.requests == ["https://api.github.com/user"]
     recorded = prepare_harness["recorded"]
@@ -244,8 +211,8 @@ async def test_public_scope_resolves_profile_via_installation_token(
         ]
     )
 
-    middleware = _middleware(_slack_config())
-    await _prepare(middleware)
+    config = _slack_config()
+    await _record(config, _turn(config))
 
     assert github_client.requests == [
         "https://api.github.com/user",
@@ -257,10 +224,9 @@ async def test_public_scope_resolves_profile_via_installation_token(
     assert recorded["display_name_source"] == "github"
 
     # A second run on another thread reuses the cached profile lookup.
-    middleware = _middleware(_slack_config(thread_id="thread-2", invocation_id="inv-2"))
-    middleware._thread_id = "thread-2"
+    config = _slack_config(thread_id="thread-2", invocation_id="inv-2")
     github_client._responses.append(_FakeResponse(401, {"message": "Bad credentials"}))
-    await _prepare(middleware)
+    await _record(config, _turn(config))
     assert github_client.requests == [
         "https://api.github.com/user",
         "https://api.github.com/users/mason-gh",
@@ -286,9 +252,10 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     from_slack = await _middleware(_slack_config())._prepare(
         cast(PrepareRunState, {"messages": [asked]}), runtime
     )
+    said = cast(list[dict[str, str]], from_slack["messages"])
     first_reset = backend._git_identity_pending
     assert first_reset is not None
-    told = [HumanMessage(content=message["content"]) for message in from_slack["messages"]]
+    told = [HumanMessage(content=message["content"]) for message in said]
     later = cast(
         PrepareRunState,
         {
@@ -301,17 +268,17 @@ async def test_a_thread_keeps_its_system_prompt_while_each_turn_says_where_it_ca
     assert backend._git_identity_pending is not None
     assert backend._git_identity_pending != first_reset
 
-    system_prompt = from_slack["rendered_system_prompt"]
+    system_prompt = cast(str, from_slack["rendered_system_prompt"])
     assert "triggered from Slack" not in system_prompt and "/workspace" not in system_prompt
-    assert [message["content"] for message in from_slack["messages"]] == [
+    assert [message["content"] for message in said] == [
         AnyContext("environment", "/workspace"),
         AnyContext("source", "triggered from Slack"),
     ]
     # Only what changed is told again, and the prompt is not rendered again.
     assert "rendered_system_prompt" not in from_dashboard
-    assert [message["content"] for message in from_dashboard["messages"]] == [
-        AnyContext("source", "handled in the dashboard")
-    ]
+    assert [
+        message["content"] for message in cast(list[dict[str, str]], from_dashboard["messages"])
+    ] == [AnyContext("source", "handled in the dashboard")]
 
     # A thread whose prompt came from before it was fixed for good renders it once more.
     legacy = {**later, "system_prompt_fixed": None}

@@ -1,4 +1,4 @@
-"""The thread's files on the backend: paths it serves, and boxes the runtime does not own.
+"""The thread's files on the backend: paths it serves, and sandboxes the runtime does not own.
 
 One endpoint per operation of deepagents' sandbox backend, carrying what that
 backend takes and returns, so the runtime's own file and shell tools can work

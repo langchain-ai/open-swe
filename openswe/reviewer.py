@@ -998,15 +998,15 @@ def reviewer_tools() -> list[BaseTool]:
     )
 
 
-async def _reconnect_reviewer_box(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
+async def _reconnect_reviewer_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
     await ensure_reviewer_github_token(thread_id, cfg)
     return await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
 
 
-def reviewer_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
-    """The review thread's box, connected again with a fresh token whenever it is gone."""
+def reviewer_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The review thread's sandbox, connected again with a fresh token whenever it is gone."""
     return get_cached_sandbox_backend(
-        thread_id, reconnect=partial(_reconnect_reviewer_box, thread_id, cfg)
+        thread_id, reconnect=partial(_reconnect_reviewer_sandbox, thread_id, cfg)
     )
 
 
@@ -1023,7 +1023,7 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
 
-    backend = reviewer_box(thread_id, cfg)
+    backend = reviewer_sandbox(thread_id, cfg)
 
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],

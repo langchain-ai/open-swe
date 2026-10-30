@@ -1,11 +1,11 @@
-"""The thread's box's proxy config, which gives commands in the box their credentials.
+"""The thread's sandbox's proxy config, which gives commands in the sandbox their credentials.
 
 The proxy config is written whole, so one side writes all of it. The backend does,
 with a GitHub token it mints for the thread, unless the run's catalog names the
-connection the box's GitHub rules carry (``SandboxSpec.github_proxy``). Then MDA
+connection the sandbox's GitHub rules carry (``SandboxSpec.github_proxy``). Then MDA
 writes it before each command: GitHub's rules from that connection, and the rest
-the backend keeps on the box (``SANDBOX_PROXY``), such as its tool channel's
-capability, which names the box.
+the backend keeps on the sandbox (``SANDBOX_PROXY``), such as its tool channel's
+capability, which names the sandbox.
 """
 
 import base64
@@ -21,7 +21,7 @@ GIT_TOKEN_USERNAME: Final = "x-access-token"
 
 
 class GitHubProxyRule(BaseModel):
-    """One of the box's GitHub rules: the hosts it matches and how it presents the token."""
+    """One of the sandbox's GitHub rules: the hosts it matches and how it presents the token."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -50,14 +50,14 @@ GITHUB_PROXY_RULES: Final = (
 
 
 class SandboxProxyRequest(RunRequest):
-    # The box MDA opened for the run, which the capability in the answer names.
+    # The sandbox MDA opened for the run, which the capability in the answer names.
     sandbox_id: str
 
 
 class SandboxProxy(BaseModel):
-    """The backend's part of the box's proxy config, which MDA writes beside GitHub's rules."""
+    """The backend's part of the sandbox's proxy config, which MDA writes beside GitHub's rules."""
 
-    # Its rules carry a capability for the box, so it is never logged.
+    # Its rules carry a capability for the sandbox, so it is never logged.
     config: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
 
 

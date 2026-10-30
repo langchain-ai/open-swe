@@ -226,7 +226,7 @@ async def publish_workspace(
     try:
         from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
-        # ready() reconnects through the provider, which starts a stopped/idle box
+        # ready() reconnects through the provider, which starts a stopped/idle sandbox
         # before handing it back — so the capture always targets a running sandbox.
         backend = unwrap_sandbox_backend(await get_sandbox_backend(thread_id))
         snapshot_id = await store.capture_sandbox_snapshot(

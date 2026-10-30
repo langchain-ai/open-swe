@@ -111,7 +111,7 @@ class Bridge(BaseModel):
 
     @classmethod
     def bridge_id_of(cls, sandbox_id: str | None) -> str | None:
-        """The bridge a ``sandbox_id`` names, or ``None`` when it names a real box."""
+        """The bridge a ``sandbox_id`` names, or ``None`` when it names a real sandbox."""
         if not sandbox_id or not sandbox_id.startswith(SANDBOX_ID_PREFIX):
             return None
         return sandbox_id.removeprefix(SANDBOX_ID_PREFIX) or None

@@ -29,12 +29,12 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return SimpleNamespace(bound=bound, reconnected=reconnected)
 
 
-async def test_a_box_mda_opened_gets_its_github_proxy_before_the_agent_runs(
+async def test_a_sandbox_mda_opened_gets_its_github_proxy_before_the_agent_runs(
     monkeypatch: pytest.MonkeyPatch, calls: SimpleNamespace
 ) -> None:
     monkeypatch.setattr(graph, "proxy_token_recorded", lambda _thread_id: False)
 
-    await RunSession.bind_sandbox(_session(managed=True), _prepare("box-1"))
+    await RunSession.bind_sandbox(_session(managed=True), _prepare("sandbox-1"))
 
     calls.bound.assert_awaited_once()
     calls.reconnected.assert_awaited_once_with(CONFIG, "agent")
@@ -43,9 +43,9 @@ async def test_a_box_mda_opened_gets_its_github_proxy_before_the_agent_runs(
 @pytest.mark.parametrize(
     ("managed", "sandbox_id", "recorded"),
     [
-        (True, "box-1", True),  # the proxy is already set in this process
-        (True, None, False),  # MDA could not open the box
-        (False, "box-1", False),  # not MDA's box
+        (True, "sandbox-1", True),  # the proxy is already set in this process
+        (True, None, False),  # MDA could not open the sandbox
+        (False, "sandbox-1", False),  # not MDA's sandbox
     ],
 )
 async def test_the_proxy_is_left_alone_otherwise(
@@ -66,6 +66,6 @@ async def test_a_failed_connection_does_not_fail_the_run(
     monkeypatch: pytest.MonkeyPatch, calls: SimpleNamespace
 ) -> None:
     monkeypatch.setattr(graph, "proxy_token_recorded", lambda _thread_id: False)
-    calls.reconnected.side_effect = RuntimeError("box unreachable")
+    calls.reconnected.side_effect = RuntimeError("sandbox unreachable")
 
-    await RunSession.bind_sandbox(_session(managed=True), _prepare("box-1"))
+    await RunSession.bind_sandbox(_session(managed=True), _prepare("sandbox-1"))

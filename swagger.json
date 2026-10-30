@@ -8037,6 +8037,20 @@
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments"
+          },
           "ended_at": {
             "anyOf": [
               {
@@ -8122,6 +8136,7 @@
           "output_preview",
           "output_truncated",
           "has_output",
+          "attachments",
           "namespace",
           "started_at",
           "ended_at"
@@ -21716,7 +21731,7 @@
     },
     "/dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}": {
       "get": {
-        "description": "The bytes of one file attached to a message in this thread.",
+        "description": "The bytes of one file attached to a message or tool result in this thread.",
         "operationId": "api_get_thread_attachment_dashboard_api_threads__thread_id__transcript_attachments__attachment_id__get",
         "parameters": [
           {

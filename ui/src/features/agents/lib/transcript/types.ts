@@ -104,6 +104,8 @@ export interface TranscriptToolCallRow {
   output_preview: string | null
   /** Whether the full output can be fetched from the tool-output endpoint. */
   has_output: boolean
+  /** Images the tool returned, such as a browser screenshot. */
+  attachments: ReadonlyArray<TranscriptAttachment> | null
   namespace: Namespace
   started_at: string
 }
@@ -209,6 +211,8 @@ export interface ToolCompletedPayload {
   output_preview: string | null
   output_truncated: boolean
   has_output: boolean
+  /** Absent from events written before tool results carried images. */
+  attachments?: ReadonlyArray<TranscriptAttachment> | null
 }
 
 export interface RunNoticePayload {

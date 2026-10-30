@@ -293,7 +293,7 @@ def apply() -> None:
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # LangSmith's sandbox service: another external boundary. MDA creates every
-    # thread's box (mda_entrypoint.py) and the backend reconnects to it by id, both
+    # thread's sandbox (mda_entrypoint.py) and the backend reconnects to it by id, both
     # through the stand-in, which has no proxy to configure. Snapshots are recorded
     # in the fake store; the workspace tools, store writes, name/tag scheme and
     # status transitions all still run for real.
@@ -314,7 +314,7 @@ def apply() -> None:
         for module in (sandbox_lifecycle, github_proxy):
             module.__dict__["workspace_token"] = _sandbox_github_access
 
-    # A refresh boots its own builder to run the scripts in: a stand-in box, of
+    # A refresh boots its own builder to run the scripts in: a stand-in sandbox, of
     # which nothing is reclaimed afterwards; the scripts, the capture and the
     # record all run for real.
     from openswe.workspaces import refresh as workspace_refresh
@@ -456,7 +456,7 @@ async def _fake_assert_repo_access(full_name: str, token: str) -> str:
 async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) -> object:
     import sandbox_service
 
-    return sandbox_service.open_box()
+    return sandbox_service.open_mda_sandbox()
 
 
 async def _stand_in_sandbox(
@@ -464,7 +464,7 @@ async def _stand_in_sandbox(
 ) -> object:
     import sandbox_service
 
-    return sandbox_service.open_box(sandbox_id)
+    return sandbox_service.open_mda_sandbox(sandbox_id)
 
 
 async def _configure_no_proxy(*_args: object, **_kwargs: object) -> None:
