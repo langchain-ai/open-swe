@@ -47,7 +47,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_memory"
           label="Memory"
-          description="Threads you start include what your workspace's curator learned from everyone's threads, and your runs follow what you asked Open SWE to remember."
+          description="Threads you start include what your workspace's curator learned from everyone's threads."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"

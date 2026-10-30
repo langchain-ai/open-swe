@@ -11,8 +11,7 @@ class UserPreferences(BaseModel):
     pr_review_links: bool = False
     pr_failure_reactions: bool = False
     experimental_fleet: bool = False
-    # Threads this person starts carry what their workspace's curator learned, and their
-    # personal memories reach their runs.
+    # Threads this person starts carry what their workspace's curator learned.
     experimental_memory: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
     experimental_act_as_approval: bool = False
