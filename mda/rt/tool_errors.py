@@ -14,7 +14,7 @@ from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
-from langgraph.errors import NodeCancelledError
+from langgraph.errors import GraphBubbleUp, NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import (
@@ -49,7 +49,8 @@ class ToolErrorMiddleware(AgentMiddleware):
         started = monotonic()
         try:
             return await handler(request)
-        except NodeCancelledError:
+        except NodeCancelledError, GraphBubbleUp:
+            # A connection the person has not granted pauses the run until they do.
             raise
         except SandboxRetryableConnectionError as exc:
             # The command never started, so nothing is known to be wrong with the box.

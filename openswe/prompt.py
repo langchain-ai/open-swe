@@ -8,6 +8,7 @@ from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
 from openswe.prompts import prompt
+from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -120,10 +121,12 @@ def construct_system_prompt(
     sole_writer: bool = False,
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
+    agent_workspace: bool = False,
 ) -> SystemPrompt:
     """Render the agent's system prompt, once for the thread's whole life."""
     shared = prompt(
         "system/main",
+        agent_workspace=agent_workspace,
         dashboard_context_section=prompt(
             "system/dashboard-context",
             environment=ENV.OPENSWE_ENV.optional(),
@@ -167,6 +170,7 @@ class TurnContext:
     """
 
     working_dir: str
+    agent_workspace: bool = False
     source: str = "dashboard"
     slack_context: bool = False
     slack_ask: bool = False
@@ -188,6 +192,8 @@ class TurnContext:
             else "system/working-environment",
             working_dir=self.working_dir,
             desktop=self.local_checkout_client == "desktop",
+            agent_workspace=self.agent_workspace,
+            sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
         if self.sandbox_file_downloads:
             environment += "\n\n" + prompt("system/sandbox-file-downloads")

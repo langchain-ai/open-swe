@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast
@@ -11,6 +12,7 @@ from managed_deepagents._telemetry.gates import is_telemetry_disabled
 from managed_deepagents._telemetry.otel import LogAttributes, record_log
 from managed_deepagents._telemetry.run import finish_run
 from managed_deepagents._telemetry.transport import posthog_transport
+from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -86,6 +88,16 @@ def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - l
             if self.root is None:
                 self.root = run_id
 
+        def on_tool_start(
+            self,
+            serialized: dict[str, Any],
+            input_str: str,  # noqa: ARG002 - callback signature
+            **kwargs: Any,
+        ) -> None:
+            name = kwargs.get("name") or serialized.get("name")
+            if isinstance(name, str) and name.startswith(BROWSER_TOOL_PREFIX):
+                pending.browser_used = True
+
         def on_interrupt(self, event: GraphInterruptEvent) -> None:
             if event.run_id == self.root:
                 self.interrupted = True
@@ -108,6 +120,10 @@ def observe_run(agent: AgentT, pending: PendingRun) -> AgentT:  # noqa: C901 - l
             **_kwargs: Any,
         ) -> None:
             if run_id == self.root:
+                # Agent Server cancels a run by cancelling its task.
+                if isinstance(error, asyncio.CancelledError):
+                    self.report("cancelled")
+                    return
                 record_log("ERROR", "run failed", error=error)
                 self.report("failure")
 

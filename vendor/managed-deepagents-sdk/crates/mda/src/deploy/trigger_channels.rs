@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use super::channel_app::{self, is_interactive, SetupUi, WaitTick};
 use super::channel_icon::channel_icon_file;
+use super::channel_setup::ChannelStatus;
 use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
@@ -25,6 +26,8 @@ const SLACK_ICON_IMAGE_MAX_BYTES: usize = 1_000_000;
 const SLACK_ICON_IMAGE_SIZE_PX: u32 = 512;
 const SLACK_APP_NAME_MAX_CHARS: usize = 35;
 const DEFAULT_SLACK_BACKGROUND_COLOR: &str = "#09090f";
+/// How messages name the one provider Trigger Server channels support.
+pub(crate) const PROVIDER_LABEL: &str = "Slack";
 const PNG_MIN_BYTES: usize = 33;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
@@ -218,7 +221,6 @@ impl RequiredAction {
 
 pub(crate) fn prepare(
     requirements: &ChannelRequirements,
-    wait: bool,
     project_root: &Path,
     language: Language,
     assistant_id: &str,
@@ -270,9 +272,6 @@ pub(crate) fn prepare(
             "Slack channel configuration requires {}=[].",
             language.ident("requiredEnv", "required_env")
         );
-    }
-    if !wait {
-        bail!("An agent with a Slack channel cannot be deployed with --no-wait.");
     }
     let trigger_on_all_messages = match provider_config.trigger_mode {
         Some(mode)
@@ -391,14 +390,16 @@ const SKIPPED_SETUP: &str = "Continuing without the Slack channel. The deploymen
 /// env credentials are checked always. Without a terminal, a new channel
 /// needs them unless LangSmith can create the Slack app on its own: it
 /// cannot on a self-hosted LangSmith, and first needs the user to authorize
-/// it in Slack when they have not yet.
+/// it in Slack when they have not yet. `interactive` says whether setup can
+/// ask in a terminal.
 pub(crate) fn preflight(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
     deployment_id: Option<&str>,
     env_vars: &BTreeMap<String, String>,
+    interactive: bool,
 ) -> Result<()> {
-    if slack_app::credentials_env(env_vars)?.is_some() || is_interactive() {
+    if slack_app::credentials_env(env_vars)?.is_some() || interactive {
         return Ok(());
     }
     let registered = deployment_id.map(|id| registration(client, id, &prepared.name));
@@ -424,10 +425,50 @@ fn registration(
     deployment_id: &str,
     channel_name: &str,
 ) -> Result<bool> {
+    Ok(registered_channel(client, deployment_id, channel_name)?.is_some())
+}
+
+/// The deployment's channel as Trigger Server has it registered, if it does.
+fn registered_channel(
+    client: &langsmith::Client,
+    deployment_id: &str,
+    channel_name: &str,
+) -> Result<Option<langsmith::TriggerChannel>> {
     Ok(client
         .trigger_channels(deployment_id)?
-        .iter()
-        .any(|channel| channel.provider == "slack" && channel.channel_name == channel_name))
+        .into_iter()
+        .find(|channel| channel.provider == "slack" && channel.channel_name == channel_name))
+}
+
+/// Where the channel's setup stands for the deployment, read without
+/// changing anything.
+pub(crate) fn status(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    deployment_id: &str,
+) -> Result<ChannelStatus> {
+    let registered = registered_channel(client, deployment_id, &prepared.name)?;
+    Ok(registered_status(
+        registered.as_ref().map(|channel| channel.status.as_deref()),
+    ))
+}
+
+/// `registered` is the channel's Trigger Server status, if it is registered:
+/// one an older Trigger Server does not report counts as active.
+fn registered_status(registered: Option<Option<&str>>) -> ChannelStatus {
+    match registered {
+        None => ChannelStatus::NeedsSetup(
+            "No Slack app is connected to this deployment yet.".to_string(),
+        ),
+        Some(None | Some("active")) => ChannelStatus::Ready,
+        Some(Some(status)) => {
+            let status = safe_message(status).map_or_else(
+                || "not active".to_string(),
+                |status| status.replace('_', " "),
+            );
+            ChannelStatus::NeedsSetup(format!("The Slack channel is registered, but {status}."))
+        }
+    }
 }
 
 /// Whether a deploy without a terminal or the user's own Slack app can set up
@@ -797,13 +838,35 @@ mod tests {
 
     use super::*;
 
-    fn prepare(
-        requirements: &ChannelRequirements,
-        wait: bool,
-    ) -> Result<Option<PreparedTriggerChannel>> {
+    #[test]
+    fn registered_status_needs_an_active_channel() {
+        assert!(matches!(
+            registered_status(None),
+            ChannelStatus::NeedsSetup(_)
+        ));
+        assert_eq!(
+            registered_status(Some(Some("active"))),
+            ChannelStatus::Ready
+        );
+        // An older Trigger Server does not report the status.
+        assert_eq!(registered_status(Some(None)), ChannelStatus::Ready);
+        assert_eq!(
+            registered_status(Some(Some("pending_approval"))),
+            ChannelStatus::NeedsSetup(
+                "The Slack channel is registered, but pending approval.".to_string()
+            )
+        );
+        assert_eq!(
+            registered_status(Some(Some("bad\nstatus"))),
+            ChannelStatus::NeedsSetup(
+                "The Slack channel is registered, but not active.".to_string()
+            )
+        );
+    }
+
+    fn prepare(requirements: &ChannelRequirements) -> Result<Option<PreparedTriggerChannel>> {
         super::prepare(
             requirements,
-            wait,
             Path::new("."),
             Language::TypeScript,
             "assistant-id",
@@ -1011,7 +1074,7 @@ mod tests {
 
     #[test]
     fn prepare_accepts_the_trigger_slack_manifest() {
-        let prepared = prepare(&requirements(), true).unwrap().unwrap();
+        let prepared = prepare(&requirements()).unwrap().unwrap();
 
         assert_eq!(prepared.name, "slack");
         assert!(!prepared.trigger_on_all_messages);
@@ -1058,7 +1121,7 @@ mod tests {
             for (key, value) in provider_config.as_object().unwrap() {
                 config.insert(key.clone(), value.clone());
             }
-            let prepared = prepare(&requirements, true).unwrap().unwrap();
+            let prepared = prepare(&requirements).unwrap().unwrap();
 
             assert_eq!(
                 serde_json::to_value(slack_setup(&prepared).options).unwrap(),
@@ -1074,16 +1137,16 @@ mod tests {
         config["triggerOnAllMessages"] = json!(true);
         config["triggerMode"] = json!("thread");
 
-        let error = prepare(&requirements, true).unwrap_err().to_string();
+        let error = prepare(&requirements).unwrap_err().to_string();
         assert!(error.contains("conflicts with triggerMode"), "{error}");
 
         let mut requirements = self::requirements();
         requirements.get_mut("slack").unwrap()["providerConfig"]["triggerMode"] = json!("all");
-        assert!(prepare(&requirements, true).is_err());
+        assert!(prepare(&requirements).is_err());
 
         let mut requirements = self::requirements();
         requirements.get_mut("slack").unwrap()["providerConfig"]["triggerMode"] = json!("channel");
-        assert!(prepare(&requirements, true).is_err());
+        assert!(prepare(&requirements).is_err());
     }
 
     #[test]
@@ -1094,7 +1157,6 @@ mod tests {
 
         let prepared = super::prepare(
             &requirements,
-            true,
             Path::new("."),
             Language::TypeScript,
             assistant_id,
@@ -1121,7 +1183,6 @@ mod tests {
 
         let prepared = super::prepare(
             &requirements,
-            true,
             root.path(),
             Language::TypeScript,
             "assistant-id",
@@ -1251,7 +1312,6 @@ mod tests {
 
         let error = super::prepare(
             &requirements,
-            true,
             root.path(),
             Language::TypeScript,
             "assistant-id",
@@ -1291,7 +1351,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let prepared = prepare(&requirements, false).unwrap();
+        let prepared = prepare(&requirements).unwrap();
 
         assert!(prepared.is_none());
     }
@@ -1302,7 +1362,7 @@ mod tests {
         manifest.as_object_mut().unwrap().remove("transport");
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let prepared = prepare(&requirements, false).unwrap();
+        let prepared = prepare(&requirements).unwrap();
 
         assert!(prepared.is_none());
     }
@@ -1313,7 +1373,7 @@ mod tests {
         manifest["transport"] = json!("direct");
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let prepared = prepare(&requirements, false).unwrap();
+        let prepared = prepare(&requirements).unwrap();
 
         assert!(prepared.is_none());
     }
@@ -1324,7 +1384,7 @@ mod tests {
         manifest["transport"] = json!(42);
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let error = prepare(&requirements).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -1337,19 +1397,9 @@ mod tests {
         let mut requirements = requirements();
         requirements.insert("internal".to_string(), direct_slack_manifest("internal"));
 
-        let prepared = prepare(&requirements, true).unwrap().unwrap();
+        let prepared = prepare(&requirements).unwrap().unwrap();
 
         assert_eq!(prepared.name, "slack");
-    }
-
-    #[test]
-    fn prepare_rejects_no_wait_for_a_trigger_channel() {
-        let error = prepare(&requirements(), false).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "An agent with a Slack channel cannot be deployed with --no-wait."
-        );
     }
 
     #[test]
@@ -1368,7 +1418,7 @@ mod tests {
         .into_iter()
         .collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let error = prepare(&requirements).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -1382,7 +1432,7 @@ mod tests {
         manifest["autoReply"] = json!(false);
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let prepared = prepare(&requirements, true).unwrap().unwrap();
+        let prepared = prepare(&requirements).unwrap().unwrap();
 
         assert_eq!(prepared.name, "slack");
     }
@@ -1393,7 +1443,7 @@ mod tests {
         manifest["requiredPermissions"] = json!(["chat:write"]);
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let error = prepare(&requirements).unwrap_err();
 
         assert!(error.to_string().contains("requiredPermissions=[]"));
     }
@@ -1404,7 +1454,7 @@ mod tests {
         manifest["requiredEnv"] = json!(["SLACK_BOT_TOKEN"]);
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let error = prepare(&requirements).unwrap_err();
 
         assert!(error.to_string().contains("requiredEnv=[]"));
     }
@@ -1415,7 +1465,7 @@ mod tests {
         manifest["name"] = json!("support");
         let requirements = [("support".to_string(), manifest)].into_iter().collect();
 
-        let prepared = prepare(&requirements, true).unwrap().unwrap();
+        let prepared = prepare(&requirements).unwrap().unwrap();
 
         assert_eq!(prepared.name, "support");
     }
@@ -1426,7 +1476,7 @@ mod tests {
         manifest["name"] = json!("support");
         let requirements = [("help".to_string(), manifest)].into_iter().collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let error = prepare(&requirements).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -1441,7 +1491,7 @@ mod tests {
         let mut requirements = requirements();
         requirements.insert("support".to_string(), support);
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let error = prepare(&requirements).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -1451,7 +1501,7 @@ mod tests {
 
     #[test]
     fn setup_request_matches_the_trigger_server_contract() {
-        let prepared = prepare(&requirements(), true).unwrap().unwrap();
+        let prepared = prepare(&requirements()).unwrap().unwrap();
         let request = build_setup_request(
             &prepared,
             "https://agent.example/base",
@@ -1492,7 +1542,7 @@ mod tests {
 
     #[test]
     fn setup_request_embeds_the_prepared_custom_icon() {
-        let mut prepared = prepare(&requirements(), true).unwrap().unwrap();
+        let mut prepared = prepare(&requirements()).unwrap().unwrap();
         prepared.app.icon = b"custom-icon".to_vec();
 
         let request = build_setup_request(
@@ -1516,11 +1566,11 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("backgroundColor");
-        let support = prepare(&support_requirements, true).unwrap().unwrap();
+        let support = prepare(&support_requirements).unwrap().unwrap();
         let mut billing_requirements = support_requirements.clone();
         billing_requirements.get_mut("slack").unwrap()["providerConfig"]["app"]["name"] =
             json!("Billing Bot");
-        let billing = prepare(&billing_requirements, true).unwrap().unwrap();
+        let billing = prepare(&billing_requirements).unwrap().unwrap();
 
         let support_request = build_setup_request(
             &support,
@@ -1554,7 +1604,7 @@ mod tests {
         let mut manifest = requirements().remove("slack").unwrap();
         manifest["name"] = json!("support");
         let requirements = [("support".to_string(), manifest)].into_iter().collect();
-        let prepared = prepare(&requirements, true).unwrap().unwrap();
+        let prepared = prepare(&requirements).unwrap().unwrap();
 
         let request = build_setup_request(
             &prepared,

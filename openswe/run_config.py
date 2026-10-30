@@ -157,6 +157,7 @@ class RunConfig(BaseModel):
     reviewer_subagent_reasoning_effort: str | None = None
 
     # Behavior toggles
+    experience: Literal["coding", "agent_workspace"] = "coding"
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     slack_ask: bool | None = None

@@ -178,7 +178,7 @@ def _before_agent(
     if sender is not None:
         warnings.warn(
             "Integrations that need a user connection are unavailable in this run: "
-            f"its {sender} sender cannot be mapped to a user of this agent's identity.",
+            f"resolve_user does not map its {sender} sender to a user of this agent's identity.",
             RuntimeWarning,
             stacklevel=2,
         )

@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import { useSession } from "@/lib/session"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import {
   readRecentReviewPages,
@@ -57,8 +58,16 @@ export function RecentReviewPagesMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
+        <a
+          href={githubUrls.pullRequest(pr)}
+          target="_blank"
+          rel="noreferrer"
+          onPointerDown={(event) => {
+            if (event.metaKey || event.ctrlKey) event.preventDefault()
+          }}
+          onClick={(event) => {
+            if (!event.metaKey && !event.ctrlKey) event.preventDefault()
+          }}
           className="group flex min-w-0 items-center gap-space-1 rounded-sm text-left hover:underline"
         >
           <span className="min-w-0 truncate">{children}</span>
@@ -67,7 +76,7 @@ export function RecentReviewPagesMenu({
             size={14}
             className="shrink-0 text-icon-secondary group-hover:text-icon-primary"
           />
-        </button>
+        </a>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
