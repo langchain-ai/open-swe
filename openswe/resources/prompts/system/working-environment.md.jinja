@@ -6,6 +6,21 @@ Work directly in those checkouts; there is usually no need to create worktrees u
 
 `OPEN_SWE_TOOLS_URL` is reserved for internal callbacks, not tool calls.
 
+#### Sandbox Lifetime
+
+{% set idle_seconds = sandbox_defaults.extra_fields.get("idle_ttl_seconds", sandbox_defaults.idle_ttl_seconds) %}
+{% set delete_seconds = sandbox_defaults.extra_fields.get("delete_after_stop_seconds", sandbox_defaults.delete_after_stop_seconds) %}
+Deployment defaults for **new** remote sandboxes:
+- Idle stopping: `idle_ttl_seconds={{ idle_seconds }}` seconds. Stopping an idle sandbox is not deletion.
+{% if delete_seconds == 0 %}
+- Automatic deletion after STOP is disabled (`delete_after_stop_seconds=0`). This is not a guarantee of permanent storage.
+{% else %}
+- Deletion: `delete_after_stop_seconds={{ delete_seconds }}` seconds ({{ delete_seconds / 86400 }} days) after the sandbox enters STOP, not after creation or the last message.
+{% endif %}
+Workspace/create overrides and settings on an existing sandbox may differ; these defaults do not reveal this sandbox's actual settings or deletion deadline.
+Do not promise that local sandbox files or sandbox-backed download links will persist forever.
+Push code deliverables and preserve other important outputs outside the sandbox before relying on later access; tell the user when an output is only stored here.
+
 #### Repository Setup Steps
 
 Before any task that changes code, set up the repo in your sandbox, in order:

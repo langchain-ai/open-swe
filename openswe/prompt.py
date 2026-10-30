@@ -8,6 +8,7 @@ from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
 from openswe.prompts import prompt
+from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -192,6 +193,7 @@ class TurnContext:
             working_dir=self.working_dir,
             desktop=self.local_checkout_client == "desktop",
             agent_workspace=self.agent_workspace,
+            sandbox_defaults=None if self.local_checkout else LangSmithCreateOptions.resolve(),
         )
         if self.sandbox_file_downloads:
             environment += "\n\n" + prompt("system/sandbox-file-downloads")
