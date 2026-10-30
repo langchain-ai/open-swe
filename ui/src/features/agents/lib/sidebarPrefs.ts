@@ -78,6 +78,7 @@ function sanitizeFilters(value: unknown): SidebarFilters {
         ? raw.includeResolved
         : DEFAULT_SIDEBAR_FILTERS.includeResolved,
     ownedOnly: raw.ownedOnly === true,
+    includeSlackQuestions: raw.includeSlackQuestions === true,
     includeClaudeCode:
       typeof raw.includeClaudeCode === "boolean"
         ? raw.includeClaudeCode

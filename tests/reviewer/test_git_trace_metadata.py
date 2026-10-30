@@ -53,6 +53,25 @@ async def test_actual_checkout_wins_over_configured_repo(
     assert result["ls_repo_provider"] == "github"
 
 
+async def test_edit_evidence_is_persisted_when_work_is_first_observed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    update = AsyncMock()
+    monkeypatch.setattr("openswe.threads.store.THREADS.update", update)
+    git = TurnGitMetadata({"configurable": {"thread_id": "thread", "invocation_id": "turn"}})
+    before = GitSnapshot.model_validate(
+        {"repos": {"/repo": {"repo": "org/repo", "branch": "main", "head": "old"}}}
+    )
+    after = GitSnapshot.model_validate(
+        {"repos": {"/repo": {"repo": "org/repo", "branch": "main", "head": "new"}}}
+    )
+    monkeypatch.setattr(git, "snapshot", AsyncMock(side_effect=[before, after]))
+    assert await git.work_evidence(before, "read", 1) == {}
+    update.assert_not_awaited()
+    assert await git.work_evidence(before, "edit", 2)
+    update.assert_awaited_once_with("thread", {"has_edits": True})
+
+
 async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -114,6 +133,7 @@ async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order
 async def test_invalid_optional_evidence_does_not_discard_valid_pr_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("openswe.threads.store.THREADS.update", AsyncMock())
     module = "openswe.agent_api.git_metadata"
     monkeypatch.setattr(f"{module}.get_sandbox_backend", AsyncMock())
     monkeypatch.setattr(f"{module}.resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))

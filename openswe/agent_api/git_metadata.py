@@ -143,7 +143,19 @@ class TurnGitMetadata:
     ) -> dict[str, JsonValue]:
         if before is None or (after := await self.snapshot()) is None:
             return {}
-        return self.evidence(after.changes_since(before), call_id, observed_at=observed_at)
+        targets = after.changes_since(before)
+        if targets:
+            await self._record_edits()
+        return self.evidence(targets, call_id, observed_at=observed_at)
+
+    async def _record_edits(self) -> None:
+        from openswe.threads.store import THREADS
+
+        if self.config.thread_id:
+            try:
+                await THREADS.update(self.config.thread_id, {"has_edits": True})
+            except Exception:
+                logger.warning("Could not record thread edit evidence", exc_info=True)
 
     def observations(self, state: Mapping[str, object]) -> Iterator[tuple[bool, GitObservation]]:
         for key, value in state.items():
@@ -191,6 +203,7 @@ class TurnGitMetadata:
             branch = target.branch if not branches or target.branch in branches else branches[0]
             targets.setdefault((target.repo, branch), None)
         if targets:
+            await self._record_edits()
             metadata["open_swe_git_targets"] = [
                 {"repo": repo, "branch": branch} for repo, branch in targets
             ]
