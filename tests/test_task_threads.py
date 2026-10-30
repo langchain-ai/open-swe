@@ -97,6 +97,33 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
         await service.model_choice("default", metadata, None, "none")
 
 
+@pytest.mark.parametrize(
+    ("coordinator", "channel"),
+    [({"channel": "slack"}, "slack"), ({}, None)],
+    ids=["channel-conversation", "backend-thread"],
+)
+def test_a_channel_conversations_worker_belongs_to_its_channel(
+    coordinator: dict[str, JsonValue], channel: str | None
+) -> None:
+    """MDA creates the worker as the conversation's own, so the backend acts on it there."""
+    current_task = task()
+    delegation = store.TaskDelegation(
+        worker_thread_id=str(uuid4()),
+        task_id=current_task.id,
+        coordinator_thread_id=COORDINATOR,
+        instructions="Fix login",
+        model=MODEL,
+        effort="low",
+    )
+    metadata = ThreadMetadata.model_validate(
+        {"owner_type": "user", "owner_login": OWNER, "sandbox_id": "shared", **coordinator}
+    )
+
+    worker = service._worker_metadata(current_task, delegation, metadata)
+
+    assert worker.get("channel") == channel
+
+
 def task() -> store.Task:
     workspace = WorkspaceRow(slug="default", name="Default")
     task = store.Task(
