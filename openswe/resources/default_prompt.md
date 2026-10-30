@@ -14,7 +14,8 @@ A thread can override its own model, for example by asking the agent to switch t
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
-- **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions. The agent saves personal memories with `remember` and drops them with `forget`; they are not shown here yet.
+- **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
+  The agent saves personal memories with `remember` and drops them with `forget`; they are not shown here yet.
 - **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, managed tools, and personal MCP servers.
 - **Settings → Experiments** (`/my-settings/experiments`): experimental interface and agent features (including LangSmith Agent Workspace for Open SWE chats), recent-work context, and Slack behavior such as concierge mode, review-page links, and failing-check reactions.
 - **Code review** (`/review`): configure auto-review repositories.
