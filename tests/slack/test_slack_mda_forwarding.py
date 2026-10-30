@@ -18,6 +18,7 @@ from starlette.requests import Request
 
 from openswe import dispatch
 from openswe.agent_api.tokens import verify_runtime_token
+from openswe.mda_channels import api as channel_api
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
@@ -358,7 +359,12 @@ def test_mda_starts_only_conversations_its_slack_channel_can_run(
     assert mda_forwarding.mda_can_start(**(_PLAIN | message)) is starts
 
 
-async def _post_endpoint(app: FastAPI, body: dict[str, JsonValue], signed: bool) -> httpx.Response:
+async def _post_endpoint(
+    app: FastAPI,
+    body: dict[str, JsonValue],
+    signed: bool,
+    path: str = "/slack/channel/events",
+) -> httpx.Response:
     content = json.dumps(body).encode()
     headers = {"content-type": "application/json"}
     if signed:
@@ -373,7 +379,7 @@ async def _post_endpoint(app: FastAPI, body: dict[str, JsonValue], signed: bool)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        return await client.post("/slack/channel/events", content=content, headers=headers)
+        return await client.post(path, content=content, headers=headers)
 
 
 async def test_the_endpoint_answers_only_mda_and_only_for_messages_it_was_handed(
@@ -602,6 +608,67 @@ async def test_mda_starts_the_run_a_handed_over_message_prepares(
     assert metadata["channel"] == "slack"
     assert metadata["slack_trigger_ts"] == "1.2"
     assert not {"user_id", "ls_repo_provider", "ls_attribution_identifier"} & metadata.keys()
+
+
+_PLAN = {"thread_id": _MDA_THREAD, "message_ts": "1.2"}
+
+
+async def _plan(app: FastAPI) -> httpx.Response:
+    return await _post_endpoint(app, _PLAN, signed=True, path="/mda/channel-api/plan_slack_turn")
+
+
+@pytest.mark.parametrize("interrupts", [True, False])
+async def test_the_handler_gets_the_run_and_whether_it_redirects_the_work_in_progress(
+    monkeypatch: pytest.MonkeyPatch, interrupts: bool
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
+    request = SlackRequest(channel_id="C1", thread_ts="1.2", thread_id=_MDA_THREAD)
+    recall = AsyncMock(return_value=(request, None))
+    monkeypatch.setattr(mda_forwarding, "recall", recall)
+    prepared = slack_service.SlackChannelRun(
+        input={"messages": [{"role": "user", "content": "and the tests too"}]},
+        configurable={"source": "slack", "github_login": "ada"},
+        trigger_ts="1.2",
+        interrupts=interrupts,
+    )
+    monkeypatch.setattr(
+        slack_service, "prepare_slack_channel_run", AsyncMock(return_value=prepared)
+    )
+    monkeypatch.setattr(slack_channel.index, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_channel, "channel_run_starting", AsyncMock())
+    monkeypatch.setattr(dispatch, "_run_user_metadata", AsyncMock(return_value={}))
+    stub_mda_runtime(monkeypatch)
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    answered = await _plan(app)
+
+    assert answered.status_code == 200
+    start = answered.json()
+    assert start["interrupts"] is interrupts
+    assert start["run"]["input"] == prepared.input
+    assert verify_runtime_token(start["run"]["context"]["__run_token"]).thread_id == _MDA_THREAD
+    assert start["run"]["metadata"]["slack_trigger_ts"] == "1.2"
+    # A call sent again under the same webhook ID builds the run again.
+    recall.assert_awaited_once_with(_MDA_THREAD, "1.2", "msg_delivery-1")
+
+
+async def test_the_handler_gets_no_run_for_a_message_the_backend_didnt_hand_over(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
+    monkeypatch.setattr(mda_forwarding, "recall", AsyncMock(return_value=None))
+    app = FastAPI()
+    app.include_router(channel_api.router)
+
+    with caplog.at_level("INFO"):
+        answered = await _plan(app)
+
+    assert answered.status_code == 200
+    assert answered.json() == {"run": None, "interrupts": True}
+    [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
+    assert record.no_run_reason == "not handed over"
 
 
 @pytest.mark.parametrize(

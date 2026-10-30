@@ -279,7 +279,9 @@ The deployment's Slack channel (`channels/slack.py`) takes the Slack conversatio
 Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
 When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until its first metadata write, by the run or by the backend taking it back, says who sees it), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
 Later messages in that Slack thread, and Slack's Stop, go the same way.
-Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
+Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, whose handler (`rt/slack.py`) asks the backend's `plan_slack_turn` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
+A mention, a direct message or an explicit request redirects the thread's run in progress (`interrupt`); any other follow-up waits its turn behind it (`enqueue`), as on the backend's own Slack threads.
+The backend still answers `/slack/channel/events` for a deployment whose channel names it as an endpoint, until every deployment runs the handler.
 The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
 
 The backend forwards to Trigger Server's Slack events URL (`TRIGGER_EVENTS_URL` in `openswe/slack/mda_forwarding.py`), the same on US LangSmith for every environment: Trigger Server routes each request by its Slack app.
@@ -290,8 +292,8 @@ When Trigger Server doesn't take a message in a conversation the channel hasn't 
 The backend claims a new conversation only once it has gated and remembered the message, so a failure before the hand-off leaves the conversation unclaimed.
 When Trigger Server doesn't take a message in a conversation the channel started, or the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
 Taking it back is atomic, so the person gets either the run or the error.
-When MDA retries a call to `/slack/channel/events` it got no answer to (same `webhook-id`), the backend builds the run again from the request that call took; any other call for the message gets no run.
-Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`.
+When MDA retries a call to `plan_slack_turn` it got no answer to (same `webhook-id`), the backend builds the run again from the request that call took; any other call for the message gets no run.
+Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each answer without a run from `plan_slack_turn` logs its `no_run_reason`.
 A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 
 Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):

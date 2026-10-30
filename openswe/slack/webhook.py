@@ -762,6 +762,9 @@ class SlackChannelRun:
     input: RunInput
     configurable: dict[str, JsonValue]
     trigger_ts: str
+    # Whether the message redirects the thread's work in progress; otherwise it
+    # waits its turn, as the backend's own Slack follow-ups do.
+    interrupts: bool = True
 
 
 @dataclass
@@ -1388,6 +1391,7 @@ async def _process_slack_mention_impl(
             input=run_input,
             configurable=configurable,
             trigger_ts=event_ts,
+            interrupts=explicitly_tagged,
         )
         return True
     if status_shown is not None:
