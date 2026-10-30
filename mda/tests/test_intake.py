@@ -1,7 +1,9 @@
+import asyncio
 import socket
 import uuid
 from typing import cast
 
+import httpx
 import pytest
 import rt.images as images
 import rt.linear as linear
@@ -18,10 +20,10 @@ from managed_deepagents import (
     LinearSessionPromptedEvent,
     LinearSessionPromptedPayload,
 )
-from managed_deepagents._channels.http.endpoint import EndpointDeclined
+from managed_deepagents._channels.http.endpoint import EndpointClient, EndpointDeclined
 from managed_deepagents._channels.http.types import ChannelName
 from pydantic import BaseModel, TypeAdapter
-from rt.intake import backend_endpoint
+from rt.intake import ask_backend, backend_endpoint
 from runtime_api.endpoint import Endpoint
 from runtime_api.linear import (
     LINEAR_AUTOMATION_RULES,
@@ -75,6 +77,39 @@ def test_the_channel_asks_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     # a host that never resolves stands in, so a call fails instead of misrouting.
     monkeypatch.delenv("OPEN_SWE_BACKEND_URL")
     assert backend_endpoint("/x") == "https://open-swe-backend.invalid/x"
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "tries"),
+    [
+        # Acted on once per delivery: tried again for as long as a backend rollout takes.
+        (RECORD_LINEAR_DELIVERY, 11),
+        (PLAN_LINEAR_AUTOMATIONS, 11),
+        # Planning a session signs its run and indexes its thread: tried again only briefly.
+        (PLAN_LINEAR_SESSION, 3),
+    ],
+)
+def test_the_channel_tries_a_call_again_while_the_backend_is_down(
+    monkeypatch: pytest.MonkeyPatch, endpoint: Endpoint[BaseModel, BaseModel], tries: int
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.example")
+    monkeypatch.setenv("MDA_SERVICE_SECRET", "whsec_" + "a" * 32)
+    sent: list[str] = []
+
+    async def unavailable(self: object, msg_id: str, body: bytes, seconds: float) -> None:
+        sent.append(msg_id)
+        raise httpx.ConnectError("backend is rolling out")
+
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(EndpointClient, "_post", unavailable)
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    request = endpoint.request.model_construct()
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(ask_backend(endpoint, request, msg_id="msg_delivery-1"))
+    # Every try is the same webhook, so the backend acts on it once.
+    assert sent == ["msg_delivery-1"] * tries
 
 
 class _Backend:

@@ -20,7 +20,6 @@ from typing_extensions import TypeIs
 from managed_deepagents._channel_icon import validate_channel_icon_path
 from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
-from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
@@ -82,7 +81,6 @@ from managed_deepagents._channels.linear_types import (
     LinearTeam,
 )
 from managed_deepagents._channels.resolve_user import checked_resolve_user
-from managed_deepagents._channels.run_input import HandlerFailed
 from managed_deepagents._channels.runtime import require_text_content
 from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import set_log_attributes
@@ -128,9 +126,10 @@ def linear_channel(
 
     Args:
         on_event: Event handlers that start runs. Return a prompt (string,
-            message, or state), or ``None`` to skip. A handler that raises fails
-            the delivery, which Linear sends again, except in an agent session,
-            which hears at once. A handler may also be an
+            message, or state), or ``None`` to skip. MDA answers Linear before it
+            asks the handler, so a handler may take longer than Linear waits; one
+            that raises starts nothing, and its error is logged, and an agent
+            session hears that something went wrong. A handler may also be an
             endpoint, a URL or an ``httpx.Request`` carrying headers: MDA POSTs it
             the event and its thread, and starts the run it answers with.
         app: The Linear app ``mda deploy`` sets up; team allowlist.
@@ -373,14 +372,8 @@ async def _parse(
         "target": _target(event),
         "delivery_key": delivery_id,
     }
-    # An endpoint may take longer to answer than Linear waits. A session's
-    # person can't wait for Linear's retries, an hour apart after the first:
-    # its run starts in the background too, and a failed start says so in the
-    # session at once.
-    if is_endpoint_handler(handlers.get(key)) or isinstance(
-        event, LinearSessionCreatedEvent | LinearSessionPromptedEvent
-    ):
-        message["background"] = True
+    # A handler may take longer to decide than Linear waits, so Linear hears first.
+    message["background"] = True
     # Stop in a session cancels the session's run.
     if _is_stop(event):
         return {
@@ -635,11 +628,7 @@ async def _handler_input(
     raw_event: JsonValue | None,
     thread: LinearChannelThread,
 ) -> ChannelRunResult | None:
-    """What the event's handler starts a run with; ``None`` when it skips.
-
-    A handler that raised fails the delivery (``HandlerFailed``), except in an
-    agent session, whose author waits: they hear it at once.
-    """
+    """What the event's handler starts a run with; ``None`` when it skips or fails."""
     event = _event(raw_event)
     if event is None:
         return None
@@ -653,15 +642,11 @@ async def _handler_input(
     )
     if outcome.type == "input":
         return outcome.input
-    is_session = isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent)
-    if outcome.type == "failed" and not is_session:
-        raise HandlerFailed
     # A session that gets no run would wait for an answer that never comes,
     # whether it just opened or this is a follow-up in it. A handler that
     # raised failed; one that returned nothing declined, and an endpoint may
-    # say why. Its author hears now: a retry minutes later would start work
-    # they may have moved on from.
-    if is_session:
+    # say why.
+    if isinstance(event, LinearSessionCreatedEvent | LinearSessionPromptedEvent):
         await _say(
             event.session_id,
             {"type": "error", "body": _ERROR_MESSAGE}
@@ -828,12 +813,12 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
         return
     if _is_linear_target(target) and "sessionId" in target:
         _release_session(target["sessionId"])
-    # A session would keep "working" on a run that never started; its runs
-    # start in the background, so nothing retries them. An issue's or
-    # comment's delivery Linear retries (``retry``) may still start, so it
-    # hears nothing yet.
+    # A session would keep "working" on a run that never started. An issue's
+    # event may be one its handler would have skipped, so its failure is only
+    # logged; one Linear retries (``retry``) may still start.
     if delivery["type"] == "failed" and delivery["reason"] == "start":
-        await _report_error(RuntimeError("channel run could not be started"), target)
+        if _is_linear_target(target) and "sessionId" in target:
+            await _report_error(RuntimeError("channel run could not be started"), target)
         return
     pending = pending_decision(delivery)
     if pending is not None:
