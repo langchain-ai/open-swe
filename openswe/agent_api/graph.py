@@ -443,20 +443,30 @@ class RunSession:
         offered = tools.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
         # Code mode calls tools past the model's list, so what the graph excludes stays out.
         from_code = offered - excluded if self.surface.code_mode else frozenset()
+        subagents = [
+            SubagentSpec(
+                name=subagent.name,
+                description=subagent.description,
+                system_prompt=common_prompt(subagent.system_prompt),
+                tools=None
+                if subagent.tools is None
+                else [name for name in subagent.tools if name in offered],
+            )
+            for subagent in (() if self._delegates else self.surface.subagents)
+        ]
+        if self.assistant_id == "reviewer":
+            subagents.append(
+                SubagentSpec(
+                    name="description-reviewer",
+                    description="Check PR description accuracy and material omissions against the full diff.",
+                    system_prompt=common_prompt(prompt("reviewer/description")),
+                    tools=["execute", "read_file", "ls", "fetch_review_diff"],
+                )
+            )
         return Catalog(
             operations=[spec for spec in self._specs() if spec.name not in withheld],
             mcp_servers=list(self.surface.mcp_servers),
-            subagents=[
-                SubagentSpec(
-                    name=subagent.name,
-                    description=subagent.description,
-                    system_prompt=common_prompt(subagent.system_prompt),
-                    tools=None
-                    if subagent.tools is None
-                    else [name for name in subagent.tools if name in offered],
-                )
-                for subagent in (() if self._delegates else self.surface.subagents)
-            ],
+            subagents=subagents,
             models=self.start_models(),
             # Hidden from the model, as the in-process graph hides them.
             excluded=sorted(excluded),

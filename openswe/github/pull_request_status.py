@@ -583,6 +583,31 @@ class PullRequestClient:
             json={"message": message, "event": "DISMISS"},
         )
 
+    async def dismiss_description_reviews(self, *, scope_to_review_id: int) -> None:
+        """Clear only this reviewer's description blocks after a verified correction."""
+        from openswe.review.publish import DESCRIPTION_REVIEW_MARKER
+
+        reviews = await self.reviews()
+        current = next((review for review in reviews if review.get("id") == scope_to_review_id), {})
+        user = current.get("user")
+        if (
+            not isinstance(user, dict)
+            or user.get("login", "").lower() not in OPEN_SWE_GITHUB_LOGINS
+        ):
+            raise ValueError("Cannot identify the description review author")
+        for review in reviews:
+            author = review.get("user")
+            if (
+                review.get("state") == "CHANGES_REQUESTED"
+                and isinstance(author, dict)
+                and author.get("login") == user.get("login")
+                and DESCRIPTION_REVIEW_MARKER in (review.get("body") or "")
+                and isinstance(review.get("id"), int)
+            ):
+                await self.dismiss_review(
+                    review["id"], "The PR description now accurately covers the reviewed changes."
+                )
+
     async def withdraw_open_swe_approvals(
         self,
         *,

@@ -195,11 +195,13 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fork", [False, True])
+@pytest.mark.parametrize("description_changed", [False, True])
 @pytest.mark.parametrize("approval_mode,unchanged_diff", [("off", False), ("approve", True)])
 async def test_head_update_triggers_re_review_run_when_watching(
     fork: bool,
     unchanged_diff: bool,
     approval_mode: str,
+    description_changed: bool,
 ) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
@@ -214,6 +216,8 @@ async def test_head_update_triggers_re_review_run_when_watching(
     if fork:
         payload.pop("ref")
         payload.pop("after")
+    if description_changed:
+        payload["changes"] = {"body": {"from": "Old description"}}
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
 
@@ -249,7 +253,7 @@ async def test_head_update_triggers_re_review_run_when_watching(
             return_value={
                 "kind": "reviewer",
                 "watch": True,
-                "last_reviewed_sha": "oldsha",
+                "last_reviewed_sha": "newsha" if description_changed else "oldsha",
             },
         ),
         patch(
@@ -274,9 +278,12 @@ async def test_head_update_triggers_re_review_run_when_watching(
         ) as create_check,
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
-        if not fork:
-            await github_webhooks.process_github_push_event(payload)
-        await github_webhooks.process_github_pr_synchronize(payload)
+        if description_changed:
+            await github_webhooks.process_github_pr_description_edit(payload)
+        else:
+            if not fork:
+                await github_webhooks.process_github_push_event(payload)
+            await github_webhooks.process_github_pr_synchronize(payload)
 
     fake_client.runs.create.assert_awaited_once()
     assert fake_client.runs.create.await_args is not None
@@ -284,7 +291,7 @@ async def test_head_update_triggers_re_review_run_when_watching(
     assert args[1] == "reviewer"
     configurable = kwargs["config"]["configurable"]
     assert configurable["re_review"] is True
-    assert configurable["last_reviewed_sha"] == "oldsha"
+    assert configurable["last_reviewed_sha"] == ("newsha" if description_changed else "oldsha")
     assert configurable["head_sha"] == "newsha"
     assert configurable["repo"] == {"owner": "lc", "name": "repo"}
     if fork:
