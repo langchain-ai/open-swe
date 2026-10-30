@@ -47,7 +47,6 @@ from openswe.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
     derive_pr_state,  # noqa: F401
-    describe_open_swe_tags,  # noqa: F401
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
@@ -56,7 +55,6 @@ from openswe.github.comments import (
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
     sanitize_github_comment_body,  # noqa: F401
-    verify_github_signature,
 )
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
@@ -182,7 +180,6 @@ __all__ = [
     "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_REPO_OWNER",
     "FEEDBACK_REACTIONS",
-    "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
     "LANGGRAPH_URL",
     "OPEN_SWE_TAGS",
@@ -193,15 +190,12 @@ __all__ = [
     "SLACK_SIGNING_SECRET",
     "SlackThreadMappingError",
     "AGENT_VERSION_METADATA",
-    "describe_open_swe_tags",
     "mentions_open_swe",
     "GH_PR_AGENT_STATE_ACTIONS",
     "GH_PR_FIRST_REVIEW_ACTIONS",
     "GH_PR_WATCH_TOGGLE_ACTIONS",
     "SUPPORTED_GH_COMMENT_ACTIONS",
-    "SUPPORTED_GH_EVENTS",
     "SUPPORTED_GH_ISSUE_ACTIONS",
-    "SUPPORTED_GH_PULL_REQUEST_ACTIONS",
     "build_github_issue_comments_text",
     "build_queued_finding_reply_prompt",
     "build_reviewer_configurable",
@@ -298,7 +292,6 @@ __all__ = [
     "update_agent_thread_pr_state",
     "update_slack_message",
     "upsert_agent_thread_metadata",
-    "verify_github_signature",
     "verify_slack_signature",
     "workspace_for_repo_config",
 ]
@@ -326,7 +319,6 @@ if ENV.DEBUG_TRACEMALLOC.optional():
     )
 
 
-GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
 SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
 SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
 SLACK_BOT_USERNAME = ENV.SLACK_BOT_USERNAME.get()
@@ -1042,29 +1034,7 @@ async def post_account_link_prompt(
 
 
 GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])
-SUPPORTED_GH_EVENTS = frozenset(
-    [
-        "issue_comment",
-        "issues",
-        "pull_request",
-        "pull_request_review_comment",
-        "pull_request_review",
-        "push",
-        *GITHUB_CI_EVENTS,
-    ]
-)
 SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
-SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
-    [
-        "opened",
-        "edited",
-        "ready_for_review",
-        "converted_to_draft",
-        "closed",
-        "reopened",
-        "synchronize",
-    ]
-)
 GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.

@@ -28,8 +28,8 @@ Follow [Create a GitHub App](INSTALLATION.md#3-create-a-github-app) in the insta
 
 - **Callback URL**: `http://localhost:2024/dashboard/api/auth/callback`.
   This is where GitHub sends the browser after "Sign in with GitHub" on your local dashboard.
-- **Webhook URL**: `https://<name>.ngrok-free.dev/webhooks/github` with your ngrok domain from step 3, or leave the webhook off (untick **Active**) if you only start runs from the dashboard.
-  GitHub cannot deliver to `localhost`.
+- **Webhook URL**: your MDA deployment's `<deployment-url>/channels/github/events`, which `mda deploy` sets, or leave the webhook off (untick **Active**) if you only start runs from the dashboard.
+  The deployment's GitHub channel routes each delivery and calls your backend through the tunnel from step 3 (`OPEN_SWE_BACKEND_URL`); GitHub cannot deliver to `localhost`.
 
 Use a name of your own (GitHub App names are unique), and give it a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) if a shared deployment already answers to `@openswe` in the same repositories.
 
@@ -89,7 +89,6 @@ GITHUB_APP_ID=""                # step 2
 GITHUB_APP_CLIENT_ID=""
 GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one double-quoted line, \n between the PEM lines
-GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
 ALLOWED_GITHUB_USERS=""         # your GitHub login; required unless ALLOWED_GITHUB_ORGS is set
 
@@ -164,11 +163,9 @@ The HMR WebSocket connects straight to Vite's port; the UI's Vite config points 
 | Endpoint | Purpose |
 |---|---|
 | `/` | Dashboard |
-| `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
-| `POST /github/channel/events` | The MDA deployment's GitHub channel asking what an issue mention starts |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /mda/channel-api/{endpoint}` | The MDA deployment's channels asking for what needs Open SWE's data (`runtime_api.linear`) |
+| `POST /mda/channel-api/{endpoint}` | The MDA deployment's channels asking for what needs Open SWE's data (`runtime_api.linear`, `runtime_api.github`) |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -406,9 +403,9 @@ Ask users to attach that file to a report.
   Do not swap in a tunnel that forwards the whole port; see step 3.
   GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived.
   With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
-- Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime.
+- Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime.
   Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes verify the deployment's signature with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s.
+- Webhook secrets are required: without `SLACK_SIGNING_SECRET`, every request to `/webhooks/slack` is rejected with 401, and the GitHub and Linear channels' calls are verified with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s; the MDA deployment verifies GitHub's and Linear's own signatures.
 
 ### Dashboard login fails or won't stay logged in
 

@@ -36,6 +36,11 @@ class ChannelCall:
 @cache
 def _handlers() -> Handlers[ChannelCall]:
     # Imported on the first call, so the webapp doesn't load every channel at startup.
+    from runtime_api.github import (
+        PLAN_GITHUB_ISSUE_RUN,
+        RECORD_GITHUB_DELIVERY,
+        RUN_GITHUB_WORK,
+    )
     from runtime_api.linear import (
         LINEAR_AUTOMATION_RULES,
         LINEAR_SESSION_FACTS,
@@ -44,9 +49,13 @@ def _handlers() -> Handlers[ChannelCall]:
         RECORD_LINEAR_DELIVERY,
     )
 
+    from openswe.github import channel as github
     from openswe.linear import channel as linear
 
     handlers = Handlers[ChannelCall]()
+    handlers.serve(RECORD_GITHUB_DELIVERY, github.record_github_delivery)
+    handlers.serve(RUN_GITHUB_WORK, github.run_github_work)
+    handlers.serve(PLAN_GITHUB_ISSUE_RUN, github.plan_github_issue_run)
     handlers.serve(RECORD_LINEAR_DELIVERY, linear.record_linear_delivery)
     handlers.serve(LINEAR_SESSION_FACTS, linear.linear_session_facts)
     handlers.serve(PLAN_LINEAR_SESSION, linear.plan_linear_session)

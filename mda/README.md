@@ -248,13 +248,21 @@ The channel reports failures in the session itself.
 
 ## GitHub
 
-The deployment's GitHub channel (`channels/github.py`) handles `@openswe` mentions on issues: `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only.
-One issue is one conversation, on the channel's own thread, and a new mention interrupts the run in progress, as before.
-Pull requests, reviews, CI, the reviewer and automations stay on the backend.
+The deployment's GitHub channel (`channels/github.py`) receives every delivery of Open SWE's own GitHub App: issues, issue and pull request comments, pull requests, reviews and review comments, pushes, CI (`status`, and `check_run`, `check_suite` and `workflow_run` once completed) and the merge queue (`merge_group`).
+Its handler (`rt/github.py`) decides what each one starts, as the backend's `/webhooks/github` did, and asks the backend's typed channel API (`runtime_api.github`) only for what needs Open SWE's data:
 
-The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`.
-The backend forwards the issue events that would start a run to `<deployment>/channels/github/events` exactly as GitHub sent them, instead of starting the run itself.
-Deploy remembers that the webhook stays at the backend once you answer "No" to moving it; without a terminal, `MDA_GITHUB_WEBHOOK_ELSEWHERE` names the backend's URL.
+- `record_github_delivery` logs the delivery once and answers whether a workspace owns its repository, whether the allowlist takes it, whether automatic review is on for it, and the handles that mention Open SWE.
+- The switchboard (`rt/github_routes.py`) names the backend's work the delivery starts: the merge queue wakeup, automations, the agent thread's pull request state and usage, approvals withdrawn on a push, review guides paused, reviews and re-reviews, the reviewer's watch, human review requests settled, CI wakeups, and a pull request comment's run. `run_github_work` runs that work once per delivery, after it answers.
+- An `@openswe` mention on an issue, in its title or body or in a comment, starts the coding agent's run on the issue's conversation, the channel's own thread: `plan_github_issue_run` checks the commenter and the public-repository gate, reacts to the comment, builds the prompt, indexes the thread and answers with the input, the run context with a run token signed for the thread, the run metadata and the run-complete webhook.
+  A new mention interrupts the run in progress, as before; while the thread waits on an interrupt it only answers whether Open SWE acts, so the channel points the issue to the decision.
+
+The channel takes the App's own pushes and pull requests too (`include_own_events`), so the agent's work still updates reviews, approvals and the merge queue; the handler skips the App's own comments, reviews and issues.
+Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
+A delivery whose backend call fails starts nothing, and MDA logs why; redeliver it from the App's advanced settings once the backend is back.
+
+The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret) and points its webhook at `<deployment>/channels/github/events`.
+A deployment whose deploy kept the App's webhook at the backend (`MDA_GITHUB_WEBHOOK_ELSEWHERE`) keeps it there until it moves: change it once in the App's settings, or run `mda deploy` in a terminal and confirm the move.
+Move it right after deploying this change, since the backend no longer serves `/webhooks/github`.
 
 Without a terminal, deploy brings the App from `MDA_GITHUB_APP_ID`, `MDA_GITHUB_APP_PRIVATE_KEY_FILE`, `MDA_GITHUB_APP_INSTALLATION_ID` and `MDA_GITHUB_WEBHOOK_SECRET`, all or none, and hands them to Agent Auth only.
 Both deploy workflows set them for a deployment that has no App yet: the App and installation IDs are the ones its backend uses, and the key and webhook secret come from the `MDA_GITHUB_APP_PRIVATE_KEY_<ENVIRONMENT>` and `MDA_GITHUB_WEBHOOK_SECRET_<ENVIRONMENT>` repository secrets, the same values as the backend's `GITHUB_APP_PRIVATE_KEY` and `GITHUB_WEBHOOK_SECRET`.
@@ -264,11 +272,6 @@ Without them, the deploy of a deployment with no App fails before uploading anyt
 The channel asks for the App's repository permissions (`app.permissions`), so the token deploy keeps at `mda/github-token` can do what the backend's sandbox token does, for the boxes whose GitHub proxy MDA writes (Sandbox, above).
 Deploy renews the token with them only where the App's installation grants them and the App is installed once; its report names the token's permissions, which `MDA_GITHUB_PROXY_CONNECTION` needs in full.
 Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
-
-The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`.
-The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing.
-While the thread waits on an interrupt it only answers whether Open SWE would act, so the channel points the issue to the decision.
-Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
 
 ## Slack
 

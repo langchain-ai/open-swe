@@ -5,26 +5,26 @@ import importlib
 from typing import cast
 from unittest.mock import AsyncMock
 
-import httpx
 import httpx2
 import pytest
 from langgraph_sdk.errors import NotFoundError
 
-from openswe.github import routes as github_routes
+from openswe.github import channel as github_channel
 from openswe.github import webhook as github_webhooks
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.review.reviews import trigger_re_review
+from openswe.schedules import store as schedules
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.payloads import SlackChannelContext
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
-from tests.conftest import post_signed_github_webhook, register_github_logins
+from tests.conftest import register_github_logins
+from tests.github_channel import GitHubDelivered, deliver_github_event
 
 pytestmark = pytest.mark.usefixtures("no_local_threads")
 
 request_pr_review_module = importlib.import_module("openswe.slack.tools.request_pr_review")
 
-_TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
 
 
@@ -56,12 +56,14 @@ def _slack_routing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "claim_slack_event", claim)
 
 
-async def _post_github_webhook(
-    event_type: str, payload: dict[object, object], *, delivery_id: str | None = None
-) -> httpx.Response:
-    return await post_signed_github_webhook(
-        event_type, payload, secret=_TEST_WEBHOOK_SECRET, delivery_id=delivery_id
-    )
+async def _deliver(
+    monkeypatch: pytest.MonkeyPatch,
+    event_type: str,
+    payload: dict[str, object],
+    *,
+    delivery_id: str | None = None,
+) -> GitHubDelivered:
+    return await deliver_github_event(monkeypatch, event_type, payload, delivery_id=delivery_id)
 
 
 def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
@@ -85,15 +87,15 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
 
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     if wakeup_fails:
         monkeypatch.setattr(
-            github_routes,
+            github_channel,
             "wake_native_queue",
             AsyncMock(side_effect=RuntimeError("DB unavailable")),
         )
 
-    response = await _post_github_webhook(
+    delivered = await _deliver(
+        monkeypatch,
         "pull_request",
         {
             "action": "opened",
@@ -102,11 +104,8 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "ignored",
-        "reason": "Automatic review disabled for repository",
-    }
+    assert delivered.facts.auto_review is False
+    assert "review_pull_request" not in delivered.work
     assert called is False
 
 
@@ -126,11 +125,11 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         called["gate_calls"] = int(called.get("gate_calls", 0)) + 1
         return {"status": "ignored", "reason": "Sender is not authorized"}
 
-    monkeypatch.setattr(github_routes, "_launch_automations", fake_launch)
+    monkeypatch.setattr(schedules, "launch_github_automations", fake_launch)
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", reject_external_author)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    response = await _post_github_webhook(
+    delivered = await _deliver(
+        monkeypatch,
         "issues",
         {
             "action": "opened",
@@ -141,10 +140,9 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         delivery_id="delivery-1",
     )
 
-    assert response.json() == {
-        "status": "ignored",
-        "reason": f"Issue does not mention {webhook_common.describe_open_swe_tags()}",
-    }
+    # It doesn't mention Open SWE, so no run plans for it.
+    assert delivered.work == ("launch_automations",)
+    assert delivered.issue_run is None
     assert called["event_type"] == "issues"
     assert called["delivery_id"] == "delivery-1"
     assert called.get("gate_calls", 0) == 0
@@ -174,15 +172,13 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
 async def test_github_webhook_ignores_comments_from_unregistered_senders(
     monkeypatch, registry_db, event_type: str, payload: dict[str, object]
 ) -> None:
-    async def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("an unregistered sender must not reach a handler")
-
-    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fail_if_called)
-    monkeypatch.setattr(github_webhooks, "process_github_review_finding_reply", fail_if_called)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    handled = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", handled)
+    monkeypatch.setattr(github_webhooks, "process_github_review_finding_reply", handled)
     register_github_logins(monkeypatch, "octocat")
 
-    response = await _post_github_webhook(
+    delivered = await _deliver(
+        monkeypatch,
         event_type,
         {
             **payload,
@@ -191,7 +187,9 @@ async def test_github_webhook_ignores_comments_from_unregistered_senders(
         },
     )
 
-    assert response.json()["status"] == "ignored"
+    # The backend routes the comment, and an unregistered sender reaches no handler.
+    assert "route_comment" in delivered.work
+    handled.assert_not_awaited()
 
 
 async def test_github_webhook_routes_review_comment_reply_without_tag(
@@ -214,10 +212,10 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
         fake_process_github_review_finding_reply,
     )
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     register_github_logins(monkeypatch, "octocat")
 
-    response = await _post_github_webhook(
+    delivered = await _deliver(
+        monkeypatch,
         "pull_request_review_comment",
         {
             "action": "created",
@@ -236,8 +234,7 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
+    assert delivered.work == ("route_comment",)
     assert auto_review_checked is False
     payload = called["payload"]
     assert isinstance(payload, dict)
@@ -311,7 +308,6 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", allow)
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     register_github_logins(monkeypatch, "octocat")
     await PullRequest(
         owner="langchain-ai",
@@ -321,16 +317,15 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
         threads=[ThreadLink(thread_id="agent-thread", source=AGENT_OPENED_LINK_SOURCE)],
     ).save()
 
-    response = await _post_github_webhook(
-        event_type, _untagged_pr_event(event_type, sender, action=action, body=body)
+    delivered = await _deliver(
+        monkeypatch, event_type, _untagged_pr_event(event_type, sender, action=action, body=body)
     )
 
-    assert response.status_code == 200
-    assert (response.json()["status"] == "accepted") is accepted
     expected_thread_id = None if webhook_common.mentions_open_swe(body) else "agent-thread"
     assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
-    if body is not None and not accepted and action != "deleted":
-        assert response.json() == {"status": "ignored", "reason": "Untagged workflow command"}
+    if body is not None and not accepted:
+        # An untagged workflow command reaches the backend as no work at all.
+        assert "route_comment" not in delivered.work
 
 
 @pytest.mark.parametrize(
@@ -341,7 +336,8 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
 async def test_github_webhook_ignores_untagged_comment_on_pr_agent_did_not_open(
     monkeypatch, registry_db, source: str, opening_head_sha: str
 ) -> None:
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    handled = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", handled)
     register_github_logins(monkeypatch, "octocat")
     await PullRequest(
         owner="langchain-ai",
@@ -351,11 +347,11 @@ async def test_github_webhook_ignores_untagged_comment_on_pr_agent_did_not_open(
         threads=[ThreadLink(thread_id="other-thread", source=source)],
     ).save()
 
-    response = await _post_github_webhook(
-        "issue_comment", _untagged_pr_event("issue_comment", {"login": "octocat"})
+    await _deliver(
+        monkeypatch, "issue_comment", _untagged_pr_event("issue_comment", {"login": "octocat"})
     )
 
-    assert response.json()["status"] == "ignored"
+    handled.assert_not_awaited()
 
 
 def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(monkeypatch) -> None:

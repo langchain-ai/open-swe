@@ -1,115 +1,208 @@
-"""Routes for MDA's GitHub channel: @openswe mentions on issues.
+"""What MDA's GitHub channel calls on the backend (``runtime_api.github``).
 
-Open SWE's App keeps its webhook at ``/webhooks/github``, which forwards issue
-deliveries to the MDA deployment's GitHub channel (``openswe.github.forwarding``).
-The channel verifies GitHub's signature, owns the conversation's thread and
-starts its runs; its ``on_event`` names this endpoint, which it asks what each
-event starts. Each run carries the backend's run-complete webhook. The backend decides
-everything else, as for its own runs: who may trigger, the prompt, the workspace,
-and the signed run token the run calls back with.
+Open SWE's GitHub App delivers its webhooks to the MDA deployment's GitHub
+channel, which verifies each delivery and decides there what it starts. It asks
+here only for what needs Open SWE's data, its App or its signing key: to log each
+delivery and say what Open SWE knows about its repository
+(``record_github_delivery``); to run the work it chose, as the backend's own webhook
+ran it (``run_github_work``); and the run an ``@openswe`` mention on an issue starts
+on the channel's thread (``plan_github_issue_run``). Each run carries the backend's
+run-complete webhook.
 """
 
+import json
 import logging
-from typing import Final, Literal, cast, get_args
-from uuid import UUID
+from collections.abc import Awaitable, Callable
+from datetime import timedelta
+from typing import Any, Final, cast
 
-from fastapi import APIRouter, Depends, HTTPException
-from managed_deepagents import EndpointAnswer, EndpointEvent, EndpointThread
-from managed_deepagents import JsonValue as AnswerJson
 from pydantic import JsonValue
-from typing_extensions import TypedDict
+from runtime_api.github import (
+    GitHubDelivery,
+    GitHubDeliveryFacts,
+    GitHubIssueRun,
+    GitHubWork,
+    GitHubWorkAccepted,
+    GitHubWorkName,
+    PlanGitHubIssueRun,
+    PlannedGitHubIssueRun,
+)
 
+from openswe import event_claims
+from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
-from openswe.mda_channels.auth import require_mda_channel
+from openswe.github.comments import OPEN_SWE_TAGS
+from openswe.human_review.completed_reviews import CompletedReview
+from openswe.mda_channels.api import ChannelCall
+from openswe.merge_queue.controller import wake_native_queue
+from openswe.review_guide.launch import notify_pr_updated
+from openswe.schedules import store as schedules
 from openswe.threads.router import (
     adopt_channel_run,
     channel_run_metadata,
     channel_run_starting,
 )
 from openswe.threads.runtimes import RUNTIMES
+from openswe.ui_invalidations import Topic
 from openswe.webhooks import common
+from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import repo_is_routable
 
 logger = logging.getLogger(__name__)
 
 CHANNEL: Final = "github"
-# What the channel starts with while the thread waits: nothing, it only notes Open SWE acts.
-_ACTS_WHILE_INTERRUPTED: Final = "Open SWE was mentioned while the thread waits."
+_WORK_CLAIMS: Final = "github_channel_work"
+# Longer than MDA keeps sending one call again.
+_WORK_CLAIM_TTL: Final = timedelta(hours=24)
 
-IssueEventKey = Literal[
-    "issues.opened",
-    "issues.edited",
-    "issues.reopened",
-    "issue_comment.created",
-    "issue_comment.edited",
-]
-_ISSUE_EVENT_KEYS: frozenset[str] = frozenset(get_args(IssueEventKey))
+type _Payload = dict[str, Any]
 
 
-router = APIRouter(prefix="/github/channel", dependencies=[Depends(require_mda_channel)])
+def _repo_config(payload: dict[str, JsonValue]) -> dict[str, str]:
+    repository = payload.get("repository")
+    repository = repository if isinstance(repository, dict) else {}
+    owner = repository.get("owner")
+    owner = owner if isinstance(owner, dict) else {}
+    return {"owner": str(owner.get("login") or ""), "name": str(repository.get("name") or "")}
 
 
-class GitHubChannelCall(TypedDict):
-    """What MDA's GitHub channel POSTs: the event and its thread.
+async def record_github_delivery(
+    call: ChannelCall, delivery: GitHubDelivery
+) -> GitHubDeliveryFacts:
+    """Log the delivery once, and what Open SWE knows about its repository.
 
-    MDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a
-    generic TypedDict's type arguments to a subclass, and the API schema gets a
-    name of its own.
+    A workspace lookup that fails raises, so the delivery fails rather than drop
+    work a workspace may own.
     """
+    body = json.dumps(delivery.payload).encode()
+    refs = EventRefs.github(body)
+    await EventLog.record_once(
+        call.request,
+        body,
+        "github",
+        event_type=delivery.event,
+        delivery_id=delivery.delivery_id,
+        refs=refs,
+    )
+    if refs.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
+    repo = _repo_config(delivery.payload)
+    named = bool(repo["owner"] and repo["name"])
+    reviews = named and delivery.event in {"pull_request", "push"}
+    return GitHubDeliveryFacts(
+        routable=not named or await repo_is_routable(repo["owner"], repo["name"]),
+        allowed=common.is_repo_allowed(repo),
+        auto_review=reviews and await common.is_repo_auto_review_enabled(repo),
+        tags=list(OPEN_SWE_TAGS),
+    )
 
-    event: EndpointEvent[str, dict[str, JsonValue]]
-    thread: EndpointThread
+
+async def _gated(payload: _Payload, event: str) -> bool:
+    """Whether the public-repo gate lets the delivery's sender in; it logs why when not."""
+    return await common.enforce_public_repo_org_gate(payload, event) is None
 
 
-def _fields(value: JsonValue | None) -> dict[str, JsonValue]:
-    """``value``'s fields when it is a JSON object; none otherwise."""
-    return value if isinstance(value, dict) else {}
+async def _review_pull_request(payload: _Payload) -> None:
+    if await _gated(payload, "pull_request"):
+        await service.process_github_pr_ready(payload)
 
 
-async def trigger_rejection(payload: dict[str, JsonValue], event_type: str) -> str | None:
-    """Why an issue event starts no run, as ``/webhooks/github`` decides it; None when it does."""
-    issue = payload.get("issue")
-    if not isinstance(issue, dict):
-        return "The event names no issue"
-    if issue.get("pull_request"):
-        return "Pull request comments stay on Open SWE's own intake"
-    repository = _fields(payload.get("repository"))
-    repo_config = {
-        "owner": str(_fields(repository.get("owner")).get("login") or ""),
-        "name": str(repository.get("name") or ""),
+async def _route_comment(payload: _Payload, event: str, *, mentioned: bool) -> None:
+    """A pull request comment's run, as the backend's webhook routed it."""
+    sender_login = str((payload.get("sender") or {}).get("login") or "")
+    if not await service.is_accepted_commenter(sender_login):
+        logger.debug(
+            "Ignoring GitHub comment from an unregistered sender",
+            extra={"github_event": event, "sender_login": sender_login},
+        )
+        return
+    if (
+        event == "pull_request_review_comment"
+        and common.review_comment_reply_parent_id(payload) is not None
+    ):
+        if await _gated(payload, event):
+            await service.process_github_review_finding_reply(payload)
+        return
+    agent_thread_id = None
+    if not mentioned:
+        agent_thread_id = await service.untagged_agent_pr_thread_id(payload, event)
+        if agent_thread_id is None:
+            return
+    if await _gated(payload, event):
+        await service.process_github_pr_comment(payload, event, agent_thread_id=agent_thread_id)
+
+
+def _tasks(work: GitHubWork) -> dict[GitHubWorkName, Callable[[], Awaitable[object]]]:
+    payload = cast(_Payload, work.payload)
+    event, delivery_id = work.event, work.delivery_id
+    return {
+        "wake_merge_queue": lambda: wake_native_queue(payload),
+        "launch_automations": lambda: schedules.launch_github_automations(
+            event, payload, delivery_id
+        ),
+        "track_pull_request_state": lambda: common.update_agent_thread_pr_state(payload),
+        "track_pull_request_usage": lambda: common.update_agent_pr_usage_from_webhook(
+            payload, delivery_id=delivery_id
+        ),
+        "withdraw_superseded_approvals": lambda: service.withdraw_superseded_approvals(payload),
+        "notify_pr_updated": lambda: notify_pr_updated(payload),
+        "review_fork_push": lambda: service.process_github_pr_synchronize(payload),
+        "settle_review_on_close": lambda: service.settle_human_review_on_close(payload),
+        "settle_human_reviews": lambda: service.settle_human_reviews(payload),
+        "update_reviewer_watch": lambda: service.process_github_pr_close(payload),
+        "review_pull_request": lambda: _review_pull_request(payload),
+        "review_push": lambda: service.process_github_push_event(payload),
+        "ci_event": lambda: service.process_github_ci_event(payload, event, delivery_id),
+        "record_completed_review": lambda: CompletedReview.record(payload),
+        "route_comment": lambda: _route_comment(payload, event, mentioned=work.mentioned),
     }
-    if not common.is_repo_allowed(repo_config):
-        return "Repository not in allowlist"
-    if not await repo_is_routable(repo_config["owner"], repo_config["name"]):
-        return "Repository is not assigned to a workspace"
-    if event_type == "issues":
-        if payload.get("action") not in common.SUPPORTED_GH_ISSUE_ACTIONS:
-            return "Unsupported GitHub issue action"
-        changes = _fields(payload.get("changes"))
-        if payload.get("action") == "edited" and not any(f in changes for f in ("body", "title")):
-            return "Issue edit did not change title or body"
-        text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
-    else:
-        if payload.get("action") not in common.SUPPORTED_GH_COMMENT_ACTIONS["issue_comment"]:
-            return "Unsupported GitHub issue_comment action"
-        sender_login = str(_fields(payload.get("sender")).get("login") or "")
-        if not await service.is_accepted_commenter(sender_login):
-            return "Sender is not a registered Open SWE user"
-        text = str(_fields(payload.get("comment")).get("body") or "")
-    if not common.mentions_open_swe(text):
-        return f"Does not mention {common.describe_open_swe_tags()}"
-    gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
-    if gate_rejection is not None:
-        return gate_rejection["reason"]
-    return None
 
 
-async def _prepare_run(
-    payload: dict[str, JsonValue], delivery_id: str, thread_id: str, event_type: str
-) -> EndpointAnswer | None:
+async def _run(
+    name: GitHubWorkName, task: Callable[[], Awaitable[object]], work: GitHubWork
+) -> None:
+    # One piece failing doesn't keep the delivery's others from running.
+    try:
+        await task()
+    except Exception:
+        logger.exception(
+            "GitHub work failed",
+            extra={
+                "github_work": name,
+                "github_event": work.event,
+                "github_delivery": work.delivery_id,
+            },
+        )
+
+
+async def run_github_work(call: ChannelCall, work: GitHubWork) -> GitHubWorkAccepted:
+    """Run the work after answering, in the order given, once per delivery: MDA sends a
+    call again after an answer it didn't get."""
+    if postgres.configured() and not await event_claims.claim(
+        _WORK_CLAIMS, work.delivery_id, ttl=_WORK_CLAIM_TTL
+    ):
+        return GitHubWorkAccepted()
+    tasks = _tasks(work)
+    for name in dict.fromkeys(work.work):
+        call.background.add_task(_run, name, tasks[name], work)
+    logger.info(
+        "Accepted GitHub work",
+        extra={
+            "github_event": work.event,
+            "github_delivery": work.delivery_id,
+            "github_work": list(work.work),
+        },
+    )
+    return GitHubWorkAccepted()
+
+
+async def _prepare_run(plan: PlanGitHubIssueRun, thread_id: str) -> GitHubIssueRun | None:
     prepared = await service.prepare_github_issue_run(
-        payload, event_type, thread_id, adopt=lambda thread: adopt_channel_run(thread, CHANNEL)
+        cast(_Payload, plan.payload),
+        plan.event,
+        thread_id,
+        adopt=lambda thread: adopt_channel_run(thread, CHANNEL),
     )
     if prepared is None:
         return None
@@ -119,7 +212,7 @@ async def _prepare_run(
         {
             **common.AGENT_VERSION_METADATA,
             CHANNEL_METADATA_KEY: CHANNEL,
-            "github_delivery": delivery_id,
+            "github_delivery": plan.delivery_id,
         },
         source="github_issue",
     )
@@ -134,53 +227,47 @@ async def _prepare_run(
         # A channel thread has no Slack thread to link.
         thread_metadata={},
     )
-    run: EndpointAnswer = {
-        "input": cast(dict[str, AnswerJson], prepared.input),
-        "context": cast(dict[str, AnswerJson], rewritten["context"]),
-        "metadata": cast(dict[str, AnswerJson], channel_run_metadata(run_config["metadata"])),
-    }
-    if COMPLETION_WEBHOOK_URL:
-        run["webhook"] = COMPLETION_WEBHOOK_URL
+    run = GitHubIssueRun(
+        input=cast(dict[str, JsonValue], prepared.input),
+        context=cast(dict[str, JsonValue], rewritten["context"]),
+        metadata=channel_run_metadata(run_config["metadata"]),
+        webhook=COMPLETION_WEBHOOK_URL or None,
+    )
     await channel_run_starting(thread_id)
     return run
 
 
-@router.post("/events")
-async def github_channel_event(
-    call: GitHubChannelCall,
-) -> EndpointAnswer | None:
-    """The run an @openswe mention on an issue starts on the channel's thread, or ``None``.
+async def plan_github_issue_run(
+    _call: ChannelCall, plan: PlanGitHubIssueRun
+) -> PlannedGitHubIssueRun:
+    """The run an ``@openswe`` mention on an issue starts on the channel's thread.
 
-    While the thread waits on an interrupt nothing starts: a non-null answer only
-    tells the channel Open SWE would act, so it points the issue to the decision.
+    The channel decided the mention is one; this checks the commenter and the
+    public-repo gate, reacts to the comment, builds the prompt, indexes the thread
+    and signs the run. While the thread waits it only says whether Open SWE acts.
     """
-    event, thread = call["event"], call["thread"]
-    key, payload, delivery_id = event["key"], event["payload"], event["deliveryId"]
-    if key not in _ISSUE_EVENT_KEYS or not delivery_id:
-        raise HTTPException(status_code=422, detail="Unsupported GitHub event")
-    try:
-        thread_id = str(UUID(thread["id"]))
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail="Invalid thread") from error
-    event_type, _, action = key.partition(".")
-    if payload.get("action") != action:
-        raise HTTPException(status_code=422, detail="The payload's action is not the event's")
-    fields = {"github_event": key, "github_delivery": delivery_id, "agent_thread_id": thread_id}
-    reason = await trigger_rejection(payload, event_type)
-    if reason is not None:
-        return _no_run(reason, **fields)
-    if thread.get("interrupted"):
+    payload = cast(_Payload, plan.payload)
+    thread_id = str(plan.thread_id)
+    fields = {"github_event": plan.event, "github_delivery": plan.delivery_id}
+    if plan.event == "issue_comment":
+        sender_login = str((payload.get("sender") or {}).get("login") or "")
+        if not await service.is_accepted_commenter(sender_login):
+            return _no_run("Sender is not a registered Open SWE user", **fields)
+    if not await _gated(payload, plan.event):
+        return _no_run("The public-repo gate refused the sender", **fields)
+    if plan.waiting:
         # Nothing starts while the thread waits; no reaction or metadata either.
-        return {"input": _ACTS_WHILE_INTERRUPTED}
-    answer = await _prepare_run(payload, delivery_id, thread_id, event_type)
-    if answer is None:
-        return _no_run("no run prepared", **fields)
-    return answer
+        return PlannedGitHubIssueRun(starts=True)
+    run = await _prepare_run(plan, thread_id)
+    if run is None:
+        return _no_run("no run prepared", **fields, agent_thread_id=thread_id)
+    return PlannedGitHubIssueRun(starts=True, run=run)
 
 
-def _no_run(reason: str, **fields: str) -> None:
-    """Answer the channel that the event starts nothing, with one log line saying why."""
+def _no_run(reason: str, **fields: str) -> PlannedGitHubIssueRun:
+    """Answer the channel that the mention starts nothing, with one log line saying why."""
     logger.info(
-        "MDA's GitHub channel endpoint answers no run",
+        "MDA's GitHub channel starts no run",
         extra={"endpoint": "github", "no_run_reason": reason, **fields},
     )
+    return PlannedGitHubIssueRun(starts=False)

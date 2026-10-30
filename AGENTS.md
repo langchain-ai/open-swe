@@ -95,6 +95,7 @@ Never run the full test suite locally; run only tests related to the change.
 `mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`).
 Never import `openswe` there; test each side of an endpoint against the models it exchanges.
 Exception for channel input: a channel handler in `mda/` that writes a run's input keeps its own copy of what it needs from the backend, and only that: the `<input-message>` envelope (`mda/rt/input_messages.py`, standard library only, held byte-identical to `openswe.input_messages` by `tests/agent/test_mda_input_messages.py`) fetching the images a message links to (`mda/rt/images.py`, over `rt.public_http`), and reading the repository a message names (`mda/rt/repositories.py`, standard library only, held to `openswe.utils.repo` by `tests/agent/test_mda_repositories.py`).
+The GitHub channel's switchboard (`mda/rt/github_routes.py`, standard library and `runtime_api` only) keeps the backend's GitHub action sets and its mention pattern, held to `openswe.webhooks.common` by `tests/agent/test_mda_github_routes.py`; the handles themselves come from the backend with each delivery.
 The backend still checks anything that grants access, such as a run's repository, before it signs the run.
 Change the backend's envelope and the copy together.
 

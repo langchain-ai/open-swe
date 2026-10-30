@@ -23,8 +23,6 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
-from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
-from openswe.github.forwarding import ForwardJob
 from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -207,12 +205,6 @@ async def _report_receipt_purge(_job: Job) -> None:
 @WORKER.register(TOOL_SETS_PURGE)
 async def _tool_sets_purge(_job: Job) -> None:
     logger.info("Tool sets purged", extra={"purged": await purge_tool_sets()})
-
-
-@WORKER.register(GITHUB_CHANNEL_FORWARD)
-async def _github_channel_forward(job: Job) -> None:
-    # Retried, like a lost lease, without harm: MDA dedupes by X-GitHub-Delivery.
-    await ForwardJob.model_validate(job.payload).run()
 
 
 @WORKER.register(WAKE_THREAD_JOB)
