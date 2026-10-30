@@ -5,15 +5,18 @@ import { BookOpenTextIcon } from "@phosphor-icons/react/dist/ssr/BookOpenText"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
-import { LinkSimpleIcon } from "@phosphor-icons/react/dist/ssr/LinkSimple"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 
-import { ContextMenuItem, DropdownMenuItem } from "@/components/MenuItem"
+import {
+  ContextMenuItem,
+  DropdownMenuItem,
+  LinkMenuItem,
+} from "@/components/MenuItem"
 import { threadPullRequest } from "@/features/agents/lib/threadPullRequest"
 import type { AgentThread, ReviewPageRef } from "@/features/agents/lib/types"
 import {
@@ -33,57 +36,49 @@ const MENU_ITEM = {
 
 const ICON_SIZE = 14
 
+const openExternal = (url: string) =>
+  window.open(url, "_blank", "noopener,noreferrer")
+
 /**
- * Opens or copies the thread's pull request on our review page; holding Alt
- * (Option) switches both to GitHub. The GitHub variant is not an anchor
- * because an Alt-click on a link downloads it.
+ * Opens the thread's pull request on our review page, with a button that copies
+ * that link; holding Alt (Option) switches both to GitHub.
  */
-function PullRequestMenuItems({
+function PullRequestMenuItem({
   menu,
   pullRequest,
 }: {
   menu: ThreadMenuKind
   pullRequest: { url: string; review: ReviewPageRef }
 }) {
-  const Item = MENU_ITEM[menu]
+  const navigate = useNavigate()
   const github = useAltKey()
   return (
-    <>
-      {github ? (
-        <Item
-          onSelect={() =>
-            window.open(pullRequest.url, "_blank", "noopener,noreferrer")
-          }
-        >
-          <GithubLogoIcon size={ICON_SIZE} weight="regular" />
-          Open PR on GitHub
-        </Item>
-      ) : (
-        <Item asChild title="Hold ⌥ Option / Alt to open it on GitHub">
-          <Link {...reviewPageRoute(pullRequest.review)}>
-            <BookOpenTextIcon size={ICON_SIZE} weight="regular" />
-            Open PR review
-          </Link>
-        </Item>
-      )}
-      <Item
-        onSelect={() =>
-          github
-            ? copyText(pullRequest.url, "Copied the GitHub link")
-            : copyAppLinks(
-                [reviewPagePath(pullRequest.review)],
-                "Copied the review link"
-              )
-        }
-      >
-        {github ? (
+    <LinkMenuItem
+      item={MENU_ITEM[menu]}
+      icon={
+        github ? (
           <GithubLogoIcon size={ICON_SIZE} weight="regular" />
         ) : (
-          <LinkSimpleIcon size={ICON_SIZE} weight="regular" />
-        )}
-        {github ? "Copy GitHub PR link" : "Copy PR review link"}
-      </Item>
-    </>
+          <BookOpenTextIcon size={ICON_SIZE} weight="regular" />
+        )
+      }
+      label={github ? "Open PR on GitHub" : "Open PR review"}
+      title={github ? undefined : "Hold ⌥ Option / Alt for GitHub"}
+      copyLabel={github ? "Copy GitHub PR link" : "Copy PR review link"}
+      onOpen={() =>
+        github
+          ? openExternal(pullRequest.url)
+          : void navigate(reviewPageRoute(pullRequest.review))
+      }
+      onCopy={() =>
+        github
+          ? copyText(pullRequest.url, "Copied the GitHub link")
+          : copyAppLinks(
+              [reviewPagePath(pullRequest.review)],
+              "Copied the review link"
+            )
+      }
+    />
   )
 }
 
@@ -116,45 +111,33 @@ export function ThreadMenuItems({
   return (
     <>
       {pullRequest && (
-        <PullRequestMenuItems menu={menu} pullRequest={pullRequest} />
+        <PullRequestMenuItem menu={menu} pullRequest={pullRequest} />
       )}
       {thread.traceUrl && (
-        <>
-          <Item asChild>
-            <a href={thread.traceUrl} target="_blank" rel="noreferrer">
-              <TreeStructureIcon size={ICON_SIZE} weight="regular" />
-              Open trace
-            </a>
-          </Item>
-          <Item
-            onSelect={() =>
-              thread.traceUrl &&
-              copyText(thread.traceUrl, "Copied the trace link")
-            }
-          >
-            <LinkSimpleIcon size={ICON_SIZE} weight="regular" />
-            Copy trace link
-          </Item>
-        </>
+        <LinkMenuItem
+          item={Item}
+          icon={<TreeStructureIcon size={ICON_SIZE} weight="regular" />}
+          label="Open trace"
+          copyLabel="Copy trace link"
+          onOpen={() => thread.traceUrl && openExternal(thread.traceUrl)}
+          onCopy={() =>
+            thread.traceUrl &&
+            copyText(thread.traceUrl, "Copied the trace link")
+          }
+        />
       )}
       {thread.sourceUrl && (
-        <>
-          <Item asChild>
-            <a href={slackUrl ?? undefined} target="_blank" rel="noreferrer">
-              <SlackLogoIcon size={ICON_SIZE} weight="regular" />
-              Open in Slack
-            </a>
-          </Item>
-          <Item
-            onSelect={() =>
-              thread.sourceUrl &&
-              copyText(thread.sourceUrl, "Copied the Slack link")
-            }
-          >
-            <LinkSimpleIcon size={ICON_SIZE} weight="regular" />
-            Copy Slack link
-          </Item>
-        </>
+        <LinkMenuItem
+          item={Item}
+          icon={<SlackLogoIcon size={ICON_SIZE} weight="regular" />}
+          label="Open in Slack"
+          copyLabel="Copy Slack link"
+          onOpen={() => slackUrl && openExternal(slackUrl)}
+          onCopy={() =>
+            thread.sourceUrl &&
+            copyText(thread.sourceUrl, "Copied the Slack link")
+          }
+        />
       )}
       {thread.automationId && (
         <Item asChild>

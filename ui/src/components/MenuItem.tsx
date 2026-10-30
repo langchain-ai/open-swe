@@ -2,7 +2,14 @@
 import * as MacawContextMenu from "@langchain/macaw-components/ContextMenu"
 // oxlint-disable-next-line no-restricted-imports -- this module is the sanctioned wrapper
 import * as MacawDropdownMenu from "@langchain/macaw-components/DropdownMenu"
-import { forwardRef, type ComponentProps, type ElementRef } from "react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { LinkSimpleIcon } from "@phosphor-icons/react/dist/ssr/LinkSimple"
+import {
+  forwardRef,
+  type ComponentProps,
+  type ElementRef,
+  type ReactNode,
+} from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -44,3 +51,47 @@ export const ContextMenuItem = forwardRef<
   />
 ))
 ContextMenuItem.displayName = "ContextMenuItem"
+
+/**
+ * A menu row that opens a link, with a trailing button that copies it instead.
+ * The copy button swallows its own click so the row's select (open) never fires;
+ * its pointerdown must still reach the row, or Radix selects the row on pointerup.
+ */
+export function LinkMenuItem({
+  item: Item,
+  icon,
+  label,
+  copyLabel,
+  onOpen,
+  onCopy,
+  title,
+}: {
+  item: typeof DropdownMenuItem | typeof ContextMenuItem
+  icon: ReactNode
+  label: ReactNode
+  copyLabel: string
+  onOpen: () => void
+  onCopy: () => void
+  title?: string
+}) {
+  return (
+    <Item onSelect={onOpen} title={title} className="pr-space-1">
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <IconButton
+        icon={LinkSimpleIcon}
+        label={copyLabel}
+        tooltipProps={{ title: copyLabel }}
+        size="xs"
+        color="secondary"
+        variant="plain"
+        className="-my-space-1 shrink-0"
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onCopy()
+        }}
+      />
+    </Item>
+  )
+}

@@ -703,6 +703,7 @@ export function SidebarThreadRow({
             <RowHoverCard
               trigger={link}
               card={<ThreadHoverCard item={item} live={live} />}
+              suppressed={contextMenuOpen}
             />
           </div>
         </ContextMenuTrigger>
@@ -846,12 +847,19 @@ function SidebarSubagentRow({
 function RowHoverCard({
   trigger,
   card,
+  suppressed = false,
 }: {
   trigger: React.ReactElement
   card: React.ReactNode
+  /** Kept shut while the row's context menu is open, which it would cover. */
+  suppressed?: boolean
 }) {
   return (
-    <HoverCard openDelay={500} closeDelay={100}>
+    <HoverCard
+      openDelay={500}
+      closeDelay={100}
+      open={suppressed ? false : undefined}
+    >
       <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
       <HoverCardContent
         side="right"

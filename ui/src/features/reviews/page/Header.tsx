@@ -24,7 +24,7 @@ import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 
-import { DropdownMenuItem } from "@/components/MenuItem"
+import { DropdownMenuItem, LinkMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
@@ -374,38 +374,33 @@ export function Header({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             {detail?.trace_url && (
-              <DropdownMenuItem asChild>
-                <a href={detail.trace_url} target="_blank" rel="noreferrer">
+              <LinkMenuItem
+                item={DropdownMenuItem}
+                icon={
                   <TreeStructureIcon aria-hidden size={16} weight="regular" />
-                  Open reviewer trace
-                </a>
-              </DropdownMenuItem>
-            )}
-            {detail?.trace_url && (
-              <DropdownMenuItem
-                onSelect={() =>
+                }
+                label="Open reviewer trace"
+                copyLabel="Copy reviewer trace link"
+                onOpen={() =>
+                  detail.trace_url &&
+                  window.open(detail.trace_url, "_blank", "noopener,noreferrer")
+                }
+                onCopy={() =>
                   detail.trace_url &&
                   copyText(detail.trace_url, "Copied the trace link")
                 }
-              >
-                <LinkIcon aria-hidden size={16} weight="regular" />
-                Copy reviewer trace link
-              </DropdownMenuItem>
+              />
             )}
-            <DropdownMenuItem
-              onSelect={() =>
+            <LinkMenuItem
+              item={DropdownMenuItem}
+              icon={<GithubLogoIcon aria-hidden size={16} weight="regular" />}
+              label="Open on GitHub"
+              copyLabel="Copy GitHub link"
+              onOpen={() =>
                 window.open(githubUrl, "_blank", "noopener,noreferrer")
               }
-            >
-              <GithubLogoIcon aria-hidden size={16} weight="regular" />
-              Open on GitHub
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => copyText(githubUrl, "Copied the GitHub link")}
-            >
-              <LinkIcon aria-hidden size={16} weight="regular" />
-              Copy GitHub link
-            </DropdownMenuItem>
+              onCopy={() => copyText(githubUrl, "Copied the GitHub link")}
+            />
             <DropdownMenuItem onSelect={copyPageLink}>
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
