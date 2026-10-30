@@ -340,6 +340,11 @@ async function cleanupFixtures(request: APIRequestContext) {
   if (createdThreadIds.size > 0) {
     const login = await request.post("/control/login", { data: USER });
     expect(login.ok(), await login.text()).toBeTruthy();
+    const profile = await request.put("/dashboard/api/profile", {
+      data: { experimental_fleet: false },
+      headers: SAME_ORIGIN_HEADERS,
+    });
+    expect(profile.ok(), await profile.text()).toBeTruthy();
   }
   for (const threadId of createdThreadIds) {
     const pinResponse = await request.delete(
@@ -401,56 +406,49 @@ test.describe("threads workspace", () => {
       headers: SAME_ORIGIN_HEADERS,
     });
     expect(profile.ok(), await profile.text()).toBeTruthy();
-    try {
-      await page.goto("/agents");
-      await dismissOnboardingIfShown(page);
-      const sidebar = page.locator("[data-sidebar-frame]");
-      await expect(sidebar.getByRole("tab")).toHaveCount(0);
-      await expect(
-        sidebar.getByRole("link", { name: "New chat", exact: true }),
-      ).toBeVisible();
-      const row = sidebar.getByRole("link", {
-        name: TITLES.ready,
-        exact: true,
-      });
-      await expect(row).toHaveAttribute("href", `/agents/${THREAD_IDS.ready}`);
-      await row.hover();
-      await row
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+    const sidebar = page.locator("[data-sidebar-frame]");
+    await expect(sidebar.getByRole("tab")).toHaveCount(0);
+    await expect(
+      sidebar.getByRole("link", { name: "New chat", exact: true }),
+    ).toBeVisible();
+    const row = sidebar.getByRole("link", {
+      name: TITLES.ready,
+      exact: true,
+    });
+    await expect(row).toHaveAttribute("href", `/agents/${THREAD_IDS.ready}`);
+    await row.hover();
+    await row
+      .locator("..")
+      .getByRole("button", { name: "Pin chat", exact: true })
+      .click();
+    await expect(
+      row
         .locator("..")
-        .getByRole("button", { name: "Pin chat", exact: true })
-        .click();
-      await expect(
-        row
-          .locator("..")
-          .getByRole("button", { name: "Unpin chat", exact: true }),
-      ).toBeVisible();
-      await row
-        .locator("..")
-        .getByRole("button", { name: "Archive chat", exact: true })
-        .click();
-      await expect(row).toBeHidden();
-      await sidebar
-        .getByRole("button", { name: "Archived", exact: true })
-        .click();
-      await expect(row).toBeVisible();
-      await row.hover();
-      await row
-        .locator("..")
-        .getByRole("button", { name: "Unarchive chat", exact: true })
-        .click();
-      await expect(row).toBeVisible();
-      await page.reload();
-      await expect(row).toBeVisible();
-      await expect(sidebar.getByRole("tab")).toHaveCount(0);
-      await page.goto(`/agents/chat?chat=${THREAD_IDS.ready}`);
-      await expect(page).toHaveURL(/\/agents\/?$/);
-    } finally {
-      const restored = await page.request.put("/dashboard/api/profile", {
-        data: { experimental_fleet: false },
-        headers: SAME_ORIGIN_HEADERS,
-      });
-      expect(restored.ok(), await restored.text()).toBeTruthy();
-    }
+        .getByRole("button", { name: "Unpin chat", exact: true }),
+    ).toBeVisible();
+    await row.hover();
+    await row
+      .locator("..")
+      .getByRole("button", { name: "Archive chat", exact: true })
+      .click();
+    await expect(row).toBeHidden();
+    await sidebar
+      .getByRole("button", { name: "Archived", exact: true })
+      .click();
+    await expect(row).toBeVisible();
+    await row.hover();
+    await row
+      .locator("..")
+      .getByRole("button", { name: "Unarchive chat", exact: true })
+      .click();
+    await expect(row).toBeVisible();
+    await page.reload();
+    await expect(row).toBeVisible();
+    await expect(sidebar.getByRole("tab")).toHaveCount(0);
+    await page.goto(`/agents/chat?chat=${THREAD_IDS.ready}`);
+    await expect(page).toHaveURL(/\/agents\/?$/);
   });
 
   test("pins and unpins a non-owned thread across sidebar views", async ({
