@@ -387,7 +387,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update, opened = await self._before_agent(state, runtime)
         held = {**state.get(STATE_KEY, {}), **_held(update)}
         run = self._backend.run
-        if self._in_box:
+        if self._in_sandbox:
             # A sandbox MDA could not open is not asked for again here: the run's first tool
             # call opens it, or says why it cannot.
             files = getattr(runtime, "backend", None) if opened else None
@@ -399,7 +399,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return self._carrying(state, update)
 
     @property
-    def _in_box(self) -> bool:
+    def _in_sandbox(self) -> bool:
         """Whether the run's files are in MDA's sandbox, which it asks for before preparing."""
         return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
 
@@ -440,7 +440,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 Prepare,
                 run_id(),
                 state,
-                in_box=self._in_box,
+                in_sandbox=self._in_sandbox,
                 sandbox_id=opened.sandbox_id,
                 sandbox_error=opened.error,
             ),
@@ -484,7 +484,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         )
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
-        if self._open_sandbox is None or not self._in_box:
+        if self._open_sandbox is None or not self._in_sandbox:
             return OpenedSandbox()
         return await self._open_sandbox(runtime)
 

@@ -100,7 +100,7 @@ class SandboxMove:
 
         A carry that fails puts the thread back where it was, so it is never
         half-moved: its checkout stays in the sandbox it was asked to leave. A move to
-        the cloud has no sandbox to carry it to yet: MDA creates the thread's box when
+        the cloud has no sandbox to carry it to yet: MDA creates the thread's sandbox when
         its next run starts, and the checkout comes over when that run connects to it.
         """
         from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread

@@ -832,16 +832,16 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
     return by_name
 
 
-async def _reconnect_agent_box(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
+async def _reconnect_agent_sandbox(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
     return await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace)
 
 
 class ThreadFiles:
-    """The thread's files as the agent's tools reach them: its box, with the paths this
+    """The thread's files as the agent's tools reach them: its sandbox, with the paths this
     deployment serves routed in.
 
     Those are the run's skill stores, and the images it offloaded, which PostgreSQL
-    keeps so they can be read without the box.
+    keeps so they can be read without the sandbox.
     """
 
     def __init__(
@@ -856,11 +856,11 @@ class ThreadFiles:
                 namespace=lambda _runtime: blob_namespace(thread_id),
             ),
         }
-        box = get_cached_sandbox_backend(
-            thread_id, reconnect=partial(_reconnect_agent_box, thread_id, workspace_slug(cfg))
+        cached = get_cached_sandbox_backend(
+            thread_id, reconnect=partial(_reconnect_agent_sandbox, thread_id, workspace_slug(cfg))
         )
         self.backend = CompositeBackend(
-            default=box, routes=self.routes, artifacts_root=self.artifacts_root
+            default=cached, routes=self.routes, artifacts_root=self.artifacts_root
         )
 
     @classmethod
@@ -1056,7 +1056,7 @@ async def _cached_profile(profile_login: str | None):
 def _sandbox_file_downloads_enabled(*, bridged: bool) -> bool:
     """Return whether signed sandbox file downloads are available for this run.
 
-    They are served by the LangSmith box itself, which a bridged thread does not have.
+    They are served by the LangSmith sandbox itself, which a bridged thread does not have.
     """
     return not bridged
 

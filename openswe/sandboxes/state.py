@@ -55,7 +55,7 @@ class SandboxUnreachableError(RuntimeError):
 
 
 class SandboxHandedOverError(SandboxUnreachableError):
-    """The thread's old box is gone or set aside: its next run starts in a fresh one MDA opens."""
+    """The thread's old sandbox is gone or set aside: its next run starts in a fresh one MDA opens."""
 
 
 _SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
@@ -104,15 +104,15 @@ class SandboxBackendProxy(BaseSandbox):
         self._startup_task = None
 
     def detach(self) -> None:
-        """Forget the box; the next call connects to whatever the thread is bound to then."""
+        """Forget the sandbox; the next call connects to whatever the thread is bound to then."""
         self._backend = None
         self._startup_task = None
 
     def follow(self, sandbox_id: object) -> None:
-        """Forget a cached box the thread is no longer bound to, on whichever replica holds it.
+        """Forget a cached sandbox the thread is no longer bound to, on whichever replica holds it.
 
-        A thread moved off a Mac, or handed to MDA, is bound to a new box by another
-        process; this one would otherwise keep using the box the thread left.
+        A thread moved off a Mac, or handed to MDA, is bound to a new sandbox by another
+        process; this one would otherwise keep using the sandbox the thread left.
         """
         if self._backend is not None and self._backend.id != sandbox_id:
             self.detach()
@@ -357,7 +357,7 @@ class SandboxBackendProxy(BaseSandbox):
 SANDBOX_BACKENDS: dict[str, SandboxBackendProxy] = {}
 
 # Sandbox ID -> live connection to it. Keyed by sandbox rather than thread so a
-# thread rebound on another worker can never be handed the box it left.
+# thread rebound on another worker can never be handed the sandbox it left.
 SANDBOX_CONNECTIONS: dict[str, SandboxBackendProtocol] = {}
 
 

@@ -2082,13 +2082,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             raise RuntimeError("This run has no sandbox")
         return selected
 
-    def _without_box(self) -> SandboxBackendProtocol | None:
-        """Where this run acts instead (``_openswe_without_box``) when it has no box."""
-        from managed_deepagents.sandbox import without_box  # noqa: PLC0415
+    def _without_sandbox(self) -> SandboxBackendProtocol | None:
+        """Where this run acts instead (``_openswe_without_sandbox``) when it has no box."""
+        from managed_deepagents.sandbox import without_sandbox  # noqa: PLC0415
 
         if self._resolved_backend is not None:
             return None
-        instead = without_box(self._source.sandbox)
+        instead = without_sandbox(self._source.sandbox)
         return instead if instead is not None and self._selection() is None else None
 
     def _keep(self, backend: SandboxBackendProtocol) -> None:
@@ -2374,7 +2374,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     ) -> _ResultT:
         from managed_deepagents._sandbox_proxy import run_sync  # noqa: PLC0415
 
-        instead = self._without_box()
+        instead = self._without_sandbox()
         if instead is not None:
             return operation(instead)
         backend = self._backend()
@@ -2392,7 +2392,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         *,
         execute: bool = False,
     ) -> _ResultT:
-        instead = self._without_box()
+        instead = self._without_sandbox()
         if instead is not None:
             return await _settled(operation(instead))
         backend = await self._abackend()

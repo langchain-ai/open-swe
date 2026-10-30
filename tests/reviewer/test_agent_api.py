@@ -238,7 +238,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     prepared = await graph.api(
         run,
         "prepare",
-        {"run_id": "run-1", "messages": asked, "in_box": True, "sandbox_id": "sandbox-1"},
+        {"run_id": "run-1", "messages": asked, "in_sandbox": True, "sandbox_id": "sandbox-1"},
     )
 
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
@@ -929,7 +929,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     from openswe.sandboxes.managed import ManagedSandbox
 
-    # A thread with no box of MDA's, so the catalog reads no thread metadata.
+    # A thread with no sandbox of MDA's, so the catalog reads no thread metadata.
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
     monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain.agents.middleware import ModelCallLimitMiddleware

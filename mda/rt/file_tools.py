@@ -108,17 +108,17 @@ class FileToolsMiddleware(AgentMiddleware):
         )
         # The run's skills, which this runtime keeps itself (``rt.skills``).
         self._skills = dict(skills or {})
-        # The box's own tools, as the model is offered them; code mode runs them from here.
-        self._box: dict[str, BaseTool] = {}
+        # The sandbox's own tools, as the model is offered them; code mode runs them from here.
+        self._sandbox_tools: dict[str, BaseTool] = {}
         self._execute_timeout = execute_timeout
         self._tool_errors = ToolErrorMiddleware(backend)
         self._image_reads = ValidateImageReadsMiddleware()
-        self._agents_md_in_box = SubdirAgentsReadMiddleware(None)
+        self._agents_md_in_sandbox = SubdirAgentsReadMiddleware(None)
         self._agents_md_remote = SubdirAgentsReadMiddleware(remote_files)
 
     @property
-    def _in_box(self) -> bool:
-        """Whether the run's files are in MDA's box, rather than only on the backend."""
+    def _in_sandbox(self) -> bool:
+        """Whether the run's files are in MDA's sandbox, rather than only on the backend."""
         return self._backend.run.planned.sandbox is not None
 
     @property
@@ -185,7 +185,7 @@ class FileToolsMiddleware(AgentMiddleware):
                     for tool in request.tools
                 ]
             )
-        self._box.update(
+        self._sandbox_tools.update(
             (tool.name, tool)
             for tool in request.tools
             if isinstance(tool, BaseTool) and tool.name in FILE_TOOLS
@@ -205,7 +205,7 @@ class FileToolsMiddleware(AgentMiddleware):
             run: Handler = self._run_skill
         elif _under(spec.backend_paths, call_["name"], call_["args"]):
             run = self._run_remote
-        elif not self._in_box:
+        elif not self._in_sandbox:
             run = partial(self._observed, handler=self._run_remote)
         else:
             run = partial(
@@ -269,11 +269,11 @@ class FileToolsMiddleware(AgentMiddleware):
             git.changed(started)
 
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
-        """The call against the backend's files, as the box's own tool would run it."""
+        """The call against the backend's files, as the sandbox's own tool would run it."""
         return await _invoked(self._remote[request.tool_call["name"]], request)
 
     async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
-        """The call against the run's skills, as the box's own tool would run it."""
+        """The call against the run's skills, as the sandbox's own tool would run it."""
         tool = self._skills.get(request.tool_call["name"])
         if tool is None:
             return ToolMessage(
@@ -286,13 +286,13 @@ class FileToolsMiddleware(AgentMiddleware):
 
     async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
         """A code mode call, run by the tool the model's own call of it runs."""
-        tools = self._box if self._in_box else self._remote
+        tools = self._sandbox_tools if self._in_sandbox else self._remote
         return await _invoked(tools[request.tool_call["name"]], request)
 
     async def _checked(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler`` in the graph's own order: image reads, then tool errors, then AGENTS.md."""
         checks = self._spec.checks
-        agents_md = self._agents_md_in_box if self._in_box else self._agents_md_remote
+        agents_md = self._agents_md_in_sandbox if self._in_sandbox else self._agents_md_remote
         checked = handler
         for check in (
             agents_md if "agents_md" in checks else None,

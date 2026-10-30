@@ -124,7 +124,7 @@ async def complete_handoff(
     if not isinstance(source_id, str) or source_id == target.id:
         return
     repo = _repo(metadata)
-    # A move to the cloud carries the checkout once MDA's box exists, by when the Mac
+    # A move to the cloud carries the checkout once MDA's sandbox exists, by when the Mac
     # it left may be gone: the thread then continues from the branch as pushed.
     if Bridge.bridge_id_of(source_id) and not await BridgeStore.is_connected(source_id):
         logger.warning(

@@ -80,13 +80,13 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
-# Held state: when the box's GitHub token next needs replacing. It lives in the thread's
+# Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
 # checkpoint, so it holds for the next run on whichever backend replica serves it.
 _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
 # A token is replaced this long before it expires. The backend never hands out one with
 # less left, so a replacement is not due again at once.
 _GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
-# A thread whose box has no GitHub proxy is asked again after this long.
+# A thread whose sandbox has no GitHub proxy is asked again after this long.
 _GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
 # A refresh that failed is tried again after this long, so a failure that keeps happening
 # does not hold up every model call.
@@ -416,7 +416,7 @@ class RunLoop:
         return False
 
     async def _github_proxy(self, held: Mapping[str, object]) -> dict[str, JsonValue]:
-        """Put a new GitHub token on the box once the one there is about to expire.
+        """Put a new GitHub token on the sandbox once the one there is about to expire.
 
         The call is awaited, so the model's first command never runs on an expired
         token. A failure leaves the run going and the call is made again a minute later.
@@ -430,12 +430,12 @@ class RunLoop:
         try:
             refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
         except Exception:
-            logger.warning("Could not refresh the box's GitHub token", exc_info=True)
+            logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
             return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
         return _github_proxy_due(refreshed, now)
 
     def prepared(self, prepared: Prepared) -> dict[str, JsonValue]:
-        """Held state that keeps the token preparation put on the box until it is due."""
+        """Held state that keeps the token preparation put on the sandbox until it is due."""
         if prepared.github_proxy is None or not self.rules.refresh_github_proxy:
             return {}
         return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))

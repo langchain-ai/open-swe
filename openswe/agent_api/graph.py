@@ -359,7 +359,7 @@ class RunSession:
         self.config = config
         # The run as its token names it, whose catalog grants it its operations.
         self.run = run
-        # The graph the run plays, which decides what a replaced box may reach.
+        # The graph the run plays, which decides what a replaced sandbox may reach.
         self.assistant_id = assistant_id
         self._restore = restore
         self._joined = self._prepared = started_here
@@ -498,7 +498,7 @@ class RunSession:
         )
 
     async def plan(self) -> Catalog:
-        """The catalog, with who the run acts for, the box MDA creates for it, and the grant
+        """The catalog, with who the run acts for, the sandbox MDA creates for it, and the grant
         of each operation to the run this session serves."""
         sandbox = await self.sandbox()
         spec = (
@@ -507,7 +507,7 @@ class RunSession:
         catalog = self.catalog()
         loop = catalog.loop
         if loop is not None and spec is not None and spec.github_proxy is not None:
-            # MDA puts a fresh token in this box's proxy config itself, before each command.
+            # MDA puts a fresh token in this sandbox's proxy config itself, before each command.
             loop = loop.model_copy(update={"refresh_github_proxy": False})
         run = self.run
         return catalog.model_copy(
@@ -540,13 +540,13 @@ class RunSession:
         )
 
     async def sandbox(self) -> ManagedSandbox | None:
-        """The thread's box as MDA creates it, when MDA owns it."""
+        """The thread's sandbox as MDA creates it, when MDA owns it."""
         return await managed_sandbox(self.config, self.assistant_id)
 
     async def bind_sandbox(self, request: Prepare) -> None:
-        """Bind the thread to the box MDA opened before preparing, if MDA owns it.
+        """Bind the thread to the sandbox MDA opened before preparing, if MDA owns it.
 
-        A thread with no box to work in ends the run once the person knows why.
+        A thread with no sandbox to work in ends the run once the person knows why.
         """
         cfg = RunConfig.from_config(self.config)
         if cfg.thread_id is None or await self.sandbox() is None:
@@ -562,20 +562,20 @@ class RunSession:
             await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
             raise
         if request.sandbox_id is not None and not proxy_token_recorded(cfg.thread_id):
-            # MDA runs the agent's commands in the box itself, so nothing here connects
+            # MDA runs the agent's commands in the sandbox itself, so nothing here connects
             # to it before its first GitHub call: connect now, which sets its git
             # identity, and its proxy unless MDA writes that.
             try:
                 await reconnect_sandbox(self.config, self.assistant_id)
             except Exception:
                 logger.warning(
-                    "Could not connect to the box MDA opened",
+                    "Could not connect to the sandbox MDA opened",
                     extra={"agent_thread_id": cfg.thread_id, "sandbox_id": request.sandbox_id},
                     exc_info=True,
                 )
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
-        """Connect again to the thread's box, which MDA replaced with a fresh one."""
+        """Connect again to the thread's sandbox, which MDA replaced with a fresh one."""
         await reconnect_sandbox(self.config, self.assistant_id)
         return Done()
 
@@ -688,7 +688,7 @@ class RunSession:
 
     async def prepare(self, request: Prepare) -> Prepared:
         started = datetime.now(UTC)
-        # MDA opened the box before preparing; preparation connects to it as to any other.
+        # MDA opened the sandbox before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
         if self.surface.inbox is not None and cfg.thread_id is not None:
@@ -722,7 +722,7 @@ class RunSession:
         return await self._answer_phase("after_agent", request, ended)
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
-        """A tool MDA ran in the box found it gone; the run ends once the person knows."""
+        """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
         await post_sandbox_unreachable_notification(
             self.config, sandbox_id=request.sandbox_id, reason=request.reason
         )
@@ -843,7 +843,7 @@ async def check_shell(guards: ShellGuards, request: ShellCheck) -> ShellVerdict:
 def _run_github_scope(
     cfg: RunConfig, assistant_id: str | None
 ) -> tuple[list[str] | None, PermissionMap | None]:
-    """How a run narrows its box's GitHub token beyond its thread's own scope: a review
+    """How a run narrows its sandbox's GitHub token beyond its thread's own scope: a review
     reads only its pull request's repository."""
     if assistant_id not in _REVIEW_GRAPHS:
         return None, None
@@ -853,7 +853,7 @@ def _run_github_scope(
 async def managed_sandbox(
     config: RunnableConfig, assistant_id: str | None
 ) -> ManagedSandbox | None:
-    """The run's thread's box as MDA creates it, when MDA owns it."""
+    """The run's thread's sandbox as MDA creates it, when MDA owns it."""
     cfg = RunConfig.from_config(config)
     if cfg.thread_id is None:
         return None
@@ -867,7 +867,7 @@ async def managed_sandbox(
 
 
 async def reconnect_sandbox(config: RunnableConfig, assistant_id: str | None) -> None:
-    """Connect again to the thread's box, which MDA replaced with a fresh one."""
+    """Connect again to the thread's sandbox, which MDA replaced with a fresh one."""
 
     async def reconnect(_runtime: Runtime) -> None:
         cfg = RunConfig.from_config(config)
@@ -1026,7 +1026,7 @@ class TokenRun:
         )
         if preparation is None:
             return None
-        if request.in_box:
+        if request.in_sandbox:
             # MDA opened the sandbox before preparing; the thread is bound to it from here on.
             # A thread with no sandbox to work in ends the run once the person knows why.
             try:
@@ -1171,7 +1171,7 @@ class TokenRun:
         return Done()
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
-        """A tool MDA ran in the box found it gone; the run ends once the person knows."""
+        """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
         await post_sandbox_unreachable_notification(
             self.config, sandbox_id=request.sandbox_id, reason=request.reason
         )
@@ -1203,7 +1203,7 @@ class TokenRun:
 
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
-        # Where MDA may write the box's proxy, a review's narrowing decides that it does
+        # Where MDA may write the sandbox's proxy, a review's narrowing decides that it does
         # not, as it does for the catalog. Otherwise it keeps the thread's own scope.
         repositories, permissions = (
             _run_github_scope(cfg, self.graph.assistant_id)
@@ -1219,11 +1219,11 @@ class TokenRun:
         return GitHubProxyRefreshed(expires_at=expires_at)
 
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
-        """The backend's part of the proxy config MDA writes on the run's box."""
+        """The backend's part of the proxy config MDA writes on the run's sandbox."""
         cfg = RunConfig.from_config(self.config)
         managed = await managed_sandbox(self.config, self.graph.assistant_id)
         if managed is None or managed.github_proxy is None:
-            # The box's capability goes only to a run that writes its proxy config.
+            # The sandbox's capability goes only to a run that writes its proxy config.
             raise RefusedCallError("The backend writes this thread's sandbox proxy config")
         config = await mda_proxy_config(
             managed.thread_id or self.run.thread_id,

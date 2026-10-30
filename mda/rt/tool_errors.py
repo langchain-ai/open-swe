@@ -54,7 +54,7 @@ class ToolErrorMiddleware(AgentMiddleware):
             # A connection the person has not granted pauses the run until they do.
             raise
         except SandboxRetryableConnectionError as exc:
-            # The command never started, so nothing is known to be wrong with the box.
+            # The command never started, so nothing is known to be wrong with the sandbox.
             logger.warning("The sandbox kept refusing a tool call before it started", exc_info=True)
             return _error(
                 request,
@@ -72,7 +72,7 @@ class ToolErrorMiddleware(AgentMiddleware):
             if not _sandbox_unreachable(exc):
                 logger.exception("Tool call failed", extra={"tool_name": request.tool_call["name"]})
                 return _error(request, {"error": str(exc), "error_type": type(exc).__name__})
-            # Every later call would meet the same dead box, so the run ends here once
+            # Every later call would meet the same dead sandbox, so the run ends here once
             # the person knows.
             logger.exception("The thread's sandbox stopped answering")
             self._report_unreachable(request, exc)

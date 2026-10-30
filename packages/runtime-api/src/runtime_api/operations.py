@@ -57,7 +57,7 @@ class OperationResult(BaseModel):
     pull_requests: list[PullRequestHead] = []
     # Custom stream events the operation emitted, for the run to emit.
     events: list[JsonValue] = []
-    # The thread's box did not answer; the backend has told the person, and the run ends.
+    # The thread's sandbox did not answer; the backend has told the person, and the run ends.
     sandbox_unreachable: bool = False
 
 
@@ -65,7 +65,7 @@ OPERATION = Endpoint("operation", RunOperation, OperationResult)
 
 
 class ShellCheck(RunRequest):
-    """A shell command a tool is about to run in the thread's box."""
+    """A shell command a tool is about to run in the thread's sandbox."""
 
     tool: str
     command: str

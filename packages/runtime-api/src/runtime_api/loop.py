@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Final
 from uuid import UUID
 
-from pydantic import BaseModel, JsonValue
+from pydantic import AliasChoices, BaseModel, Field, JsonValue
 
 from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
@@ -44,8 +44,8 @@ class RunCall(RunRequest):
 
 class Prepare(RunCall):
     # Whether the runtime keeps the thread's sandbox, and the sandbox it opened before preparing;
-    # None when it could not.
-    in_box: bool = False
+    # None when it could not. An MDA deployed before the field was renamed sends ``in_box``.
+    in_sandbox: bool = Field(False, validation_alias=AliasChoices("in_sandbox", "in_box"))
     sandbox_id: str | None = None
     # Why the runtime could not open it, secrets removed.
     sandbox_error: str | None = None
@@ -62,14 +62,14 @@ class PhaseResult(BaseModel):
 
 
 class GitHubProxyRefreshed(BaseModel):
-    """The box's GitHub proxy was given a fresh token."""
+    """The sandbox's GitHub proxy was given a fresh token."""
 
-    # When that token expires; None when the thread's box has no GitHub proxy to refresh.
+    # When that token expires; None when the thread's sandbox has no GitHub proxy to refresh.
     expires_at: datetime | None = None
 
 
 class Prepared(PhaseResult):
-    # The token preparation put on the box, which the first model call then keeps; None
+    # The token preparation put on the sandbox, which the first model call then keeps; None
     # when it put none there.
     github_proxy: GitHubProxyRefreshed | None = None
 
@@ -162,7 +162,7 @@ class ScoutPlanEnd(RunRequest):
 
 
 class SandboxGone(RunRequest):
-    # The box a tool found gone, when its error named it.
+    # The sandbox a tool found gone, when its error named it.
     sandbox_id: str | None = None
     # Why, when the sandbox never booted, secrets removed.
     reason: str | None = None
@@ -260,9 +260,9 @@ AFTER_MODEL = Endpoint(
 AFTER_AGENT = Endpoint("after_agent", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, Done, seconds=LOOP_CALL_SECONDS)
-# The runtime replaced the thread's box: the backend connects to the fresh one.
+# The runtime replaced the thread's sandbox: the backend connects to the fresh one.
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
-# A tool the runtime ran found the box gone: the backend tells the person.
+# A tool the runtime ran found the sandbox gone: the backend tells the person.
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
@@ -276,7 +276,7 @@ MODEL_CHOICE = Endpoint(
 TASK_CONTEXT = Endpoint(
     "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# Mints a token and sets it on the box, so sending it again only mints another.
+# Mints a token and sets it on the sandbox, so sending it again only mints another.
 REFRESH_GITHUB_PROXY = Endpoint(
     "refresh_github_proxy",
     RunRequest,

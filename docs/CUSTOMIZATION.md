@@ -49,7 +49,7 @@ For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a s
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
-With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the boxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
+With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the sandboxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
 ### Who creates sandboxes

@@ -99,7 +99,7 @@ class SandboxDefinition:
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
         "_openswe_select",
-        "_openswe_without_box",
+        "_openswe_without_sandbox",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -224,9 +224,9 @@ def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefiniti
     return selected
 
 
-def without_box(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
+def without_sandbox(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
     """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
-    backend = sandbox.options.get("_openswe_without_box")
+    backend = sandbox.options.get("_openswe_without_sandbox")
     return backend if isinstance(backend, SandboxBackendProtocol) else None
 
 

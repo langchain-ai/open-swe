@@ -73,7 +73,7 @@ from rt.backend import (
 )
 from rt.file_tools import FileToolsMiddleware
 from rt.git_evidence import TurnGit, turn_git
-from rt.managed_sandbox import box
+from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware, turn_trace
 from rt.model_calls import model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
@@ -238,8 +238,8 @@ type Answer = Callable[[str, dict[str, JsonValue]], Awaitable[BaseModel]]
 
 # A run planned with nothing in particular.
 _NO_PLAN: Final = Catalog()
-# A run whose files are in MDA's box.
-_IN_BOX: Final = SandboxSpec(
+# A run whose files are in MDA's sandbox.
+_IN_SANDBOX: Final = SandboxSpec(
     create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=60, delete_after_stop_seconds=60)
 )
 
@@ -1234,7 +1234,7 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
         ("read_file", {"file_path": "/workspace/repo/README.md"}, False, False),
     ],
 )
-async def test_box_tools_ask_the_guards_and_reach_the_backends_paths(
+async def test_sandbox_tools_ask_the_guards_and_reach_the_backends_paths(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
     arguments: dict[str, str],
@@ -1247,7 +1247,8 @@ async def test_box_tools_ask_the_guards_and_reach_the_backends_paths(
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
         catalog=Catalog(
-            files=FilesSpec(backend_paths=["/skills/"], guards=["shell_commands"]), sandbox=_IN_BOX
+            files=FilesSpec(backend_paths=["/skills/"], guards=["shell_commands"]),
+            sandbox=_IN_SANDBOX,
         )
     )
     checks = AsyncMock(return_value=ShellVerdict(allowed=True).model_dump(mode="json"))
@@ -1271,16 +1272,16 @@ async def test_box_tools_ask_the_guards_and_reach_the_backends_paths(
         state={"messages": []},
         runtime=runtime,
     )
-    in_box = AsyncMock(return_value=ToolMessage(content="ran", tool_call_id="call-1"))
+    in_sandbox = AsyncMock(return_value=ToolMessage(content="ran", tool_call_id="call-1"))
     monkeypatch.setattr("rt.file_tools.remote_file_tools", lambda *_: {"read_file": served})
     files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
 
-    await files.awrap_tool_call(request, in_box)
+    await files.awrap_tool_call(request, in_sandbox)
     await backend.outbox.drain()
 
     assert checks.await_count == int(checked)
     assert served.ainvoke.await_count == int(remote)
-    assert in_box.await_count == int(not remote)
+    assert in_sandbox.await_count == int(not remote)
 
 
 @pytest.mark.parametrize("next_trace_available", [True, False])
@@ -1574,7 +1575,7 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
-        catalog=Catalog(files=FilesSpec(guards=["shell_commands"]), sandbox=_IN_BOX)
+        catalog=Catalog(files=FilesSpec(guards=["shell_commands"]), sandbox=_IN_SANDBOX)
     )
     refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
     monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
@@ -1601,14 +1602,14 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
         state={"messages": []},
         runtime=runtime,
     )
-    in_box = AsyncMock()
+    in_sandbox = AsyncMock()
     files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
 
-    refused = await files.awrap_tool_call(request, in_box)
+    refused = await files.awrap_tool_call(request, in_sandbox)
     await backend.outbox.drain()
 
     assert isinstance(refused, ToolMessage) and refused.status == "error"
-    in_box.assert_not_awaited()
+    in_sandbox.assert_not_awaited()
     started.assert_called_once()
     [[_body, recorded]] = [call.args for call in finished.call_args_list]
     assert recorded.content == "pr_creation_fallback_blocked"
@@ -1666,7 +1667,7 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
-        catalog=Catalog(files=FilesSpec(guards=["shell_commands"]), sandbox=_IN_BOX)
+        catalog=Catalog(files=FilesSpec(guards=["shell_commands"]), sandbox=_IN_SANDBOX)
     )
     refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
     monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
@@ -1675,14 +1676,14 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     ran = AsyncMock(return_value="opened")
 
     @tool("execute")
-    async def box_execute(command: str) -> str:
-        """Run a command in the box."""
+    async def sandbox_execute(command: str) -> str:
+        """Run a command in the sandbox."""
         return await ran(command)
 
     remote = RemoteFiles(backend, lambda: "run-1")
     files = FileToolsMiddleware(backend, 300, remote_files=remote)
     model_request = MagicMock(spec=ModelRequest)
-    model_request.tools = [box_execute]
+    model_request.tools = [sandbox_execute]
     await files.awrap_model_call(model_request, AsyncMock())
     [execute] = files.code_tools(["execute", "web_search"])
     runtime = ToolRuntime(
@@ -1710,7 +1711,7 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
         catalog=Catalog(
-            files=FilesSpec(backend_paths=["/blobs/"], checks=["image_reads"]), sandbox=_IN_BOX
+            files=FilesSpec(backend_paths=["/blobs/"], checks=["image_reads"]), sandbox=_IN_SANDBOX
         )
     )
     monkeypatch.setattr(backend.outbox, "started", MagicMock())
@@ -1754,7 +1755,7 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     assert "not a valid image" in message.content
 
 
-async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files(
+async def test_a_run_without_an_mda_sandbox_offloads_a_large_result_to_its_own_files(
     tmp_path: Path,
 ) -> None:
     files = LocalShellBackend(root_dir=tmp_path, virtual_mode=True)
@@ -1784,7 +1785,7 @@ async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files
                 )
             ),
             tools=[dump],
-            sandbox=box(files),
+            sandbox=declared_sandbox(files),
         )
 
     agent = await compile_managed_agent_async(shared, None, report_telemetry=False)
@@ -1808,7 +1809,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
-        catalog=Catalog(skill_sources=["/skills/", "/organization-skills/"], sandbox=_IN_BOX)
+        catalog=Catalog(skill_sources=["/skills/", "/organization-skills/"], sandbox=_IN_SANDBOX)
     )
     asked: list[str] = []
 
@@ -1852,7 +1853,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
         tool_call_id="call-1",
         store=None,
     )
-    in_box = AsyncMock()
+    in_sandbox = AsyncMock()
     read = await files.awrap_tool_call(
         ToolCallRequest(
             tool_call={
@@ -1865,12 +1866,12 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
             state={"messages": []},
             runtime=runtime,
         ),
-        in_box,
+        in_sandbox,
     )
     await backend.outbox.drain()
 
     assert isinstance(read, ToolMessage) and "Run make deploy." in read.text
-    in_box.assert_not_awaited()
+    in_sandbox.assert_not_awaited()
     # Listed once for the run, and no file was read through the backend's files.
     assert asked.count("skills") == 1
     assert not [name for name in asked if name.startswith("files.")]

@@ -1,6 +1,6 @@
 """The thread's sandbox as MDA's own sandbox: declared, opened as the run starts, replaced on request.
 
-The graph declares one sandbox (``box``) for every run; each run's catalog says which
+The graph declares one sandbox (``sandbox``) for every run; each run's catalog says which
 sandbox it uses and the options MDA creates it with (``SandboxSpec``), or that it has
 none, when what the graph keeps itself, such as large tool results, goes to the
 backend's files instead. MDA keeps one sandbox per thread whatever the backend's options
@@ -95,31 +95,31 @@ EXECUTE_TIMEOUT_SECONDS: Final = 300
 OPEN_BACKOFF_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 OPEN_MAX_ELAPSED_SECONDS: Final = 90.0
 _CAUSE_LIMIT: Final = 300
-# Creation failures the service, not the box's options, caused; an image or config one is not.
+# Creation failures the service, not the sandbox's options, caused; an image or config one is not.
 _UNSCHEDULED: Final = frozenset({"Unschedulable", "ServiceUnavailable"})
 _SECRET = re.compile(
     r"(?i)\b((?:token|api[_-]?key|secret|password|authorization)\s*[:=]\s*(?:bearer\s+)?|bearer\s+)"
     r"[^\s,;&\"']+"
 )
 # Agent Auth renews the GitHub token MDA reads, and the commands the backend runs in
-# the box write no proxy config, so MDA writes it again this often.
+# the sandbox write no proxy config, so MDA writes it again this often.
 _PROXY_REWRITE_SECONDS: Final = 300.0
 _PROXY_RETRY_SECONDS: Final = 60.0
-# The sandbox API takes no proxy config while the host suspends an idle box, which takes
+# The sandbox API takes no proxy config while the host suspends an idle sandbox, which takes
 # up to about three minutes: the write before the run prepares outlasts that, as the
 # backend's own does.
 PROXY_WRITE_BACKOFF_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 PROXY_WRITE_MAX_ELAPSED_SECONDS: Final = 180.0
-# No connection to read the token from, or no box to write on: writing again changes nothing.
+# No connection to read the token from, or no sandbox to write on: writing again changes nothing.
 _PERMANENT_WRITE_FAILURES: Final = (ConnectionNotFoundError, ResourceNotFoundError)
-# MDA writes the proxy config before each command it runs in the box, this one included.
+# MDA writes the proxy config before each command it runs in the sandbox, this one included.
 _NO_OP: Final = ":"
 _NO_OP_TIMEOUT_SECONDS: Final = 60
 
 
 @runtime_checkable
 class _Rebindable(Protocol):
-    """MDA's handle on the run's box, which binds a fresh one to the run."""
+    """MDA's handle on the run's sandbox, which binds a fresh one to the run."""
 
     def bind_runtime(self, runtime: object) -> SandboxBackendProtocol: ...
 
@@ -132,18 +132,18 @@ def _run_of(runtime: object) -> Run:
 
 
 def _planned(runtime: object) -> tuple[Run, SandboxSpec] | None:
-    """The run in ``runtime``, and the box its catalog names; None without one of MDA's."""
+    """The run in ``runtime``, and the sandbox its catalog names; None without one of MDA's."""
     try:
         run = _run_of(runtime)
         spec = run.planned.sandbox
     except BackendCallError:
-        # Not started yet, or not an Open SWE run, so nothing may open a box for it.
+        # Not started yet, or not an Open SWE run, so nothing may open a sandbox for it.
         return None
     return None if spec is None else (run, spec)
 
 
 def _github_rules(github: ConnectionRef) -> list[dict[str, object]]:
-    """The box's GitHub rules, with the token MDA reads from ``github`` before each command."""
+    """The sandbox's GitHub rules, with the token MDA reads from ``github`` before each command."""
     token = connections.get(github.slug, {"type": github.owner})
     return [
         {
@@ -164,9 +164,9 @@ def _github_rules(github: ConnectionRef) -> list[dict[str, object]]:
 
 
 def _rebound(runtime: object) -> SandboxBackendProtocol:
-    """The run's box through a handle of its own.
+    """The run's sandbox through a handle of its own.
 
-    A hook's handle keeps the box as it first resolved it, which may be from before
+    A hook's handle keeps the sandbox as it first resolved it, which may be from before
     the backend's part of the proxy config was known, and writes that config.
     """
     backend = getattr(runtime, "backend", None)
@@ -175,11 +175,11 @@ def _rebound(runtime: object) -> SandboxBackendProtocol:
     return backend.bind_runtime(runtime)
 
 
-class BoxProxy:
-    """The proxy config MDA writes on a run's box, and when it writes it next."""
+class SandboxProxyWriter:
+    """The proxy config MDA writes on a run's sandbox, and when it writes it next."""
 
     def __init__(self) -> None:
-        # The backend's part, which names the box, so it is known once the box is open.
+        # The backend's part, which names the sandbox, so it is known once the sandbox is open.
         self._backend_config: dict[str, JsonValue] | None = None
         # The backend refused to hand its part over, so it writes the config itself.
         self._refused = False
@@ -196,16 +196,16 @@ class BoxProxy:
         }
 
     def replaced(self) -> None:
-        """The box was replaced, so the backend's part, which follows the thread's rules the
+        """The sandbox was replaced, so the backend's part, which follows the thread's rules the
         replacement may change, is asked for again.
 
-        Until then MDA writes none of it, and the new box keeps the config it was created
-        with: never the old box's workspace rules.
+        Until then MDA writes none of it, and the new sandbox keeps the config it was created
+        with: never the old sandbox's workspace rules.
         """
         self._backend_config = None
 
     async def write(self, runtime: object, sandbox_id: str | None = None) -> None:
-        """Have MDA write it on box ``sandbox_id`` (the run's) now; raises when it could not.
+        """Have MDA write it on sandbox ``sandbox_id`` (the run's) now; raises when it could not.
 
         Once the backend refuses to hand its part over, MDA writes none of it.
         """
@@ -229,7 +229,7 @@ class BoxProxy:
         self._due_at = time.monotonic() + _PROXY_REWRITE_SECONDS
 
     async def keep_fresh(self, runtime: object) -> None:
-        """Write it again when due; a failure is tried again later, the box keeping the last."""
+        """Write it again when due; a failure is tried again later, the sandbox keeping the last."""
         if self._refused or time.monotonic() < self._due_at:
             return
         try:
@@ -241,11 +241,11 @@ class BoxProxy:
 
 
 # Each run's own, never the shared graph's.
-_PROXIES: Final = RunLocal(BoxProxy)
+_PROXIES: Final = RunLocal(SandboxProxyWriter)
 
 
-def _written_proxy(runtime: object) -> BoxProxy | None:
-    """The proxy config MDA writes on the run's box; None where the backend writes it."""
+def _written_proxy(runtime: object) -> SandboxProxyWriter | None:
+    """The proxy config MDA writes on the run's sandbox; None where the backend writes it."""
     planned = _planned(runtime)
     if planned is None or planned[1].github_proxy is None:
         return None
@@ -253,7 +253,7 @@ def _written_proxy(runtime: object) -> BoxProxy | None:
 
 
 def _selected(runtime: object) -> SandboxDefinition | None:
-    """The box the run in ``runtime`` uses, as its catalog says; None without one of MDA's."""
+    """The sandbox the run in ``runtime`` uses, as its catalog says; None without one of MDA's."""
     planned = _planned(runtime)
     if planned is None:
         return None
@@ -269,7 +269,7 @@ def definition(
     sandbox_id: str | None = None,
     proxy_config: dict[str, object] | None = None,
 ) -> SandboxDefinition:
-    """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``.
+    """The sandbox MDA keeps for ``thread_id`` (the run's own by default), created from ``create``.
 
     MDA writes ``proxy_config`` on it before each command; without one the backend
     writes its proxy config.
@@ -291,20 +291,20 @@ def definition(
     )
 
 
-def box(without_box: SandboxBackendProtocol) -> SandboxDefinition:
-    """The box every run's catalog picks from, and ``without_box`` for a run it gives none."""
+def declared_sandbox(without_sandbox: SandboxBackendProtocol) -> SandboxDefinition:
+    """The sandbox every run's catalog picks from, and ``without_sandbox`` for a run it gives none."""
     return define_sandbox(
         _openswe_per_thread=True,
         _openswe_no_manage_proxy=True,
         _openswe_select=_selected,
-        _openswe_without_box=without_box,
+        _openswe_without_sandbox=without_sandbox,
         default_timeout=EXECUTE_TIMEOUT_SECONDS,
     )
 
 
 @dataclass(frozen=True)
 class OpenedSandbox:
-    """The thread's box as the run opened it: its name, or why it could not be opened."""
+    """The thread's sandbox as the run opened it: its name, or why it could not be opened."""
 
     sandbox_id: str | None = None
     error: str | None = None
@@ -312,7 +312,7 @@ class OpenedSandbox:
 
 
 def _transient(exc: BaseException) -> bool:
-    """Whether opening the box again may succeed: the service, not the request, failed."""
+    """Whether opening the sandbox again may succeed: the service, not the request, failed."""
     if isinstance(
         exc,
         SandboxConnectionError
@@ -358,7 +358,7 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     """
     opened = await _opening(getattr(runtime, "backend", None), wait=False)
     if opened.sandbox_id is not None and (proxy := _written_proxy(runtime)) is not None:
-        # Preparing may already work in the box with GitHub, as a checkout handed over does.
+        # Preparing may already work in the sandbox with GitHub, as a checkout handed over does.
         await _first_write(proxy, runtime, opened.sandbox_id)
     return opened
 
@@ -368,9 +368,9 @@ async def booted_sandbox(files: object) -> OpenedSandbox:
     return await _opening(files, wait=True)
 
 
-async def _first_write(proxy: BoxProxy, runtime: Runtime, sandbox_id: str) -> None:
-    """Write the proxy config MDA writes on box ``sandbox_id``, retrying while it fails for
-    as long as the host takes to suspend an idle box; raises, the cause logged, after."""
+async def _first_write(proxy: SandboxProxyWriter, runtime: Runtime, sandbox_id: str) -> None:
+    """Write the proxy config MDA writes on sandbox ``sandbox_id``, retrying while it fails for
+    as long as the host takes to suspend an idle sandbox; raises, the cause logged, after."""
     deadline = time.monotonic() + PROXY_WRITE_MAX_ELAPSED_SECONDS
     for backoff in (*PROXY_WRITE_BACKOFF_SECONDS, None):
         try:
@@ -432,7 +432,7 @@ async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
 
 
 class ManagedSandboxMiddleware(AgentMiddleware):
-    """Carry out ``recreate_sandbox`` for the box MDA owns, and keep the proxy config
+    """Carry out ``recreate_sandbox`` for the sandbox MDA owns, and keep the proxy config
     MDA writes there fresh."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
@@ -456,7 +456,7 @@ class ManagedSandboxMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         proxy = _written_proxy(request.runtime)
         if proxy is not None:
-            # A resumed run reaches a tool call before any model call, and its box may
+            # A resumed run reaches a tool call before any model call, and its sandbox may
             # hold a token that expired while it waited.
             await proxy.keep_fresh(request.runtime)
         result = await handler(request)

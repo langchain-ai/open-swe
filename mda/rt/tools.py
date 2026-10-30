@@ -79,7 +79,7 @@ _json_content = TypeAdapter(str | list[JsonValue])
 
 
 class SandboxGoneError(RuntimeError):
-    """The thread's box did not answer an operation; the person has been told, and the run ends."""
+    """The thread's sandbox did not answer an operation; the person has been told, and the run ends."""
 
 
 class UnreadConnectionError(RuntimeError):

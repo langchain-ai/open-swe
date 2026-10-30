@@ -101,7 +101,7 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
         await _connect(backend, "thread-proxy-fails")
 
     # Cancelled with the sandbox, rather than left behind to report into a run
-    # that has already given up on the box.
+    # that has already given up on the sandbox.
     assert not release.is_set()
 
 

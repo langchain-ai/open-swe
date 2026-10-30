@@ -64,7 +64,7 @@ SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502,
 # waits, retries included.
 SANDBOX_BOOT_TIMEOUT_SECONDS = 90
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
-# The API cannot push a proxy config while the host suspends an idle box, which
+# The API cannot push a proxy config while the host suspends an idle sandbox, which
 # takes up to about three minutes; outlast that rather than fail the run.
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
@@ -407,10 +407,10 @@ async def sandbox_proxy_config(
     thread_id: str | None = None,
     federated_rules: Sequence[dict[str, JsonValue]] | None = None,
 ) -> dict[str, JsonValue]:
-    """The box's proxy config: GitHub's rules with ``github_token``, none without one, the
+    """The sandbox's proxy config: GitHub's rules with ``github_token``, none without one, the
     thread's tool channel, and the custom settings of ``base_proxy_config``.
 
-    ``federated_rules`` are the cloud identity rules read from the live box, which replace
+    ``federated_rules`` are the cloud identity rules read from the live sandbox, which replace
     any in ``base_proxy_config``; without them, the base config's are kept."""
     from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
 
@@ -431,7 +431,7 @@ async def sandbox_proxy_config(
     ]
     tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     if federated_rules is not None:
-        # Federation is fixed at creation, including its absence on older boxes, and
+        # Federation is fixed at creation, including its absence on older sandboxes, and
         # LangSmith allows one rule per cloud.
         federated_clouds = {rule.get("type") for rule in federated_rules}
         preserved_rules = [
@@ -938,7 +938,7 @@ class SandboxProvider(ABC):
 
     Intentionally has no delete. A sandbox holds the agent's only copy of its
     working tree, and the thread metadata read fails open to "no sandbox", so a
-    delete keyed off it can destroy a live box. Reclamation is the platform's
+    delete keyed off it can destroy a live sandbox. Reclamation is the platform's
     job, via the idle TTL and delete-after-stop set at create time.
     """
 

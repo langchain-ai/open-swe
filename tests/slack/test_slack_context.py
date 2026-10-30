@@ -536,10 +536,10 @@ async def slack_file_mention(monkeypatch, registry_db):
     # the instance default rather than leaving the sandbox unbound.
     [(False, "", "default"), (False, "env:staging", "staging"), (True, "", "staging")],
 )
-async def test_slack_files_wait_for_the_box_mda_opens_for_the_run(
+async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
     slack_file_mention, private, existing, tag, environment
 ):
-    """The webhook never gives the thread a box: it records where the files go."""
+    """The webhook never gives the thread a sandbox: it records where the files go."""
     from openswe.slack.staged_files import PENDING_SLACK_FILES_KEY
 
     request, threads, captured = slack_file_mention

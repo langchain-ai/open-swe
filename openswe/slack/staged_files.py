@@ -1,8 +1,8 @@
 """Slack files a thread's sandbox receives once its run has opened it.
 
 A message can bring files before the thread has a sandbox: Managed Deep Agents
-creates the box only when the thread's run starts. The webhook records where each
-file goes and where Slack serves it; the run's first connection to its box, before
+creates the sandbox only when the thread's run starts. The webhook records where each
+file goes and where Slack serves it; the run's first connection to its sandbox, before
 the model runs, downloads the files and writes them there.
 """
 
