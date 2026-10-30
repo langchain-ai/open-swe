@@ -6,3 +6,4 @@
 1143 d031eb7d3f3b155698cdcee1a92bceb42042f795 feat(channels): let a GitHub channel handle its own App's events
 1147 e365dc2bf6dc1d125336666e81befeb2a7556edf feat(channels): let handlers start runs on threads they choose
 1149 3cc46489733aecd961883d0ba05fe42bd57ec18b feat(channels): answer the provider first, then ask the channel's handler
+1171 3ad3aa8656f3f7cf5c957134cd01e02aa7113bf7 feat(channels): let Slack handlers choose each run's thread
