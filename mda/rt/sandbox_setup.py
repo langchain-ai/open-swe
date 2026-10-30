@@ -6,7 +6,8 @@ leaves a readied sandbox as it was. The run asks for a new sandbox without waiti
 boot, so readying it first waits for the boot. A call that needs the sandbox waits for the
 boot (``booted``), and a tool that may change a checkout for the readying (``done``),
 both in ``rt.file_tools``; the turn's git baseline (``rt.git_evidence``) waits for the
-boot too, so a sandbox that never booted is never reached for, and so never made again.
+readying too, since it reads the work dir, so a sandbox that never booted is never reached
+for, and so never made again.
 """
 
 import asyncio
@@ -22,10 +23,11 @@ from rt.backend import Run, RunLocal
 
 logger = logging.getLogger(__name__)
 
+# The git identity is written even without a work dir; the exit status says if either failed.
 _SETUP: Final = (
-    f"mkdir -p {shlex.quote(WORK_DIR)} && test -w {shlex.quote(WORK_DIR)}; "
+    f"mkdir -p {shlex.quote(WORK_DIR)} && test -w {shlex.quote(WORK_DIR)}; work_dir=$?; "
     f"git config --global user.name {shlex.quote(GIT_NAME)} && "
-    f"git config --global user.email {shlex.quote(GIT_EMAIL)}"
+    f"git config --global user.email {shlex.quote(GIT_EMAIL)} && exit $work_dir"
 )
 
 

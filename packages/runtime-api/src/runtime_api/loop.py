@@ -19,7 +19,7 @@ until a run receives it.
 """
 
 from datetime import datetime
-from typing import Final
+from typing import Final, Literal
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, JsonValue
@@ -68,10 +68,33 @@ class GitHubProxyRefreshed(BaseModel):
     expires_at: datetime | None = None
 
 
+class RunNotice(BaseModel):
+    """A notice the transcript shows on the run's turn."""
+
+    kind: Literal["workspace_stale"]
+    data: dict[str, JsonValue] = {}
+
+
+class RunSender(BaseModel):
+    """Who the invocation a run plays is attributed to, as preparing it found."""
+
+    github_login: str | None = None
+    github_user_id: str | None = None
+    user_email: str | None = None
+    source: str | None = None
+    repository: str | None = None
+
+
 class Prepared(PhaseResult):
     # The token preparation put on the sandbox, which the first model call then keeps; None
     # when it put none there.
     github_proxy: GitHubProxyRefreshed | None = None
+    # What the turn's transcript shows, which the run hands back with ``run_started``: the
+    # replica that opens the turn need not be the one that prepared it.
+    notices: list[RunNotice] = []
+    # Who the turn is attributed to, which the run hands back with ``run_started``: a later
+    # run, with a token of its own, may send that report for it.
+    sender: RunSender | None = None
 
 
 class ModelCall(BaseModel):
@@ -142,6 +165,9 @@ class RunStarted(Report):
     model_id: str | None = None
     effort: str | None = None
     model_route: str | None = None
+    # What preparing the turn found for its transcript, and whom it is attributed to.
+    notices: list[RunNotice] = []
+    sender: RunSender | None = None
 
 
 class RunEnded(Report):

@@ -83,6 +83,7 @@ from runtime_api.loop import (
     ModelResult,
     PhaseResult,
     Prepare,
+    Prepared,
     RunCall,
     RunStarted,
 )
@@ -395,7 +396,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         else:
             # Without a sandbox of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)
-        turn_git(run).start(files, held.get("work_dir"), sandbox_setup(run).booted)
+        turn_git(run).start(files, held.get("work_dir"), sandbox_setup(run).done)
         return self._carrying(state, update)
 
     @property
@@ -450,7 +451,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if self._loop is not None:
             prepared.update.update(self._loop.prepared(prepared))
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
-        self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared.update))
+        self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
         update = {**update, "open_swe_prepared_for": invocation}
         if opened.workspace_lost:
             messages = update.get("messages", [])
@@ -466,9 +467,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             ]
         return update, opened.error is None
 
-    def _started(self, state: RunState, prepared: Mapping[str, JsonValue]) -> RunStarted:
+    def _started(self, state: RunState, prepared: Prepared) -> RunStarted:
         """The run's start, for the transcript to open its turn and the thread to record it."""
-        held = {**state.get(STATE_KEY, {}), **prepared}
+        held = {**state.get(STATE_KEY, {}), **prepared.update}
 
         def chosen(key: str) -> str | None:
             value = held.get(key)
@@ -481,6 +482,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             effort=chosen("selected_effort"),
             model_route=chosen("model_route"),
             invocation_id=self._backend.invocation_id,
+            notices=prepared.notices,
+            sender=prepared.sender,
         )
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:

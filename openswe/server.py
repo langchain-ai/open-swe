@@ -37,6 +37,7 @@ from runtime_api.catalog import (
     RoutingRules,
 )
 from runtime_api.endpoint import QUICK_CALL_SECONDS
+from runtime_api.loop import RunSender, RunStarted
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -1588,54 +1589,109 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
 
+def agent_sender(config: RunnableConfig, turn: AgentTurnSettings) -> RunSender:
+    """Who an agent run's invocation is attributed to: whoever sent what started it."""
+    cfg = RunConfig.from_config(config)
+    return RunSender(
+        github_login=turn.profile_login,
+        github_user_id=cfg.github_user_id,
+        user_email=cfg.user_email,
+        source=cfg.source or "dashboard",
+        repository=cfg.repo_full_name or None,
+    )
+
+
 async def record_agent_run(
-    config: RunnableConfig,
-    turn: AgentTurnSettings,
-    *,
-    model_id: str | None,
-    effort: str | None,
-    route: str | None,
+    config: RunnableConfig, turn: AgentTurnSettings, started: RunStarted, *, carried: bool
 ) -> None:
-    """Record what an agent run's turn runs as: on the thread, and in usage."""
+    """Record what an agent run's turn runs as: on the thread, and in usage.
+
+    Each is recorded whether or not the other could be: usage records the run's completion
+    only once its start is there. A ``carried`` start, an earlier invocation's that this run
+    sends, is recorded in usage as its own sender's, and leaves the thread to this run.
+    """
     cfg = RunConfig.from_config(config)
     thread_id = cfg.thread_id
     if thread_id is None:
         return
-    model_id = model_id or cfg.resolved_agent_model_id
-    effort = effort or cfg.resolved_agent_effort
-    source = cfg.source or "dashboard"
+    sender = started.sender or (None if carried else agent_sender(config, turn))
+    model_id = started.model_id or (None if carried else cfg.resolved_agent_model_id)
+    effort = started.effort or (None if carried else cfg.resolved_agent_effort)
+    source = (sender.source if sender is not None else None) or "dashboard"
+
+    async def on_thread() -> None:
+        try:
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={
+                    "agent_kind": "agent",
+                    "model": model_id,
+                    "effort": effort,
+                    "source": source,
+                    **(
+                        {"model_route": started.model_route}
+                        if started.model_route is not None
+                        else {}
+                    ),
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Failed to record the agent run on its thread",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+
+    async def in_usage(sender: RunSender, model_id: str, invocation_id: str) -> None:
+        identity: CollaboratorIdentity | None = None
+        if not carried:
+            # This token's sender is the invocation's only when the run sends its own start.
+            try:
+                github_token, _expires_at = await resolve_github_token(config, thread_id)
+                identity = await resolve_triggering_user_identity(
+                    as_json_object(config), github_token
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to resolve the agent run's sender for usage",
+                    extra={"agent_thread_id": thread_id},
+                    exc_info=True,
+                )
+        try:
+            await record_agent_invocation_usage(
+                invocation_id=invocation_id,
+                thread_id=thread_id,
+                github_login=sender.github_login,
+                github_user_id=identity.github_user_id
+                if identity is not None and identity.github_user_id is not None
+                else sender.github_user_id,
+                user_email=sender.user_email or "",
+                display_name=identity.analytics_display_name
+                if identity is not None and identity.analytics_display_name
+                else None,
+                display_name_source=identity.display_name_source if identity is not None else None,
+                model_id=model_id,
+                effort=effort,
+                source=source,
+                repository=sender.repository,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to record the agent run's usage",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+
+    recording = [] if carried else [on_thread()]
+    if sender is not None and model_id is not None and cfg.invocation_id:
+        recording.append(in_usage(sender, model_id, cfg.invocation_id))
+    elif carried:
+        logger.warning(
+            "Not recording a carried run start that names no sender",
+            extra={"agent_thread_id": thread_id, "invocation_id": cfg.invocation_id},
+        )
     async with aphase(thread_id, "run_started.record_run"):
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
-                "agent_kind": "agent",
-                "model": model_id,
-                "effort": effort,
-                "source": source,
-                **({"model_route": route} if route is not None else {}),
-            },
-        )
-        if not cfg.invocation_id or model_id is None:
-            return
-        github_token, _expires_at = await resolve_github_token(config, thread_id)
-        identity = await resolve_triggering_user_identity(as_json_object(config), github_token)
-        await record_agent_invocation_usage(
-            invocation_id=cfg.invocation_id,
-            thread_id=thread_id,
-            github_login=turn.profile_login,
-            github_user_id=identity.github_user_id
-            if identity is not None and identity.github_user_id is not None
-            else cfg.github_user_id,
-            user_email=cfg.user_email or "",
-            display_name=identity.analytics_display_name
-            if identity is not None and identity.analytics_display_name
-            else None,
-            display_name_source=identity.display_name_source if identity is not None else None,
-            model_id=model_id,
-            effort=effort,
-            source=source,
-            repository=cfg.repo_full_name or None,
-        )
+        await asyncio.gather(*recording)
 
 
 async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:

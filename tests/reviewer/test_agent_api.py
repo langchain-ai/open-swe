@@ -201,6 +201,11 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     usage = AsyncMock()
     prompts: list[dict[str, object]] = []
     monkeypatch.setattr(graph_module, "bind_mda_sandbox", bound)
+    # Binding the sandbox found its workspace image stale.
+    monkeypatch.setattr(graph_module, "take_stale_boot", lambda thread_id: object())
+    monkeypatch.setattr(
+        graph_module, "stale_workspace_notice", lambda thread_id, stale: {"workspace": "w"}
+    )
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
@@ -248,6 +253,10 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()
+    # The transcript turn may open on another replica, so its notices go with the run.
+    assert prepared["notices"] == [{"kind": "workspace_stale", "data": {"workspace": "w"}}]
+    queued = MagicMock()
+    monkeypatch.setattr(graph_module, "queue_run_notice", queued)
 
     await graph.api(
         run,
@@ -258,21 +267,36 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
             "model_id": "openai:gpt-6.1-sol",
             "effort": "high",
             "model_route": "default",
+            "notices": prepared["notices"],
+            "sender": prepared["sender"],
         },
     )
 
+    queued.assert_called_once_with("thread-1", "workspace_stale", {"workspace": "w"})
     [metadata] = [call.kwargs["metadata"] for call in updated.await_args_list]
     assert metadata["model"] == "openai:gpt-6.1-sol"
     assert metadata["model_route"] == "default"
     assert usage.await_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
     assert usage.await_args.kwargs["invocation_id"] == "invocation-1"
 
-    # An earlier run's start, sent by this one from the thread's checkpoint, is its own.
+    # An earlier run's start, sent by this one from the thread's checkpoint, is recorded
+    # as its own sender's, and leaves this run's model on the thread.
     await graph.api(
-        run, "run_started", {"run_id": "run-0", "humans": asked, "invocation_id": "invocation-0"}
+        run,
+        "run_started",
+        {
+            "run_id": "run-0",
+            "humans": asked,
+            "invocation_id": "invocation-0",
+            "model_id": "openai:gpt-6-luna",
+            "sender": {"github_login": "earlier-sender", "source": "slack"},
+        },
     )
 
     assert usage.await_args.kwargs["invocation_id"] == "invocation-0"
+    assert usage.await_args.kwargs["github_login"] == "earlier-sender"
+    assert usage.await_args.kwargs["source"] == "slack"
+    assert updated.await_count == 1
 
 
 async def test_a_run_its_plan_still_answers_prepares_from_its_plan(

@@ -7,7 +7,7 @@ from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from runtime_api.loop import RunStarted
+from runtime_api.loop import RunSender, RunStarted
 
 from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
@@ -23,6 +23,7 @@ from openswe.run_config import RunConfig
 from openswe.server import (
     PrepareAgentRunMiddleware,
     ThreadFiles,
+    agent_sender,
     agent_tools_by_name,
     client,
     integration_tools,
@@ -74,20 +75,17 @@ class AgentParts(RunParts):
         # Middleware types are invariant in the state they extend; a graph merges them all.
         return cast(list[AgentMiddleware], [prepare, guide])
 
+    def sender(self, config: RunnableConfig, settings: RunSettings) -> RunSender | None:
+        return None if settings.agent is None else agent_sender(config, settings.agent)
+
     async def started(
-        self, config: RunnableConfig, settings: RunSettings, started: RunStarted
+        self, config: RunnableConfig, settings: RunSettings, started: RunStarted, *, carried: bool
     ) -> None:
         cfg = RunConfig.from_config(config)
         if settings.agent is None or cfg.thread_id is None:
             return
         try:
-            await record_agent_run(
-                config,
-                settings.agent,
-                model_id=started.model_id,
-                effort=started.effort,
-                route=started.model_route,
-            )
+            await record_agent_run(config, settings.agent, started, carried=carried)
         except Exception:
             # Bookkeeping: the turn goes on, and the reports behind this one with it.
             logger.warning(

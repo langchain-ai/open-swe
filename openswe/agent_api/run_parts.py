@@ -13,7 +13,7 @@ from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from runtime_api.loop import RunStarted
+from runtime_api.loop import RunSender, RunStarted
 
 from openswe.agent_api.tokens import RunSettings
 from openswe.run_config import RunConfig
@@ -47,13 +47,20 @@ class RunParts:
         graph still prepares from its plan."""
         return None
 
+    def sender(self, config: RunnableConfig, settings: RunSettings) -> RunSender | None:  # noqa: ARG002
+        """Who the run's invocation is attributed to; None where the graph records no start."""
+        return None
+
     async def started(
         self,
         config: RunnableConfig,  # noqa: ARG002
         settings: RunSettings,  # noqa: ARG002
         started: RunStarted,  # noqa: ARG002
+        *,
+        carried: bool,  # noqa: ARG002
     ) -> None:
-        """Record what the run's turn runs as, once it began."""
+        """Record what the run's turn runs as, once it began; ``carried`` when this run
+        sends the start of an earlier invocation, whose sender ``started`` names."""
 
     async def credentials(self, config: RunnableConfig) -> None:
         """Make the run's GitHub token ready in this process for its tools."""

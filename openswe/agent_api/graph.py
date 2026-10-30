@@ -143,6 +143,7 @@ from runtime_api.loop import (
     Routed,
     RunCall,
     RunEnded,
+    RunNotice,
     RunStarted,
     SandboxGone,
     ScoutPlanEnd,
@@ -222,8 +223,9 @@ from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.settle_review_check import settle_review_check
+from openswe.middleware.stale_workspace import stale_workspace_notice
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
 from openswe.prompts import common_prompt, prompt
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
@@ -233,6 +235,7 @@ from openswe.sandboxes.lifecycle import (
     mda_proxy_config,
     reconnect_replaced_sandbox,
     refresh_thread_github_proxy,
+    take_stale_boot,
 )
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
@@ -1039,6 +1042,7 @@ class TokenRun:
             except SandboxUnreachableError as exc:
                 await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
                 raise
+        notices = self._turn_notices()
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(self.run.thread_id).receive(events=events)
@@ -1054,6 +1058,8 @@ class TokenRun:
                 github_proxy=None
                 if expires_at is None
                 else GitHubProxyRefreshed(expires_at=expires_at),
+                notices=notices,
+                sender=self.parts.sender(self.config, self.run.settings),
             )
 
         emitted: list[object] = []
@@ -1062,6 +1068,12 @@ class TokenRun:
         )
         return result.model_copy(update={"events": [_json_or_text(e) for e in emitted]})
 
+    def _turn_notices(self) -> list[RunNotice]:
+        """What the turn's transcript shows from binding its sandbox: a stale workspace image."""
+        stale = take_stale_boot(self.run.thread_id)
+        data = None if stale is None else stale_workspace_notice(self.run.thread_id, stale)
+        return [] if data is None else [RunNotice(kind="workspace_stale", data=data)]
+
     def _as_invocation(self, invocation_id: str | None) -> None:
         """Record as the invocation a report names, which need not be this token's."""
         if invocation_id is not None:
@@ -1069,10 +1081,18 @@ class TokenRun:
 
     async def run_started(self, request: RunStarted) -> Done:
         """Record the run's start: its transcript turn, and what it runs as."""
+        # A later run sends what an earlier one left undelivered, with its own token, whose
+        # sender is not the earlier invocation's: the report names that one's.
+        carried = request.invocation_id not in (
+            None,
+            RunConfig.from_config(self.config).invocation_id,
+        )
         self._as_invocation(request.invocation_id)
+        for notice in request.notices:
+            queue_run_notice(self.run.thread_id, notice.kind, notice.data)
 
         async def record(_state: dict[str, object], _runtime: Runtime) -> None:
-            await self.parts.started(self.config, self.run.settings, request)
+            await self.parts.started(self.config, self.run.settings, request, carried=carried)
 
         await self._reporting(
             request, "run_started", record, messages=messages_from_dict(request.humans)

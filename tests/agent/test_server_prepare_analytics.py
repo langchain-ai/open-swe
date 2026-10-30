@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
+from runtime_api.loop import RunStarted
 
 import openswe.server as server
 from openswe.agent_api.tokens import AgentTurnSettings
@@ -158,9 +159,19 @@ def _slack_config(**extra: Any) -> dict[str, Any]:
 
 
 async def _record(config: dict[str, Any], turn: AgentTurnSettings) -> None:
-    await server.record_agent_run(
-        cast(Any, config), turn, model_id="openai:gpt-5", effort=None, route=None
-    )
+    started = RunStarted(run_id="run-1", model_id="openai:gpt-5")
+    await server.record_agent_run(cast(Any, config), turn, started, carried=False)
+
+
+async def test_a_thread_that_cannot_be_updated_still_records_the_runs_usage(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Usage records the run's completion only once its start is there."""
+    monkeypatch.setattr(server.client.threads, "update", AsyncMock(side_effect=RuntimeError))
+
+    await _record(_slack_config(), _turn(_slack_config()))
+
+    assert prepare_harness["recorded"]["invocation_id"] == "inv-1"
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(

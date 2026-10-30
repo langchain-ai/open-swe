@@ -84,17 +84,18 @@ class TurnGit:
         self,
         files: object,
         root: object,
-        booted: Callable[[], Awaitable[None]] | None = None,
+        ready: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Fingerprint the checkouts under ``root`` in the thread's ``files`` as the turn
-        starts, in the background, once ``booted`` says the sandbox has booted."""
+        starts, in the background, once ``ready`` says the sandbox has booted and has its
+        work dir."""
         self._observed = []
         self._changed_at = None
         if not isinstance(files, SandboxBackendProtocol) or not isinstance(root, str) or not root:
             self._baseline = None
             return
         self._sandbox, self._root = files, root
-        self._baseline = asyncio.ensure_future(self._first_fingerprint(booted))
+        self._baseline = asyncio.ensure_future(self._first_fingerprint(ready))
 
     async def changing(self) -> None:
         """Wait for the turn's starting fingerprint, before a tool that may change a checkout."""
@@ -156,11 +157,11 @@ class TurnGit:
             self._observed.append(_Observed(at, tuple(after.changes_since(before))))
 
     async def _first_fingerprint(
-        self, booted: Callable[[], Awaitable[None]] | None
+        self, ready: Callable[[], Awaitable[None]] | None
     ) -> GitSnapshot | None:
-        if booted is not None:
+        if ready is not None:
             try:
-                await booted()
+                await ready()
             except SandboxUnavailableError:
                 # Reaching for a sandbox that never booted would open another; the run's
                 # first call that needs the sandbox reports it.
