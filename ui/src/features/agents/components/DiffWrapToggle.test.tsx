@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
@@ -10,7 +11,7 @@ afterEach(() => cleanup())
 
 describe("DiffWrapToggle", () => {
   it("toggles and persists line wrapping", () => {
-    render(<DiffWrapToggle />)
+    render(<DiffWrapToggle />, { wrapper: TooltipProvider })
     const toggle = screen.getByRole("button", { name: "Wrap lines" })
 
     expect(toggle.getAttribute("aria-pressed")).toBe("false")
@@ -26,7 +27,8 @@ describe("DiffWrapToggle", () => {
       <>
         <DiffWrapToggle />
         <DiffWrapToggle />
-      </>
+      </>,
+      { wrapper: TooltipProvider }
     )
     const toggles = screen.getAllByRole("button", { name: "Wrap lines" })
 

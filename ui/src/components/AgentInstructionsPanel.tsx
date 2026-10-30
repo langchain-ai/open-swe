@@ -1,19 +1,13 @@
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Skeleton } from "@/components/ui/skeleton"
-import { InstructionsEditor } from "@/components/InstructionsEditor"
+import { AddRepositoryField } from "@/components/AddRepositoryField"
+import { EditorScreen } from "@/components/EditorScreen"
+import { TextEditor } from "@/components/TextEditor"
 import {
   api,
   isGithubReauthError,
@@ -22,6 +16,7 @@ import {
 } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
+import { cn } from "@/lib/utils"
 
 function formatMutationError(e: Error): string {
   return isGithubReauthError(e)
@@ -113,10 +108,6 @@ export function AgentInstructionsPanel() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["agentInstructions"] }),
   })
 
-  if (instructions.isLoading) {
-    return <Skeleton className="h-40" />
-  }
-
   const configured = new Set((instructions.data ?? []).map((s) => s.full_name))
   const suggestedRepos = (repos.data?.repositories ?? []).filter(
     (r) => !configured.has(r.full_name)
@@ -140,140 +131,22 @@ export function AgentInstructionsPanel() {
     (error !== null && /github token|re-login required/i.test(error))
 
   return (
-    <div className="flex flex-col gap-6 p-4">
-      {githubReauth && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          Your GitHub connection expired.{" "}
-          <a
-            href={loginUrl()}
-            className="font-medium underline underline-offset-2"
-          >
-            Sign in with GitHub again
-          </a>{" "}
-          to list installed repos.
-        </div>
-      )}
-      <section className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="add-instruction-repo">Add repository</Label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Input
-              id="add-instruction-repo"
-              placeholder="owner/repo"
-              value={addRepo}
-              onChange={(e) => setAddRepo(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  handleAdd()
-                }
-              }}
-              className="sm:flex-1"
-            />
-            <Button
-              size="sm"
-              className="shrink-0 sm:w-auto"
-              disabled={!canAdd || create.isPending}
-              onClick={handleAdd}
-            >
-              Add
-            </Button>
-          </div>
-          {suggestedRepos.length > 0 && (
-            <Combobox
-              items={suggestedRepos.map((r) => r.full_name)}
-              value={addRepo}
-              onValueChange={(v) => setAddRepo(typeof v === "string" ? v : "")}
-            >
-              <ComboboxInput
-                placeholder="Search installed repos…"
-                showClear
-                className="w-full"
-              />
-              <ComboboxContent className="min-w-[var(--anchor-width)]">
-                <ComboboxList className="max-h-48">
-                  <ComboboxEmpty>No matches</ComboboxEmpty>
-                  {suggestedRepos.map((r) => (
-                    <ComboboxItem key={r.full_name} value={r.full_name}>
-                      <span className="truncate" title={r.full_name}>
-                        {r.full_name}
-                      </span>
-                      {r.private && (
-                        <span className="ml-auto text-[10px] text-muted-foreground">
-                          private
-                        </span>
-                      )}
-                    </ComboboxItem>
-                  ))}
-                </ComboboxList>
-              </ComboboxContent>
-            </Combobox>
+    <EditorScreen
+      title="Repository Instructions"
+      description="Per-repository instructions added to the agent's system prompt for runs in that repository."
+      actions={
+        <>
+          {error && (
+            <span className="text-xs text-error-secondary">{error}</span>
           )}
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-foreground">Repositories</p>
-          {(instructions.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No repositories yet.
-            </p>
-          ) : (
-            <ul className="flex flex-wrap gap-2">
-              {(instructions.data ?? []).map((s) => (
-                <li key={s.full_name}>
-                  <button
-                    type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
-                      selected === s.full_name
-                        ? "border-primary bg-muted font-medium"
-                        : "border-border"
-                    }`}
-                    onClick={() => setSelected(s.full_name)}
-                  >
-                    <span className="truncate">{s.full_name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      <div className="border-t border-border" />
-
-      <section className="space-y-3">
-        {!selected || !active ? (
-          <p className="text-xs text-muted-foreground">
-            Select a repository above to view or edit its custom agent
-            instructions.
-          </p>
-        ) : (
-          <>
-            <p className="text-sm font-medium text-foreground">
-              {active.full_name}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                disabled={!dirty || save.isPending}
-                onClick={() =>
-                  save.mutate({
-                    full_name: active.full_name,
-                    value: draft,
-                  })
-                }
-              >
-                Save instructions
-              </Button>
+          {active && (
+            <>
               {dirty && (
-                <span className="self-center text-xs text-muted-foreground">
-                  Unsaved changes
-                </span>
+                <span className="text-xs text-secondary">Unsaved changes</span>
               )}
               <Button
-                size="sm"
-                variant="destructive"
-                className="ml-auto"
+                color="error"
+                size="xs"
                 onClick={() => {
                   if (
                     !window.confirm(
@@ -287,16 +160,87 @@ export function AgentInstructionsPanel() {
               >
                 Remove
               </Button>
-            </div>
-            <InstructionsEditor
-              value={draft}
-              onChange={setDraft}
-              placeholder="Write custom instructions for the coding agent on this repository (markdown)."
-            />
-          </>
-        )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
-      </section>
-    </div>
+              <Button
+                color="primary"
+                size="xs"
+                disabled={!dirty || save.isPending}
+                onClick={() =>
+                  save.mutate({ full_name: active.full_name, value: draft })
+                }
+              >
+                Save instructions
+              </Button>
+            </>
+          )}
+        </>
+      }
+      sidebar={
+        <>
+          <AddRepositoryField
+            id="add-instruction-repo"
+            value={addRepo}
+            onChange={setAddRepo}
+            suggestions={suggestedRepos}
+            canAdd={canAdd && !create.isPending}
+            onAdd={handleAdd}
+          />
+          {instructions.isLoading ? (
+            <Skeleton className="h-24" />
+          ) : (instructions.data ?? []).length === 0 ? (
+            <p className="text-xs text-secondary">No repositories yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-space-1">
+              {(instructions.data ?? []).map((s) => (
+                <li key={s.full_name}>
+                  <Button
+                    color="secondary"
+                    variant="plain"
+                    size="sm"
+                    aria-label={s.full_name}
+                    type="button"
+                    aria-pressed={selected === s.full_name}
+                    className={cn(
+                      "h-auto justify-start whitespace-normal",
+                      "w-full truncate px-space-2 py-space-2 text-left text-inherit",
+                      selected === s.full_name
+                        ? "bg-selected font-medium hover:bg-selected dark:hover:bg-selected"
+                        : "hover:bg-surface-level-1-hover"
+                    )}
+                    onClick={() => setSelected(s.full_name)}
+                  >
+                    {/* A string child would be wrapped in Macaw's font-normal Text, dropping the selected weight. */}
+                    <span className="min-w-0 truncate">{s.full_name}</span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      }
+    >
+      {githubReauth && (
+        <Banner intent="error" className="m-space-4">
+          <span className="text-xs text-error-secondary">
+            Your GitHub connection expired.{" "}
+            <MacawLink href={loginUrl()} variant="sm">
+              Sign in with GitHub again
+            </MacawLink>{" "}
+            to list installed repos.
+          </span>
+        </Banner>
+      )}
+      {active ? (
+        <TextEditor
+          value={draft}
+          onChange={setDraft}
+          ariaLabel={`Instructions for ${active.full_name}`}
+          placeholder="Write custom instructions for the coding agent on this repository (markdown)."
+        />
+      ) : (
+        <p className="m-auto p-space-5 text-xs text-secondary">
+          Select a repository to view or edit its custom agent instructions.
+        </p>
+      )}
+    </EditorScreen>
   )
 }

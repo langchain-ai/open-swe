@@ -6,23 +6,49 @@ import {
   type JsonObject,
 } from "./json.ts"
 import type { Credential } from "./credentials.ts"
-import {
-  identitySchema,
-  threadsPageSchema,
-  type Identity,
-  type ThreadsPage,
-} from "./threads.ts"
-import {
-  humanReviewDismissSchema,
-  humanReviewRequestSchema,
-  pullRequestApiPath,
-  type HumanReviewDismissResult,
-  type HumanReviewRequestResult,
-} from "./review.ts"
-import { uploadedThreadSchema } from "./upload.ts"
-import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
 import { BridgeHttpApi } from "open-swe-bridge-client"
 import * as z from "zod"
+
+const identitySchema = z.object({
+  login: z.string(),
+  email: z.string().nullish(),
+  is_admin: z.boolean().nullish(),
+})
+
+export type Identity = z.infer<typeof identitySchema>
+
+const workerSchema = z.object({
+  worker_thread_id: z.string(),
+  thread_url: z.string().nullable(),
+  instructions: z.string(),
+  state: z.string(),
+  run_status: z.string().nullish(),
+  error: z.string().nullish(),
+  active: z.boolean(),
+})
+
+const activitySchema = z.object({
+  runs: z.array(z.string()),
+  settled: z.boolean(),
+  workers: z.array(workerSchema),
+})
+
+export type WorkerActivity = z.infer<typeof workerSchema>
+
+/**
+ * What a thread's coordinator is still doing: its runs since the one the CLI
+ * last followed, oldest first, and the workers it launched.
+ */
+export type TaskActivity = z.infer<typeof activitySchema>
+
+/** One thread the CLI serves, as its coordinator and that coordinator's workers. */
+export interface CoordinatorThread {
+  events(): Promise<Response>
+  /** Null when the backend predates task workers, so there are none to wait for. */
+  activity(after: string | null): Promise<TaskActivity | null>
+  /** Cancels the workers still running, then the coordinator's own runs. */
+  stop(): Promise<void>
+}
 
 export class ApiError extends Error {
   constructor(
@@ -160,83 +186,6 @@ export class ApiClient {
     await this.send("GET", "/threads?limit=1")
   }
 
-  async listThreadsPage(query: URLSearchParams): Promise<ThreadsPage> {
-    const parsed = threadsPageSchema.safeParse(
-      await this.json("GET", `/threads/page?${query}`)
-    )
-    if (!parsed.success)
-      throw new ProtocolError("/threads/page response is malformed")
-    return parsed.data
-  }
-
-  async mcpTools(): Promise<CliTool[]> {
-    const result = z
-      .array(cliToolSchema)
-      .safeParse(await this.json("GET", "/cli/mcp/tools"))
-    if (!result.success)
-      throw new ProtocolError("/cli/mcp/tools response is malformed")
-    return result.data
-  }
-
-  async mcpInvoke(
-    name: string,
-    args: Record<string, unknown>
-  ): Promise<unknown> {
-    return this.json("POST", `/cli/mcp/tools/${encodeURIComponent(name)}`, {
-      body: args,
-    })
-  }
-
-  /** Create a thread from a gzipped JSONL session upload; returns its id. */
-  async uploadSession(gzippedJsonl: Uint8Array): Promise<string> {
-    const parsed = uploadedThreadSchema.safeParse(
-      await this.json("POST", "/threads/uploads", {
-        raw: {
-          data: gzippedJsonl,
-          headers: {
-            "Content-Type": "application/x-ndjson",
-            "Content-Encoding": "gzip",
-          },
-        },
-      })
-    )
-    if (!parsed.success)
-      throw new ProtocolError("/threads/uploads response is malformed")
-    return parsed.data.id
-  }
-
-  /** Post a Slack review card for a pull request, or return (and re-summarize) the open one. */
-  async requestHumanReview(
-    prUrl: string,
-    body: { inline_summary: string; channel?: string }
-  ): Promise<HumanReviewRequestResult> {
-    const parsed = humanReviewRequestSchema.safeParse(
-      await this.json("POST", `${pullRequestApiPath(prUrl)}/human-review`, {
-        body,
-      })
-    )
-    if (!parsed.success)
-      throw new ProtocolError("human review response is malformed")
-    return parsed.data
-  }
-
-  /** Dismiss a pull request's open review request, as its card's Dismiss button does. */
-  async dismissHumanReviewRequest(
-    prUrl: string,
-    body: { reason?: string }
-  ): Promise<HumanReviewDismissResult> {
-    const parsed = humanReviewDismissSchema.safeParse(
-      await this.json(
-        "POST",
-        `${pullRequestApiPath(prUrl)}/human-review/dismiss`,
-        { body }
-      )
-    )
-    if (!parsed.success)
-      throw new ProtocolError("human review dismissal response is malformed")
-    return parsed.data
-  }
-
   /** The bridge routes, for `Bridge` to serve this machine through. */
   bridges(): BridgeHttpApi {
     return new BridgeHttpApi((method, path, options) =>
@@ -280,6 +229,52 @@ export class ApiClient {
 
   async cancelThread(threadId: string): Promise<void> {
     await this.send("POST", `/threads/${encodeURIComponent(threadId)}/cancel`)
+  }
+
+  async taskActivity(
+    threadId: string,
+    after: string | null
+  ): Promise<TaskActivity | null> {
+    const query = after === null ? "" : `?after=${encodeURIComponent(after)}`
+    let payload: unknown
+    try {
+      payload = await this.json(
+        "GET",
+        `/threads/${encodeURIComponent(threadId)}/workers${query}`
+      )
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 404) return null
+      throw cause
+    }
+    const parsed = activitySchema.safeParse(payload)
+    if (!parsed.success)
+      throw new ProtocolError("worker activity response is malformed")
+    return parsed.data
+  }
+
+  async cancelWorkers(threadId: string): Promise<void> {
+    try {
+      await this.send(
+        "POST",
+        `/threads/${encodeURIComponent(threadId)}/workers/cancel`
+      )
+    } catch (cause) {
+      if (!(cause instanceof ApiError && cause.status === 404)) throw cause
+    }
+  }
+
+  coordinator(threadId: string, events: EventStreamInput): CoordinatorThread {
+    return {
+      events: () => this.openEventStream(threadId, events),
+      activity: (after) => this.taskActivity(threadId, after),
+      stop: async () => {
+        try {
+          await this.cancelWorkers(threadId)
+        } finally {
+          await this.cancelThread(threadId)
+        }
+      },
+    }
   }
 
   async openEventStream(

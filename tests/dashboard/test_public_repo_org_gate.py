@@ -5,6 +5,7 @@ from typing import Any, cast
 import pytest
 from httpx2 import Response
 
+from openswe.github import forwarding
 from openswe.github import webhook as github_webhooks
 from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
@@ -38,9 +39,18 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     register_github_logins(monkeypatch, "stranger", "insider")
 
 
-async def test_gate_blocks_non_member_on_public_pr_comment(
-    fake_store: Any, monkeypatch, registry_db
+@pytest.mark.parametrize("sender", ["Configured[bot]", "CONFIGURED[BOT]"])
+async def test_gate_recognizes_internal_bots_case_insensitively(
+    monkeypatch: pytest.MonkeyPatch, sender: str
 ) -> None:
+    monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", "langchain-ai")
+    monkeypatch.setattr(webhook_common, "INTERNAL_BOT_LOGINS", frozenset({"configured[bot]"}))
+    assert await webhook_common._is_sender_allowed_for_public_repo(
+        {"repository": {"private": False}, "sender": {"login": sender}}
+    )
+
+
+async def test_gate_blocks_non_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -80,9 +90,7 @@ async def test_gate_blocks_non_member_on_public_pr_comment(
     assert seen["calls"] == ["stranger"]
 
 
-async def test_gate_allows_org_member_on_public_pr_comment(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_allows_org_member_on_public_pr_comment(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
@@ -122,7 +130,7 @@ async def test_gate_allows_org_member_on_public_pr_comment(
     assert called["event"] == "issue_comment"
 
 
-async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_gate_skipped_on_private_repo(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -163,7 +171,7 @@ async def test_gate_skipped_on_private_repo(fake_store: Any, monkeypatch, regist
     assert seen["calls"] == []
 
 
-async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_gate_disabled_when_env_unset(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch, gate="")
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -204,16 +212,14 @@ async def test_gate_disabled_when_env_unset(fake_store: Any, monkeypatch, regist
     assert seen["calls"] == []
 
 
-async def test_gate_blocks_non_member_on_public_issue(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
-    async def fake_process_github_issue(*_args, **_kwargs) -> None:
+    async def fake_forward(*_args, **_kwargs) -> None:
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
+    monkeypatch.setattr(forwarding, "queue_forward", fake_forward)
 
     response = await _post_github_webhook(
         "issues",
@@ -241,7 +247,7 @@ async def test_gate_blocks_non_member_on_public_issue(
 
 
 async def test_review_requested_is_unsupported_before_public_repo_gate(
-    fake_store: Any, monkeypatch, registry_db
+    monkeypatch, registry_db
 ) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
@@ -274,9 +280,7 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
     assert seen["calls"] == []
 
 
-async def test_internal_bot_comment_never_prompts_the_agent(
-    fake_store: Any, monkeypatch, registry_db
-) -> None:
+async def test_internal_bot_comment_never_prompts_the_agent(monkeypatch, registry_db) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -345,7 +349,7 @@ class _FakeAsyncClient:
     async def __aexit__(self, *_args) -> None:
         return None
 
-    async def get(self, *_args, **_kwargs):
+    async def request(self, *_args, **_kwargs):
         return self._response
 
 

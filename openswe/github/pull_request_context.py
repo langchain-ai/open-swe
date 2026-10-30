@@ -11,12 +11,12 @@ from openswe.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
     sanitize_github_comment_body,
 )
-from openswe.github.http import GITHUB_GRAPHQL, github_client, github_request
+from openswe.github.http import GITHUB_GRAPHQL, GitHubClient, github_request
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.prompts import prompt
 from openswe.users import User
 
-PullRequestFixScope = Literal["conflicts", "checks", "comments"]
+PullRequestFixScope = Literal["repair", "comments"]
 
 _CONTEXT_LIMIT = 100
 _FIELD_LIMIT = 4_000
@@ -490,20 +490,19 @@ def build_fix_prompt(context: Mapping[str, Any], scope: PullRequestFixScope) -> 
     """Render the bounded PR context ``scope`` concerns into a model-ready request.
 
     Each scope carries only its own section, so the agent is never handed review
-    comments while it was asked to fix checks, or the other way round.
+    comments while it was asked to repair the PR, or the other way round.
     """
     lines = [
         "Fresh GitHub scan:",
         f"- Head SHA: {context.get('headSha') or 'unavailable'}",
         f"- Merge state: {context.get('mergeState') or 'unavailable'}",
     ]
-    if scope == "checks":
+    if scope == "repair":
         lines.extend(_check_lines(context))
-    if scope == "comments":
+        lines.extend(_stack_lines(context))
+    else:
         lines.append(f"- Review decision: {context.get('reviewDecision') or 'unavailable'}")
         lines.extend(_review_lines(context))
-    if scope != "comments":
-        lines.extend(_stack_lines(context))
     if context.get("truncated") is True:
         lines.extend(
             [
@@ -577,16 +576,15 @@ def _review_lines(context: Mapping[str, Any]) -> list[str]:
 
 
 async def get_pull_request_context(
-    record: object, token: str, scope: PullRequestFixScope
+    github: GitHubClient, record: object, scope: PullRequestFixScope
 ) -> dict[str, Any] | None:
     """Fetch fresh actionable context for one validated pull-request record."""
     identity = pull_request_identity(record)
     if identity is None:
         return None
     owner, repo, number = identity
-    async with github_client(token=token) as client:
-        reviews = await _fetch_reviews(client, owner, repo, number)
-        checks = await _fetch_checks(client, owner, repo, number)
+    reviews = await _fetch_reviews(github.http, owner, repo, number)
+    checks = await _fetch_checks(github.http, owner, repo, number)
     context: dict[str, Any] = {
         "repoFullName": f"{owner}/{repo}",
         "number": number,

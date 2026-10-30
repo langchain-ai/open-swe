@@ -20,24 +20,23 @@ from openswe.incidents.models import (
     IncidentPolicy,
     IncidentReportRecord,
 )
+from openswe.incidents.records import (
+    CommandReceipts,
+    IncidentPolicies,
+    IncidentReports,
+    Incidents,
+)
 from openswe.input_messages import PersonIdentity
 from openswe.slack.channels import SlackChannel
-from openswe.slack.http import SlackClient
-from openswe.store import TypedStore, now_iso
-from openswe.ui_invalidations import Topic
+from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, required_slack_value, slack_error
 from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
-POLICIES = TypedStore(
-    ["incidents", "policies"], IncidentPolicy, invalidates=Topic.INCIDENT_SETTINGS
-)
-INCIDENTS = TypedStore[Incident, IncidentId](
-    ["incidents", "incidents"], Incident, invalidates=Topic.INCIDENTS
-)
-REPORTS = TypedStore[IncidentReportRecord, IncidentId](
-    ["incidents", "reports"], IncidentReportRecord, invalidates=Topic.INCIDENTS
-)
-COMMANDS = TypedStore(["incidents", "commands"], CommandReceipt)
+POLICIES = IncidentPolicies()
+INCIDENTS = Incidents()
+REPORTS = IncidentReports()
+COMMANDS = CommandReceipts()
 ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
 _VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}
 REQUIRED_SLACK_SCOPES = frozenset(
@@ -112,16 +111,23 @@ def note(target: Incident | IncidentReportRecord, kind: str, text: str) -> None:
         target.activity = target.activity[-100:]
 
 
-async def save(record: Incident) -> None:
+def actor_login(actor: dict[str, Any]) -> str | None:
+    """The GitHub login of the person behind ``actor``; ``None`` for a system or unlinked actor."""
+    login = actor.get("github_login")
+    return login if isinstance(login, str) and login else None
+
+
+async def save(record: Incident, *, by: str | None = None) -> None:
+    """Save ``record``; ``by`` is the GitHub login of the person whose action changed it."""
     from openswe.incidents import documents
 
     record.updated_at = now_iso()
-    await INCIDENTS.put(record.id, record)
-    await documents.preserve_metadata(record)
+    await INCIDENTS.put(record.id, record, by=by)
+    await documents.preserve_metadata(record, by=by)
 
 
 async def get_policy() -> IncidentPolicy:
-    return await POLICIES.get("default") or IncidentPolicy()
+    return await POLICIES.get() or IncidentPolicy()
 
 
 def channel_allowed(
@@ -193,36 +199,31 @@ def _last_operation(policy: IncidentPolicy) -> dict[str, Any]:
 
 async def get_settings() -> dict[str, Any]:
     policy = await get_policy()
-    app_id = ENV.SLACK_APP_ID.get()
+    app_id = required_slack_value(ENV.SLACK_APP_ID)
     connection: dict[str, Any] = {
-        "slack_configured": bool(ENV.SLACK_BOT_TOKEN.get()),
         "workspace_id": policy.workspace_id,
-        "slack_app_id": app_id or policy.slack_app_id,
+        "slack_app_id": app_id,
         "required_scopes_present": None,
         "verified_at": None,
         "error": None,
     }
-    if connection["slack_configured"]:
-        try:
-            auth, scopes = await _auth_test()
-            team_id = str(auth.get("team_id") or "")
-            if team_id:
-                connection["workspace_id"] = team_id
-            if policy.workspace_id and team_id != policy.workspace_id:
-                connection["error"] = "Slack installation belongs to a different workspace."
-            else:
-                connection["verified_at"] = now_iso()
-            if scopes is not None:
-                connection["required_scopes_present"] = REQUIRED_SLACK_SCOPES.issubset(scopes)
-                if not connection["required_scopes_present"]:
-                    connection["error"] = "Slack installation is missing required Incidents scopes."
-        except Exception:
-            connection["error"] = "Slack verification failed; check installation and permissions."
-    if not app_id:
-        connection["error"] = (
-            connection["error"] or "Set SLACK_APP_ID to the installed Slack app ID."
-        )
-    elif policy.slack_app_id and app_id != policy.slack_app_id:
+    try:
+        auth, scopes = await _auth_test()
+        team_id = str(auth.get("team_id") or "")
+        if team_id:
+            connection["workspace_id"] = team_id
+        if policy.workspace_id and team_id != policy.workspace_id:
+            connection["error"] = "Slack installation belongs to a different workspace."
+        else:
+            connection["verified_at"] = now_iso()
+        if scopes is not None:
+            connection["required_scopes_present"] = REQUIRED_SLACK_SCOPES.issubset(scopes)
+            if not connection["required_scopes_present"]:
+                connection["error"] = "Slack installation is missing required Incidents scopes."
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning("Slack verification failed", extra={"slack_error": slack_error(exc)})
+        connection["error"] = "Slack verification failed; check installation and permissions."
+    if policy.slack_app_id and app_id != policy.slack_app_id:
         connection["error"] = (
             connection["error"] or "SLACK_APP_ID differs from the app bound to this policy."
         )
@@ -257,11 +258,7 @@ async def update_settings(
         if candidate.model not in SUPPORTED_MODEL_IDS:
             raise HTTPException(422, "Unsupported incident model")
     if candidate.enabled:
-        app_id = ENV.SLACK_APP_ID.get()
-        if not app_id:
-            raise HTTPException(
-                422, "Set SLACK_APP_ID to the installed Slack app ID before enabling Incidents"
-            )
+        app_id = required_slack_value(ENV.SLACK_APP_ID)
         try:
             auth, _ = await _auth_test()
         except Exception as exc:
@@ -273,7 +270,7 @@ async def update_settings(
             raise HTTPException(422, "Slack installation did not report a workspace")
         bound = (current.workspace_id, current.slack_app_id)
         identity = (workspace_id, app_id)
-        if bound != identity and any(bound) and await INCIDENTS.search(limit=1):
+        if bound != identity and any(bound) and await INCIDENTS.any():
             raise HTTPException(
                 409, "Slack workspace or app cannot change with registered incidents"
             )
@@ -282,7 +279,7 @@ async def update_settings(
     candidate.enabled_at = (
         time.time() if candidate.enabled and not current.enabled else current.enabled_at
     )
-    await POLICIES.put("default", candidate)
+    await POLICIES.put(candidate, by=actor_login(actor))
     logger.info(
         "Incident settings updated", extra={"actor": actor.get("id"), "version": candidate.version}
     )
@@ -328,13 +325,9 @@ async def list_incidents(
     include_setup: bool = False,
 ) -> dict[str, Any]:
     policy = await get_policy()
-    records = await INCIDENTS.search_all()
+    statuses = _VIEWS.get(view, {view}) if view and view != "all" else None
     items = []
-    for record in records:
-        if record.workspace_id != policy.workspace_id:
-            continue
-        if view and view != "all" and record.status not in _VIEWS.get(view, {view}):
-            continue
+    for record in await INCIDENTS.in_workspace(policy.workspace_id, statuses):
         if await readable(record, policy):
             item = summary(record, await REPORTS.get(record.id))
         elif include_setup and record.reason == "setup_failed":
@@ -435,10 +428,11 @@ async def submit_command(
     assert record is not None
     policy = await get_policy()
     # Claim the request before acting so a retried HTTP request cannot repeat the action.
-    await COMMANDS.put(
-        claim_id,
+    if not await COMMANDS.claim(
         CommandReceipt(id=claim_id, incident_id=id, action=action, content_hash=content_hash),
-    )
+        by=actor_login(actor),
+    ):
+        return {"command_id": request_id, "status": "duplicate"}
     try:
         if action == "ask":
             assert text is not None

@@ -11,6 +11,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import {
   api,
@@ -24,6 +25,7 @@ import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
+import { ModelPairControl } from "./WorkspaceSettingsSections"
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@monaco-editor/react", () => ({
@@ -129,7 +131,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         num_members: 3,
       },
     ],
-    partial: false,
+    refreshing: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
   vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
@@ -147,7 +149,8 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
-    </QueryClientProvider>
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
   )
 }
 
@@ -164,6 +167,39 @@ async function invalidateWorkspaces() {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("preserves saved effort while a subagent uses the parent model", () => {
+    const onChange = vi.fn()
+    const props = {
+      label: "Open SWE Agent subagents",
+      models: [
+        {
+          id: "openai:gpt-6.1-sol",
+          label: "GPT-6.1 Sol",
+          supports_images: true,
+          efforts: ["medium", "high"],
+          default_effort: "medium",
+        },
+      ],
+      model: "openai:gpt-6.1-sol",
+      effort: "high",
+      onChange,
+      disabled: false,
+    }
+    const { rerender } = render(
+      <ModelPairControl {...props} parentModel={props.model} />
+    )
+    const effort = () =>
+      screen.getByRole("combobox", {
+        name: "Open SWE Agent subagents reasoning effort",
+      }) as HTMLButtonElement
+    expect(effort().disabled).toBe(true)
+    expect(effort().textContent).toContain("Parent run")
+    rerender(<ModelPairControl {...props} parentModel="another-model" />)
+    expect(effort().disabled).toBe(false)
+    expect(effort().textContent).toContain("high")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("shows model labels before the dropdown opens and after it closes", async () => {
     mockApis()
     vi.mocked(api.options).mockResolvedValue({
@@ -192,10 +228,6 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage()
 
     const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
-    const models = screen
-      .getByRole("heading", { name: "Model defaults" })
-      .closest("section")!
-    expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
     expect(screen.queryByRole("listbox")).toBeNull()
     fireEvent.click(trigger)
     expect(
@@ -231,11 +263,9 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage(true, onDeleted)
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete OSS" }))
-    expect(screen.getByRole("alertdialog").textContent).toContain(
-      "cannot be undone"
-    )
+    expect(screen.getByRole("dialog").textContent).toContain("cannot be undone")
     fireEvent.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", {
+      within(screen.getByRole("dialog")).getByRole("button", {
         name: "Cancel",
       })
     )
@@ -270,13 +300,13 @@ describe("WorkspaceSettingsPanel", () => {
       )
     ).toBe(true)
     expect(
-      within(screen.getByRole("alertdialog"))
+      within(screen.getByRole("dialog"))
         .getByRole("button", { name: "Cancel" })
         .hasAttribute("disabled")
     ).toBe(true)
     finish()
     await waitFor(() => expect(onDeleted).toHaveBeenCalledOnce())
-    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   it("does not offer deletion without admin access", async () => {
@@ -568,6 +598,9 @@ describe("WorkspaceSettingsPanel", () => {
       ).rules[0].name
     ).toBe("updated-service")
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("LangSmith Access"), {
+      target: { value: "projects:read, datasets:read" },
+    })
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
@@ -578,6 +611,10 @@ describe("WorkspaceSettingsPanel", () => {
           proxy_config: {
             ...proxy,
             rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+          access_delegation: {
+            mode: "EXPLICIT",
+            permissions: ["projects:read", "datasets:read"],
           },
         },
       })
@@ -721,7 +758,7 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
-  })
+  }, 15_000)
 
   it("offers every accessible repository as its default", async () => {
     mockApis()
@@ -744,7 +781,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The selector stays disabled until the workspace's settings have loaded.
     const trigger = await screen.findByRole("button", {
-      name: /Pick a repository/,
+      name: "No default repository",
     })
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)

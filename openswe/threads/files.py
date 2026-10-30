@@ -3,13 +3,12 @@
 import base64
 import json
 import logging
-from functools import cache
-from importlib import resources
 from typing import Annotated, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
+from openswe.sandboxes import scripts as sandbox_scripts
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import _response_output, connect_sandbox
 from openswe.threads.summary import _assert_thread_promptable, _metadata_repo
@@ -52,13 +51,8 @@ _WORKSPACE_PATH_ADAPTER: TypeAdapter[WorkspaceDirectory | WorkspaceFile] = TypeA
 )
 
 
-@cache
 def _workspace_path_script() -> str:
-    return (
-        resources.files("openswe.resources")
-        .joinpath("workspace_path.py")
-        .read_text(encoding="utf-8")
-    )
+    return sandbox_scripts.source("workspace_path.py")
 
 
 def _workspace_path_command(root: str, mode: Literal["path", "index"], path: str) -> str:
@@ -99,7 +93,7 @@ async def _run_workspace_script(
     try:
         payload = json.loads(output.splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as exc:
-        logger.warning("Invalid workspace path response", extra={"thread": thread_id})
+        logger.warning("Invalid workspace path response", extra={"thread_id": thread_id})
         raise HTTPException(502, "Could not read the workspace.") from exc
     if "error" in payload:
         raise HTTPException(404, payload["error"])

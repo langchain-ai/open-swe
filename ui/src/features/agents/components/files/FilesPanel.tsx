@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react"
-import { TreeStructureIcon } from "@phosphor-icons/react"
+import { useMemo, useRef, useState } from "react"
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
   File,
   Virtualizer,
@@ -19,6 +20,11 @@ import {
   useDiffOverflow,
 } from "@/features/agents/utils/diffUtils"
 import { useWorkspaceFile } from "@/features/agents/lib/workspaceFiles"
+import {
+  SelectionReply,
+  codePassage,
+} from "@/features/agents/components/SelectionReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useResolvedTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -28,14 +34,16 @@ interface FilesPanelProps {
   relativePath: string | null
   revealRequestId: number
   onOpenFile: (relativePath: string) => void
+  /** Offers Reply on text selected in the open file. */
+  onReply?: (reply: PassageReply) => void
 }
 
 function PreviewMessage(props: { children: string; error?: boolean }) {
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground",
-        props.error && "text-destructive"
+        "flex min-h-0 flex-1 items-center justify-center px-space-6 text-center text-xs text-secondary",
+        props.error && "text-error-secondary"
       )}
     >
       {props.children}
@@ -43,8 +51,13 @@ function PreviewMessage(props: { children: string; error?: boolean }) {
   )
 }
 
-function SourcePreview(props: { name: string; contents: string }) {
+function SourcePreview(props: {
+  name: string
+  contents: string
+  onReply?: (reply: PassageReply) => void
+}) {
   const themeType = useResolvedTheme()
+  const paneRef = useRef<HTMLDivElement>(null)
   const [overflow] = useDiffOverflow()
   const file = useMemo(
     () => ({
@@ -59,21 +72,30 @@ function SourcePreview(props: { name: string; contents: string }) {
       poolOptions={DIFF_WORKER_POOL_OPTIONS}
       highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
     >
-      <Virtualizer
-        className="min-h-0 flex-1 overflow-auto"
-        config={DIFF_VIRTUALIZER_CONFIG}
-      >
-        <File
-          file={file}
-          options={{
-            theme: diffOptions.theme,
-            themeType,
-            overflow,
-            disableFileHeader: true,
-            unsafeCSS: DIFF_UNSAFE_CSS,
-          }}
+      <div ref={paneRef} className="flex min-h-0 flex-1 flex-col">
+        <Virtualizer
+          className="min-h-0 flex-1 overflow-auto"
+          config={DIFF_VIRTUALIZER_CONFIG}
+        >
+          <File
+            file={file}
+            options={{
+              theme: diffOptions.theme,
+              themeType,
+              overflow,
+              disableFileHeader: true,
+              unsafeCSS: DIFF_UNSAFE_CSS,
+            }}
+          />
+        </Virtualizer>
+      </div>
+      {props.onReply && (
+        <SelectionReply
+          containerRef={paneRef}
+          readPassage={codePassage(props.name, props.contents)}
+          onReply={props.onReply}
         />
-      </Virtualizer>
+      )}
     </WorkerPoolContextProvider>
   )
 }
@@ -81,6 +103,7 @@ function SourcePreview(props: { name: string; contents: string }) {
 function FilePreview(props: {
   file: ReturnType<typeof useWorkspaceFile>
   relativePath: string
+  onReply?: (reply: PassageReply) => void
 }) {
   const { data, error } = props.file
   if (error) return <PreviewMessage error>{error.message}</PreviewMessage>
@@ -91,12 +114,16 @@ function FilePreview(props: {
   return (
     <>
       {data.truncated ? (
-        <div className="shrink-0 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+        <div className="shrink-0 border-b border-default px-space-3 py-space-1 text-xxs text-secondary">
           Preview limited to the first 1 MB of a {data.size.toLocaleString()}{" "}
           byte file.
         </div>
       ) : null}
-      <SourcePreview name={props.relativePath} contents={data.contents} />
+      <SourcePreview
+        name={props.relativePath}
+        contents={data.contents}
+        onReply={props.onReply}
+      />
     </>
   )
 }
@@ -107,6 +134,7 @@ export function FilesPanel({
   relativePath,
   revealRequestId,
   onOpenFile,
+  onReply,
 }: FilesPanelProps) {
   const [explorerOpen, setExplorerOpen] = useState(true)
   const file = useWorkspaceFile(target, relativePath)
@@ -114,39 +142,42 @@ export function FilesPanel({
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
-      style={{ "--panel-diff-bg": "var(--background)" } as React.CSSProperties}
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-level-1"
+      style={
+        {
+          "--panel-diff-bg": "var(--bg-surface-level-1)",
+        } as React.CSSProperties
+      }
     >
       {relativePath ? (
-        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-3">
+        <div className="flex h-9 shrink-0 items-center gap-space-1 border-b border-default px-space-3">
           <span
-            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+            className="min-w-0 flex-1 truncate text-xs text-secondary"
             title={relativePath}
           >
             {relativePath}
           </span>
           <DiffWrapToggle />
-          <button
-            type="button"
-            aria-label={
-              explorerOpen ? "Hide file explorer" : "Show file explorer"
-            }
+          <IconButton
+            icon={TreeStructureIcon}
+            label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+            size="sm"
+            color="secondary"
+            variant="plain"
             aria-pressed={explorerOpen}
-            title={explorerOpen ? "Hide file explorer" : "Show file explorer"}
             onClick={() => setExplorerOpen((open) => !open)}
-            className={cn(
-              "flex size-6 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground",
-              explorerOpen && "bg-accent text-foreground"
-            )}
-          >
-            <TreeStructureIcon className="size-3.5" />
-          </button>
+            className={cn(explorerOpen && "bg-selected text-primary")}
+          />
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {relativePath ? (
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <FilePreview file={file} relativePath={relativePath} />
+            <FilePreview
+              file={file}
+              relativePath={relativePath}
+              onReply={onReply}
+            />
           </div>
         ) : null}
         {showExplorer ? (
@@ -154,7 +185,7 @@ export function FilesPanel({
             className={cn(
               "flex min-h-0 shrink-0",
               relativePath
-                ? "w-[min(22rem,46%)] min-w-56 border-l border-border"
+                ? "w-[min(22rem,46%)] min-w-56 border-l border-default"
                 : "min-w-0 flex-1"
             )}
           >

@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 from openswe.threads import pr_fixes
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 CAMEL_CASE_CONTEXT: dict[str, Any] = {
     "title": "Broken build",
     "headRef": "feature/fix",
@@ -23,7 +25,7 @@ CAMEL_CASE_CONTEXT: dict[str, Any] = {
 }
 
 OPEN = pr_fixes.OpenThreadIntent(intent="open", title="Fix broken build")
-FIX = pr_fixes.FixIntent(intent="fix", scope="checks")
+FIX = pr_fixes.FixIntent(intent="fix")
 ADDRESS_COMMENTS = pr_fixes.AddressCommentsIntent(intent="address-comments")
 
 PR_URL = "https://github.com/acme/app/pull/12"
@@ -103,7 +105,7 @@ async def test_every_intent_locks_on_the_same_key_so_only_one_thread_is_created(
     keys: list[str] = []
 
     @asynccontextmanager
-    async def recording_lock(_client, key: str):
+    async def recording_lock(key: str):
         keys.append(key)
         yield
 
@@ -136,6 +138,48 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     assert await pr_fixes.start_pull_request_thread(
         "acme", "app", 12, "alice", intent=FIX
     ) == pr_fixes.PullRequestThreadRun(thread_id="new")
+
+
+async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
+    thread_id = await pr_fixes.dispatch_pull_request_prompt(
+        "acme",
+        "app",
+        12,
+        "alice",
+        "Pick a reviewer",
+        title="Reviewer assignment",
+        before_dispatch=AsyncMock(),
+        unlisted=True,
+    )
+    assert thread_id == "new"
+    metadata = setup.client.threads.update.await_args_list[0].kwargs["metadata"]
+    assert metadata["unlisted"] is True
+    assert setup.threads["existing"]["metadata"].get("unlisted") is None
+    setup.threads["new"]["metadata"].update(metadata)
+    FakeRegistry.thread_ids.append("new")
+    assert [
+        t["thread_id"] for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None)
+    ] == ["existing"]
+    assert [
+        t["thread_id"]
+        for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
+    ] == ["new"]
+
+
+async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(setup):
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    setup.client.threads.update.assert_not_awaited()
+    setup.threads["existing"]["metadata"]["review_chat"] = True
+    await pr_fixes.start_pull_request_thread(
+        "acme",
+        "app",
+        12,
+        "alice",
+        intent=pr_fixes.MessageIntent(intent="message", title="Discuss PR", message="Explain this"),
+    )
+    assert "review_chat" not in setup.client.threads.update.await_args.kwargs["metadata"]
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
+    assert setup.client.threads.update.await_args.kwargs["metadata"]["review_chat"] is False
 
 
 async def test_denied_repo_never_reads_or_starts_threads(setup):
@@ -171,6 +215,7 @@ async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypat
     FakeRegistry.thread_ids = []
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
     metadata = setup.client.threads.update.await_args.kwargs["metadata"]
+    assert metadata["review_chat"] is True
     monkeypatch.setattr(runs, "resolve_run_email", AsyncMock(return_value=None))
     configurable = await runs._build_dashboard_configurable(
         "new",

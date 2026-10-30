@@ -1,0 +1,149 @@
+//! Every interactive prompt needs a way to be answered without a terminal.
+//!
+//! Coding agents and CI run `mda` with stdin redirected, so a prompt that only a
+//! human at a TTY can answer wedges the workflow. This test inventories every
+//! `.interact()` call in the CLI and pins each one to the flag, env var, or
+//! guard that answers it unattended. Adding a prompt fails here until its
+//! escape is recorded below — and, if it has none, until one exists.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+
+/// `(file, prompts in it, how a non-interactive caller answers them)`.
+const PROMPTS: &[(&str, usize, &str)] = &[
+    (
+        "channel/setup.rs",
+        1,
+        "choosing which channels to set up is only asked in a terminal, and not when a \
+         channel is named (`mda channels setup slack`); without a terminal, or with --json, \
+         the command only reports each channel's status",
+    ),
+    (
+        "chat/mod.rs",
+        6,
+        "interactive-only command: message, tool-review, per-call tool-approval, \
+         edited-arguments, reason-or-answer, and interrupt-reply prompts",
+    ),
+    (
+        "coding_agent.rs",
+        2,
+        "only reached with `-i`, which is rejected without a terminal",
+    ),
+    (
+        "connection/mod.rs",
+        2,
+        "browser hand-off is skipped without a terminal; delete takes --yes",
+    ),
+    ("delete/mod.rs", 1, "--yes; refuses without a terminal"),
+    (
+        "deploy/channel_app.rs",
+        1,
+        "the try-again-or-skip prompt after a failed GitHub, Linear or Slack setup step is \
+         only asked in a terminal; without one, the failure ends the deploy once every \
+         channel had its turn",
+    ),
+    (
+        "deploy/github_channel/mod.rs",
+        10,
+        "GitHub App setup prompts run only in an interactive terminal, and the CLI-only env \
+         vars answer them with or without one: MDA_GITHUB_APP_OWNER creates a new App there \
+         (with neither it nor an existing App, deploy fails before uploading), \
+         MDA_GITHUB_APP_ID, MDA_GITHUB_APP_PRIVATE_KEY_FILE and MDA_GITHUB_WEBHOOK_SECRET \
+         bring an existing App, MDA_GITHUB_APP_INSTALLATION_ID picks its installation when \
+         GitHub reports none or several, and MDA_GITHUB_WEBHOOK_SECRET alone supplies a \
+         brought App's missing webhook secret. Deploy prints the setup link instead of \
+         opening a browser, and a brought App whose webhook points elsewhere fails the \
+         deploy with how to change it on GitHub or keep it (MDA_GITHUB_WEBHOOK_ELSEWHERE). \
+         Moving an App from another deployment and picking one of several installations \
+         are only asked in a terminal",
+    ),
+    (
+        "deploy/linear_channel/mod.rs",
+        7,
+        "Linear app setup prompts run only in an interactive terminal, and the CLI-only env \
+         vars answer them with or without one: MDA_LINEAR_CLIENT_ID, \
+         MDA_LINEAR_CLIENT_SECRET and MDA_LINEAR_WEBHOOK_SECRET skip choosing a new or an \
+         existing app and the credential prompts (without a terminal and without them, \
+         deploy fails before uploading with that hint and the create-app link), \
+         MDA_LINEAR_WORKSPACE answers the workspace prompt, and MDA_LINEAR_WEBHOOK_SECRET \
+         alone answers the signing-secret prompt of an installed app; a failed setup fails \
+         the deploy instead of offering to try again; the redirect URI confirmation, and \
+         the confirmation that an app from those env vars has the settings deploy lists, \
+         are only asked in a terminal, without one deploy prints what to set and goes on",
+    ),
+    (
+        "deploy/mod.rs",
+        3,
+        "collision overwrite takes --yes; Context Hub conflicts take --context-strategy; \
+         API key comes from LANGSMITH_API_KEY",
+    ),
+    (
+        "deploy/slack_app.rs",
+        3,
+        "choosing a new Slack channel's app and entering its credentials only happens in an \
+         interactive terminal; MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET supply the \
+         user's own app with or without one. Without a terminal and without them, hosted \
+         LangSmith creates a managed app in a workspace the user already authorized it in \
+         and says so; otherwise deploy fails before uploading with that hint",
+    ),
+    (
+        "deploy/trigger_channels.rs",
+        1,
+        "moving a Slack app another deployment uses is only offered in an interactive terminal; \
+         without one, deploy fails saying the app stays there",
+    ),
+    (
+        "secret_input.rs",
+        1,
+        "--secret-from-env, --secret-from-file, or stdin",
+    ),
+];
+
+fn count_prompts(dir: &Path, root: &Path, found: &mut BTreeMap<String, usize>) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            count_prompts(&path, root, found);
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        // Test modules drive prompt themes, not real prompts.
+        if path.extension().is_none_or(|ext| ext != "rs") || relative.ends_with("tests.rs") {
+            continue;
+        }
+        // The whole file counts: production code may follow an inline test module.
+        let count = fs::read_to_string(&path)
+            .unwrap()
+            .matches(".interact()")
+            .count();
+        if count > 0 {
+            found.insert(relative, count);
+        }
+    }
+}
+
+#[test]
+fn every_prompt_has_a_non_interactive_escape() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = BTreeMap::new();
+    count_prompts(&src, &src, &mut found);
+
+    let recorded: BTreeMap<String, usize> = PROMPTS
+        .iter()
+        .map(|(file, count, _)| ((*file).to_string(), *count))
+        .collect();
+
+    assert_eq!(
+        found,
+        recorded,
+        "interactive prompts changed. Give every new prompt a flag or env var that \
+         answers it without a terminal (and fail with that hint when stdin is not a \
+         TTY), then record it in PROMPTS in {}",
+        file!()
+    );
+}

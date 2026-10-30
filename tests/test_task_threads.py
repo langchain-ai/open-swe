@@ -1,24 +1,26 @@
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 from fastapi import HTTPException
 from pydantic import JsonValue
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.database import postgres
-from openswe.tasks import flags, presentation, service, store
 from openswe.tasks import messages as task_messages
+from openswe.tasks import presentation, service, store
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.threads import access, creation, handlers
+from openswe.threads import access, handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from openswe.utils.thread_participants import PARTICIPANT_IDENTITY_PREFIX, PARTICIPANT_LOGINS_KEY
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -28,6 +30,7 @@ MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
 OWNER = "owner"
 WORKSPACE_MODEL = "anthropic:claude-sonnet-5-5"
+Launch = Callable[[service.Actor, str, str], Awaitable[dict[str, object]]]
 
 
 @pytest.mark.parametrize(
@@ -94,6 +97,33 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
         await service.model_choice("default", metadata, None, "none")
 
 
+@pytest.mark.parametrize(
+    ("coordinator", "channel"),
+    [({"channel": "slack"}, "slack"), ({}, None)],
+    ids=["channel-conversation", "backend-thread"],
+)
+def test_a_channel_conversations_worker_belongs_to_its_channel(
+    coordinator: dict[str, JsonValue], channel: str | None
+) -> None:
+    """MDA creates the worker as the conversation's own, so the backend acts on it there."""
+    current_task = task()
+    delegation = store.TaskDelegation(
+        worker_thread_id=str(uuid4()),
+        task_id=current_task.id,
+        coordinator_thread_id=COORDINATOR,
+        instructions="Fix login",
+        model=MODEL,
+        effort="low",
+    )
+    metadata = ThreadMetadata.model_validate(
+        {"owner_type": "user", "owner_login": OWNER, "sandbox_id": "shared", **coordinator}
+    )
+
+    worker = service._worker_metadata(current_task, delegation, metadata)
+
+    assert worker.get("channel") == channel
+
+
 def task() -> store.Task:
     workspace = WorkspaceRow(slug="default", name="Default")
     task = store.Task(
@@ -154,13 +184,15 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
             raise ConnectionError("response lost after acceptance")
         return result
 
-    async def list_runs(thread_id: str, **kwargs: object) -> list[dict[str, object]]:
-        return [
+    async def list_runs(
+        thread_id: str, *, limit: int | None = None, offset: int = 0, status: str | None = None
+    ) -> list[dict[str, object]]:
+        runs = [
             run
-            for run in client.created_runs
-            if run["thread_id"] == thread_id
-            and (not kwargs.get("status") or run["status"] == kwargs["status"])
+            for run in reversed(client.created_runs)
+            if run["thread_id"] == thread_id and (status is None or run["status"] == status)
         ]
+        return runs[offset:][:limit]
 
     async def cancel_many(*, thread_id: str, run_ids: list[str], action: str) -> None:
         for run in client.created_runs:
@@ -179,18 +211,37 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         client.metadata[thread_id].update(metadata)
 
     client.threads.update = AsyncMock(side_effect=update)
-    owner = User(
-        identities=[UserIdentity(provider="github", external_id="1", login=OWNER)],
-        preferences={"experimental_task_coordination": True},
-    )
+    owner = User(identities=[UserIdentity(provider="github", external_id="1", login=OWNER)])
     client.owner = owner
+    participant = User(
+        identities=[UserIdentity(provider="github", external_id="2", login="participant")],
+    )
+    client.participant = participant
     monkeypatch.setattr(
         User,
         "for_login",
-        AsyncMock(side_effect=lambda provider, login: owner if login == OWNER else None),
+        AsyncMock(
+            side_effect=lambda provider, login: (
+                owner if login == OWNER else participant if login == "participant" else None
+            )
+        ),
     )
-    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=owner))
-    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(
+            side_effect=lambda provider, external_id: {"1": owner, "2": participant}.get(
+                external_id
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "get",
+        AsyncMock(
+            side_effect=lambda user_id: {owner.id: owner, participant.id: participant}.get(user_id)
+        ),
+    )
     client.threads.get_state = AsyncMock(return_value={"values": {"messages": []}})
     client.runs.create = AsyncMock(side_effect=run_create)
     client.runs.list = AsyncMock(side_effect=list_runs)
@@ -203,56 +254,60 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr(service, "COMPLETION_WEBHOOK_URL", "https://example.test/completion")
-    monkeypatch.setattr(creation, "_owner_prefers_tools_in_sandbox", AsyncMock(return_value=False))
     from openswe import dispatch
     from openswe.slack import thinking
 
-    monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        dispatch, "_run_user_metadata", AsyncMock(return_value={"ls_repo_provider": "github"})
+    )
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
     return client
 
 
-@pytest.mark.usefixtures("registry_db")
-async def test_default_off_rejects_delegation_without_creating_a_task(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    client.owner.preferences = {"experimental_task_coordination": False}
-    with pytest.raises(PermissionError, match="disabled"):
-        await service.spawn_worker(
-            service.Actor(COORDINATOR, OWNER),
-            instructions="Implement",
-            model=None,
-            effort=None,
-            request_id="disabled-call",
+@pytest.fixture
+def launch(monkeypatch: pytest.MonkeyPatch) -> Launch:
+    """Launch a worker as a coordinator's MDA async subagent does, one thread per tool call."""
+    parents: dict[str, str] = {}
+
+    async def mda_thread(thread_id: str) -> dict[str, object]:
+        return {
+            "metadata": {"subagent_name": "general-purpose", "parent_thread_id": parents[thread_id]}
+        }
+
+    runtimes = MagicMock()
+    runtimes.mda.get = AsyncMock(side_effect=mda_thread)
+    monkeypatch.setattr(service, "RUNTIMES", runtimes)
+
+    async def launch(actor: service.Actor, request_id: str, instructions: str) -> dict[str, object]:
+        launched = await service.authorize_async_worker(actor, request_id, instructions)
+        if launched is not None:
+            return launched
+        worker_thread_id = str(uuid5(NAMESPACE_URL, f"{actor.thread_id}:{request_id}"))
+        parents[worker_thread_id] = actor.thread_id
+        return await service.register_async_worker(
+            actor, request_id, worker_thread_id, instructions
         )
-    assert await store.TaskMembership.context_for_thread(COORDINATOR) is None
-    assert not client.created_runs
+
+    return launch
 
 
-@pytest.mark.parametrize("bridge_client", ["cli", None])
-async def test_cli_bridge_rejects_delegation_before_reserving_a_worker(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, bridge_client: str | None
+@pytest.mark.parametrize("connected", [True, False])
+async def test_cli_bridge_delegates_only_while_it_is_served(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, connected: bool
 ) -> None:
-    client.metadata[COORDINATOR]["sandbox_id"] = "bridge:cli"
-    if bridge_client is not None:
-        client.metadata[COORDINATOR]["sandbox_bridge_client"] = bridge_client
+    client.metadata[COORDINATOR].update(sandbox_id="bridge:cli", sandbox_bridge_client="cli")
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=None))
-    reserve = AsyncMock()
-    monkeypatch.setattr(store.Task, "reserve_worker", reserve)
+    monkeypatch.setattr(BridgeStore, "is_connected", AsyncMock(return_value=connected))
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, OWNER)
 
-    with pytest.raises(ValueError, match="one-shot CLI bridge"):
-        await service.spawn_worker(
-            service.Actor(COORDINATOR, OWNER),
-            instructions="Implement",
-            model=None,
-            effort=None,
-            request_id="cli-call",
-        )
-
-    reserve.assert_not_awaited()
-    assert not client.created_runs
+    if connected:
+        assert (await service.Delegation.authorize(actor)).metadata.sandbox_id == "bridge:cli"
+    else:
+        with pytest.raises(ValueError, match="connected"):
+            await service.Delegation.authorize(actor)
 
 
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
@@ -260,9 +315,58 @@ async def test_public_thread_does_not_allow_using_owners_credentials(client: Mag
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
 
 
-@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("restriction", ["unverified", "private", "admin"])
+async def test_task_participants_require_verified_identity_and_thread_access(
+    client: MagicMock, restriction: str
+) -> None:
+    metadata = client.metadata[COORDINATOR]
+    metadata[PARTICIPANT_LOGINS_KEY] = {"participant": True}
+    if restriction != "unverified":
+        metadata[PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+            f"user:{client.participant.id}"
+        )
+    if restriction == "private":
+        metadata["visibility"] = "private"
+    elif restriction == "admin":
+        metadata["admin_thread"] = True
+    actor = service.Actor(COORDINATOR, "participant")
+    with pytest.raises(PermissionError if restriction == "unverified" else HTTPException):
+        if restriction == "private":
+            await service.control_worker(actor, worker_thread_id="worker", action="status")
+        else:
+            await service.task_status(actor)
+
+
+async def test_verified_participant_cannot_launch_workers(
+    client: MagicMock, launch: Launch
+) -> None:
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    with pytest.raises(PermissionError, match="thread owner"):
+        await launch(service.Actor(COORDINATOR, "participant"), "spawn", "Work")
+    assert not client.created_runs
+
+
+async def test_verified_participant_cannot_steer_from_a_worker_thread(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    current_task = task()
+    current_task.coordinator_thread_id = str(uuid4())
+    context = store.TaskContext(
+        current_task,
+        store.TaskMembership(thread_id=COORDINATOR, task_id=current_task.id, role="worker"),
+    )
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=context))
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.task_status(service.Actor(COORDINATOR, "participant"))
+
+
 async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, enabled: bool
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     metadata = await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
     owner_id = metadata.owner_user_id
@@ -271,12 +375,8 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     owner = User(
         id=owner_id,
         identities=[UserIdentity(provider="github", external_id="1", login="renamed-owner")],
-        preferences={"experimental_task_coordination": enabled},
     )
-    replacement = User(
-        identities=[UserIdentity(provider="github", external_id="2", login=OWNER)],
-        preferences={"experimental_task_coordination": not enabled},
-    )
+    replacement = User(identities=[UserIdentity(provider="github", external_id="2", login=OWNER)])
     monkeypatch.setattr(
         User,
         "for_login",
@@ -296,17 +396,55 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     assert (
         await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
     ).owner_user_id == owner_id
-    assert await flags.task_coordination_enabled(OWNER, owner_user_id=owner_id) is enabled
-    if enabled:
-        await flags.require_task_coordination(client.metadata[COORDINATOR])
-    else:
-        with pytest.raises(PermissionError, match="disabled"):
-            await flags.require_task_coordination(client.metadata[COORDINATOR])
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
-    monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
-    with pytest.raises(PermissionError, match="disabled"):
-        await flags.require_task_coordination(client.metadata[COORDINATOR])
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_system_thread_delegates_to_system_owned_workers(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    client.metadata[COORDINATOR] = {
+        "owner_type": "system",
+        "visibility": "public",
+        "source": "schedule",
+        "schedule_id": "nightly",
+        "workspace": "default",
+        "sandbox_id": "shared-sandbox",
+    }
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR)
+    # A scheduled run acts for no person; a Slack post's author must not become the owner.
+    worker_id, posted = [
+        str((await launch(launcher, call, "Implement"))["worker_thread_id"])
+        for launcher, call in ((actor, "scheduled"), (service.Actor(COORDINATOR, OWNER), "posted"))
+    ]
+    for worker in (client.metadata[worker_id], client.metadata[posted]):
+        assert worker["owner_type"] == "system"
+        assert "owner_user_id" not in worker and "owner_login" not in worker
+
+    sent = await service.message_task_thread(
+        actor, message="Check logout too", worker_thread_id=worker_id, request_id="follow-up"
+    )
+    assert sent == {"success": True, "recipient_thread_id": worker_id}
+    (follow_up,) = client.created_runs
+    assert "github_login" not in follow_up["config"]["configurable"]
+    reply = await service.message_task_thread(
+        service.Actor(worker_id), message="Done", worker_thread_id=None, request_id="report"
+    )
+    assert reply["recipient_thread_id"] == COORDINATOR
+
+    outsider = str(uuid4())
+    client.metadata[outsider] = {"owner_type": "system", "visibility": "public"}
+    with pytest.raises(PermissionError, match="its own task"):
+        await service.authorized_metadata(service.Actor(outsider), worker_id)
+    client.metadata[outsider] = {"owner_type": "user", "owner_login": OWNER}
+    with pytest.raises(PermissionError, match="share their coordinator's owner"):
+        await service.authorized_metadata(service.Actor(outsider, OWNER), worker_id)
+
+    cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
+    assert cancelled["cancellation_requested"] is True
+    assert follow_up["status"] == "interrupted"
 
 
 async def test_task_owner_still_needs_admin_permission(client: MagicMock) -> None:
@@ -324,10 +462,12 @@ async def test_task_wakeup_preserves_current_model_selection(
         model="anthropic:claude-opus-5-5",
         effort="high",
         model_selection=selection,
+        experience="agent_workspace",
     )
 
     config = await service.recipient_config(COORDINATOR)
 
+    assert config["experience"] == "agent_workspace"
     assert config["model_selection"] == selection
     if selection == "explicit":
         assert config["agent_model_id"] == "anthropic:claude-opus-5-5"
@@ -345,6 +485,7 @@ async def test_desktop_worker_cannot_be_shared(
         sandbox_id="bridge:desktop",
         sandbox_kind="bridge",
         sandbox_bridge_client="desktop",
+        experience="agent_workspace",
     )
     current_task = task()
     delegation = store.TaskDelegation(
@@ -355,16 +496,15 @@ async def test_desktop_worker_cannot_be_shared(
         model=MODEL,
         effort="low",
     )
-    monkeypatch.setattr(service, "record_event", AsyncMock())
-    monkeypatch.setattr(TaskMessage, "deliver", AsyncMock())
     for module in (access, handlers):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
 
-    await service.launch_worker(
+    await service.index_worker(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
-    with pytest.raises(HTTPException, match="owner's Mac") as error:
+    assert client.metadata[delegation.worker_thread_id]["experience"] == "agent_workspace"
+    with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409
     client.threads.update.assert_not_called()
@@ -380,18 +520,15 @@ async def test_worker_cannot_spawn_siblings(
     )
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=context))
     with pytest.raises(PermissionError, match="coordinator"):
-        await service.spawn_worker(
-            service.Actor(COORDINATOR, OWNER),
-            instructions="delegate again",
-            model=None,
-            effort=None,
-            request_id="call-1",
+        await service.authorize_async_worker(
+            service.Actor(COORDINATOR, OWNER), "call-1", "delegate again"
         )
     assert not client.created_runs
 
 
+@pytest.mark.parametrize("operation", ["message", "cancel"])
 async def test_control_rejects_worker_from_another_task(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     current_task = task()
     context = store.TaskContext(
@@ -414,112 +551,24 @@ async def test_control_rejects_worker_from_another_task(
         ),
     )
     with pytest.raises(PermissionError, match="belonging to this task"):
-        await service.control_worker(
-            service.Actor(COORDINATOR, OWNER), worker_thread_id="other-worker", action="cancel"
-        )
+        actor = service.Actor(COORDINATOR, OWNER)
+        if operation == "message":
+            await service.message_task_thread(
+                actor, message="Change scope", worker_thread_id="other-worker", request_id="scope"
+            )
+        else:
+            await service.control_worker(actor, worker_thread_id="other-worker", action="cancel")
     client.runs.cancel_many.assert_not_awaited()
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_lost_launch_response_retries_same_worker_without_waiting_for_work(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    actor = service.Actor(COORDINATOR, OWNER)
-    workspace = WorkspaceRow(slug="engineering", name="Engineering")
-    async with postgres.session() as session:
-        session.add(workspace)
-    client.metadata[COORDINATOR]["workspace"] = workspace.slug
-    client.metadata[COORDINATOR]["title"] = "Fix login"
-    assert await store.TaskMembership.context_for_thread(COORDINATOR) is None
-    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
-    client.fail_after_accept = True
-    with pytest.raises(service.WorkerLaunchError) as failed:
-        await asyncio.wait_for(
-            service.spawn_worker(
-                actor,
-                instructions="Implement login fix",
-                model=MODEL,
-                effort="low",
-                request_id="stable-call",
-            ),
-            timeout=5,
-        )
-    assert failed.value.retryable
-    worker_id = failed.value.worker_thread_id
-    context = await store.TaskMembership.context_for_thread(COORDINATOR)
-    assert context is not None
-    assert context.membership.role == "coordinator"
-    assert context.task.coordinator_thread_id == COORDINATOR
-    assert context.task.title == "Fix login"
-    assert context.task.workspace_id == workspace.id
-    assert context.task.delegated is True
-    worker_context = await store.TaskMembership.context_for_thread(worker_id)
-    assert worker_context is not None
-    assert worker_context.task.id == context.task.id
-    assert worker_context.membership.role == "worker"
-    memberships = await store.sidebar_memberships([COORDINATOR, worker_id, "unrelated"])
-    assert set(memberships) == {COORDINATOR, worker_id}
-    assert memberships[worker_id].coordinator_thread_id == COORDINATOR
-    assert memberships[worker_id].instructions == "Implement login fix"
-    assert memberships[worker_id].launch_error is True
-    assert await store.sidebar_memberships([COORDINATOR], workers_of=True) == {
-        worker_id: memberships[worker_id]
-    }
-    assert client.created_runs[0]["status"] == "pending"
-    delegation = await store.TaskDelegation.get(worker_id)
-    assert delegation is not None and delegation.launch_error
-    client.owner.preferences = {"experimental_task_coordination": False}
-    with pytest.raises(PermissionError, match="disabled"):
-        await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
-    assert len(client.created_runs) == 1
-    client.owner.preferences = {"experimental_task_coordination": True}
-    retried = await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
-    replayed = await service.spawn_worker(
-        actor,
-        instructions="Implement login fix",
-        model=MODEL,
-        effort="low",
-        request_id="stable-call",
-    )
-    assert retried["worker_thread_id"] == replayed["worker_thread_id"] == worker_id
-    assert retried["task_id"] == replayed["task_id"] == str(context.task.id)
-    assert len(client.created_runs) == 1
-    assert client.created_runs[0]["assistant_id"] == "agent"
-    worker_config = client.created_runs[0]["config"]["configurable"]
-    assert worker_config["agent_model_id"] == MODEL
-    assert worker_config["agent_effort"] == "low"
-    assert worker_config["model_selection"] == "explicit"
-    assert worker_config["workspace"] == workspace.slug
-    assert client.metadata[worker_id]["workspace"] == workspace.slug
-    assert "slack_thread" not in worker_config
-    assert len(await store.TaskDelegation.for_task(context.task.id)) == 1
-    assert client.metadata[worker_id]["sandbox_id"] == "shared-sandbox"
-    assert client.metadata[worker_id]["github_token_repositories"] == ["langchain-ai/open-swe"]
-    assert "source_context" not in client.metadata[worker_id]
-    async with postgres.session() as session:
-        assert (
-            await session.scalar(
-                select(func.count())
-                .select_from(TaskMessage)
-                .where(TaskMessage.thread_id == worker_id)
-            )
-            == 1
-        )
-
-
-@pytest.mark.usefixtures("registry_db")
-async def test_concurrent_first_spawns_and_replay_share_one_task(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+async def test_concurrent_first_launches_and_replay_share_one_task(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     results = await asyncio.gather(
-        *(
-            service.spawn_worker(
-                actor, instructions="Implement", model=None, effort=None, request_id=request_id
-            )
-            for request_id in ("first", "second", "first")
-        )
+        *(launch(actor, request_id, "Implement") for request_id in ("first", "second", "first"))
     )
     assert all(result["success"] for result in results)
     assert results[0]["worker_thread_id"] == results[2]["worker_thread_id"]
@@ -529,7 +578,6 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
     assert {result["task_id"] for result in results} == {str(context.task.id)}
     assert context.task.title == "Delegated work"
     assert len(await store.TaskDelegation.for_task(context.task.id)) == 2
-    assert len(client.created_runs) == 2
     async with postgres.session() as session:
         assert await session.scalar(select(func.count()).select_from(store.Task)) == 1
         memberships = list(await session.scalars(select(store.TaskMembership)))
@@ -543,14 +591,12 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_cancel_discards_owed_assignment_without_reviving_worker(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+async def test_cancel_discards_owed_events_without_reviving_worker(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
-    result = await service.spawn_worker(
-        actor, instructions="Implement", model=None, effort=None, request_id="call"
-    )
+    result = await launch(actor, "call", "Implement")
     worker_id = str(result["worker_thread_id"])
     workspace = WorkspaceRow(slug="task-cancellation", name="Task cancellation")
     async with postgres.session() as session:
@@ -573,43 +619,60 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
     async with postgres.session() as session:
         session.add(subscription)
         await event.record(session)
-    client.owner.preferences = {"experimental_task_coordination": False}
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
-    assert await EventMatch.owed(worker_id, []) == []
+    assert await EventMatch.owed(worker_id) == []
     assert await EventSubscription.for_thread(worker_id) == []
     assert await EventMatch.deliver(worker_id, "enqueue") is False
     assert await TaskMessage.deliver(worker_id, "interrupt") is False
-    assert client.created_runs[0]["status"] == "interrupted"
-    with pytest.raises(ValueError, match="uncancelled"):
-        await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
-    assert len(client.created_runs) == 1
+    assert not client.created_runs
+
+    # Unlike a person stopping the task, the coordinator that cancelled still hears the outcome.
+    from openswe.tasks.events import finished_delivery_id, worker_finished
+
+    run_id = str(uuid4())
+    await worker_finished(worker_id, run_id, "interrupted", {})
+    assert await TaskMessage.recorded(COORDINATOR, finished_delivery_id(worker_id, run_id))
 
 
 @pytest.mark.usefixtures("registry_db")
 async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
-    first = await service.spawn_worker(
-        actor, instructions="Implement login fix", model=None, effort=None, request_id="first"
-    )
+    first = await launch(actor, "first", "Implement login fix")
     worker_id = str(first["worker_thread_id"])
-    initial_messages = TaskMessage.messages(await TaskMessage.owed(worker_id, []))
-    client.threads.get_state.return_value = {"values": {"messages": initial_messages}}
-    client.created_runs[0]["status"] = "success"
     client.statuses[worker_id] = "idle"
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    participant = service.Actor(COORDINATOR, "participant")
 
-    status = await service.task_status(actor)
+    status = await service.task_status(participant)
     workers = status["workers"]
     assert isinstance(workers, list)
     (worker,) = workers
     assert status["task_id"] == first["task_id"]
     assert worker["worker_thread_id"] == worker_id
     assert worker["status"] == "idle"
-    assert worker["latest_run"]["status"] == "success"
 
+    worker_status = await service.control_worker(
+        participant, worker_thread_id=worker_id, action="status"
+    )
+    assert worker_status["worker_thread_id"] == worker_id
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.message_task_thread(
+            participant,
+            message="Push to a private repo",
+            worker_thread_id=worker_id,
+            request_id="denied",
+        )
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.control_worker(participant, worker_thread_id=worker_id, action="cancel")
+    assert await TaskMessage.owed(worker_id) == []
+    assert not client.created_runs
+    client.runs.cancel_many.assert_not_awaited()
     sent = await service.message_task_thread(
         actor,
         message="Check logout too",
@@ -618,7 +681,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     )
     assert sent["success"] is True
     assert sent["recipient_thread_id"] == worker_id
-    (follow_up,) = await TaskMessage.owed(worker_id, initial_messages)
+    (follow_up,) = await TaskMessage.owed(worker_id)
     assert "Check logout too" in follow_up.content
     follow_up_display = TaskEventMetadata.model_validate(follow_up.task_event)
     assert follow_up_display.sender_role == "coordinator"
@@ -626,28 +689,27 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert follow_up_display.content == "Check logout too"
     assert follow_up_display.kind == "message"
     assert follow_up_display.status is None
-    assert len(client.created_runs) == 2
-    assert client.created_runs[-1]["thread_id"] == worker_id
-    assert client.created_runs[-1]["status"] == "pending"
+    assert follow_up.run_config["github_login"] == OWNER
+    assert client.metadata[worker_id]["owner_user_id"] == str(client.owner.id)
+    (follow_up_run,) = client.created_runs
+    assert follow_up_run["thread_id"] == worker_id
+    assert follow_up_run["status"] == "pending"
+    assert follow_up_run["config"]["configurable"]["github_login"] == OWNER
 
-    sibling = await service.spawn_worker(
-        actor, instructions="Review login fix", model=None, effort=None, request_id="sibling"
-    )
+    cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
+    assert cancelled["cancellation_requested"] is True
+    assert client.created_runs[-1]["status"] == "interrupted"
+
+    sibling = await launch(actor, "sibling", "Review login fix")
     assert sibling["success"] is True
     assert sibling["task_id"] == first["task_id"]
     assert sibling["worker_thread_id"] != worker_id
-    assert len(client.created_runs) == 3
     context = await store.TaskMembership.context_for_thread(worker_id)
     assert context is not None
     assert str(context.task.id) == first["task_id"]
     assert context.membership.role == "worker"
     assert len(await store.TaskDelegation.for_task(context.task.id)) == 2
 
-    client.owner.preferences = {"experimental_task_coordination": False}
-    with pytest.raises(PermissionError, match="disabled"):
-        await service.spawn_worker(
-            actor, instructions="Another worker", model=None, effort=None, request_id="disabled"
-        )
     client.statuses[COORDINATOR] = "busy"
     senders = [worker_id, str(sibling["worker_thread_id"])]
     reports = ['Blocked on "login" & <schema>; can you help?', "Checked:\n```python\na < b\n```"]
@@ -658,8 +720,8 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
             worker_thread_id=None,
             request_id="report",
         )
-    assert len(client.created_runs) == 3
-    owed = await TaskMessage.owed(COORDINATOR, [])
+    assert len(client.created_runs) == 1
+    owed = await TaskMessage.owed(COORDINATOR)
     displays = [TaskEventMetadata.model_validate(event.task_event) for event in owed]
     assert [str(display.sender_thread_id) for display in displays] == senders
     assert [display.content for display in displays] == reports
@@ -668,8 +730,279 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     message_ids = [f"event-match:{event.id}" for event in owed]
     client.statuses[COORDINATOR] = "idle"
     assert await TaskMessage.deliver(COORDINATOR, "enqueue")
-    assert len(client.created_runs) == 4
+    assert len(client.created_runs) == 2
     wake = client.created_runs[-1]
     assert wake["thread_id"] == COORDINATOR
     delivered_ids = [message["id"] for message in wake["input"]["messages"] if "id" in message]
     assert delivered_ids == message_ids
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_coordinator_settles_once_every_worker_report_has_reached_it(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.tasks import activity
+    from openswe.tasks.events import worker_finished
+
+    monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, OWNER)
+    assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
+
+    worker_id = str((await launch(actor, "call", "Implement"))["worker_thread_id"])
+    run_id = str(uuid4())
+    run: dict[str, object] = {"thread_id": worker_id, "run_id": run_id, "status": "running"}
+    client.created_runs.append(run)
+
+    async def states() -> list[str]:
+        current = await activity.CoordinatorActivity.of(COORDINATOR)
+        assert current.settled is not any(worker.active for worker in current.workers)
+        return [worker.state for worker in current.workers]
+
+    assert await states() == ["running"]
+    run.update(status="success", updated_at=datetime.now(UTC).isoformat())
+    assert await states() == ["reporting"]
+
+    answer = {"values": {"messages": [{"type": "ai", "content": "Implemented"}]}}
+    await worker_finished(worker_id, run_id, "success", answer)
+    (wake,) = [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
+    current = await activity.CoordinatorActivity.of(COORDINATOR)
+    assert [worker.state for worker in current.workers] == ["done"]
+    assert current.runs == [wake["run_id"]]
+    assert current.running
+    assert not current.settled
+
+    wake["status"] = "success"
+    assert not (await activity.CoordinatorActivity.of(COORDINATOR)).settled
+    # The wake run, once prepared, holds the reports it was started to carry.
+    carried = [UUID(message_id) for message_id in wake["metadata"]["event_match_ids"]]
+    await TaskMessage.received(COORDINATOR, carried)
+    assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
+
+    stuck = str((await launch(actor, "stuck", "Review"))["worker_thread_id"])
+    assert sorted(await states()) == ["done", "starting"]
+    async with postgres.session() as session:
+        delegation = await session.get_one(store.TaskDelegation, stuck)
+        delegation.created_at = datetime.now(UTC) - activity.LOST_AFTER
+    current = await activity.CoordinatorActivity.of(COORDINATOR)
+    assert {
+        worker.worker_thread_id: (worker.state, worker.error) for worker in current.workers
+    } == {
+        worker_id: ("done", None),
+        stuck: ("failed", "The worker did not start within 5 minutes."),
+    }
+    assert current.settled
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_report_held_through_a_long_coordinator_run_is_awaited_once_it_ends(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.tasks import activity
+    from openswe.tasks.events import worker_finished
+
+    monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    first = str(uuid4())
+    coordinating: dict[str, object] = {
+        "thread_id": COORDINATOR,
+        "run_id": first,
+        "status": "running",
+    }
+    client.created_runs.append(coordinating)
+    client.statuses[COORDINATOR] = "busy"
+    worker_id = str(
+        (await launch(service.Actor(COORDINATOR, OWNER), "call", "Implement"))["worker_thread_id"]
+    )
+    worker_run = str(uuid4())
+    long_ago = datetime.now(UTC) - 2 * activity.LOST_AFTER
+    client.created_runs.append(
+        {
+            "thread_id": worker_id,
+            "run_id": worker_run,
+            "status": "success",
+            "updated_at": long_ago.isoformat(),
+        }
+    )
+    answer = {"values": {"messages": [{"type": "ai", "content": "Implemented"}]}}
+    await worker_finished(worker_id, worker_run, "success", answer)
+    async with postgres.session() as session:
+        await session.execute(update(TaskMessage).values(matched_at=long_ago))
+
+    current = await activity.CoordinatorActivity.of(COORDINATOR, after=first)
+    assert (current.runs, current.running, current.settled) == ([], True, False)
+    coordinating.update(status="success", updated_at=datetime.now(UTC).isoformat())
+    client.statuses[COORDINATOR] = "idle"
+    current = await activity.CoordinatorActivity.of(COORDINATOR, after=first)
+    assert current.awaiting_delivery
+    assert not current.settled
+    coordinating["updated_at"] = long_ago.isoformat()
+    assert (await activity.CoordinatorActivity.of(COORDINATOR, after=first)).settled
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_cancelling_a_coordinators_workers_spares_finished_ones(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.tasks import activity
+    from openswe.tasks.events import finished_delivery_id, worker_finished
+
+    monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    actor = service.Actor(COORDINATOR, OWNER)
+    running = str((await launch(actor, "running", "Implement"))["worker_thread_id"])
+    finished = str((await launch(actor, "finished", "Review"))["worker_thread_id"])
+    running_run, finished_run = str(uuid4()), str(uuid4())
+    client.created_runs += [
+        {"thread_id": running, "run_id": running_run, "status": "running"},
+        {"thread_id": finished, "run_id": finished_run, "status": "success"},
+    ]
+    client.statuses[COORDINATOR] = "busy"
+    await service.message_task_thread(
+        service.Actor(running, OWNER), message="Halfway", worker_thread_id=None, request_id="note"
+    )
+    answer = {"values": {"messages": [{"type": "ai", "content": "Reviewed"}]}}
+    await worker_finished(finished, finished_run, "success", answer)
+
+    await (await activity.CoordinatorActivity.of(COORDINATOR)).stop_workers()
+    # The interrupted run's completion lands after the stop, with the coordinator idle.
+    client.statuses[COORDINATOR] = "idle"
+    await worker_finished(running, running_run, "interrupted", {})
+
+    owed = await TaskMessage.owed(COORDINATOR)
+    assert [message.delivery_id for message in owed] == [
+        finished_delivery_id(finished, finished_run)
+    ]
+    assert not [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
+    current = await activity.CoordinatorActivity.of(COORDINATOR)
+    assert {worker.worker_thread_id: worker.state for worker in current.workers} == {
+        running: "cancelled",
+        finished: "done",
+    }
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_task(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.agent_api.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
+    from openswe.tasks.events import worker_finished
+
+    actor = service.Actor(COORDINATOR, OWNER)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    worker, replayed, stranger = str(uuid4()), str(uuid4()), str(uuid4())
+    launched = {
+        worker: COORDINATOR,
+        replayed: COORDINATOR,
+        stranger: str(uuid4()),
+    }
+
+    async def mda_thread(thread_id: str) -> dict[str, object] | None:
+        parent = launched.get(thread_id)
+        return {"metadata": {"subagent_name": "general-purpose", "parent_thread_id": parent}}
+
+    runtimes = MagicMock()
+    runtimes.mda.get = AsyncMock(side_effect=mda_thread)
+    monkeypatch.setattr(service, "RUNTIMES", runtimes)
+
+    with pytest.raises(ValueError, match="instructions"):
+        await service.authorize_async_worker(actor, "blank", "  ")
+    assert await service.authorize_async_worker(actor, "launch", "Implement login fix") is None
+    first = await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+    # The coordinator's registration and the worker's own adoption race; both land once.
+    again = await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+    assert again == first
+    # A replayed launch reuses its worker instead of launching another.
+    assert await service.authorize_async_worker(actor, "launch", "Implement login fix") == first
+    with pytest.raises(store.WorkerAlreadyLaunchedError) as replay:
+        await service.register_async_worker(actor, "launch", replayed, "Implement login fix")
+    assert service.worker_reply(replay.value.task, replay.value.delegation) == first
+    with pytest.raises(PermissionError, match="not an async worker this coordinator launched"):
+        await service.register_async_worker(actor, "elsewhere", stranger, "Implement")
+
+    context = await store.TaskMembership.context_for_thread(worker)
+    assert context is not None
+    assert str(context.task.id) == first["task_id"]
+    assert context.membership.role == "worker"
+    assert len(await store.TaskDelegation.for_task(context.task.id)) == 1
+    metadata = client.metadata[worker]
+    assert metadata["sandbox_host_thread_id"] == COORDINATOR
+    assert metadata["sandbox_id"] == "shared-sandbox"
+    assert metadata["owner_login"] == OWNER
+    assert metadata[MDA_GRAPH_METADATA_KEY] == MDA_WORKER_GRAPH_ID
+    # MDA started the assignment; Open SWE queued nothing to start it again.
+    assert client.created_runs == []
+    assert await TaskMessage.owed(worker) == []
+
+    # A worker launches no workers of its own.
+    with pytest.raises(PermissionError, match="coordinator"):
+        await service.authorize_async_worker(service.Actor(worker, OWNER), "nested", "Help")
+
+    client.statuses[COORDINATOR] = "busy"
+    payload = {"values": {"messages": [{"type": "ai", "content": "Fixed login."}]}}
+    assert await worker_finished(worker, "run-1", "success", payload)
+    # Settled twice (two replicas, or a retried settle): reported once.
+    assert await worker_finished(worker, "run-1", "success", payload)
+    (report,) = await TaskMessage.owed(COORDINATOR)
+    assert "Fixed login." in report.content
+    # A busy coordinator picks the report up before its next model call; an idle one wakes.
+    assert not [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
+    client.statuses[COORDINATOR] = "idle"
+    assert await TaskMessage.deliver(COORDINATOR, "enqueue")
+    (wake,) = [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
+    assert [m["id"] for m in wake["input"]["messages"] if "id" in m] == [f"event-match:{report.id}"]
+
+    sent = await service.message_task_thread(
+        actor, message="Check logout too", worker_thread_id=worker, request_id="follow-up"
+    )
+    assert sent == {"success": True, "recipient_thread_id": worker}
+    (follow_up,) = [run for run in client.created_runs if run["thread_id"] == worker]
+
+    cancelled = await service.control_worker(actor, worker_thread_id=worker, action="cancel")
+    assert cancelled["cancellation_requested"] is True
+    assert follow_up["status"] == "interrupted"
+    with pytest.raises(ValueError, match="cancelled"):
+        await service.message_task_thread(
+            actor, message="One more thing", worker_thread_id=worker, request_id="late"
+        )
+    assert await TaskMessage.deliver(worker, "enqueue") is False
+    with pytest.raises(ValueError, match="cancelled"):
+        await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_concurrent_registrations_of_one_launch_make_one_worker(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A replayed launch started a second thread before the first registered; their
+    # registrations race in different backend processes.
+    actor = service.Actor(COORDINATOR, OWNER)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    threads = [str(uuid4()), str(uuid4())]
+    runtimes = MagicMock()
+    runtimes.mda.get = AsyncMock(
+        return_value={
+            "metadata": {"subagent_name": "general-purpose", "parent_thread_id": COORDINATOR}
+        }
+    )
+    monkeypatch.setattr(service, "RUNTIMES", runtimes)
+
+    results = await asyncio.gather(
+        *(
+            service.register_async_worker(actor, "launch", thread, "Implement login fix")
+            for thread in threads
+        ),
+        return_exceptions=True,
+    )
+
+    registered = [result for result in results if isinstance(result, dict)]
+    assert len(registered) == 1
+    assert [type(result) for result in results if isinstance(result, BaseException)] == [
+        store.WorkerAlreadyLaunchedError
+    ]
+    context = await store.TaskMembership.context_for_thread(COORDINATOR)
+    assert context is not None
+    (delegation,) = await store.TaskDelegation.for_task(context.task.id)
+    assert delegation.worker_thread_id == registered[0]["worker_thread_id"]
+    replayed = await service.authorize_async_worker(actor, "launch", "Implement login fix")
+    assert replayed == registered[0]

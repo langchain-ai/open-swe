@@ -53,6 +53,8 @@ export interface TranscriptUsage {
   input_tokens?: number | null
   output_tokens?: number | null
   total_tokens?: number | null
+  model?: string | null
+  invocation_id?: string | null
 }
 
 /** A subagent's position in the run tree: `[]` at the root, `[task_tool_call_id, …]` below it. */
@@ -76,6 +78,7 @@ export interface TranscriptTurnRow {
 export interface TranscriptSender {
   login: string
   kind: string
+  display_name?: string | null
 }
 
 export interface TranscriptMessageRow {

@@ -17,6 +17,7 @@ from openswe.webhooks import event_log
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
+from tests.support.slack_api import SlackAPI
 
 _THREAD = "thread-1"
 
@@ -140,7 +141,73 @@ def _check_suite(
 
 
 async def _owed() -> list[EventMatch]:
-    return await EventMatch.owed(_THREAD, [])
+    return await EventMatch.owed(_THREAD)
+
+
+@pytest.mark.parametrize("stale", [False, True])
+async def test_bot_subscription_refreshes_missing_or_stale_channel_metadata(
+    registry_db: None,
+    slack_api: SlackAPI,
+    delivered: list[tuple[str, MultitaskStrategy]],
+    stale: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    workspace_id = uuid4()
+    channel: dict[str, JsonValue] = {
+        "id": "CPUBLIC",
+        "is_channel": True,
+        "is_member": True,
+        "is_private": False,
+        "is_im": False,
+        "is_mpim": False,
+    }
+    await SlackChannel.save_all(channel if stale else {"id": "CPUBLIC"})
+    async with transaction() as conn:
+        await conn.execute(
+            text("INSERT INTO workspace (id, slug, name) VALUES (:id, 'alerts', 'Alerts')"),
+            {"id": workspace_id},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO workspace_slack_channel (channel_id, workspace_id) "
+                "VALUES ('CPUBLIC', :id)"
+            ),
+            {"id": workspace_id},
+        )
+        await conn.execute(
+            text("UPDATE slack_channel SET fetched_at = :fetched WHERE id = 'CPUBLIC'"),
+            {
+                "fetched": datetime.now(UTC) - timedelta(minutes=6)
+                if stale
+                else datetime.fromtimestamp(0, UTC)
+            },
+        )
+    await _subscribe({"workspace": workspace_id}, sources=["slack"], event_types=["message"])
+    slack_api.respond({"ok": True, "channel": channel})
+    payload = {
+        "event": {
+            "type": "message",
+            "subtype": "bot_message",
+            "bot_id": "BSTATUS",
+            "user": "UBOT",
+            "text": "build failed",
+            "channel": "CPUBLIC",
+        }
+    }
+    assert await EventLog.record(
+        _request("/webhooks/slack"),
+        json.dumps(payload).encode(),
+        "slack",
+        event_type="message",
+        delivery_id="bot-alert",
+        refs=EventRefs(slack_channel_id="CPUBLIC"),
+    )
+    (owed,) = await _owed()
+    assert owed.delivery_id == "bot-alert"
+    assert "build failed" in owed.content
+    assert delivered == [(_THREAD, "enqueue")]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
 
 async def test_payload_match_filters_ci_results_on_the_subscribed_pull_request(
@@ -177,7 +244,7 @@ async def test_a_one_shot_matches_once_and_ends(
     assert delivered == [(_THREAD, "enqueue")]
 
 
-async def test_matches_are_owed_oldest_first_until_their_messages_are_in_state(
+async def test_matches_are_owed_oldest_first_until_a_run_receives_them(
     workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
 ) -> None:
     await _subscribe(workspace, event_types=["check_suite"])
@@ -188,8 +255,8 @@ async def test_matches_are_owed_oldest_first_until_their_messages_are_in_state(
 
     owed = await _owed()
     assert [match.delivery_id for match in owed] == ["d-1", "d-2", "d-3"]
-    first_two = EventMatch.messages(owed[:2])
-    assert [match.delivery_id for match in await EventMatch.owed(_THREAD, first_two)] == ["d-3"]
+    await EventMatch.received(_THREAD, [match.id for match in owed[:2]])
+    assert [match.delivery_id for match in await EventMatch.owed(_THREAD)] == ["d-3"]
     (after,) = await EventSubscription.for_thread(_THREAD)
     assert (after.trigger_count, after.last_triggered_at) == (3, before.last_triggered_at)
 
@@ -239,3 +306,42 @@ async def test_slack_matches_joined_channels_but_not_dms(
             text("SELECT delivery_id FROM event_log WHERE source = 'slack'")
         )
         assert list(deliveries) == ["s-private", "s-public", "s-own"]
+
+
+async def test_workspace_events_reach_only_admin_threads_that_name_the_source(
+    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+) -> None:
+    await _subscribe(workspace, event_types=["refresh"])
+    await _subscribe(workspace, sources=["workspace"], event_types=["refresh"])
+    await EventSubscription(
+        thread_id="admin-thread",
+        workspace_id=workspace["workspace"],
+        multitask_strategy="enqueue",
+        run_config={"thread_id": "admin-thread", "admin_thread": True},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        sources=["workspace"],
+        event_types=["refresh"],
+    ).create()
+
+    await EventLog.append(
+        "workspace",
+        {
+            "workspace_slug": "acme",
+            "error": "TimeoutError with opaque-error-credential",
+            "log_tail": "Updating repo with opaque-log-credential",
+        },
+        event_type="refresh.failed",
+        delivery_id="w-1",
+        refs=EventRefs(workspace_id=workspace["workspace"]),
+    )
+
+    assert await _owed() == []
+    (match,) = await EventMatch.owed("admin-thread")
+    assert "refresh.failed" in match.content
+    assert "opaque-error-credential" not in match.content
+    assert "opaque-log-credential" not in match.content
+    since = datetime.now(UTC) - timedelta(hours=1)
+    assert await EventLog.kinds(since) == []
+    assert [(kind.source, kind.event_type) for kind in await EventLog.kinds(since, admin=True)] == [
+        ("workspace", "refresh.failed")
+    ]

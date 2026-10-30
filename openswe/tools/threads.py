@@ -7,40 +7,48 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
+from xml.etree import ElementTree
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from openswe.invocation import resolve_invocation_id
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.run_config import RunConfig
+from openswe.schedules import store as schedules
+from openswe.slack.allowed_bots import authorized_slack_bot_run
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.records import lookup_slack_link_thread_id
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     get_dashboard_thread,
     resolve_dashboard_thread,
-    send_dashboard_message,
 )
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
-from openswe.threads.runs import ThreadMessageBody, start_dashboard_thread
+from openswe.threads.runs import start_dashboard_thread
+from openswe.threads.store import THREADS
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from openswe.tools.sandbox_preference import sandbox_only
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
+from openswe.utils.dashboard_handoff import RELAY_RUN_ID_KEY, RELAYED_FROM_KEY
 from openswe.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -82,6 +90,13 @@ _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
 _MAX_PLAN_CHARS = 500_000
+_NO_ACTOR = "No verified triggering user is available"
+_NO_READER = f"Thread lookup was unavailable. {_NO_ACTOR}"
+_NO_WRITER = (
+    f"{_NO_ACTOR}. Automation runs can read threads with list_threads and get_thread "
+    "but cannot message, manage, or start them; to send a result to the automation's "
+    "creator, DM them with slack_post_message."
+)
 
 
 @dataclass(frozen=True)
@@ -89,6 +104,8 @@ class _Actor:
     login: str
     email: str | None
     name: str
+    # An automation reading threads on its own run; it has no participant threads.
+    automation: bool = False
 
     @property
     def session(self) -> dict[str, Any]:
@@ -96,7 +113,7 @@ class _Actor:
 
     @property
     def admin(self) -> bool:
-        return is_admin(self.email, login=self.login)
+        return not self.automation and is_admin(self.email, login=self.login)
 
 
 def _config() -> dict[str, Any]:
@@ -118,15 +135,37 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         login = await User.login_for_email(email)
     if not login:
         return None
-    current_login = _latest_state_github_login(state)
-    if current_login and current_login.lower() != login.lower():
-        login = current_login
-        email = None
     try:
+        current_login = await _latest_state_github_login(state)
+        if current_login and current_login.lower() != login.lower():
+            login = current_login
+            email = None
         await enforce_github_login_gate(login)
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
+
+
+async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
+    """Who reads threads: the triggering user, else the automation or allowed bot running this."""
+    if actor := await _actor(state):
+        return actor
+    cfg = RunConfig.parse(_config().get("configurable"))
+    if record := await schedules.authorized_schedule_run(cfg):
+        return _Actor(
+            login=f"system:schedule:{record['id']}",
+            email=None,
+            name=record.get("name") or "Automation",
+            automation=True,
+        )
+    if bot := await authorized_slack_bot_run(cfg):
+        return _Actor(
+            login=f"system:slack-bot:{bot.team_id}:{bot.bot_id}",
+            email=None,
+            name=bot.name,
+            automation=True,
+        )
+    return None
 
 
 async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
@@ -183,6 +222,38 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     return result
 
 
+async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
+    result = {key: item.get(key) for key in ("id", "status", "createdAt", "updatedAt", "title")}
+    result["webUrl"] = _web_link(item)
+    pr = item.get("pr")
+    result["pr"] = (
+        {key: pr.get(key) for key in ("url", "number", "state")}
+        if isinstance(pr, Mapping)
+        else None
+    )
+    messages = item.get("messages")
+    final_message = item.get("final_message")
+    outcome = (
+        final_message
+        if isinstance(final_message, str) and final_message
+        else _last_assistant_outcome(messages if isinstance(messages, list) else [])
+    )
+    thread_id = item.get("id")
+    if outcome is None and isinstance(thread_id, str):
+        thread_state = await THREADS.state(thread_id)
+        outcome = _last_assistant_outcome(_state_messages(thread_state))
+    result["final_message"] = outcome[:500] if outcome else None
+    return result
+
+
+def _last_assistant_outcome(messages: list[object]) -> str | None:
+    for message in reversed(messages):
+        if _message_kind(message) in {"ai", "assistant"} and not _value(message, "tool_calls"):
+            if text := _plain_message_text(_message_content(message)):
+                return text
+    return None
+
+
 def _exact_locator_filters(
     *,
     participant: str | None,
@@ -217,7 +288,7 @@ def _exact_locator_filters(
     return filters
 
 
-@sandbox_only
+@expose_mcp()
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -231,12 +302,13 @@ async def list_threads(
     scope: ThreadScope = "all",
     automation_id: str | None = None,
     admin_threads: bool | None = None,
+    summary_only: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
-    actor = await _actor(state)
+    actor = await _reader(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_READER)
     requested = (
         participant.strip() if isinstance(participant, str) and participant.strip() else None
     )
@@ -245,6 +317,7 @@ async def list_threads(
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
 
+    compact = summary_only if summary_only is not None else scope == "automation"
     normalized_query = query.strip() if isinstance(query, str) else ""
     exact_locator = (
         parse_langsmith_locator(normalized_query) is not None
@@ -279,9 +352,20 @@ async def list_threads(
             if isinstance(resolved_locator, dict):
                 return resolved_locator
             _, summary = resolved_locator
+            try:
+                item = (
+                    await _compact_list_item(summary)
+                    if compact
+                    else _list_item(summary, locator=normalized_query)
+                )
+            except Exception:
+                logger.exception(
+                    "Could not load thread outcome", extra={"thread_id": summary.get("id")}
+                )
+                return _failure("Could not list threads")
             return {
                 "success": True,
-                "items": [_list_item(summary, locator=normalized_query)],
+                "items": [item],
                 "limit": 1,
                 "offset": 0,
                 "has_more": False,
@@ -298,7 +382,8 @@ async def list_threads(
             email=actor.email,
             limit=limit,
             offset=offset,
-            include_all=all_users or (admin_threads is True and requested is None),
+            include_all=all_users
+            or (requested is None and (admin_threads is True or actor.automation)),
             resolved=resolved,
             viewed=viewed,
             source=source,
@@ -319,9 +404,16 @@ async def list_threads(
     items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
+    try:
+        results = [
+            await _compact_list_item(item) if compact else _list_item(item) for item in items
+        ]
+    except Exception:
+        logger.exception("Could not load thread outcomes")
+        return _failure("Could not list threads")
     return {
         "success": True,
-        "items": [_list_item(item) for item in items],
+        "items": results,
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),
@@ -409,12 +501,26 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
+def _last_assistant_message(state: object) -> dict[str, object] | None:
+    for message in reversed(_state_messages(state)):
+        if _message_kind(message) not in {"ai", "assistant"}:
+            continue
+        text = _plain_message_text(_message_content(message))
+        if text:
+            return {
+                "text": text[-_MAX_DETAIL_MESSAGE_CHARS:],
+                "truncated": len(text) > _MAX_DETAIL_MESSAGE_CHARS,
+                "timestamp": _message_timestamp(message),
+            }
+    return None
+
+
 def _transcript(state: Any) -> dict[str, Any]:
     messages = _state_messages(state)
     visible: list[dict[str, Any]] = []
     omitted = 0
     used_chars = 0
-    for message in messages:
+    for message in reversed(messages):
         kind = _message_kind(message)
         if kind not in {"human", "user", "ai", "assistant"}:
             omitted += 1
@@ -428,7 +534,7 @@ def _transcript(state: Any) -> dict[str, Any]:
             omitted += 1
             continue
         remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        returned_text = text[-min(_MAX_DETAIL_MESSAGE_CHARS, remaining) :]
         visible.append(
             {
                 "id": _message_id(message),
@@ -441,7 +547,7 @@ def _transcript(state: Any) -> dict[str, Any]:
         )
         used_chars += len(returned_text)
     return {
-        "messages": visible,
+        "messages": list(reversed(visible)),
         "message_count": len(messages),
         "returned_count": len(visible),
         "omitted_count": omitted,
@@ -463,7 +569,7 @@ def _state_summary(state: Any) -> dict[str, Any]:
     }
 
 
-def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
+async def _latest_state_github_login(state: Mapping[str, object] | None) -> str | None:
     messages = state.get("messages") if isinstance(state, Mapping) else None
     if not isinstance(messages, list):
         return None
@@ -476,7 +582,58 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
         sender_id = message_sender_id(content)
         if isinstance(sender_id, str) and sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
-            return login or None
+            if not login.isdigit():
+                return login or None
+            blocks = content if isinstance(content, list) else [content]
+            for block in blocks:
+                text = _value(block, "text") if isinstance(block, Mapping) else block
+                if not isinstance(text, str):
+                    continue
+                try:
+                    envelope = ElementTree.fromstring(text)
+                except ElementTree.ParseError:
+                    continue
+                if (
+                    envelope.tag == "input-message"
+                    and envelope.get("sender") == sender_id
+                    and envelope.get("surface") in {"web", "automation"}
+                ):
+                    return login
+            for context_message in reversed(messages):
+                context_content = _message_content(context_message)
+                if dynamic_context_hash(context_content) is None:
+                    continue
+                blocks = context_content if isinstance(context_content, list) else [context_content]
+                for block in blocks:
+                    text = _value(block, "text") if isinstance(block, Mapping) else block
+                    if not isinstance(text, str):
+                        continue
+                    try:
+                        context = ElementTree.fromstring(text)
+                    except ElementTree.ParseError:
+                        continue
+                    if (
+                        context.tag != "dynamic-context"
+                        or context.get("kind") != "person"
+                        or context.get("id") != sender_id
+                    ):
+                        continue
+                    for line in (context.text or "").splitlines():
+                        field, separator, value = line.partition(":")
+                        if field == "github_login" and separator and value.strip():
+                            return value.strip()
+            try:
+                user = await User.for_identity("github", login)
+            except Exception as exc:
+                logger.warning(
+                    "Could not resolve GitHub sender",
+                    extra={"sender_id": sender_id},
+                    exc_info=True,
+                )
+                raise HTTPException(403, _NO_ACTOR) from exc
+            if user is None or not user.github_login:
+                raise HTTPException(403, _NO_ACTOR)
+            return user.github_login
         return None
     return None
 
@@ -545,14 +702,16 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     }
 
 
-async def _queued_message_count(client: Any, thread_id: str) -> int:
+async def _queued_message_count(thread_id: str) -> int:
     try:
-        item = await client.store.get_item(("queue", thread_id), "pending_messages")
+        return len(await QueuedMessage.for_thread(thread_id))
     except Exception:
+        logger.warning(
+            "Could not count queued messages",
+            exc_info=True,
+            extra={"thread_id": thread_id},
+        )
         return 0
-    value = _value(item, "value")
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    return len(messages) if isinstance(messages, list) else 0
 
 
 def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) -> dict[str, Any]:
@@ -565,6 +724,7 @@ def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) ->
             "author": comment.get("author"),
             "author_login": comment.get("author_login"),
             "body": str(comment.get("body") or "")[:_MAX_DETAIL_MESSAGE_CHARS],
+            "parent_id": comment.get("parent_id"),
             "anchor": comment.get("anchor") if isinstance(comment.get("anchor"), Mapping) else None,
             "created_at": comment.get("created_at"),
         }
@@ -615,6 +775,10 @@ def _looks_uuid(value: str) -> bool:
 
 
 async def _private_thread_context(actor: _Actor) -> bool:
+    if actor.automation:
+        return False
+    if RunConfig.parse(_config().get("configurable")).mcp_caller:
+        return True
     thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         return False
@@ -627,7 +791,12 @@ async def _private_thread_context(actor: _Actor) -> bool:
 
 
 async def _authorized_locator(
-    locator: str, actor: _Actor, *, admin_override: bool = False
+    locator: str,
+    actor: _Actor,
+    *,
+    admin_override: bool = False,
+    action: ThreadAction | None = None,
+    relayed_from: object = None,
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
@@ -637,13 +806,7 @@ async def _authorized_locator(
         if not thread_id:
             return _failure("Could not resolve LangSmith trace to an Open SWE thread")
     elif slack_locator:
-        client = langgraph_client()
-        thread_id = await lookup_slack_thread_id(client, *slack_locator) or ""
-        if not thread_id:
-            thread_id = (
-                await lookup_slack_thread_id(client, slack_locator[0], CODE_CHANNEL_SESSION_TS)
-                or ""
-            )
+        thread_id = await lookup_slack_link_thread_id(locator) or ""
         if not thread_id:
             return _failure("Could not resolve Slack link to an Open SWE thread")
     if not thread_id:
@@ -676,7 +839,15 @@ async def _authorized_locator(
         and not admin_override
         and not await _private_thread_context(actor)
     ):
-        raise HTTPException(404, "thread not found")
+        if not (
+            action == "send_message"
+            and thread_id == relayed_from
+            and thread_is_owner({"owner_login": summary.get("ownerLogin")}, actor.login)
+        ):
+            return _failure(
+                "this private thread can only be reached from its owner's private conversation",
+                status_code=403,
+            )
     return thread_id, summary
 
 
@@ -730,15 +901,15 @@ def _available_actions(
     return actions
 
 
-@sandbox_only
+@expose_mcp()
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Implement the `get_thread` tool."""
-    actor = await _actor(state)
+    """Inspect a thread, including last_assistant_message (text tail, truncated, timestamp) or None."""
+    actor = await _reader(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_READER)
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
@@ -753,7 +924,7 @@ async def get_thread(
             plan_content_task = tasks.create_task(get_plan_content(thread_id))
             plan_comments_task = tasks.create_task(list_plan_comments(thread_id))
             approvals_task = tasks.create_task(get_workflow_push_approvals(thread_id))
-            queued_count_task = tasks.create_task(_queued_message_count(client, thread_id))
+            queued_count_task = tasks.create_task(_queued_message_count(thread_id))
             # Fetched separately from `runs_task` (bounded to the recent-history
             # window): a pending run enqueued long ago can fall outside that
             # window while a busy thread accumulates newer completed runs.
@@ -767,8 +938,8 @@ async def get_thread(
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
         queued_count = queued_count_task.result()
-        # `queued_count` only sees the legacy in-run injection queue (Slack
-        # context, the `send_dashboard_message` tool). A composer follow-up
+        # `queued_count` only sees the in-run injection queue (Slack context,
+        # steered follow-ups). A composer follow-up
         # enqueued via the server-backed queue adapter is a genuine
         # LangGraph run instead — count it too.
         queued_count += len(pending_runs_task.result())
@@ -807,6 +978,7 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "last_assistant_message": _last_assistant_message(thread_state),
         "transcript": _transcript(thread_state),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
@@ -816,7 +988,9 @@ async def get_thread(
         "links": links,
         "langsmith": _langsmith_identifiers(summary.get("traceUrl"), locator),
         "slack": slack_locator and _slack_identifiers(locator),
-        "available_actions": _available_actions(
+        "available_actions": []
+        if actor.automation
+        else _available_actions(
             admin=actor.admin,
             admin_thread=summary.get("adminThread") is True,
             running=running,
@@ -853,20 +1027,9 @@ async def _send_message(
     model_id: str | None,
     effort: str | None,
 ) -> dict[str, Any]:
-    body = ThreadMessageBody(
-        content=message,
-        model_id=model_id,
-        effort=effort,
-    )
-    try:
-        queued_summary = await send_dashboard_message(
-            thread_id, actor.login, body, email=actor.email
-        )
-        return {"success": True, "mode": "queued", "thread": _list_item(queued_summary)}
-    except HTTPException as exc:
-        if exc.status_code != 409:
-            raise
-
+    # The dashboard's own send: a busy thread gets the message steered into its
+    # open turn or queued as a follow-up run, both shown on the transcript at once.
+    # Marked as relayed so it never moves the recipient's conversation to Web.
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -878,28 +1041,40 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
+    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
+        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
     )
     try:
-        payload = json.loads(content) if content else None
-    except json.JSONDecodeError:
-        payload = None
+        reply = _CommandReply.model_validate_json(content or b"{}")
+    except ValidationError:
+        reply = _CommandReply()
     if status_code not in {200, 202, 204}:
-        detail = payload.get("detail") if isinstance(payload, Mapping) else None
-        return _failure(
-            detail if isinstance(detail, str) else "Could not start thread run",
-            status_code=status_code,
-        )
-    run_id = payload.get("run_id") if isinstance(payload, Mapping) else None
-    return {
-        "success": True,
-        "mode": "started",
-        "run_id": run_id if isinstance(run_id, str) else None,
-    }
+        return _failure(reply.detail or "Could not start thread run", status_code=status_code)
+    result = reply.result
+    mode = "steered" if result.steered else "queued" if result.queued else "started"
+    return {"success": True, "mode": mode, "run_id": result.run_id}
+
+
+class _CommandResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str | None = None
+    queued: bool = False
+    steered: bool = False
+
+
+class _CommandReply(BaseModel):
+    """The commands proxy's reply to ``run.start``: a start, a steer, or a queued follow-up."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    result: _CommandResult = Field(default_factory=_CommandResult)
+    detail: str | None = None
 
 
 def _required(value: str | None, name: str, action: str) -> dict[str, Any] | None:
@@ -950,6 +1125,8 @@ def _unexpected_action_arguments(
     return sorted(provided - allowed)
 
 
+@expose_mcp()
+@audit_tool()
 async def manage_thread(
     thread_id: str,
     action: ThreadAction,
@@ -966,7 +1143,7 @@ async def manage_thread(
     """Implement the `manage_thread` tool."""
     actor = await _actor(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_WRITER)
     thread_id = thread_id.strip()
     if not thread_id:
         return _failure("thread_id is required")
@@ -992,10 +1169,23 @@ async def manage_thread(
         model_id, effort = validated
 
     try:
-        # Private threads are only reachable from the owner's private context.
-        # admin_cancel is the exception, so its response must not leak details.
         admin_override = action == "admin_cancel" and actor.admin
-        resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
+        configurable = as_json_object(_config().get("configurable"))
+        relayed_from = configurable.get(RELAYED_FROM_KEY)
+        # Queued provenance is checkpointed, so only the run its inbox read it for may use it.
+        if (
+            state
+            and configurable.get("run_id")
+            and state.get(RELAY_RUN_ID_KEY) == configurable["run_id"]
+        ):
+            relayed_from = state.get(RELAYED_FROM_KEY)
+        resolved = await _authorized_locator(
+            thread_id,
+            actor,
+            admin_override=admin_override,
+            action=action,
+            relayed_from=relayed_from,
+        )
         if isinstance(resolved, dict):
             return resolved
         thread_id, summary = resolved
@@ -1086,6 +1276,8 @@ async def manage_thread(
         return _failure("Thread action failed")
 
 
+@expose_mcp()
+@audit_tool()
 async def start_thread(
     title: str,
     instructions: str,
@@ -1096,7 +1288,7 @@ async def start_thread(
     """Implement the `start_thread` tool."""
     actor = await _actor(state)
     if actor is None:
-        return _failure("No verified triggering user is available")
+        return _failure(_NO_WRITER)
     title = title.strip()
     instructions = instructions.strip()
     if not title:

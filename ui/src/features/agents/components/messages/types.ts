@@ -3,6 +3,7 @@ import type {
   LocalRepo,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface ApprovalCallbacks {
   onApprove?: (approvalRequestId: string) => void
@@ -19,6 +20,8 @@ export interface LoadEarlier {
 
 export type MessagesScrollControl = {
   scrollToBottom: () => void
+  /** Hold a message the user is sending at the top while the reply fills in. */
+  pinMessage: (messageId: string) => void
 }
 
 export interface MessagesProps extends ApprovalCallbacks {
@@ -28,14 +31,16 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean
+  /** Cost of each finished run, by invocation id, shown beside its turn's timestamp. */
+  runCosts?: Record<string, number>
   emptyState?: React.ReactNode
   footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
-  /** Send a queued message now instead of waiting for the run to end. */
-  onSteerQueuedMessage?: (id: string) => void
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
+  /** Offers Reply on selected transcript text, attaching the reply to the next message. */
+  onReply?: (reply: PassageReply) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean

@@ -1,18 +1,14 @@
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Input } from "@langchain/macaw-components/Input"
+import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { RepoSelector } from "./RepoSelector"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 
 type DraftReviewChoice = "team_default" | "always_on" | "always_off"
 
@@ -41,28 +37,50 @@ function TextSettingRow({
   description: string
   placeholder: string
 }) {
-  const { profile, ready, save } = useProfileSettings()
+  const { profile, ready } = useProfileSettings()
   return (
     <SettingsRow
       label={label}
       description={description}
       htmlFor={field}
       control={
-        <Input
+        <TextSettingInput
           // Remount once the profile loads so the field shows the saved value.
           key={`${ready}`}
-          id={field}
-          className="w-56"
+          field={field}
+          saved={profile?.[field] ?? null}
           placeholder={placeholder}
-          defaultValue={profile?.[field] ?? ""}
-          disabled={!ready}
-          onBlur={(event) => {
-            const value = event.target.value.trim() || null
-            if (value !== (profile?.[field] ?? null))
-              save({ [field]: value } satisfies Partial<ProfileUpdate>)
-          }}
         />
       }
+    />
+  )
+}
+
+function TextSettingInput({
+  field,
+  saved,
+  placeholder,
+}: {
+  field: TextField
+  saved: string | null
+  placeholder: string
+}) {
+  const { ready, save } = useProfileSettings()
+  const [draft, setDraft] = useState(saved ?? "")
+  return (
+    <Input
+      id={field}
+      size="md"
+      className="w-56"
+      placeholder={placeholder}
+      value={draft}
+      onChange={setDraft}
+      disabled={!ready}
+      onBlur={() => {
+        const value = draft.trim() || null
+        if (value !== saved)
+          save({ [field]: value } satisfies Partial<ProfileUpdate>)
+      }}
     />
   )
 }
@@ -70,6 +88,10 @@ function TextSettingRow({
 export function GitSettings() {
   const { profile, ready, save } = useProfileSettings()
   const repos = useRepos()
+  const workspaceOptions = useWorkspaceOptions()
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
+    null
+  )
   // Which team default applies depends on the workspace a pull request's
   // repository belongs to; the user's own workspace is the one answer this
   // page can give, and it is where their new threads run.
@@ -79,6 +101,15 @@ export function GitSettings() {
   })
   const workspace =
     preferences.data?.default_workspace ?? DEFAULT_WORKSPACE_SLUG
+  const repositoryWorkspace =
+    workspaceOverride ??
+    workspaceOptions.data?.workspaces.find((item) => item.slug === workspace)
+      ?.slug ??
+    workspaceOptions.data?.default_slug ??
+    workspace
+  const inheritedRepository = profile?.default_repo
+    ? `Inherit global (${profile.default_repo})`
+    : "Inherit global (no default)"
   const workspaceSettings = useQuery({
     queryKey: ["workspaceSettings", workspace],
     queryFn: () => api.getWorkspaceSettings(workspace),
@@ -104,8 +135,8 @@ export function GitSettings() {
         description="Where runs work when a request doesn't name a repository or branch."
       >
         <SettingsRow
-          label="Default repository"
-          description="Used when a request doesn't name a repository."
+          label="Default Repository"
+          description="Used unless you set a workspace-specific default or name a repository."
           control={
             <div className="w-56">
               <RepoSelector
@@ -115,8 +146,52 @@ export function GitSettings() {
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 disabled={!ready}
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
-                dropdownClassName="w-56"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
+              />
+            </div>
+          }
+        />
+        <SettingsRow
+          label="Workspace"
+          description="Choose a workspace to customize your default repository."
+          control={
+            <Select
+              aria-label="Repository workspace"
+              size="md"
+              value={repositoryWorkspace}
+              options={
+                workspaceOptions.data?.workspaces.map((item) => ({
+                  value: item.slug,
+                  label: item.name,
+                })) ?? []
+              }
+              onChange={(slug) => slug && setWorkspaceOverride(slug)}
+              disabled={!ready || !workspaceOptions.data}
+              triggerClassName="w-56"
+            />
+          }
+        />
+        <SettingsRow
+          label="Workspace Default Repository"
+          description="Overrides your global default only in the selected workspace."
+          control={
+            <div className="w-56">
+              <RepoSelector
+                repos={repos.data?.repositories ?? []}
+                selectedRepo={
+                  profile?.workspace_default_repos?.[repositoryWorkspace] ??
+                  null
+                }
+                placeholder={inheritedRepository}
+                emptySelectionLabel={inheritedRepository}
+                onRepoChange={(repo) => {
+                  const defaults = { ...profile?.workspace_default_repos }
+                  if (repo) defaults[repositoryWorkspace] = repo
+                  else delete defaults[repositoryWorkspace]
+                  save({ workspace_default_repos: defaults })
+                }}
+                disabled={!ready || !workspaceOptions.data}
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
               />
             </div>
           }
@@ -136,7 +211,7 @@ export function GitSettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="Pull requests"
+        title="Pull Requests"
         description="How pull requests you trigger are opened and reviewed."
       >
         <ProfileSwitchRow
@@ -154,24 +229,13 @@ export function GitSettings() {
           description="Whether Open SWE Review runs on draft pull requests you open."
           control={
             <Select
-              items={draftReviewItems}
+              aria-label="Review my drafts"
+              options={draftReviewItems}
               value={toChoice(profile?.review_draft_prs)}
-              onValueChange={(v) =>
-                save({ review_draft_prs: CHOICES[v as DraftReviewChoice] })
-              }
+              onChange={(v) => v && save({ review_draft_prs: CHOICES[v] })}
               disabled={!ready}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {draftReviewItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-48"
+            />
           }
         />
       </SettingsSection>

@@ -34,14 +34,14 @@ from openswe.transcript.events import (
     TurnCompleted,
     TurnStarted,
 )
-from tests.conftest import FakeStore
 
 THREAD = str(uuid.uuid4())
 RUN = str(uuid.uuid4())
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_api_flag_blocks_requests_and_can_be_revoked(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     caller = SandboxCaller("host-thread", "sandbox-a", {"workspace": "experiment"})
     monkeypatch.setattr(SandboxCaller, "authenticate", AsyncMock(return_value=caller))

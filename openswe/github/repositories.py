@@ -19,8 +19,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
-from openswe.review.styles import normalize_repo_full_name
+from openswe.github.http import GitHubAppUnavailable, GitHubClient
+from openswe.github.repo_names import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class Repository(Base):
     # installation's listing last looked for this name, whether or not it matched.
     github_id: Mapped[int | None] = mapped_column(BigInteger, default=None, init=False)
     github_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
+    # Automatic review is opt-in; ``None`` means nobody has turned it on or off yet.
+    review_enabled: Mapped[bool | None] = mapped_column(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.full_name = normalize_repo_full_name(self.full_name)
@@ -52,28 +54,38 @@ class Repository(Base):
             )
 
     @classmethod
-    async def resolve_default_branch(cls, full_name: str, *, token: str | None) -> str:
+    async def ensure_id(cls, session: AsyncSession, full_name: str) -> UUID:
+        """The row's id, inserting the row without touching its activity when there is none."""
+        row = cls(full_name=full_name)
+        upsert = insert(cls).values(id=row.id, key=row.key, full_name=row.full_name)
+        result = await session.execute(
+            upsert.on_conflict_do_update(
+                index_elements=[cls.key], set_={"key": upsert.excluded.key}
+            ).returning(cls.id)
+        )
+        return result.scalar_one()
+
+    @classmethod
+    async def resolve_default_branch(cls, owner: str, name: str) -> str:
+        """The stored default branch, else the one the App reads from GitHub; ``""`` if neither."""
+        full_name = f"{owner}/{name}"
         repository = await cls.get(full_name)
         if repository and repository.default_branch:
             return repository.default_branch
-        if token is None:
-            return ""
         try:
-            async with github_client(token=token) as client:
-                response = await github_request(
-                    client, "GET", f"{GITHUB_API_BASE}/repos/{full_name}"
-                )
-                response.raise_for_status()
-                value = response.json().get("default_branch")
-                if isinstance(value, str) and value:
-                    await cls(full_name=full_name, default_branch=value).save()
-                    return value
-        except httpx2.HTTPError:
+            async with GitHubClient.as_app(owner, name) as github:
+                info = await github.repo(owner, name).info()
+        except GitHubAppUnavailable, httpx2.HTTPError, ValueError:
             logger.warning(
                 "Could not resolve repository default branch",
                 extra={"repo_full_name": full_name},
                 exc_info=True,
             )
+            return ""
+        value = info.get("default_branch")
+        if isinstance(value, str) and value:
+            await cls(full_name=full_name, default_branch=value).save()
+            return value
         return ""
 
     @classmethod

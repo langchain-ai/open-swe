@@ -1,29 +1,20 @@
-import { Fragment, useMemo, useState } from "react"
-import {
-  ArrowClockwiseIcon,
-  GlobeIcon,
-  HashIcon,
-  LockSimpleIcon,
-} from "@phosphor-icons/react"
+import { CheckIcon, GlobeRegularIcon } from "@langchain/macaw-components/icons"
+import { Button } from "@langchain/macaw-components/Button"
+import { SpinnerIcon } from "@langchain/macaw-components/Spinner"
+import { Typeahead } from "@langchain/macaw-components/Typeahead"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
+import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
+import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
+import { useState } from "react"
 
-import { Button } from "@/components/ui/button"
-
-import {
-  Combobox,
-  ComboboxChip,
-  ComboboxChips,
-  ComboboxChipsInput,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxValue,
-  useComboboxAnchor,
-} from "@/components/ui/combobox"
 import type { SlackChannelOption } from "@/lib/api"
 import {
   normalizeSlackChannelId,
+  rankSlackChannels,
+  rememberSlackChannels,
+  slackChannelMatches,
+  useRecentSlackChannels,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 
@@ -32,43 +23,41 @@ export function SlackChannelIcon({
 }: {
   channel: SlackChannelOption | undefined
 }) {
-  if (channel?.is_private) return <LockSimpleIcon />
-  if (channel?.is_ext_shared) return <GlobeIcon />
-  return <HashIcon />
-}
-
-/** Name or id match, ignoring a leading `#` the way Slack's switcher does. */
-export function slackChannelMatches(
-  channel: Pick<SlackChannelOption, "id" | "name">,
-  query: string
-): boolean {
-  const needle = query.trim().replace(/^#/, "").toLowerCase()
-  if (!needle) return true
+  const Icon = channel?.is_private
+    ? LockSimpleIcon
+    : channel?.is_ext_shared
+      ? GlobeRegularIcon
+      : HashIcon
   return (
-    channel.name.toLowerCase().includes(needle) ||
-    channel.id.toLowerCase().includes(needle)
+    <Icon className="shrink-0 text-icon-secondary" size={14} weight="regular" />
   )
 }
 
 export function SlackChannelRow({
   channel,
   id,
+  recent = false,
 }: {
   channel: SlackChannelOption | undefined
   id: string
+  /** Chosen recently in this browser. */
+  recent?: boolean
 }) {
   return (
     <>
       <SlackChannelIcon channel={channel} />
       <span className="min-w-0 flex-1 truncate">{channel?.name ?? id}</span>
+      {recent && (
+        <ClockCounterClockwiseIcon
+          aria-label="Recently used"
+          className="shrink-0 text-icon-secondary"
+          size={12}
+        />
+      )}
       {channel && !channel.is_member ? (
-        <span className="shrink-0 pr-5 text-muted-foreground">
-          bot not in channel
-        </span>
+        <span className="shrink-0 text-secondary">bot not in channel</span>
       ) : channel?.num_members != null ? (
-        <span className="shrink-0 pr-5 text-muted-foreground">
-          {channel.num_members}
-        </span>
+        <span className="shrink-0 text-secondary">{channel.num_members}</span>
       ) : null}
     </>
   )
@@ -77,8 +66,9 @@ export function SlackChannelRow({
 interface ChannelItems {
   items: Array<string>
   byId: Map<string, SlackChannelOption>
+  recent: Set<string>
   label: (id: string) => string
-  filter: (id: string, query: string) => boolean
+  filter: (ids: Array<string>, query: string) => Array<string>
   setQuery: (query: string) => void
   emptyMessage: string
   refresh: () => void
@@ -91,15 +81,13 @@ export function RefreshSlackChannels({
 }: Pick<ChannelItems, "refresh" | "isRefreshing">) {
   return (
     <Button
-      type="button"
-      variant="ghost"
-      size="sm"
+      color="secondary"
+      variant="plain"
+      size="xs"
       disabled={isRefreshing}
+      leftDecorator={isRefreshing ? SpinnerIcon : ArrowClockwiseIcon}
       onClick={() => refresh()}
     >
-      <ArrowClockwiseIcon
-        className={isRefreshing ? "animate-spin" : undefined}
-      />
       {isRefreshing ? "Refreshing channels…" : "Refresh channels"}
     </Button>
   )
@@ -110,47 +98,48 @@ function useChannelItems(
   eligible: ((channel: SlackChannelOption) => boolean) | undefined
 ): ChannelItems {
   const directory = useSlackChannelDirectory(true)
+  const recentIds = useRecentSlackChannels()
+  const recent = new Set(recentIds)
   const [query, setQuery] = useState("")
-  const byId = useMemo(
-    () =>
-      new Map(
-        (directory.data?.channels ?? []).map((channel) => [channel.id, channel])
-      ),
-    [directory.data]
-  )
+  const channels = directory.data?.channels ?? []
+  const byId = new Map(channels.map((channel) => [channel.id, channel]))
   const pasted = normalizeSlackChannelId(query)
-  const items = useMemo(() => {
-    const ids = (directory.data?.channels ?? [])
-      .filter((channel) => !eligible || eligible(channel))
-      .map((channel) => channel.id)
-    const known = new Set(ids)
-    for (const id of [...selected, ...(pasted ? [pasted] : [])]) {
-      if (!known.has(id)) {
-        known.add(id)
-        ids.push(id)
-      }
+  const items = rankSlackChannels(
+    channels.filter((channel) => !eligible || eligible(channel)),
+    "",
+    recentIds
+  ).map((channel) => channel.id)
+  const known = new Set(items)
+  for (const id of [...selected, ...(pasted ? [pasted] : [])]) {
+    if (!known.has(id)) {
+      known.add(id)
+      items.push(id)
     }
-    return ids
-  }, [directory.data, eligible, selected, pasted])
+  }
   const label = (id: string) => {
     const channel = byId.get(id)
     return channel ? `#${channel.name}` : id
   }
-  const filter = (id: string, text: string) =>
-    slackChannelMatches(byId.get(id) ?? { id, name: id }, text)
+  const filter = (ids: Array<string>, text: string) =>
+    ids.filter((id) =>
+      slackChannelMatches(byId.get(id) ?? { id, name: id }, text)
+    )
   return {
     items,
     byId,
+    recent,
     label,
     filter,
     setQuery,
     refresh: directory.refresh,
     isRefreshing: directory.isLoading || directory.isRefreshing,
-    emptyMessage: directory.isLoading
-      ? "Loading channels…"
-      : directory.isError
-        ? "Could not load channels from Slack. Paste a channel ID."
-        : "No channels match. Paste a channel ID to add one directly.",
+    emptyMessage:
+      directory.isLoading ||
+      (directory.isRefreshing && !directory.data?.channels.length)
+        ? "Loading channels…"
+        : directory.isError
+          ? "Could not load channels from Slack. Paste a channel ID."
+          : "No channels match. Paste a channel ID to add one directly.",
   }
 }
 
@@ -163,13 +152,54 @@ interface CommonProps {
   className?: string
 }
 
+function channelTypeaheadProps(
+  channels: ChannelItems,
+  { placeholder, disabled, className, ...props }: CommonProps
+) {
+  return {
+    options: channels.items,
+    placeholder,
+    disabled,
+    className,
+    "aria-label": props["aria-label"],
+    size: "md" as const,
+    emptyText: channels.emptyMessage,
+    getOptionLabel: channels.label,
+    onInputChange: channels.setQuery,
+    filterOptions: (
+      ids: Array<string>,
+      { inputValue }: { inputValue: string }
+    ) => channels.filter(ids, inputValue),
+    renderOption: (id: string, { selected }: { selected: boolean }) => (
+      <>
+        <SlackChannelRow
+          channel={channels.byId.get(id)}
+          id={id}
+          recent={channels.recent.has(id)}
+        />
+        <CheckIcon
+          aria-hidden
+          className={
+            selected ? "shrink-0 text-icon-brand" : "invisible shrink-0"
+          }
+          size={14}
+          weight="bold"
+        />
+      </>
+    ),
+    listFooter: (
+      <div className="mt-space-1 border-t border-subtle pt-space-1">
+        <RefreshSlackChannels {...channels} />
+      </div>
+    ),
+  }
+}
+
 export function SlackChannelCombobox({
   value,
   onValueChange,
   placeholder = "Search channels",
-  disabled,
   eligible,
-  className,
   ...props
 }: CommonProps & {
   value: string | null
@@ -177,37 +207,20 @@ export function SlackChannelCombobox({
 }) {
   const channels = useChannelItems(value ? [value] : [], eligible)
   return (
-    <Combobox<string>
-      items={channels.items}
+    <Typeahead<string>
+      {...channelTypeaheadProps(channels, { placeholder, ...props })}
+      // The input keeps showing the chosen channel; list everything until the user edits it.
+      filterOptions={(ids, { inputValue }) =>
+        value !== null && inputValue === channels.label(value)
+          ? ids
+          : channels.filter(ids, inputValue)
+      }
       value={value}
-      onValueChange={onValueChange}
-      onInputValueChange={channels.setQuery}
-      itemToStringLabel={channels.label}
-      filter={channels.filter}
-      autoHighlight
-      disabled={disabled}
-    >
-      <ComboboxInput
-        placeholder={placeholder}
-        aria-label={props["aria-label"]}
-        disabled={disabled}
-        showClear={value !== null}
-        className={className}
-      />
-      <ComboboxContent>
-        <ComboboxEmpty>{channels.emptyMessage}</ComboboxEmpty>
-        <ComboboxList>
-          {(id: string) => (
-            <ComboboxItem key={id} value={id}>
-              <SlackChannelRow channel={channels.byId.get(id)} id={id} />
-            </ComboboxItem>
-          )}
-        </ComboboxList>
-        <div className="border-t p-1">
-          <RefreshSlackChannels {...channels} />
-        </div>
-      </ComboboxContent>
-    </Combobox>
+      onChange={(next) => {
+        if (next) rememberSlackChannels([next])
+        onValueChange(next ?? null)
+      }}
+    />
   )
 }
 
@@ -215,57 +228,23 @@ export function SlackChannelMultiCombobox({
   value,
   onValueChange,
   placeholder = "Search channels",
-  disabled,
   eligible,
-  className,
   ...props
 }: CommonProps & {
   value: Array<string>
   onValueChange: (value: Array<string>) => void
 }) {
   const channels = useChannelItems(value, eligible)
-  const anchor = useComboboxAnchor()
   return (
-    <Combobox<string, true>
+    <Typeahead<string>
+      {...channelTypeaheadProps(channels, { placeholder, ...props })}
       multiple
-      items={channels.items}
+      disableCloseOnSelect
       value={value}
-      onValueChange={onValueChange}
-      onInputValueChange={channels.setQuery}
-      itemToStringLabel={channels.label}
-      filter={channels.filter}
-      autoHighlight
-      disabled={disabled}
-    >
-      <ComboboxChips ref={anchor} className={className}>
-        <ComboboxValue>
-          {(ids: Array<string>) => (
-            <Fragment>
-              {ids.map((id) => (
-                <ComboboxChip key={id}>{channels.label(id)}</ComboboxChip>
-              ))}
-              <ComboboxChipsInput
-                placeholder={ids.length === 0 ? placeholder : undefined}
-                aria-label={props["aria-label"]}
-                disabled={disabled}
-              />
-            </Fragment>
-          )}
-        </ComboboxValue>
-      </ComboboxChips>
-      <ComboboxContent anchor={anchor}>
-        <ComboboxEmpty>{channels.emptyMessage}</ComboboxEmpty>
-        <ComboboxList>
-          {(id: string) => (
-            <ComboboxItem key={id} value={id}>
-              <SlackChannelRow channel={channels.byId.get(id)} id={id} />
-            </ComboboxItem>
-          )}
-        </ComboboxList>
-        <div className="border-t p-1">
-          <RefreshSlackChannels {...channels} />
-        </div>
-      </ComboboxContent>
-    </Combobox>
+      onChange={(next) => {
+        rememberSlackChannels(next.filter((id) => !value.includes(id)))
+        onValueChange(next)
+      }}
+    />
   )
 }

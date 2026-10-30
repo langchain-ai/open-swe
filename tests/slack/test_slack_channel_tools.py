@@ -38,12 +38,32 @@ async def test_list_members_preserves_pagination_and_only_exposes_public_identit
     slack_api.respond({"ok": True, "channel": {"id": "C123", "is_private": True}})
     slack_api.respond({"ok": True, "members": ["U123"]})
     slack_api.respond(
-        {"ok": True, "user": {"profile": {"display_name": "Ada", "email": "private@example.com"}}}
+        {
+            "ok": True,
+            "user": {
+                "profile": {
+                    "display_name": "Ada",
+                    "email": "private@example.com",
+                    "status_text": "On vacation",
+                    "status_emoji": ":palm_tree:",
+                    "status_expiration": 2000000000,
+                }
+            },
+        }
     )
     assert await tools.slack_list_channel_members("C123", cursor="more") == {
         "success": True,
         "channel_id": "C123",
-        "members": [{"id": "U123", "name": "Ada", "github_login": "octocat"}],
+        "members": [
+            {
+                "id": "U123",
+                "name": "Ada",
+                "github_login": "octocat",
+                "status_text": "On vacation",
+                "status_emoji": ":palm_tree:",
+                "status_expiration": 2000000000,
+            }
+        ],
         "next_cursor": "",
     }
     assert slack_api.calls[3][1]["cursor"] == "more"
@@ -99,7 +119,16 @@ async def test_list_members_keeps_unknown_identity_when_profile_lookup_fails(
     assert result == {
         "success": True,
         "channel_id": "C123",
-        "members": [{"id": "U123", "name": "U123", "github_login": None}],
+        "members": [
+            {
+                "id": "U123",
+                "name": "U123",
+                "github_login": None,
+                "status_text": None,
+                "status_emoji": None,
+                "status_expiration": None,
+            }
+        ],
         "next_cursor": "",
     }
 
@@ -128,12 +157,13 @@ async def test_post_channel_message_requires_active_channel_membership(
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
 
 
-@pytest.mark.parametrize("source_channel", ["C123", "C456"])
+@pytest.mark.parametrize("source_channel", ["C123", "C456", ""])
 async def test_post_channel_message_finds_membership_after_empty_page(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, source_channel: str
 ) -> None:
     from openswe.slack.tools import channels
 
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
     monkeypatch.setattr(
         RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})
     )
@@ -144,17 +174,19 @@ async def test_post_channel_message_finds_membership_after_empty_page(
     slack_api.respond(
         {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
     )
-    if source_channel != "C123":
-        slack_api.respond({"ok": True, "permalink": "https://example.slack.com/archives/C456/p10"})
+    if source_channel:
+        slack_api.respond(
+            {"ok": True, "permalink": "https://example.slack.com/archives/source/p10"}
+        )
     slack_api.respond({"ok": True, "ts": "1700000000.000123"})
     result = await tools.slack_post_message("C123", "hello")
     assert result["success"] is True
     assert slack_api.calls[1][1]["cursor"] == "more"
     assert slack_api.calls[-1][0] == "chat.postMessage"
     blocks = slack_api.calls[-1][1]["blocks"]
-    assert ("https://example.slack.com/archives/C456/p10" in str(blocks)) is (
-        source_channel != "C123"
-    )
+    for payload in (str(blocks), slack_api.calls[-1][1]["text"]):
+        assert "https://openswe.example.com/agents/agent-thread" in payload
+        assert ("https://example.slack.com/archives/source/p10" in payload) is bool(source_channel)
 
 
 async def test_post_channel_message_stops_on_repeated_membership_cursor(
@@ -174,8 +206,15 @@ async def test_post_channel_message_stops_on_repeated_membership_cursor(
     [("ratelimited", 429, "rate_limited: 30"), ("not_in_channel", 200, "not_in_channel")],
 )
 async def test_post_channel_message_reports_slack_failure_without_retry(
-    slack_api: SlackAPI, member_run: None, error: str, status: int, expected: str
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, error: str, status: int, expected: str
 ) -> None:
+    from openswe.slack.tools import channels
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setattr(
+        RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})
+    )
+    monkeypatch.setattr(channels, "run_slack_location", AsyncMock(return_value=("", "")))
     slack_api.respond(
         {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
     )
@@ -183,3 +222,24 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
     result = await tools.slack_post_message("C123", "hello")
     assert result == {"success": False, "error": expected}
     assert len(slack_api.calls) == 2
+
+
+@pytest.mark.parametrize("thread_id", ["", "agent-thread"])
+async def test_post_channel_message_refuses_missing_origin_link(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, thread_id: str
+) -> None:
+    from openswe.slack.tools import channels
+
+    monkeypatch.setattr(
+        RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": thread_id})
+    )
+    monkeypatch.setattr(channels, "run_slack_location", AsyncMock(return_value=("", "")))
+    monkeypatch.setattr(channels, "origin_footer", AsyncMock(return_value=[]))
+    slack_api.respond(
+        {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
+    )
+    assert await tools.slack_post_message("C123", "hello") == {
+        "success": False,
+        "error": "origin_link_unavailable" if thread_id else "origin_thread_required",
+    }
+    assert [method for method, _ in slack_api.calls] == ["users.conversations"]

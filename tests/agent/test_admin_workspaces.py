@@ -9,10 +9,11 @@ from langgraph.graph.state import RunnableConfig
 
 from openswe import server
 from openswe.sandboxes import lifecycle
+from openswe.slack.channels import SlackChannel
 from openswe.tools import workspaces as env_tools
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
-from openswe.workspaces.store import Workspace
+from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate, WorkspaceUpdate
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
@@ -30,7 +31,7 @@ def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
     )
-    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
 
 
 # --- snapshot precedence ---
@@ -86,6 +87,12 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
         assert (await env_tools.list_workspaces())["ok"] is False
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
+        assert (await env_tools.snapshotctl("rebuild", "base"))["ok"] is False
+        assert (
+            await env_tools.configure_workspace(
+                "base", WorkspaceUpdate(kitchen_channel_ids=["C0NEW"])
+            )
+        )["ok"] is False
 
 
 # --- publish: capture this sandbox, then record ---
@@ -215,7 +222,7 @@ async def test_publishing_over_an_existing_workspace_retires_its_old_image(
         result = await env_tools.publish_workspace("base", "prompt")
 
     assert seams.calls == ["capture", "write"]
-    assert isinstance(seams.definition, env_tools.store.WorkspaceUpdate)
+    assert isinstance(seams.definition, WorkspaceUpdate)
     # The old image goes only after the record points at the new one.
     seams.retire.assert_awaited_once_with("base", "snap-old", "snap-new")
     assert result["created"] is False
@@ -240,7 +247,7 @@ async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_refresh_start_refuses_while_one_is_running(
+async def test_rebuild_refuses_while_one_is_running(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
@@ -262,11 +269,58 @@ async def test_refresh_start_refuses_while_one_is_running(
         ),
         patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
-        result = await env_tools.refresh_workspace_start("base")
+        result = await env_tools.snapshotctl("rebuild", "base")
 
-    assert result["status"] == "error"
+    assert result["ok"] is False
     assert result["task_id"] == "ws-run-1"
     start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_reads_need_a_private_admin_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Logs and audit history stay out of shared threads; writes still reach the store."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    shared = {"metadata": {"visibility": "public", "owner_type": "user", "admin_thread": True}}
+    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=shared)))
+    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
+    get = AsyncMock(return_value=_READY)
+    with (
+        patch(
+            "openswe.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
+        patch.object(env_tools.store.WORKSPACES, "get", get),
+    ):
+        assert (await env_tools.snapshotctl("status", "base"))["ok"] is False
+        assert (await env_tools.snapshotctl("history", "base"))["ok"] is False
+        get.assert_not_awaited()
+        refused = await env_tools.snapshotctl("rebuild", "base")
+
+    get.assert_awaited_once_with("base")
+    assert "no setup script" in str(refused["error"])
+
+
+async def test_snapshot_edit_clears_create_params_and_returns_them_for_undo(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    """``{}`` clears the params, unlike an omitted field, and the old ones come back."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    rules = {"proxy_config": {"rules": [{"name": "gcp"}]}}
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], create_params=rules), "admin"
+    )
+    with patch(
+        "openswe.run_config.get_config",
+        return_value=_config(admin_thread=True, github_login="ramonn"),
+    ):
+        edited = await env_tools.snapshotctl("edit", "core", create_params={})
+
+    assert edited["previous"] == {"create_params": rules}
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.create_params == {}
 
 
 # --- prompt wiring ---
@@ -277,7 +331,7 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
     from openswe import server
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
-    monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "_participant_user", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))
@@ -291,3 +345,32 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com,bob")
     assert (await server._thread_participant(bob, admin_requester_config)).workspace_admin is True
+
+
+@pytest.mark.parametrize("eligible", [True, False])
+async def test_configure_workspace_preserves_definition_and_checks_kitchen(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, eligible: bool
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", prompt="keep me", slack_channel_ids=["C0OLD", "C0NEW"]),
+        "ramonn",
+    )
+    channel = SlackChannel(
+        id="C0NEW",
+        payload={"is_member": eligible, "is_ext_shared": False, "is_pending_ext_shared": False},
+    )
+    config = _config(admin_thread=True, github_login="ramonn")
+    with (
+        patch("openswe.run_config.get_config", return_value=config),
+        patch.object(SlackChannel, "load", AsyncMock(return_value=channel)),
+    ):
+        result = await env_tools.configure_workspace(
+            "core", WorkspaceUpdate(kitchen_channel_ids=["C0NEW"])
+        )
+    assert result["ok"] is eligible
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.prompt == "keep me"
+    assert stored.slack_channel_ids == ["C0NEW", "C0OLD"]
+    assert stored.kitchen_channel_ids == (["C0NEW"] if eligible else [])

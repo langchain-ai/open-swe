@@ -1,5 +1,9 @@
 import { taskEventMetadata } from "./taskEventMetadata"
 import type { TaskEventMetadata } from "./taskEventMetadata"
+import type {
+  PassageReply,
+  PassageSource,
+} from "@/features/agents/utils/passageReply"
 
 export type { TaskEventMetadata } from "./taskEventMetadata"
 
@@ -9,6 +13,7 @@ export type StructuredSenderKind = "person" | "system"
 const SILENT_SENDERS = new Set([
   "system:sender-context",
   "system:dashboard-handoff",
+  "system:slack-note",
 ])
 
 export function isSilentSender(sender: string): boolean {
@@ -32,6 +37,7 @@ export type ParsedStructuredInput =
       senderKind: StructuredSenderKind
       surface?: string
       taskEvent?: TaskEventMetadata
+      replies?: Array<PassageReply>
     }
   | { type: "legacy"; content: string }
 
@@ -105,8 +111,9 @@ function parseAttributes(source: string): Record<string, string> | null {
   return source.slice(cursor).trim() ? null : attributes
 }
 
-// A real envelope carries the context's data fields — `<timestamp>`, `<comment_id>`,
-// nested dicts and lists — as elements beside its text. Consume them so their text
+// A real envelope carries structured data as elements beside its text: one tag of
+// `field: value` lines, such as `<issue>` or `<replying_to>`; messages stored earlier
+// nest a tag per field. Consume them so their text
 // never reaches the transcript, and refuse anything that is not a balanced element
 // so unrecognized markup still falls back to legacy rendering.
 function consumeDataElements(source: string): boolean {
@@ -175,6 +182,36 @@ function splitContent(
     }
   }
   return { content: unwrapEnvelopeText(body), remainder: "" }
+}
+
+const REPLY_ELEMENT_PATTERN = /(?:^|\n)<reply>\n([\s\S]*?)\n<\/reply>/g
+const PASSAGE_SOURCES = new Set<string>(["conversation", "terminal", "file"])
+
+function isPassageSource(value: string | undefined): value is PassageSource {
+  return value !== undefined && PASSAGE_SOURCES.has(value)
+}
+
+/** The `<reply>` elements a message carries: passages its sender replied to. */
+function replyElements(data: string): Array<PassageReply> {
+  return [...data.matchAll(REPLY_ELEMENT_PATTERN)].flatMap(([, body]) => {
+    const fields = entityFields(body ?? "")
+    const source = fields.get("source")
+    const selection = fields.get("selection")
+    if (!isPassageSource(source) || !selection) return []
+    const file = fields.get("file")
+    const lines = fields.get("lines")
+    return [
+      {
+        source,
+        ...(file ? { file } : {}),
+        ...(lines ? { lines } : {}),
+        before: fields.get("before") ?? "",
+        selection,
+        after: fields.get("after") ?? "",
+        comment: fields.get("comment") ?? "",
+      },
+    ]
+  })
 }
 
 // An entity body is `field: value` lines; a value spanning lines puts nothing
@@ -250,9 +287,11 @@ export function parseStructuredInput(
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
       const taskEvent = taskEventMetadata(attributes)
+      const replies = replyElements(split.remainder)
       return {
         type: "message",
         content: decodeXmlText(split.content),
+        ...(replies.length ? { replies } : {}),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,

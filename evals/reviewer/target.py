@@ -28,6 +28,7 @@ DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 ScoreMode = Literal["all_findings", "surfaced_findings"]
 _VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
 _VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
+_ADD_FINDING_TOOL_NAMES = frozenset({"add_finding"})
 
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
@@ -45,7 +46,7 @@ def _record_completed() -> None:
 def get_completed_count() -> int:
     """Number of examples that have finished so far in this process.
 
-    Read by ``store_reporter`` to publish progress to the dashboard.
+    Read by ``status_reporter`` to publish progress to the dashboard.
     """
     with _COMPLETED_LOCK:
         return _COMPLETED
@@ -148,26 +149,30 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
     thread = await client.threads.create()
     thread_id: str = thread["thread_id"]
     _record_thread_id(thread_id)
+    assistant_id = get_reviewer_assistant_id()
+    run_input = build_run_input(
+        _build_user_message(inputs),
+        {
+            "sender_id": "system:reviewer-eval",
+            "surface": "eval",
+            "kind": "system",
+        },
+        systems=[
+            {
+                "id": "system:reviewer-eval",
+                "display_name": "Reviewer evaluation",
+                "platform": "open-swe",
+            }
+        ],
+    )
+    configurable = _build_configurable(inputs)
     try:
+        # The backend's proxy runs this on Managed Deep Agents.
         result = await client.runs.wait(
             thread_id,
-            assistant_id=get_reviewer_assistant_id(),
-            input=build_run_input(
-                _build_user_message(inputs),
-                {
-                    "sender_id": "system:reviewer-eval",
-                    "surface": "eval",
-                    "kind": "system",
-                },
-                systems=[
-                    {
-                        "id": "system:reviewer-eval",
-                        "display_name": "Reviewer evaluation",
-                        "platform": "open-swe",
-                    }
-                ],
-            ),
-            config={"configurable": _build_configurable(inputs)},
+            assistant_id=assistant_id,
+            input=run_input,
+            config={"configurable": configurable},
         )
         score_mode = get_score_mode()
         publish_completed = True
@@ -210,7 +215,7 @@ def _extract_comments(result: Any) -> list[dict[str, Any]]:
         if not isinstance(msg, dict):
             continue
         for tc in msg.get("tool_calls") or []:
-            if tc.get("name") != "add_finding":
+            if tc.get("name") not in _ADD_FINDING_TOOL_NAMES:
                 continue
             args = tc.get("args") or {}
             file = args.get("file")

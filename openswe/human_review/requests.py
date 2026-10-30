@@ -21,15 +21,20 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, cast, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.expedited_review.eligibility import ExcludedHunk
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.human_review.pick_message import PickMessage
+from openswe.run_config import RunConfig
+from openswe.slack.dm import DmOrigin
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 
@@ -40,6 +45,7 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # Open SWE asked who has not accepted yet, so the request is still open to anyone;
 # ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
 ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
+SUPPLEMENTARY_REVIEWS_KEY = "supplementary_reviews"
 
 
 class ChannelChoice(TypedDict):
@@ -68,7 +74,17 @@ class HumanReviewParticipant(Base):
     github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
     assigned_by_agent: Mapped[bool] = mapped_column(server_default="false", default=False)
     joined_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    dm_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    dm_ts: Mapped[str] = mapped_column(server_default="", default="")
+    dm_text: Mapped[str] = mapped_column(server_default="", default="")
     user: Mapped[User] = relationship(init=False)
+
+    @property
+    def pick_message(self) -> PickMessage | None:
+        """The DM that asked them to take the pick; ``None`` when it was never recorded."""
+        if not self.dm_channel_id or not self.dm_ts:
+            return None
+        return PickMessage(channel_id=self.dm_channel_id, ts=self.dm_ts, text=self.dm_text)
 
     @property
     def github_login(self) -> str:
@@ -91,6 +107,8 @@ class HumanReviewRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
+    # Hunks the agent left off an expedited card as qualifying under the target repo's APPROVALS.md.
+    excluded_hunks: Mapped[list[ExcludedHunk]] = mapped_column(JSONB, default_factory=list)
     tldr: Mapped[str] = mapped_column(server_default="", default="")
     state: Mapped[RequestState] = mapped_column(Text, default="open")
     detail: Mapped[str] = mapped_column(server_default="", default="")
@@ -102,6 +120,7 @@ class HumanReviewRequest(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
+    auto_merge: Mapped[bool] = mapped_column(server_default="true", default=True)
     # A draft PR's expedited card offers only "Mark ready", to its author, until they click it.
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.
@@ -163,6 +182,12 @@ class HumanReviewRequest(Base):
         """People Open SWE asked to review who have not accepted yet."""
         return [p for p in self.participants if p.decision == "picked"]
 
+    @property
+    def requester_login(self) -> str:
+        if self.requested_by is not None:
+            return self.requested_by.github_login
+        return RunConfig.parse(self.run_config).github_login or ""
+
     async def author_mention(self) -> str:
         pr = self.pull_request
         author = await User.get(pr.author_user_id) if pr.author_user_id else None
@@ -183,6 +208,28 @@ class HumanReviewRequest(Base):
         return next((p for p in self.participants if p.user_id == user_id), None)
 
     @property
+    def dm_origin(self) -> DmOrigin | None:
+        """The review's Slack thread, which DMs about it are sent on behalf of."""
+        root = self.slack_thread_ts or self.slack_message_ts
+        if not self.slack_channel_id or not root:
+            return None
+        return DmOrigin(
+            channel_id=self.slack_channel_id, thread_ts=root, subject=self.pull_request.url
+        )
+
+    async def picked_by(self, thread_id: str) -> bool:
+        """Whether ``thread_id`` may pick this request's reviewer: its own thread or its Slack thread's."""
+        if not thread_id:
+            return False
+        if self.thread_id == thread_id:
+            return True
+        root = self.slack_thread_ts or self.slack_message_ts
+        if not self.slack_channel_id or not root:
+            return False
+        owner = await lookup_slack_thread_id(self.slack_channel_id, root)
+        return owner == thread_id
+
+    @property
     def slack_location(self) -> tuple[str, str] | None:
         if self.slack_channel_id and self.slack_thread_ts:
             return self.slack_channel_id, self.slack_thread_ts
@@ -195,7 +242,7 @@ class HumanReviewRequest(Base):
             .selectinload(HumanReviewParticipant.user)
             .selectinload(User.identities),
             selectinload(cls.requested_by).selectinload(User.identities),
-            selectinload(cls.pull_request),
+            selectinload(cls.pull_request).selectinload(PullRequest.threads),
         )
 
     @classmethod
@@ -216,6 +263,25 @@ class HumanReviewRequest(Base):
                     cls.state == "open",
                 )
             )
+
+    @classmethod
+    async def assigned_to(cls, user_id: UUID) -> list[Self]:
+        """Open review requests for which Open SWE explicitly picked this person."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(cls.participants)
+                .where(
+                    cls.state == "open",
+                    cls.kind.in_(("standard", "posted")),
+                    PullRequest.state == "open",
+                    HumanReviewParticipant.user_id == user_id,
+                    HumanReviewParticipant.decision == "review",
+                    HumanReviewParticipant.assigned_by_agent.is_(True),
+                )
+            )
+            return list(rows)
 
     @classmethod
     async def is_expedited_approver(cls, owner: str, repo: str, number: int, login: str) -> bool:
@@ -281,6 +347,44 @@ class HumanReviewRequest(Base):
             )
             return list(rows)
 
+    @asynccontextmanager
+    async def supplementary_rotation(
+        self, policy_id: str
+    ) -> AsyncIterator[tuple[Self | None, dict[str, datetime]]]:
+        """Read one supplementary review's rotation history and reserve a reviewer atomically."""
+        cls = type(self)
+        pr = self.pull_request
+        repository = f"{pr.owner}/{pr.repo}".lower()
+        review = cls.run_config[SUPPLEMENTARY_REVIEWS_KEY][policy_id]
+        login = review["github_login"].astext
+        assigned_at = cast(review["assigned_at"].astext, DateTime(timezone=True))
+        async with postgres.session() as session:
+            await session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(f"supplementary-review:{repository}:{policy_id}", 0)
+                    )
+                )
+            )
+            row = await session.scalar(
+                cls._loaded(select(cls))
+                .where(cls.id == self.id)
+                .with_for_update(of=cls)
+                .execution_options(populate_existing=True)
+            )
+            rows = await session.execute(
+                select(login, func.max(assigned_at))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == repository,
+                    login.is_not(None),
+                    login != "",
+                )
+                .group_by(login)
+            )
+            yield row, {name.lower(): at for name, at in rows if name and at is not None}
+
     @classmethod
     async def open_review_counts(
         cls, user_ids: Collection[UUID], *, excluding: UUID
@@ -303,13 +407,14 @@ class HumanReviewRequest(Base):
             return Counter(dict(rows.tuples().all()))
 
     @classmethod
-    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
-        """Whether this Slack thread contains an Open SWE review-request card."""
+    async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
+        """The Open SWE review-request card this Slack thread holds, with its pull request."""
         if not postgres.configured():
-            return False
+            return None
         async with postgres.session() as session:
-            request_id = await session.scalar(
-                select(cls.id)
+            return await session.scalar(
+                select(cls)
+                .options(selectinload(cls.pull_request))
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
@@ -324,9 +429,9 @@ class HumanReviewRequest(Base):
                         & (cls.slack_copy_ts == thread_ts),
                     ),
                 )
+                .order_by(cls.created_at.desc())
                 .limit(1)
             )
-            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:
@@ -382,3 +487,42 @@ class HumanReviewRequest(Base):
                 .execution_options(populate_existing=True)
             )
             yield session, row
+
+    @classmethod
+    @asynccontextmanager
+    async def locked_post(cls, channel_id: str, message_ts: str) -> AsyncIterator[list[Self]]:
+        """Lock every PR watched on one Slack message in a stable order."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .where(
+                    cls.kind == "posted",
+                    cls.slack_channel_id == channel_id,
+                    cls.slack_message_ts == message_ts,
+                )
+                .order_by(cls.id)
+                .with_for_update(of=cls)
+            )
+            yield list(rows)
+
+    async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
+        """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
+        async with self.locked(self.id) as (_, row):
+            participant = row.participant(user_id) if row is not None else None
+            if participant is None:
+                return
+            participant.dm_channel_id = message.channel_id
+            participant.dm_ts = message.ts
+            participant.dm_text = message.text
+
+    @classmethod
+    async def transition(
+        cls, request_id: UUID, *, expected: tuple[RequestState, ...], **changes: object
+    ) -> Self | None:
+        """Apply ``changes`` if the row is still in one of ``expected``; else ``None``."""
+        async with cls.locked(request_id) as (_, row):
+            if row is None or row.state not in expected:
+                return None
+            for name, value in changes.items():
+                setattr(row, name, value)
+            return row

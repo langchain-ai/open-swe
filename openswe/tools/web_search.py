@@ -2,7 +2,9 @@ import asyncio
 import logging
 from typing import Any
 
+from openswe.agent_api.connections import EXA
 from openswe.config import ENV
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 
 logger = logging.getLogger(__name__)
@@ -10,13 +12,16 @@ logger = logging.getLogger(__name__)
 WEB_SEARCH_MAX_INLINE_CHARS = 100_000
 
 
+@expose_mcp()
 async def web_search(
     query: str,
     num_results: int = 5,
     include_contents: bool = True,
 ) -> dict[str, Any]:
     """Implement the `web_search` tool."""
-    api_key = ENV.EXA_API_KEY.optional()
+    # A run's call carries the key from the MDA deployment's connection, where a setting
+    # names one; calls through Open SWE's own MCP server carry none and use the backend's.
+    api_key = EXA.credential() or ENV.EXA_API_KEY.optional()
     if not api_key:
         logger.warning("exa_api_key_missing")
         return {

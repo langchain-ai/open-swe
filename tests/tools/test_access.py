@@ -7,6 +7,7 @@ import pytest
 from openswe.run_config import RunConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
+from tests.support.slack_api import SlackAPI
 
 _OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
@@ -105,6 +106,19 @@ async def test_private_owner_gets_full_results_and_unknown_scope_fails_closed(
         assert resolved == tool_access.Access()
 
 
+@pytest.mark.parametrize("admin", [False, True])
+async def test_mcp_caller_owns_their_surface_but_only_admins_get_admin_places(
+    metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch, admin: bool
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice" if admin else "carol")
+    caller = await resolve_access(_cfg(thread_id=None, source="mcp", admin_thread=True))
+    assert caller.mode(_OWN) == "full"
+    for place in ("admin_thread", "admin_surface"):
+        assert (caller.mode(Policy(trusted=place, actor="admin")) is not None) is admin
+    # A thread run that claims the MCP source is still judged by its thread.
+    assert (await resolve_access(_cfg(source="mcp"))).mode(_OWN) is None
+
+
 @pytest.mark.parametrize("place", ["private", "admin_thread", "admin_surface"])
 async def test_sharing_revokes_tools_despite_stale_private_admin_run_config(
     metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch, place: tool_access.Place
@@ -146,3 +160,63 @@ async def test_unreadable_slack_history_is_not_sole(
     assert (await resolve_access(cfg)).mode(_OWN) is None
     assert fetch.await_args is not None
     assert fetch.await_args.kwargs == {"complete": True}
+
+
+@pytest.mark.parametrize(
+    "scope, run_fields",
+    [
+        ({"owner_type": "user"}, {}),
+        ({"visibility": "private"}, {}),
+        ({"source_context": {}}, {}),
+        ({}, {"source": "dashboard"}),
+        ({}, {"slack_thread": {**_SLACK, "triggering_bot_id": "OTHER"}}),
+        ({}, {"slack_thread": {**_SLACK, "channel_id": "C2", "triggering_bot_id": "B1"}}),
+    ],
+)
+async def test_bot_channel_history_requires_matching_system_thread_context(
+    metadata: dict[str, object], scope: dict[str, object], run_fields: dict[str, object]
+) -> None:
+    slack = {**_SLACK, "triggering_bot_id": "B1"}
+    metadata.update(owner_type="system", source_context={"slack_thread": slack})
+    metadata.update(scope)
+    cfg = _cfg(**{"source": "slack", "slack_thread": slack, "github_login": None, **run_fields})
+    resolved = await resolve_access(cfg)
+    assert resolved.mode(Policy(trusted="channel_history")) is None
+
+
+async def test_bot_channel_history_is_scoped_and_revocable(
+    metadata: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    slack_api: SlackAPI,
+) -> None:
+    from openswe.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    slack = {**_SLACK, "triggering_bot_id": "B1", "team_id": "T1"}
+    metadata.update(owner_type="system", source_context={"slack_thread": slack})
+    cfg = _cfg(source="slack", slack_thread=slack, github_login=None)
+    monkeypatch.setattr(tool_access, "configurable", lambda: cfg)
+    resolved = await resolve_access(cfg)
+    assert not resolved.private
+    assert resolved.mode(_OWN) is None
+
+    refused = await slack_read_channel_messages("C2")
+    assert refused["success"] is False
+    assert not slack_api.calls
+
+    slack_api.respond(
+        {
+            "ok": True,
+            "channel": {
+                "id": "C1",
+                "is_channel": True,
+                "is_private": False,
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
+            },
+        }
+    )
+    slack_api.respond({"ok": True, "messages": [{"ts": "0.5", "text": "Earlier alert"}]})
+    assert (await slack_read_channel_messages("C1"))["success"] is True
+
+    metadata["source_context"] = {}
+    assert (await slack_read_channel_messages("C1"))["ok"] is False

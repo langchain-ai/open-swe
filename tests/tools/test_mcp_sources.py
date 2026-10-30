@@ -1,12 +1,15 @@
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import langgraph_sdk
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
+from runtime_api.connections import ConnectionRef
 
 from openswe.mcp import MCPConnection, runtime
+from openswe.mcp.models import MCPScope
+from openswe.sandboxes.tool_runtime import ToolSurface
+from tests.mcp_helpers import fake_mcp_server
 
 
 def record(name="linear", **fields):
@@ -29,33 +32,29 @@ def source(namespace, records):
     async def get_connection(name):
         return records.get(name)
 
-    return runtime.MCPSource(namespace, list_connections, get_connection)
+    scopes: dict[str, MCPScope] = {
+        "instance_mcps": "instance",
+        "workspace_mcps": "workspace",
+        "user_mcps": "user",
+    }
+    return runtime.MCPSource(
+        namespace, list_connections, get_connection, scope=scopes[namespace[0]]
+    )
 
 
 @pytest.fixture
 def remote(monkeypatch):
     async def discover(record, namespace):
         return [
-            Tool(name=name, description=record.url, inputSchema={"type": "object"})
+            Tool(name=name, description=record.url, input_schema={"type": "object"})
             for name in record.allowed_tools
         ]
 
-    class Session:
-        def __init__(self, url):
-            self.url = url
-
-        async def initialize(self):
-            pass
-
-        async def call_tool(self, name, arguments, **kwargs):
-            return CallToolResult(content=[TextContent(type="text", text=self.url)])
-
-    @asynccontextmanager
-    async def session(connection, **kwargs):
-        yield Session(connection["url"])
+    async def call(transport, name, arguments):
+        return CallToolResult(content=[TextContent(type="text", text=transport.url)])
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
-    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    fake_mcp_server(monkeypatch, call=call)
 
 
 async def test_sources_combine_distinct_connections_and_replace_matching_names(remote):
@@ -79,7 +78,10 @@ async def test_sources_combine_distinct_connections_and_replace_matching_names(r
     ]
 
 
-async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before(remote):
+@pytest.mark.parametrize("personal_override", [False, True])
+async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before(
+    remote, personal_override
+):
     instance = source(
         ("instance_mcps",),
         {"linear": record(), "docs": record("docs"), "incident": record("incident")},
@@ -90,13 +92,34 @@ async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before
     )
     user = source(
         ("user_mcps", "alice"),
-        {"docs": record("docs", url="https://personal-docs.example/mcp")},
+        {
+            "docs": record("docs", url="https://personal-docs.example/mcp"),
+            **(
+                {"linear": record(url="https://personal-linear.example/mcp")}
+                if personal_override
+                else {}
+            ),
+        },
     )
     tools = await runtime.load_mcp_tools(instance, workspace, user)
-    assert sorted([(await tool.ainvoke({}))[0]["text"] for tool in tools]) == [
-        "https://incident.example/mcp",
-        "https://oss-linear.example/mcp",
-        "https://personal-docs.example/mcp",
+    assert sorted([(await tool.ainvoke({}))[0]["text"] for tool in tools]) == sorted(
+        [
+            "https://personal-docs.example/mcp",
+            "https://incident.example/mcp",
+            "https://personal-linear.example/mcp"
+            if personal_override
+            else "https://oss-linear.example/mcp",
+        ]
+    )
+    catalog = ToolSurface(tools={tool.name: tool for tool in tools}).catalog()
+    assert [entry.model_dump()["mcp_provenance"] for entry in catalog] == [
+        {"connection_name": "docs", "scope": "user", "overridden_scopes": ["instance"]},
+        {"connection_name": "incident", "scope": "instance", "overridden_scopes": []},
+        {
+            "connection_name": "linear",
+            "scope": "user" if personal_override else "workspace",
+            "overridden_scopes": ["instance", "workspace"] if personal_override else ["instance"],
+        },
     ]
 
 
@@ -136,13 +159,14 @@ async def test_unavailable_source_does_not_expose_lower_precedence_tools(remote,
     async def unavailable(*args):
         raise ValueError("private store details")
 
-    user = runtime.MCPSource(("user_mcps", "alice"), unavailable, unavailable)
+    user = runtime.MCPSource(("user_mcps", "alice"), unavailable, unavailable, scope="user")
     assert await runtime.load_mcp_tools(workspace, user) == []
     assert "private store details" not in caplog.text
 
 
 async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monkeypatch):
     from openswe.mcp import user
+    from openswe.mcp.records import UserMCPConnections
 
     metadata = {"visibility": "private", "owner_type": "user", "owner_login": "alice"}
     monkeypatch.setattr(
@@ -156,8 +180,8 @@ async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monk
         "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "t", "github_login": "alice"}},
     )
-    monkeypatch.setattr(user, "list_user_mcp_records", AsyncMock(return_value=[record()]))
-    monkeypatch.setattr(user, "get_user_mcp", AsyncMock(return_value=record()))
+    monkeypatch.setattr(UserMCPConnections, "records", AsyncMock(return_value=[record()]))
+    monkeypatch.setattr(UserMCPConnections, "get", AsyncMock(return_value=record()))
     tool = (await runtime.load_mcp_tools(user.user_mcp_source("alice")))[0]
     assert (await tool.ainvoke({}))[0]["text"] == "https://linear.example/mcp"
     metadata["visibility"] = "public"
@@ -173,7 +197,49 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     async def unavailable(name):
         raise ValueError("private store details")
 
-    user = runtime.MCPSource(("user_mcps", "alice"), list_connections, unavailable)
+    user = runtime.MCPSource(("user_mcps", "alice"), list_connections, unavailable, scope="user")
     tool = (await runtime.load_mcp_tools(workspace, user))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+@pytest.mark.parametrize("personal_connection", [False, True])
+async def test_a_server_read_through_an_mda_connection_is_the_mda_runs_by_tier_precedence(
+    remote, personal_connection
+):
+    workspace = source(
+        ("workspace_mcps",),
+        {
+            "linear": record(connection=ConnectionRef(slug="open-swe-mcp-linear", owner="agent")),
+            # A shared server never reads a person's own connection.
+            "notes": record(
+                "notes", connection=ConnectionRef(slug="open-swe-mcp-notes", owner="user")
+            ),
+            # Nor a credential Open SWE or a channel reads for itself, saved before the rule.
+            "github": record(
+                "github", connection=ConnectionRef(slug="mda/github-token", owner="agent")
+            ),
+        },
+    )
+    user = source(
+        ("user_mcps", "alice"),
+        {
+            "linear": record(
+                url="https://personal.example/mcp",
+                connection=ConnectionRef(slug="open-swe-mcp-linear", owner="user")
+                if personal_connection
+                else None,
+            )
+        },
+    )
+    loaded = await runtime.load_mcp_tools(workspace, user)
+    if personal_connection:
+        assert loaded == []
+        assert [
+            (server.url, server.connection.owner, server.tools) for server in loaded.runtime_servers
+        ] == [("https://personal.example/mcp", "user", {"search": "mcp_linear_search"})]
+    else:
+        assert [(await tool.ainvoke({}))[0]["text"] for tool in loaded] == [
+            "https://personal.example/mcp"
+        ]
+        assert loaded.runtime_servers == []

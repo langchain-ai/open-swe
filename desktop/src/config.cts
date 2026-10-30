@@ -15,7 +15,8 @@ const ALLOWED_PERMISSIONS = new Set([
 const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
-const CONNECT_PROVIDERS = new Set(["slack", "notion", "langsmith"]);
+const DESKTOP_ENVIRONMENTS_PATH = "/dashboard/api/desktop/environments";
+const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -111,6 +112,26 @@ function desktopExchangeUrl(backendUrl) {
   return new URL(DESKTOP_EXCHANGE_PATH, backendUrl).toString();
 }
 
+function desktopEnvironmentsUrl(backendUrl) {
+  return new URL(DESKTOP_ENVIRONMENTS_PATH, backendUrl).toString();
+}
+
+/** The alternate backends a response names, skipping any that are malformed. */
+function parseDesktopEnvironments(payload) {
+  const entries = Array.isArray(payload?.environments)
+    ? payload.environments
+    : [];
+  return entries.flatMap((entry) => {
+    if (typeof entry?.name !== "string" || typeof entry?.url !== "string")
+      return [];
+    try {
+      return [{ name: entry.name, url: validateBackendUrl(entry.url) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function isTrustedPermissionRequest(permission, requestingUrl) {
   return isAppUrl(requestingUrl) && ALLOWED_PERMISSIONS.has(permission);
 }
@@ -136,9 +157,7 @@ function localCallbackUrl(navigationUrl, backendUrl) {
     if (
       !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
-      !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(
-        target.pathname,
-      )
+      !/^\/dashboard\/api\/(?:auth|slack)\/callback$/.test(target.pathname)
     ) {
       return null;
     }
@@ -188,6 +207,7 @@ module.exports = {
   appRedirectUrl,
   connectExchangeUrl,
   connectLoginUrl,
+  desktopEnvironmentsUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
   desktopDeepLinkUrl,
@@ -199,6 +219,7 @@ module.exports = {
   isTrustedPermissionRequest,
   isTrustedProxyRequest,
   localCallbackUrl,
+  parseDesktopEnvironments,
   resolveBackendUrl,
   staticFilePath,
   validateBackendUrl,

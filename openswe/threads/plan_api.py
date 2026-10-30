@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, model_validator
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
@@ -58,6 +59,7 @@ class TextAnchor(BaseModel):
 class CommentBody(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
     anchor: TextAnchor | None = None
+    parent_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class PlanUpdate(BaseModel):
@@ -103,7 +105,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "markdown": content.get("markdown", ""),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
-        "dismissed": bool(content) and await plan_is_dismissed(thread_id, content.get("revision")),
+        "dismissed": bool(content) and await plan_is_dismissed(thread_id),
         "user": {
             "id": login,
             "login": login,
@@ -114,6 +116,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
 
 
 @plan_router.put("/{thread_id}")
+@audit_endpoint
 async def update_plan(
     thread_id: str, body: PlanUpdate, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
@@ -167,6 +170,7 @@ async def get_plan_comments(
 
 
 @plan_router.post("/{thread_id}/comments")
+@audit_endpoint
 async def post_plan_comment(
     thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
@@ -175,17 +179,26 @@ async def post_plan_comment(
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
+    if body.parent_id is not None:
+        comments = await list_plan_comments(thread_id, raise_on_error=True)
+        parent = next((c for c in comments if c["id"] == body.parent_id), None)
+        if parent is None:
+            raise HTTPException(404, "parent comment not found")
+        if parent.get("parent_id") is not None or body.anchor is not None:
+            raise HTTPException(422, "replies must reference a top-level comment without an anchor")
     login = session["sub"]
     return await add_plan_comment(
         thread_id,
         author=session.get("name") or login,
         author_login=login,
         body=text,
+        parent_id=body.parent_id,
         anchor=body.anchor.model_dump() if body.anchor else None,
     )
 
 
 @plan_router.post("/{thread_id}/comments/submit")
+@audit_endpoint
 async def submit_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, str]:
@@ -210,6 +223,7 @@ async def submit_plan_comments(
 
 
 @plan_router.delete("/{thread_id}/comments/{comment_id}")
+@audit_endpoint
 async def remove_plan_comment(
     thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:

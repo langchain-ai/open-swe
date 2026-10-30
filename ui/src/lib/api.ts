@@ -51,7 +51,30 @@ export interface AuditLog {
         after: boolean | number | "[REDACTED]" | null
       }
     > | null
+    expedited_exclusions: ExpeditedExclusions | null
   }
+}
+
+export interface ExpeditedExclusions {
+  pull_request_id: string | null
+  base_sha: string
+  head_sha: string
+  approvals_md_sha256: string
+  requested: {
+    path: string
+    hunks: number[]
+    guideline: string
+    reason: string
+  }[]
+  hunks: {
+    path: string
+    digest: string
+    header: string
+    additions: number
+    deletions: number
+    guideline: string
+    reason: string
+  }[]
 }
 
 export interface AuditLogsPage {
@@ -72,6 +95,21 @@ export interface WorkspaceApiKey {
   last_used_at: string | null
   revoked_at: string | null
   status: "active" | "expired" | "revoked"
+}
+
+/** A token that lets one person's Claude Code hooks mirror their sessions. */
+export interface ClaudeCodeSyncToken {
+  id: string
+  name: string
+  token_suffix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/** A freshly minted token: the only time its secret and hooks settings are shown. */
+export interface MintedClaudeCodeSyncToken extends ClaudeCodeSyncToken {
+  secret: string
+  settings: Record<string, unknown>
 }
 
 const API_BASE = dashboardApiBase()
@@ -194,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  /** How the server labels this user's messages; empty until they have a name. */
+  display_name?: string
   email: string | null
   avatar_url: string | null
   user_id?: string | null
@@ -273,26 +313,20 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_task_coordination?: boolean
-  experimental_assistant_ui?: boolean | null
+  agent_workspace_tasks_supported?: boolean
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
-  default_model?: string
-  reasoning_effort?: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean
-  recent_thread_context_enabled?: boolean
+  auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
+  experimental_fleet?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -302,24 +336,17 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_task_coordination?: boolean
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
-  default_model: string
-  reasoning_effort: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean | null
-  recent_thread_context_enabled?: boolean
+  auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
+  experimental_fleet?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -357,13 +384,15 @@ export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
-  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
+  managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -380,8 +409,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_chat_model?: string | null
-  default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
@@ -437,10 +464,47 @@ export interface LangSmithConnectionStatus {
   updated_at?: string | null
 }
 
-export interface NotionCredentialStatus {
-  connected: boolean
-  token_expires_at?: string | null
-  updated_at?: string | null
+export interface ManagedToolsGateway {
+  id: string
+  name: string
+  tool_count: number
+}
+
+export interface ManagedToolsMissingCredential {
+  slug: string
+  display_name: string
+  kind: "oauth" | "secret"
+}
+
+export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
+  name: string
+  tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
+}
+
+export interface ManagedToolsGatewayStatus {
+  gateway: ManagedToolsGateway
+  ready: boolean
+  tool_count?: number | null
+  missing: ManagedToolsMissingCredential[]
+  connected?: ManagedToolsConnectedService[]
+  /** LangSmith offers no tools until every missing service is connected. */
+  all_required: boolean
+}
+
+/** The card the agent offered in a thread, identified by its tool call. */
+export interface ManagedToolsConnectCard {
+  threadId: string
+  cardId: string
+}
+
+export interface ManagedToolsView {
+  configured: boolean
+  langsmith_connected: boolean
+  gateways: ManagedToolsGatewayStatus[]
 }
 
 export interface AdminUser {
@@ -451,6 +515,22 @@ export interface AdminUser {
   display_name: string
   avatar_url: string
   is_admin: boolean
+}
+
+export interface AnnouncementSummary {
+  id: string
+  text: string
+  author: string
+  created_at: string
+  finished_at: string | null
+  recipients: number
+  sent: number
+  failed: number
+}
+
+export interface AnnouncementsView {
+  recipients: number
+  items: Array<AnnouncementSummary>
 }
 
 export interface AdminUsersPage {
@@ -651,8 +731,6 @@ export interface ReposPayload {
   repositories: Array<Repository>
 }
 
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
-
 /** What a positive approval assessment does; `null` is the `dry_run` default. */
 export type ReviewApprovalMode = "off" | "dry_run" | "approve"
 
@@ -664,16 +742,8 @@ export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
-  status: ReviewStyleStatus
   custom_prompt: string | null
   approval_mode?: ReviewApprovalMode | null
-  analysis_summary: string | null
-  top_reviewers: Array<string>
-  prs_sampled: number
-  reviews_sampled: number
-  analysis_thread_id: string | null
-  analysis_run_id: string | null
-  error: string | null
   created_by?: string
   created_at?: string
   updated_at?: string
@@ -703,8 +773,6 @@ export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
-  local_tracing_project: string | null
-  default_local_tracing_project: string
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
 }
@@ -782,10 +850,10 @@ export interface SlackChannelOption {
   num_members: number | null
 }
 
-/** The channel directory; partial when Slack rate limited the walk over public channels. */
+/** The stored channel directory; refreshing while a walk over Slack is due or running. */
 export interface SlackChannelDirectory {
   channels: Array<SlackChannelOption>
-  partial: boolean
+  refreshing: boolean
 }
 
 export interface WorkspaceOptionList {
@@ -943,30 +1011,6 @@ export interface SubmittedReview {
   state: string
 }
 
-export interface ReviewCommentResult {
-  id: number
-  html_url: string
-}
-
-export interface PrReviewComment {
-  id: number
-  author: string
-  author_avatar_url: string
-  path: string
-  line: number | null
-  side: "LEFT" | "RIGHT"
-  body: string
-  html_url: string
-  created_at: string
-  is_open_swe: boolean
-  // Outdated: the line no longer appears in the current diff, so it can't render inline.
-  is_outdated: boolean
-}
-
-export interface ReviewCommentsPayload {
-  comments: Array<PrReviewComment>
-}
-
 export interface ReviewCounts {
   open: number
   resolved: number
@@ -1005,6 +1049,7 @@ export interface OpenPullRequest {
   repo: string
   number: number
   title: string
+  state: "open" | "closed" | "merged"
   draft: boolean | null
   additions: number | null
   deletions: number | null
@@ -1013,6 +1058,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  /** Each reviewer's standing review; null when the reviews could not be read. */
+  reviewers: PullRequestReviewer[] | null
   // Branch protection still wants an approval this PR does not have.
   reviewRequired: boolean
   statusAvailable: boolean
@@ -1027,6 +1074,13 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+}
+
+export interface PullRequestReviewer {
+  login: string
+  avatarUrl: string | null
+  /** A comment never replaces an earlier approval or change request. */
+  state: "approved" | "changes_requested" | "dismissed" | "commented"
 }
 
 export type MergeMethod = "squash" | "merge" | "rebase"
@@ -1053,15 +1107,11 @@ export type PullRequestThreadIntent =
   | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
-      scope: PullRequestFixScope
       context: OpenPullRequest | null
     }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
-
-/** One kind of PR problem a fix run handles; comments go through address-comments. */
-export type PullRequestFixScope = "conflicts" | "checks"
 
 export type AgentBatchComment =
   | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
@@ -1087,7 +1137,6 @@ export interface PullRequestSearchResult {
   number: number
   url: string
   title: string
-  body: string
   state: "open" | "draft" | "merged" | "closed"
 }
 
@@ -1166,6 +1215,7 @@ export interface ReviewDetail extends Omit<
   "thread_id" | "status"
 > {
   thread_id: string | null
+  trace_url?: string | null
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
@@ -1359,7 +1409,6 @@ export interface ReviewerEvalProgress {
 }
 
 export interface ReviewerEvalStatus {
-  name: string
   status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
@@ -1368,15 +1417,11 @@ export interface ReviewerEvalStatus {
   started_at: string | null
   finished_at: string | null
   created_by: string | null
-  pid: number | null
-  exit_code: number | null
   experiment_url: string | null
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
   worker_id?: string | null
-  trigger?: string | null
-  updated_at: string
 }
 
 export interface HumanReviewRequestResult {
@@ -1384,6 +1429,7 @@ export interface HumanReviewRequestResult {
   error: string
   request_id: string
   channel: string
+  channel_name: string
   permalink: string
   reused: boolean
 }
@@ -1461,20 +1507,6 @@ export const api = {
   getApprovalsFile: (full_name: string) =>
     request<ApprovalsFileStatus>(
       `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
-    ),
-  analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
-      {
-        method: "POST",
-      }
-    ),
-  cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
-      {
-        method: "POST",
-      }
     ),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
@@ -1557,6 +1589,17 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listClaudeCodeSyncTokens: () =>
+    request<ClaudeCodeSyncToken[]>("/claude-code/tokens"),
+  createClaudeCodeSyncToken: (name: string) =>
+    request<MintedClaudeCodeSyncToken>("/claude-code/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeClaudeCodeSyncToken: (id: string) =>
+    request<void>(`/claude-code/tokens/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   listWorkspaceApiKeys: (slug: string) =>
     request<WorkspaceApiKey[]>(
       `/admin/api-keys?workspace=${encodeURIComponent(slug)}`
@@ -1634,10 +1677,11 @@ export const api = {
       `/slack/users/${encodeURIComponent(userId)}/name`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: (refresh = false) =>
-    request<SlackChannelDirectory>(
-      `/slack/channels${refresh ? "?refresh=true" : ""}`
-    ),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  refreshSlackChannels: () =>
+    request<SlackChannelDirectory>("/slack/channels/refresh", {
+      method: "POST",
+    }),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   listAllowedSlackBotDirectory: () =>
     request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
@@ -1727,12 +1771,28 @@ export const api = {
     request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
       method: "DELETE",
     }),
-  getMyNotionStatus: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion"),
-  disconnectNotion: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion", {
-      method: "DELETE",
-    }),
+  listManagedToolsGateways: () =>
+    request<ManagedToolsGateway[]>("/managed-tools/gateways"),
+  getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
+  /** With a thread's connect card, the thread continues once every service is connected. */
+  connectManagedTool: (
+    gatewayId: string,
+    slug: string,
+    card?: ManagedToolsConnectCard
+  ) =>
+    request<{ connected: boolean; url?: string | null }>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}${
+        card
+          ? `?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
+          : ""
+      }`,
+      { method: "POST" }
+    ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
+    ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
@@ -1774,29 +1834,32 @@ export const api = {
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
+  listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  sendAnnouncement: (text: string, test: boolean) =>
+    request<{ test: boolean; recipients: number }>("/admin/announcements", {
+      method: "POST",
+      body: JSON.stringify({ text, test }),
+    }),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   searchPullRequests: (query: string, offset = 0) =>
     request<PullRequestSearchResults>(
       `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
     ),
-  myPullRequests: (
+  openPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
     direction: "asc" | "desc" = "desc",
-    page = 1
+    page = 1,
+    scope: "mine" | "review-assigned" | "review-requested" = "mine"
   ) =>
     request<OpenPullRequestsPayload>(
-      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+      `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
-  myPullRequestDetails: (repo: string, number: number) =>
+  pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
-    pullRequestThread(pr.repo, pr.number, {
-      intent: "fix",
-      scope,
-      context: pr,
-    }),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   sendCommentsToAgent: (
@@ -1851,13 +1914,18 @@ export const api = {
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
   humanReviewAvailability: (pr: OpenPullRequest) =>
-    request<{ available: boolean }>(
+    request<{
+      available: boolean
+      active: boolean
+      permalink: string
+      blockers: string[]
+    }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
-  requestHumanReview: (pr: OpenPullRequest) =>
+  requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
-      { method: "POST" }
+      { method: "POST", body: JSON.stringify({ channel }) }
     ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
@@ -1891,6 +1959,32 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestLabels: (owner: string, repo: string, number: number) =>
+    request<{
+      available: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+      selected: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+    }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`
+    ),
+  changePullRequestLabel: (
+    owner: string,
+    repo: string,
+    number: number,
+    name: string,
+    selected: boolean
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`,
+      { method: "PATCH", body: JSON.stringify({ name, selected }) }
     ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
@@ -1997,21 +2091,6 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(comment) }
     ),
-  listReviewComments: (owner: string, repo: string, number: number) =>
-    request<ReviewCommentsPayload>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
-    ),
-  updateReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    commentId: number,
-    body: string
-  ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
-      { method: "PATCH", body: JSON.stringify({ body }) }
-    ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   startReviewerEval: (body: ReviewerEvalStartRequest) =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", {
@@ -2040,21 +2119,22 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "notion" | "langsmith",
-  redirectTo?: string,
-  target: "_self" | "_blank" = "_self"
+  provider: "slack" | "langsmith",
+  redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    const query = redirectTo
-      ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+    const target =
+      redirectTo ??
+      (provider === "slack"
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : "")
+    const query = target
+      ? `?${new URLSearchParams({ redirect_to: target })}`
       : ""
-    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
-    if (target === "_blank") {
-      window.open(url, "_blank", "noopener,noreferrer")
-    } else {
-      window.location.assign(url)
-    }
+    window.location.assign(
+      `${API_BASE}/dashboard/api/${provider}/login${query}`
+    )
   }
   return pending
 }

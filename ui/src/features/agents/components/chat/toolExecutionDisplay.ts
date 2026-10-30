@@ -54,7 +54,7 @@ const TEXT_ARGUMENTS = [
   "title",
 ]
 
-export function toolTextArguments(
+function toolTextArguments(
   input: Record<string, unknown> | undefined
 ): Array<[string, string]> {
   return TEXT_ARGUMENTS.flatMap((key) => {
@@ -63,6 +63,17 @@ export function toolTextArguments(
       ? [[key, value] as [string, string]]
       : []
   })
+}
+
+export function formatShellCommand(command: string): string {
+  let display = command.trim()
+  const leadingCd =
+    /^cd[\t ]+(?:--[\t ]+)?(?:'[^']*'|"(?:\\[^\r\n]|[^"\\$`])*"|\\[^\r\n]|[^\s'"\\;&|<>()$`])+[\t ]*(?:&&|;(?![;&])|\r?\n)\s*/
+  while (true) {
+    const rest = display.replace(leadingCd, "")
+    if (!rest || rest === display) return display
+    display = rest
+  }
 }
 
 function truncateMiddle(value: string, maxLength: number): string {
@@ -97,7 +108,26 @@ export interface ToolDisplayParts {
   previewTooltip?: string
 }
 
+const DISPLAY_DESCRIPTION = "display_description"
+
+/** A described call reads as its description; what it would have shown moves to the tooltip. */
 export function formatToolDisplayParts(
+  title: string,
+  toolKind: AcpToolKind,
+  input: Record<string, unknown> | undefined,
+  repoPath?: string
+): ToolDisplayParts {
+  const parts = toolDisplayParts(title, toolKind, input, repoPath)
+  const description = firstStringArg(input, [DISPLAY_DESCRIPTION])
+  if (!description) return parts
+  return {
+    heading: parts.heading,
+    preview: truncateMiddle(description, 80),
+    previewTooltip: parts.previewTooltip ?? parts.preview ?? description,
+  }
+}
+
+function toolDisplayParts(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
@@ -140,7 +170,10 @@ export function formatToolDisplayParts(
     }
     case "execute": {
       if (command)
-        return { heading: "Shell", preview: truncateMiddle(command, 60) }
+        return {
+          heading: "Shell",
+          preview: truncateMiddle(formatShellCommand(command), 60),
+        }
       return plain(humanizeToolTitle(title))
     }
     case "sql":

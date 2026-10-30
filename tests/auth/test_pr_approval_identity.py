@@ -9,7 +9,7 @@ from openswe.run_config import RunConfig
 from openswe.threads import plan_api, workflow_approval_api
 
 
-async def test_approval_run_uses_authenticated_actor(monkeypatch, fake_store):
+async def test_approval_run_uses_authenticated_actor(monkeypatch):
     metadata = {
         "visibility": "public",
         "owner_type": "user",
@@ -27,7 +27,7 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch, fake_store):
         workflow_approval_api, "fetch_thread_metadata", AsyncMock(return_value=metadata)
     )
     monkeypatch.setattr(
-        workflow_approval_api, "decide_workflow_push_approval", AsyncMock(return_value={})
+        workflow_approval_api, "decide_workflow_push_approval", AsyncMock(return_value=({}, True))
     )
     dispatch = AsyncMock(return_value={"run_id": "approval-run"})
     monkeypatch.setattr(workflow_approval_api, "dispatch_agent_run", dispatch)

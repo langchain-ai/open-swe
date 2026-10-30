@@ -7,15 +7,17 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.app import get_github_app_installation_token
-from openswe.review.styles import normalize_repo_full_name
+from openswe.github.http import github_reauth_message
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
 
 def _raise_for_github_repo_status(status_code: int) -> None:
     if status_code == 401:
-        raise HTTPException(401, "github token expired, re-login required")
+        raise HTTPException(401, "GitHub credentials rejected")
     if status_code == 404:
         raise HTTPException(404, "repository not found")
     if status_code == 403:
@@ -32,7 +34,9 @@ async def assert_repo_access(full_name: str, token: str) -> str:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     owner, name = full_name.split("/", 1)
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as client:
         response = await client.get(
             f"https://api.github.com/repos/{owner}/{name}",
             headers=headers,
@@ -44,7 +48,7 @@ async def assert_repo_access(full_name: str, token: str) -> str:
 async def require_repo_access_for_user(login: str, full_name: str) -> str:
     token = await get_valid_access_token(login)
     if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
+        raise HTTPException(401, github_reauth_message(login))
     try:
         await assert_repo_access(full_name, token)
     except HTTPException as exc:
@@ -52,8 +56,13 @@ async def require_repo_access_for_user(login: str, full_name: str) -> str:
             raise
         token = await get_valid_access_token(login, force_refresh=True)
         if not token:
-            raise HTTPException(401, "github token expired, re-login required") from exc
-        await assert_repo_access(full_name, token)
+            raise HTTPException(401, github_reauth_message(login)) from exc
+        try:
+            await assert_repo_access(full_name, token)
+        except HTTPException as refreshed_exc:
+            if refreshed_exc.status_code == 401:
+                raise HTTPException(401, github_reauth_message(login)) from refreshed_exc
+            raise
     return token
 
 
@@ -105,7 +114,9 @@ async def repo_is_private(full_name: str) -> bool | None:
         return None
     owner, name = normalize_repo_full_name(full_name).split("/", 1)
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+        ) as client:
             response = await client.get(
                 f"https://api.github.com/repos/{owner}/{name}",
                 headers={

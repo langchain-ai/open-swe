@@ -1,4 +1,8 @@
 import { parseSqlResult } from "../chat/SqlResultTable"
+import {
+  parseManagedToolsCard,
+  type ManagedToolsCardOffer,
+} from "@/features/agents/lib/managedToolsCard"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export type RenderItem =
@@ -22,45 +26,46 @@ export type RenderItem =
     }
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
+  /** A code-mode `eval` call, with the tool calls its code made nested inside. */
+  | { type: "code-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
-  | { type: "connection-item"; key: string; chunk: ToolExecutionChunk }
+  | {
+      type: "managed-tools-item"
+      key: string
+      chunk: ToolExecutionChunk
+      offer: ManagedToolsCardOffer
+    }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "worker-launch-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
-  "connection-item",
+  "managed-tools-item",
   "iframe-item",
+  "worker-launch-item",
 ])
 
-export function splitWorkAndReply(items: Array<RenderItem>): {
-  workItems: Array<RenderItem>
-  replyItems: Array<RenderItem>
-} {
-  let trailingReplyIndex = items.length
-  while (trailingReplyIndex > 0) {
-    const prev = items[trailingReplyIndex - 1]
-    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    trailingReplyIndex -= 1
-  }
+/** A run of work that folds behind one row, or a reply shown between such runs. */
+export type TurnSegment =
+  | { type: "reply"; item: RenderItem }
+  | { type: "work"; key: string; items: Array<RenderItem> }
 
-  const workItems: Array<RenderItem> = []
-  const replyItems: Array<RenderItem> = []
-  items.forEach((item, index) => {
-    if (
-      item.type === "reply-item" ||
-      item.type === "connection-item" ||
-      item.type === "iframe-item" ||
-      index >= trailingReplyIndex
-    ) {
-      replyItems.push(item)
-    } else {
-      workItems.push(item)
+/** Splits a turn at every reply so each stretch of work folds in order. */
+export function segmentTurn(items: Array<RenderItem>): Array<TurnSegment> {
+  const segments: Array<TurnSegment> = []
+  items.forEach((item) => {
+    if (REPLY_ITEM_TYPES.has(item.type)) {
+      segments.push({ type: "reply", item })
+      return
     }
+    const last = segments.at(-1)
+    if (last?.type === "work") last.items.push(item)
+    else segments.push({ type: "work", key: `work-${item.key}`, items: [item] })
   })
-  return { workItems, replyItems }
+  return segments
 }
 
 function toolNeedsAttention(
@@ -95,6 +100,13 @@ function attentionItems(
     return toolNeedsAttention(item.chunk, includeUnfinished) ? [item] : []
   }
 
+  if (item.type === "code-item") {
+    const chunks = [item.chunk, ...(item.chunk.calls ?? [])]
+    return chunks.some((chunk) => toolNeedsAttention(chunk, includeUnfinished))
+      ? [item]
+      : []
+  }
+
   if (item.type === "text-chunk" && item.chunk.kind === "error") {
     return [item]
   }
@@ -102,16 +114,12 @@ function attentionItems(
   return []
 }
 
-export function selectCollapsedTurnItems(
+/** The entries of a folded stretch of work that stay visible: approvals, errors, and optionally unfinished calls. */
+export function collapsedWorkItems(
   items: Array<RenderItem>,
   includeUnfinished = false
 ): Array<RenderItem> {
-  const { replyItems } = splitWorkAndReply(items)
-  const replyKeys = new Set(replyItems.map((item) => item.key))
-
-  return items.flatMap((item) =>
-    replyKeys.has(item.key) ? [item] : attentionItems(item, includeUnfinished)
-  )
+  return items.flatMap((item) => attentionItems(item, includeUnfinished))
 }
 
 export function countWorkActions(items: Array<RenderItem>): number {
@@ -126,6 +134,9 @@ export function countWorkActions(items: Array<RenderItem>): number {
       item.type === "tool-item"
     ) {
       return count + 1
+    }
+    if (item.type === "code-item") {
+      return count + 1 + (item.chunk.calls?.length ?? 0)
     }
     return count
   }, 0)
@@ -241,6 +252,15 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (chunk.toolName === "start_async_task") {
+        flushGroups()
+        items.push({
+          type: "worker-launch-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
       if (chunk.display?.type === "output_iframe") {
         flushGroups()
         items.push({
@@ -266,8 +286,18 @@ export function buildRenderItems(
       }
 
       flushGroups()
+      const offer =
+        chunk.toolKind === "managed-tools"
+          ? parseManagedToolsCard(chunk.output)
+          : null
 
-      if (isEditTool(chunk)) {
+      if (chunk.toolKind === "code") {
+        items.push({
+          type: "code-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+      } else if (isEditTool(chunk)) {
         items.push({
           type: "edit-item",
           key: `tool-${chunk.toolCallId}`,
@@ -285,14 +315,12 @@ export function buildRenderItems(
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })
-      } else if (
-        chunk.toolKind === "service-connection" &&
-        chunk.input?.service === "notion"
-      ) {
+      } else if (offer) {
         items.push({
-          type: "connection-item",
+          type: "managed-tools-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
+          offer,
         })
       } else if (isReplyTool(chunk)) {
         items.push({

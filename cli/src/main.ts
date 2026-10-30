@@ -3,9 +3,13 @@ import { parseArgs } from "node:util"
 import { randomUUID } from "node:crypto"
 
 import pkg from "../package.json"
-import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
+import {
+  ApiClient,
+  ApiError,
+  normalizeBackend,
+  type TaskActivity,
+} from "./api.ts"
 import { Bridge } from "open-swe-bridge-client"
-import { toolCommand } from "./commands.ts"
 import {
   forgetSession,
   readBridgeMemory,
@@ -18,9 +22,8 @@ import { isGitRepository, originRepo, repoFullName } from "./git.ts"
 import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
-import { serveMcp } from "./mcp.ts"
 import {
-  followRun,
+  followTask,
   RESULT_TOOL,
   type CliResult,
   type RunOutcome,
@@ -33,18 +36,12 @@ Usage:
   oswe logout                       Forget the session for the current backend
   oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe mcp                          Serve an MCP server on stdio
-  oswe tools                        List all tool subcommands and JSON schemas
-  oswe tool NAME [--json <object>] Call any MCP tool (JSON stdin also accepted)
-  oswe tool NAME --help            Show a tool's description and input schema
   oswe --help | --version
 
 Run options:
   --thread <id>    Continue an existing thread
   --model <id>     Agent model id (needs --effort to take effect)
   --effort <name>  Reasoning effort for --model
-  --visibility <v> workspace (default) or private; API keys and CI always
-                   start system threads
 
 Piped input is attached below the prompt, or is the prompt when none is given.
 Stdout carries only the result the agent reports. The exit code is the one it
@@ -75,6 +72,35 @@ function printResult(result: CliResult): void {
   process.stdout.write(
     stdout === "" || stdout.endsWith("\n") ? stdout : `${stdout}\n`
   )
+}
+
+const INSTRUCTIONS_PREVIEW_CHARS = 72
+
+/** Notes each worker as it changes state, and how many the CLI is waiting for. */
+function workerProgress(): (activity: TaskActivity) => void {
+  const states = new Map<string, string>()
+  let waitingFor = 0
+  return (activity) => {
+    for (const worker of activity.workers) {
+      const previous = states.get(worker.worker_thread_id)
+      if (previous === worker.state) continue
+      states.set(worker.worker_thread_id, worker.state)
+      const reason = worker.error ?? worker.run_status
+      const outcome = !worker.active && reason ? ` (${reason})` : ""
+      const instructions = worker.instructions.split("\n")[0] ?? ""
+      const preview =
+        previous === undefined
+          ? ` — ${instructions.slice(0, INSTRUCTIONS_PREVIEW_CHARS)}`
+          : ""
+      note(
+        `Worker ${worker.state}${outcome}: ${worker.thread_url ?? worker.worker_thread_id}${preview}`
+      )
+    }
+    const active = activity.workers.filter((worker) => worker.active).length
+    if (active > 0 && active !== waitingFor)
+      note(`Waiting for ${active} worker${active === 1 ? "" : "s"} to report`)
+    waitingFor = active
+  }
 }
 
 async function resolveBackend(explicit: string | undefined): Promise<string> {
@@ -132,13 +158,6 @@ async function authStatusCommand(): Promise<number> {
   return 0
 }
 
-const VISIBILITIES = ["workspace", "private"] as const
-type Visibility = (typeof VISIBILITIES)[number]
-
-function isVisibility(value: string): value is Visibility {
-  return (VISIBILITIES as readonly string[]).includes(value)
-}
-
 interface RunOptions {
   thread: string | undefined
   visibility: string | undefined
@@ -148,6 +167,13 @@ interface RunOptions {
 }
 
 async function runCommand(options: RunOptions): Promise<number> {
+  // Still accepted so scripts that asked for private threads keep working.
+  if (options.visibility !== undefined && options.visibility !== "private") {
+    fail(
+      "--visibility is always private: whoever can prompt a thread runs commands on this machine"
+    )
+    return 2
+  }
   const prompt = composePrompt(options.prompt, await readPipedStdin())
   if (!prompt) {
     fail("a prompt is required, as arguments or on stdin")
@@ -159,19 +185,8 @@ async function runCommand(options: RunOptions): Promise<number> {
     return 1
   }
   const { credential } = config
-  let visibility: Visibility = "workspace"
-  if (options.visibility !== undefined) {
-    if (!isVisibility(options.visibility)) {
-      fail("--visibility must be workspace or private")
-      return 2
-    }
-    if (credential.machine) {
-      fail("API keys and CI start system threads; --visibility does not apply")
-      return 2
-    }
-    visibility = options.visibility
-  }
-  const threadType = credential.machine ? "system" : visibility
+  // Whoever can prompt a person's thread runs commands on this machine.
+  const threadType = credential.machine ? "system" : "private"
   const root = process.cwd()
   const api = new ApiClient(config.backend, credential)
 
@@ -229,20 +244,28 @@ async function runCommand(options: RunOptions): Promise<number> {
     root,
   })
   note(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
+  const thread = api.coordinator(threadId, {
+    channels: EVENT_CHANNELS,
+    namespaces: [[]],
+    depth: EVENT_DEPTH,
+    since: 0,
+  })
 
   let exitCode = 0
+  // 128 + SIGINT, as shells report an interrupted command, so `oswe run … &&` stops.
+  const INTERRUPTED = 130
   let closing = false
   let interrupts = 0
-  let activeRun = false
+  let following = false
 
   const shutdown = async (): Promise<void> => {
     if (closing) return
     closing = true
-    if (activeRun) {
+    if (following) {
       try {
-        await api.cancelThread(threadId)
+        await thread.stop()
       } catch (cause) {
-        fail(`could not cancel the run: ${errorMessage(cause)}`)
+        fail(`could not cancel the run and its workers: ${errorMessage(cause)}`)
       }
     }
     await bridge.close()
@@ -251,8 +274,11 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   process.on("SIGINT", () => {
     interrupts += 1
-    if (interrupts > 1) process.exit(130)
-    note("\nStopping — press Ctrl-C again to exit immediately.")
+    if (interrupts > 1) process.exit(INTERRUPTED)
+    exitCode = INTERRUPTED
+    note(
+      "\nStopping the run and its workers — press Ctrl-C again to exit immediately."
+    )
     void shutdown()
   })
 
@@ -280,24 +306,15 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   let outcome: RunOutcome | null = null
   try {
-    activeRun = true
+    following = true
     const runId = await api.startRun(threadId, configurable, prompt)
-    outcome = await followRun(
-      () =>
-        api.openEventStream(threadId, {
-          channels: EVENT_CHANNELS,
-          namespaces: [[]],
-          depth: EVENT_DEPTH,
-          since: 0,
-        }),
-      runId,
-      {
-        onReconnect: (attempt, reason) =>
-          note(
-            `Event stream dropped (${reason}); reconnecting, attempt ${attempt}`
-          ),
-      }
-    )
+    outcome = await followTask(thread, runId, {
+      onReconnect: (attempt, reason) =>
+        note(
+          `Lost the connection to the backend (${reason}); retrying, attempt ${attempt}`
+        ),
+      onActivity: workerProgress(),
+    })
   } catch (cause) {
     fail(
       cause instanceof ApiError && cause.status === 401
@@ -306,10 +323,13 @@ async function runCommand(options: RunOptions): Promise<number> {
     )
     exitCode = 1
   } finally {
-    activeRun = false
+    following = false
   }
 
-  if (outcome?.status === "completed" && outcome.result) {
+  if (interrupts > 0) {
+    // The run ended because Ctrl-C cancelled it, not on its own.
+    exitCode = INTERRUPTED
+  } else if (outcome?.status === "completed" && outcome.result) {
     printResult(outcome.result)
     exitCode = outcome.result.exitCode
   } else if (outcome !== null) {
@@ -347,18 +367,6 @@ function parseCli(argv: readonly string[]) {
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
-  const first = argv[0]
-  if (first === "tool" || first === "tools") {
-    try {
-      return await toolCommand(
-        first === "tool" ? argv.slice(1) : argv,
-        pkg.version
-      )
-    } catch (cause) {
-      fail(errorMessage(cause))
-      return 1
-    }
-  }
   let parsed: ReturnType<typeof parseCli>
   try {
     parsed = parseCli(argv)
@@ -393,9 +401,6 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await authStatusCommand()
       fail("usage: oswe auth status")
       return 2
-    case "mcp":
-      await serveMcp(pkg.version)
-      return 0
     case "run":
       return await runCommand({
         thread: values.thread,

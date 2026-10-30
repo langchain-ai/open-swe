@@ -30,6 +30,7 @@ from openswe.github.checks import CheckConclusion, complete_review_check_run
 from openswe.github.http import (
     GITHUB_API_BASE,
     GITHUB_GRAPHQL,
+    GitHubClient,
     github_client,
     github_request,
 )
@@ -390,6 +391,23 @@ def render_status_comment(
     return "\n\n".join(parts)
 
 
+def render_failed_status_comment(*, pr_number: int, thread_id: str, reason: str) -> str:
+    """Compose the status comment left by a review run that died before publishing.
+
+    It takes the place of the "in progress" comment, so the next review deletes
+    it when it starts or publishes.
+    """
+    parts = [
+        "## ⚠️ Open SWE Review: couldn't run\n\n"
+        f"Open SWE stopped before it could review this PR: {reason}. "
+        "Push a commit or re-request a review from Open SWE to run it again."
+    ]
+    if ui_url := dashboard_thread_url(thread_id):
+        parts.append(f"[Open in Web]({ui_url})")
+    parts.append(status_comment_marker(pr_number))
+    return "\n\n".join(parts)
+
+
 async def post_status_comment(
     *,
     owner: str,
@@ -629,36 +647,22 @@ async def post_pull_request_review(
                 and not inline_comments
                 and review_summary_marker(pr_number) in body
             ):
-                latest_review_id: int | None = None
-                page = 1
-                while True:
-                    listed = await github_request(
-                        client, "GET", url, params={"per_page": 100, "page": page}
-                    )
-                    listed.raise_for_status()
-                    reviews = listed.json()
-                    if not isinstance(reviews, list):
-                        raise ValueError("GitHub returned an invalid PR review list")
-                    for review in reviews:
+                async with GitHubClient.connect(token=token) as github:
+                    pull = github.repo(owner, repo).pull_request(pr_number)
+                    for review in reversed(await pull.reviews()):
+                        previous_body = review.get("body")
+                        review_id = review.get("id")
                         if (
-                            isinstance(review, dict)
-                            and review.get("state") == "COMMENTED"
-                            and review_summary_marker(pr_number) in (review.get("body") or "")
-                            and (review.get("body") or "").startswith(
-                                "## ✅ Open SWE Review: No issues found"
-                            )
-                            and isinstance(review.get("id"), int)
+                            review.get("state") == "COMMENTED"
+                            and isinstance(previous_body, str)
+                            and review_summary_marker(pr_number) in previous_body
+                            and previous_body.startswith("## ✅ Open SWE Review: No issues found")
+                            and isinstance(review_id, int)
                         ):
-                            latest_review_id = review["id"]
-                    if len(reviews) < 100:
-                        break
-                    page += 1
-                if latest_review_id is not None:
-                    updated = await github_request(
-                        client, "PUT", f"{url}/{latest_review_id}", json={"body": body}
-                    )
-                    updated.raise_for_status()
-                    return updated.json()
+                            updated = await pull.edit_review(review_id, body)
+                            if not isinstance(updated, dict):
+                                raise ValueError("GitHub returned an invalid PR review")
+                            return updated
             response = await github_request(client, "POST", url, json=payload)
             if response.status_code == 401:
                 raise GitHubAuthError(

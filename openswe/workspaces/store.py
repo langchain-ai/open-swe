@@ -24,8 +24,8 @@ mid-run cannot change what a reconnecting sandbox comes back to. The superseded
 snapshot is deleted once the new one is ready, so one workspace costs one image.
 
 Routing for new work picks a workspace in this order, first match wins: the
-existing thread's workspace, a ``workspace:<slug>`` tag on the opening message
-(``env:<slug>`` remains an accepted alias), the repository's owning workspace,
+existing thread's workspace, a ``/workspace:<slug>`` command on the opening message
+(``workspace:<slug>`` and ``env:<slug>`` remain accepted), the repository's owning workspace,
 the Slack channel's bound workspace, the user's default workspace preference,
 then ``default``. Nothing here is required: with no workspace resolved, or one
 whose snapshot is not ready, runs fall back to the configured base snapshot.
@@ -38,6 +38,7 @@ import re
 import shlex
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple, Self, TypedDict
 from uuid import UUID
 
@@ -56,10 +57,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.config import ENV
 from openswe.database import postgres
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
-from openswe.review.styles import normalize_repo_full_name
-from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
+from openswe.utils.time import now_iso, parse_iso
+from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.workspaces.cloud_identity import validate_access_delegation, validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -120,6 +123,14 @@ class WorkspaceConflictError(ValueError):
     """
 
 
+class RefreshInFlightError(WorkspaceConflictError):
+    """A refresh of this workspace is already running; ``run_id`` names it."""
+
+    def __init__(self, slug: str, run_id: str | None) -> None:
+        super().__init__(f"a refresh of {slug!r} is already running")
+        self.run_id = run_id
+
+
 # The unique constraints a workspace write can land on that mean "taken", as
 # opposed to a constraint failure that is a bug and must propagate.
 _CONFLICT_CONSTRAINTS = frozenset(
@@ -150,8 +161,12 @@ MAX_REPOS = 50
 CREATE_PARAMS_MAX_CHARS = 20_000
 SCRIPT_MAX_CHARS = 20_000
 REFRESH_LOG_MAX_CHARS = 40_000
+# A refresh that has been "refreshing" for longer than this lost its worker
+# (redeploy, crash) and must not block the next attempt forever.
+STALE_REFRESH_SECONDS = 3 * 60 * 60
 SNAPSHOT_NAME_MAX_CHARS = 128
 LOG_EXCERPT_LINES = 10
+REFRESH_LOG_TAIL_CHARS = 6_000
 SNAPSHOT_TAG = "latest"
 
 # Scripts and their logs live under a fixed root that is captured with the
@@ -200,9 +215,6 @@ _SENSITIVE_CREATE_PARAM_PREFIXES = (
     "token_",
 )
 _SENSITIVE_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy_authorization", "x_api_key"})
-# `workspace:my-box` (or the legacy `env:my-box` spelling) anywhere in a message,
-# as a whole word.
-_ENV_TAG_RE = re.compile(r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)")
 
 
 def slugify(name: str) -> str:
@@ -247,9 +259,8 @@ def script_root() -> str:
     """Where a workspace's scripts and their logs live inside a sandbox.
 
     ``/open-swe/environment`` in a real sandbox, where the agent runs as root.
-    Configurable
-    because ``SANDBOX_TYPE=local`` executes on a developer's own machine, whose
-    filesystem root is not writable.
+    Configurable because the E2E's stand-in sandboxes run on a developer's own
+    machine, whose filesystem root is not writable.
     """
     return ENV.OPENSWE_SCRIPT_ROOT.get().strip().rstrip("/") or DEFAULT_SCRIPT_ROOT
 
@@ -259,7 +270,9 @@ def script_log_path(label: str) -> str:
     return f"{script_root()}/logs/{label}.log"
 
 
-def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
+def script_command(
+    script: str, label: str, repos: Sequence[str] = (), *, work_dir: str = "/workspace"
+) -> str:
     """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
@@ -281,11 +294,22 @@ def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
     log_path = script_log_path(label)
     encoded = base64.b64encode(script.encode()).decode()
     workspace_repos = " ".join(repos)
+    commands = []
+    if label == "update":
+        for repo in repos:
+            checkout = shlex.quote(f"{work_dir}/{repo.rsplit('/', 1)[-1]}")
+            url = shlex.quote(f"https://github.com/{repo}.git")
+            commands.append(
+                f"if [ ! -e {checkout} ] && [ ! -L {checkout} ]; then "
+                f"git clone --quiet -- {url} {checkout} || exit $?; fi"
+            )
+    commands.append(f"exec bash -x {shlex.quote(path)}")
+    invocation = shlex.quote("\n".join(commands))
     return (
         f"mkdir -p {shlex.quote(f'{root}/logs')} "
         f"&& printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)} "
         f"&& {{ {WORKSPACE_REPOS_ENV_VAR}={shlex.quote(workspace_repos)} "
-        f"bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
+        f"GIT_TERMINAL_PROMPT=0 bash -xc {invocation} > {shlex.quote(log_path)} 2>&1; }}; "
         f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
     )
 
@@ -404,6 +428,8 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
         raise ValueError(f"create_params must be at most {CREATE_PARAMS_MAX_CHARS} JSON characters")
     if _has_sensitive_create_param(params):
         raise ValueError("create_params must not contain secrets or authentication credentials")
+    validate_cloud_identity(params)
+    validate_access_delegation(params)
     return params
 
 
@@ -653,6 +679,52 @@ class Workspace(BaseModel):
             return None
         return self.snapshot_id or None
 
+    def refresh_in_flight(self, run_id: str | None = None) -> bool:
+        """Whether a refresh other than ``run_id``'s is still plausibly running.
+
+        The marker a run left behind is not someone else's: its job was cut
+        short (a redeploy lapsed its lease) and is being retried.
+        """
+        if self.refresh_status != "refreshing":
+            return False
+        if run_id is not None and self.refresh_run_id == run_id:
+            return False
+        started_at = parse_iso(self.refresh_started_at)
+        if started_at is None:
+            return False
+        return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
+
+    def assert_refreshable(self, kind: RefreshKind) -> None:
+        """Raise ``ValueError`` when a refresh of ``kind`` cannot start now."""
+        if self.inherit_default_sandbox:
+            raise ValueError(f"workspace {self.slug!r} boots the default workspace's image")
+        if kind == "full" and not self.setup_script:
+            raise ValueError(f"workspace {self.slug!r} has no setup script to run")
+        if kind == "update" and not self.update_script:
+            raise ValueError(f"workspace {self.slug!r} has no update script to run")
+        if kind == "update" and self.ready_snapshot_id is None:
+            raise ValueError(f"workspace {self.slug!r} has no snapshot to update")
+        if self.refresh_in_flight():
+            raise RefreshInFlightError(self.slug, self.refresh_run_id)
+
+    def refresh_log_tail(self, *, chars: int = REFRESH_LOG_TAIL_CHARS) -> str | None:
+        """The end of the last settled refresh's log, where a failing script says why."""
+        if not self.refresh_log or not self.refresh_log.strip():
+            return None
+        return self.refresh_log.strip()[-chars:]
+
+    def refresh_outcome(self) -> dict[str, JsonValue]:
+        """Structured refresh history without raw script output or exception messages."""
+        return {
+            "workspace_slug": self.slug,
+            "refresh_kind": self.refresh_kind,
+            "refresh_run_id": self.refresh_run_id,
+            "snapshot_id": self.snapshot_id if self.refresh_status == "success" else None,
+            "started_at": self.refresh_started_at,
+            "finished_at": self.refresh_finished_at,
+            "steps": [step.model_dump(mode="json") for step in self.refresh_steps],
+        }
+
     @property
     def instructions(self) -> str | None:
         return self.prompt.strip() or None
@@ -682,11 +754,7 @@ class Workspace(BaseModel):
         secrets) can tighten after a record was stored, and shipping a stale
         record's params to the platform would bypass the newer rule.
         """
-        try:
-            return _validate_create_params(self.create_params)
-        except ValueError:
-            logger.warning("Ignoring invalid sandbox create params", extra={"workspace": self.slug})
-            return {}
+        return _validate_create_params(self.create_params)
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
         """Name/slug/refresh-state for the workspace picker and the settings page.
@@ -712,6 +780,52 @@ class Workspace(BaseModel):
         if include_log:
             option["refresh_log_excerpt"] = log_excerpt(self.refresh_log)
         return option
+
+
+class RefreshAttempt:
+    """One claim on a workspace's refresh, from :meth:`WorkspaceStore.mark_refreshing`.
+
+    Its writes land only while the record still carries this claim. A job whose
+    worker stalled past its lease is retried while the original may still be
+    running; once the retry takes the refresh over, the original can no longer
+    step or settle over it.
+    """
+
+    def __init__(self, slug: str, started_at: str) -> None:
+        self.slug = slug
+        self.started_at = started_at
+
+    def holds(self, record: Workspace) -> bool:
+        return parse_iso(record.refresh_started_at) == parse_iso(self.started_at)
+
+    async def start_step(self, label: str, *, log_path: str | None = None) -> None:
+        await WORKSPACES.start_refresh_step(self.slug, label, log_path=log_path, attempt=self)
+
+    async def finish_step(
+        self, label: str, status: StepStatus, *, exit_code: int | None = None
+    ) -> None:
+        await WORKSPACES.finish_refresh_step(
+            self.slug, label, status, exit_code=exit_code, attempt=self
+        )
+
+    async def publish_builder(self, sandbox_id: str) -> None:
+        await WORKSPACES.mark_refresh_builder(self.slug, sandbox_id, attempt=self)
+
+    async def settle(
+        self, status: RefreshStatus, *, log: str | None = None, error: str | None = None
+    ) -> None:
+        record = await WORKSPACES.mark_refresh_settled(
+            self.slug, status, log=log, error=error, attempt=self
+        )
+        if record is None:
+            return
+        await EventLog.append(
+            "workspace",
+            record.refresh_outcome(),
+            event_type=f"refresh.{record.refresh_status}",
+            delivery_id=f"{record.slug}:{record.refresh_started_at}",
+            refs=EventRefs(workspace_id=await WORKSPACES.id_for_slug(record.slug)),
+        )
 
 
 class WorkspaceStore:
@@ -1058,12 +1172,17 @@ class WorkspaceStore:
         return await self.put(slug, record, definition_only=True)
 
     async def update_state(
-        self, slug: str, change: Callable[[Workspace], None]
+        self,
+        slug: str,
+        change: Callable[[Workspace], None],
+        *,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         """Change a workspace's snapshot and refresh state under a row lock.
 
         Only the state columns are written, so a refresh that runs for minutes
-        never writes back a definition it read before an admin edited it.
+        never writes back a definition it read before an admin edited it. With
+        ``attempt``, nothing is written once another claim has superseded it.
         """
         async with postgres.session() as session:
             row = await session.scalar(
@@ -1075,6 +1194,12 @@ class WorkspaceStore:
             record = to_workspace(
                 row, await _bound_repos(session, row.id), channels.channels, channels.kitchen
             )
+            if attempt is not None and not attempt.holds(record):
+                logger.warning(
+                    "Superseded refresh attempt skipped a write",
+                    extra={"workspace": slug, "attempt_started_at": attempt.started_at},
+                )
+                return None
             change(record)
             record.updated_at = now_iso()
             apply_state(row, record)
@@ -1140,10 +1265,10 @@ class WorkspaceStore:
         record = await self.get(slug)
         if record is None:
             return False
-        # Its automations go first. They live in the LangGraph Store, which
-        # shares no transaction with this delete, so a failure part way leaves
-        # the workspace in place, and deleting it again finishes the job; the
-        # other order would strand automations nothing can delete by retrying.
+        # Its automations go first. Deleting them shares no transaction with
+        # this delete, so a failure part way leaves the workspace in place, and
+        # deleting it again finishes the job; the other order would strand
+        # automations nothing can delete by retrying.
         from openswe.schedules.store import delete_workspace_automations
 
         await delete_workspace_automations(slug)
@@ -1192,21 +1317,44 @@ class WorkspaceStore:
 
         return await self.update_state(slug, change)
 
-    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
+    async def mark_refreshing(
+        self, slug: str, kind: RefreshKind = "full", *, run_id: str | None = None
+    ) -> RefreshAttempt | None:
+        """Claim the workspace's refresh for ``run_id``; ``None`` if another holds it.
+
+        Checked under the row lock, so two jobs queued for one workspace start
+        one builder between them. The claimant's id is always written, ``None``
+        for a cron tick, so an id written when a job was queued never matches a
+        refresh someone else started.
+        """
+        claimed: RefreshAttempt | None = None
+
         def change(record: Workspace) -> None:
+            nonlocal claimed
+            if record.refresh_in_flight(run_id):
+                return
+            started_at = now_iso()
+            claimed = RefreshAttempt(slug, started_at)
+            record.refresh_run_id = run_id
             record.refresh_status = "refreshing"
             record.refresh_kind = kind
-            record.refresh_started_at = now_iso()
+            record.refresh_started_at = started_at
             record.refresh_finished_at = None
             record.refresh_log = None
             record.refresh_error = None
             record.refresh_steps = []
             record.refresh_sandbox_id = None
 
-        return await self.update_state(slug, change)
+        await self.update_state(slug, change)
+        return claimed
 
     async def start_refresh_step(
-        self, slug: str, label: str, *, log_path: str | None = None
+        self,
+        slug: str,
+        label: str,
+        *,
+        log_path: str | None = None,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         """Open a step, replacing any earlier one with the same label."""
 
@@ -1216,10 +1364,16 @@ class WorkspaceStore:
                 RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
             ]
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
     async def finish_refresh_step(
-        self, slug: str, label: str, status: StepStatus, *, exit_code: int | None = None
+        self,
+        slug: str,
+        label: str,
+        status: StepStatus,
+        *,
+        exit_code: int | None = None,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         def change(record: Workspace) -> None:
             record.refresh_steps = [
@@ -1231,15 +1385,17 @@ class WorkspaceStore:
                 for step in record.refresh_steps
             ]
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
-    async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Workspace | None:
+    async def mark_refresh_builder(
+        self, slug: str, sandbox_id: str | None, *, attempt: RefreshAttempt | None = None
+    ) -> Workspace | None:
         """Publish (or clear) the builder a poll may read the live trace from."""
 
         def change(record: Workspace) -> None:
             record.refresh_sandbox_id = sandbox_id
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
     async def mark_refresh_settled(
         self,
@@ -1248,6 +1404,7 @@ class WorkspaceStore:
         *,
         log: str | None = None,
         error: str | None = None,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         """Record how the last rebuild went, without touching snapshot state.
 
@@ -1271,13 +1428,18 @@ class WorkspaceStore:
                 for step in record.refresh_steps
             ]
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
     async def set_refresh_run_id(self, slug: str, run_id: str) -> Workspace | None:
-        """Record the run a refresh is running in, so a poll can tell it from a later one."""
+        """Record the run a refresh is running in, so a poll can tell it from a later one.
+
+        Never while another run's refresh is in flight: that run would no longer
+        recognise its own marker if its job is retried.
+        """
 
         def change(record: Workspace) -> None:
-            record.refresh_run_id = run_id
+            if not record.refresh_in_flight(run_id):
+                record.refresh_run_id = run_id
 
         return await self.update_state(slug, change)
 
@@ -1562,34 +1724,6 @@ async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str
     return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
 
 
-def parse_workspace_tag(text: str) -> tuple[str | None, str]:
-    """Split a leading-or-inline ``workspace:<name>`` tag off a message.
-
-    ``env:<name>`` is still accepted as an alias. Returns
-    ``(slug, text_without_the_tag)``; ``(None, text)`` when there is no tag. The
-    caller decides whether the slug names a real workspace — an unresolvable tag
-    should be left in the text rather than silently dropped.
-    """
-    match = _ENV_TAG_RE.search(text or "")
-    if match is None:
-        return None, text
-    try:
-        slug = slugify(match.group(1))
-    except ValueError:
-        return None, text
-    before, after = text[: match.start()].rstrip(), text[match.end() :].lstrip()
-    return slug, f"{before} {after}".strip() if before and after else f"{before}{after}".strip()
-
-
-def require_capture_support() -> None:
-    """Only the langsmith provider has a snapshot API to capture into."""
-    sandbox_type = ENV.SANDBOX_TYPE.get()
-    if sandbox_type != "langsmith":
-        raise RuntimeError(
-            f"capturing a workspace snapshot needs SANDBOX_TYPE=langsmith, not {sandbox_type!r}"
-        )
-
-
 async def _delete_snapshot(snapshot_id: object) -> None:
     """Best-effort delete of a superseded snapshot."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
@@ -1622,12 +1756,7 @@ async def capture_workspace_snapshot(
     The previous snapshot survives a failed capture, in both senses: it is deleted
     only once the new one is ready, and the record stays ``ready`` so runs keep
     booting from it instead of dropping to the base image.
-
-    Only the langsmith provider can capture; other providers have no snapshot API
-    to capture into, so this raises rather than failing deep in the SDK.
     """
-    require_capture_support()
-
     record = await WORKSPACES.get(slug)
     if record is None:
         raise ValueError(f"no workspace named {slug!r}")
@@ -1643,7 +1772,7 @@ async def capture_workspace_snapshot(
         await WORKSPACES.mark_capture_settled(
             slug,
             "ready" if previous_was_ready else "failed",
-            str(exc)[:1000],
+            (str(exc) or type(exc).__name__)[:1000],
         )
         raise
 
@@ -1670,7 +1799,6 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
         get_async_sandbox_client,
     )
 
-    require_capture_support()
     async with get_async_sandbox_client() as client:
         snapshot = await capture_snapshot_with_tag(
             client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout

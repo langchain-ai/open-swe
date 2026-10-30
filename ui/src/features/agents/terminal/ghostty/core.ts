@@ -70,6 +70,8 @@ export interface GhosttyTheme {
   readonly cursor: GhosttyColor
   /** CSS color the renderer overlays on selected cells; not sent to Ghostty. */
   readonly selectionBackground?: string
+  /** The 16 ANSI colors; the rest of the 256-color palette keeps its defaults. */
+  readonly ansi?: ReadonlyArray<GhosttyColor>
 }
 
 export interface GhosttyCell {
@@ -192,6 +194,8 @@ export class GhosttyTerminalCore {
   private style = 0
   private scrollbar = 0
   private rows: Array<GhosttyRow> = []
+  private renderedForeground: GhosttyColor | null = null
+  private renderedBackground: GhosttyColor | null = null
   private disposed = false
   private keyboardLayoutMap: GhosttyKeyboardLayoutMap | undefined
 
@@ -398,6 +402,16 @@ export class GhosttyTerminalCore {
       this.runtime.call("ghostty_terminal_set", this.terminal, option, color)
     }
     this.runtime.free(color, 3)
+    if (theme.ansi) this.setAnsiPalette(theme.ansi)
+  }
+
+  private setAnsiPalette(ansi: ReadonlyArray<GhosttyColor>): void {
+    const palette = this.runtime.alloc(256 * 3)
+    this.runtime.call("ghostty_terminal_get", this.terminal, 25, palette)
+    const bytes = this.runtime.bytes(palette, 256 * 3)
+    ansi.forEach(({ r, g, b }, index) => bytes.set([r, g, b], index * 3))
+    this.runtime.call("ghostty_terminal_set", this.terminal, 14, palette)
+    this.runtime.free(palette, 256 * 3)
   }
 
   scroll(deltaRows: number): void {
@@ -888,8 +902,13 @@ export class GhosttyTerminalCore {
       }))
     }
 
+    const colorsChanged =
+      this.renderedForeground === null ||
+      this.renderedBackground === null ||
+      !ghosttyColorsEqual(this.renderedForeground, foreground) ||
+      !ghosttyColorsEqual(this.renderedBackground, background)
     const dirtyRows = new Set<number>()
-    if (dirty !== 0) {
+    if (dirty !== 0 || colorsChanged) {
       this.assertSuccess(
         "ghostty_render_state_get(row iterator)",
         this.runtime.call(
@@ -909,7 +928,9 @@ export class GhosttyTerminalCore {
         ) !== 0
       ) {
         const rowDirty =
-          dirty === 2 || this.getRowBool(iterator, ROW_DATA.dirty)
+          colorsChanged ||
+          dirty === 2 ||
+          this.getRowBool(iterator, ROW_DATA.dirty)
         if (rowDirty) {
           this.rows[rowIndex] = this.readRow(
             iterator,
@@ -936,6 +957,9 @@ export class GhosttyTerminalCore {
         this.scratch
       )
     }
+
+    this.renderedForeground = foreground
+    this.renderedBackground = background
 
     return {
       cols,

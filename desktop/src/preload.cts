@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
   writeClipboard: (value) =>
     ipcRenderer.invoke("desktop:write-clipboard", value),
+  copyPageLink: () => ipcRenderer.invoke("desktop:copy-page-link"),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
@@ -52,31 +53,15 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
-  localModelCredentialStatus: (modelId) =>
-    ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
-  openLocalTrace: (threadId) =>
-    ipcRenderer.invoke("desktop:open-local-trace", threadId),
-  signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
-  getLegacyLocalPrompt: (threadId) =>
-    ipcRenderer.invoke("desktop:get-legacy-local-prompt", threadId),
-  clearLegacyLocalPrompt: (threadId) =>
-    ipcRenderer.invoke("desktop:clear-legacy-local-prompt", threadId),
-  getLegacyLocalThread: (threadId) =>
-    ipcRenderer.invoke("desktop:get-legacy-local-thread", threadId),
-  listLegacyLocalThreads: () =>
-    ipcRenderer.invoke("desktop:list-legacy-local-threads"),
-  legacyLocalActivity: () =>
-    ipcRenderer.invoke("desktop:legacy-local-activity"),
-  updateLegacyLocalThread: (input) =>
-    ipcRenderer.invoke("desktop:update-legacy-local-thread", input),
-  deleteLegacyLocalThread: (threadId) =>
-    ipcRenderer.invoke("desktop:delete-legacy-local-thread", threadId),
+  taskWorkspaces: true,
   prepareLocalThread: (input) =>
     ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
   takeOverThread: (input) =>
     ipcRenderer.invoke("desktop:take-over-thread", { ...input }),
   ensureLocalBridge: (threadId) =>
     ipcRenderer.invoke("desktop:ensure-local-bridge", threadId),
+  openTaskFolder: (threadId) =>
+    ipcRenderer.invoke("desktop:open-task-folder", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
   setAppearance: (appearance) =>

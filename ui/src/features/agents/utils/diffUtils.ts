@@ -1,14 +1,51 @@
 import { useMemo, useSyncExternalStore } from "react"
-import { preloadHighlighter } from "@pierre/diffs"
+import { preloadHighlighter, registerCustomTheme } from "@pierre/diffs"
 import type {
   VirtualFileMetrics,
   WorkerInitializationRenderOptions,
   WorkerPoolOptions,
 } from "@pierre/diffs/react"
+import { createCssVariablesTheme } from "shiki"
 import { useResolvedTheme } from "@/lib/theme"
 
 export type DiffStyle = "unified" | "split"
 export type DiffOverflow = "scroll" | "wrap"
+
+// Colors resolve from Macaw's --syntax-* tokens, which already switch with .dark.
+const macawSyntaxTheme = createCssVariablesTheme({
+  name: "macaw",
+  variablePrefix: "--diffs-",
+  fontStyle: false,
+  variableDefaults: {
+    foreground: "var(--syntax-plain)",
+    "token-keyword": "var(--syntax-keyword)",
+    "token-string": "var(--syntax-string)",
+    "token-string-expression": "var(--syntax-string)",
+    "token-comment": "var(--syntax-comment)",
+    "token-constant": "var(--syntax-constant)",
+    "token-function": "var(--syntax-function)",
+    "token-parameter": "var(--syntax-property)",
+    "token-punctuation": "var(--syntax-operator)",
+    "token-link": "var(--syntax-tag)",
+  },
+})
+
+const DIFF_THEME = { light: "macaw-light", dark: "macaw-dark" } as const
+
+for (const type of ["light", "dark"] as const) {
+  const name = DIFF_THEME[type]
+  registerCustomTheme(name, async () => ({
+    ...macawSyntaxTheme,
+    name,
+    type,
+    colors: {
+      ...macawSyntaxTheme.colors,
+      "gitDecoration.addedResourceForeground": "var(--icon-success)",
+      "gitDecoration.deletedResourceForeground": "var(--icon-error)",
+      "gitDecoration.modifiedResourceForeground": "var(--icon-brand)",
+    },
+  }))
+}
 
 const DIFF_OVERFLOW_STORAGE_KEY = "open-swe.diff.overflow"
 const diffOverflowListeners = new Set<() => void>()
@@ -70,7 +107,7 @@ export const DIFF_UNSAFE_CSS = `
 [data-file],
 [data-error-wrapper],
 [data-virtualizer-buffer] {
-  --diffs-surface: var(--panel-diff-bg, var(--card));
+  --diffs-surface: var(--panel-diff-bg, var(--bg-surface-level-1));
   --diffs-bg: var(--diffs-surface) !important;
   --diffs-light-bg: var(--diffs-surface) !important;
   --diffs-dark-bg: var(--diffs-surface) !important;
@@ -78,21 +115,21 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-token-dark-bg: transparent;
 
   --diffs-bg-context-override: var(--diffs-surface);
-  --diffs-bg-hover-override: var(--accent);
-  --diffs-bg-separator-override: var(--accent);
+  --diffs-bg-hover-override: var(--bg-surface-level-1-hover);
+  --diffs-bg-separator-override: var(--bg-surface-level-1-hover);
   --diffs-bg-buffer-override: var(--diffs-surface);
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--diffs-surface) 80%, #22c55e);
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #22c55e);
-  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #22c55e);
-  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #22c55e);
+  --diffs-bg-addition-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-success-strong)));
+  --diffs-bg-addition-number-override: light-dark(var(--bg-success-strong), color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-success-strong)));
+  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-success-strong));
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-success-strong));
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--diffs-surface) 80%, #ef4444);
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #ef4444);
-  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #ef4444);
-  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #ef4444);
+  --diffs-bg-deletion-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 80%, var(--bg-error-strong)));
+  --diffs-bg-deletion-number-override: light-dark(var(--bg-error-strong), color-mix(in srgb, var(--diffs-surface) 75%, var(--bg-error-strong)));
+  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, var(--bg-error-strong));
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, var(--bg-error-strong));
 
-  --diffs-fg-number-override: var(--muted-foreground);
+  --diffs-fg-number-override: var(--text-secondary);
   --diffs-font-size: 12px;
   --diffs-line-height: 1.5;
   --diffs-font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, monospace;
@@ -100,23 +137,36 @@ export const DIFF_UNSAFE_CSS = `
   background-color: var(--diffs-surface) !important;
 }
 
+[data-line-type="change-addition"],
+[data-line-type="change-deletion"] {
+  --mix-light: 80%;
+}
+
+:is([data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) {
+  --mix-light: 75%;
+}
+
 [data-file-info] {
-  background-color: var(--accent) !important;
-  border-block-color: var(--border) !important;
-  color: var(--foreground) !important;
+  background-color: var(--bg-surface-level-1-hover) !important;
+  border-block-color: var(--border-default) !important;
+  color: var(--text-primary) !important;
 }
 
 [data-diffs-header] {
   position: sticky !important;
   top: 0;
   z-index: 4;
-  background-color: var(--accent) !important;
-  border-bottom: 1px solid var(--border) !important;
+  background-color: var(--bg-surface-level-1-hover) !important;
+  border-bottom: 1px solid var(--border-default) !important;
+}
+
+[data-code] {
+  scrollbar-gutter: auto;
 }
 
 [data-separator] {
-  background-color: var(--accent) !important;
-  color: var(--muted-foreground) !important;
+  background-color: var(--bg-surface-level-1-hover) !important;
+  color: var(--text-secondary) !important;
 }
 
 /* A selected line propagates [data-selected-line] onto its annotation row and
@@ -124,7 +174,13 @@ export const DIFF_UNSAFE_CSS = `
    Keep the code line highlighted, but hold the annotation row at the panel bg. */
 [data-line-annotation][data-selected-line],
 [data-gutter-buffer="annotation"][data-selected-line] {
-  --diffs-line-bg: var(--diffs-surface, var(--card)) !important;
+  --diffs-line-bg: var(--diffs-surface, var(--bg-surface-level-1)) !important;
+}
+
+/* Page styles don't reach the shadow root; see SelectionReply. */
+::highlight(selection-reply) {
+  background-color: Highlight;
+  color: HighlightText;
 }
 `
 
@@ -137,16 +193,20 @@ export const DIFF_FIXED_LINE_HEIGHT_CSS = `
 }
 `
 
+const lineDiffOptions = {
+  lineDiffType: "word-alt" as const,
+  maxLineDiffLength: 4096,
+}
+
 export const diffOptions = {
-  theme: { light: "pierre-light", dark: "pierre-dark" } as const,
+  theme: DIFF_THEME,
   themeType: "system" as const,
   diffStyle: "unified" as const,
   overflow: "scroll" as const,
   disableFileHeader: true,
   unsafeCSS: `${DIFF_UNSAFE_CSS}${DIFF_FIXED_LINE_HEIGHT_CSS}`,
   collapsedContextThreshold: 4,
-  lineDiffType: "word-alt" as const,
-  maxLineDiffLength: 800,
+  ...lineDiffOptions,
   tokenizeMaxLineLength: 1200,
   tokenizeMaxLength: 120_000,
 }
@@ -210,20 +270,24 @@ export const DIFF_WORKER_POOL_OPTIONS = {
 } satisfies WorkerPoolOptions
 
 export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
-  theme: { light: "pierre-light", dark: "pierre-dark" },
-  lineDiffType: "word-alt",
-  maxLineDiffLength: 800,
+  theme: DIFF_THEME,
+  ...lineDiffOptions,
   tokenizeMaxLineLength: 1200,
   langs: ["text"],
 } satisfies WorkerInitializationRenderOptions
 
-function hashFileContents(contents: string): string {
+/** FNV-1a: a fast, stable fingerprint for cache keys and versions, not for security. */
+export function hashText(text: string): number {
   let hash = 0x811c9dc5
-  for (let i = 0; i < contents.length; i++) {
-    hash ^= contents.charCodeAt(i)
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
     hash = Math.imul(hash, 0x01000193)
   }
-  return (hash >>> 0).toString(36)
+  return hash >>> 0
+}
+
+export function hashFileContents(contents: string): string {
+  return hashText(contents).toString(36)
 }
 
 // Stable per-file content key so the worker pool dedupes highlight work across

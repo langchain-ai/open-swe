@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
-import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
+import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
@@ -19,23 +19,35 @@ function ExperimentsPage() {
       description="Features under test. They may change or go away."
     >
       <SettingsSection title="Interface">
-        <AssistantUiPreference />
+        <StreamPreference />
+        <ProfileSwitchRow
+          field="experimental_fleet"
+          label="LangSmith Agent Workspace"
+          description="Use LangSmith Agent Workspace for your Open SWE agents, with one list of pinned, recent, and archived chats."
+        />
+      </SettingsSection>
+      <SettingsSection title="Slack">
+        <ProfileSwitchRow
+          field="concierge_mode"
+          label="Concierge mode"
+          description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
+        />
+        <ProfileSwitchRow
+          field="pr_review_links"
+          label="Open pull requests in Open SWE"
+          description="Pull request links Open SWE posts for you open its review page instead of GitHub."
+        />
+        <ProfileSwitchRow
+          field="pr_failure_reactions"
+          label="React to failing checks"
+          description="Add ⚠️ to watched pull request posts when checks fail on a pull request you own."
+        />
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="experimental_task_coordination"
-          label="Asynchronous task coordination (experimental)"
-          description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
-        />
-        <ProfileSwitchRow
           field="experimental_background_callbacks"
-          label="Background command callbacks (experimental)"
+          label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
-        />
-        <ProfileSwitchRow
-          field="prefer_tools_in_sandbox"
-          label="Prefer tools through the sandbox"
-          description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
         />
         <ProfileSwitchRow
           field="experimental_act_as_approval"

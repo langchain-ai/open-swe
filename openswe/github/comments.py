@@ -14,6 +14,7 @@ from openswe.config import ENV
 from openswe.github.thread_token import GitHubAuthError
 from openswe.prompts import prompt
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,20 @@ _REACTION_ENDPOINTS: dict[str, str] = {
     "issue_comment": "https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
     "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
     "pull_request_review": "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
+    # An issue's own body: ``comment_id`` is the issue's number.
+    "issues": "https://api.github.com/repos/{owner}/{repo}/issues/{comment_id}/reactions",
+}
+
+#: GraphQL's ``ReactionContent`` for each REST reaction name.
+_GRAPHQL_REACTIONS: dict[str, str] = {
+    "+1": "THUMBS_UP",
+    "-1": "THUMBS_DOWN",
+    "laugh": "LAUGH",
+    "confused": "CONFUSED",
+    "heart": "HEART",
+    "hooray": "HOORAY",
+    "rocket": "ROCKET",
+    "eyes": "EYES",
 }
 
 PAGINATED_MAX_PAGES = 50
@@ -167,9 +182,11 @@ async def react_to_github_comment(
     token: str,
     pull_number: int | None = None,
     node_id: str | None = None,
+    content: str = "eyes",
 ) -> bool:
+    """React to a comment with ``content``, GitHub's REST name for it (``eyes``, ``confused``)."""
     if event_type == "pull_request_review":
-        return await _react_via_graphql(node_id, token=token)
+        return await _react_via_graphql(node_id, token=token, content=content)
 
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
@@ -179,7 +196,9 @@ async def react_to_github_comment(
         owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number
     )
 
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
         try:
             response = await http_client.post(
                 url,
@@ -188,7 +207,7 @@ async def react_to_github_comment(
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
-                json={"content": "eyes"},
+                json={"content": content},
             )
             if response.status_code == 401:
                 raise GitHubAuthError(f"GitHub returned 401 reacting to comment {comment_id}")
@@ -201,25 +220,30 @@ async def react_to_github_comment(
             return False
 
 
-async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
-    """Add a 👀 reaction via GitHub GraphQL API (for PR review bodies)."""
+async def _react_via_graphql(node_id: str | None, *, token: str, content: str = "eyes") -> bool:
+    """Add a reaction, 👀 by default, via GitHub GraphQL API (for PR review bodies)."""
     if not node_id:
         logger.warning("No node_id provided for GraphQL reaction")
         return False
 
     query = """
-    mutation AddReaction($subjectId: ID!) {
-    addReaction(input: {subjectId: $subjectId, content: EYES}) {
+    mutation AddReaction($subjectId: ID!, $content: ReactionContent!) {
+    addReaction(input: {subjectId: $subjectId, content: $content}) {
         reaction { content }
     }
     }
     """
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
         try:
             response = await http_client.post(
                 "https://api.github.com/graphql",
                 headers={"Authorization": f"Bearer {token}"},
-                json={"query": query, "variables": {"subjectId": node_id}},
+                json={
+                    "query": query,
+                    "variables": {"subjectId": node_id, "content": _GRAPHQL_REACTIONS[content]},
+                },
             )
             if response.status_code == 401:
                 raise GitHubAuthError(
@@ -248,7 +272,9 @@ async def post_github_comment(
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as client:
         try:
             response = await client.post(
                 url,
@@ -277,7 +303,9 @@ async def fetch_github_thread_participants(
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+        ) as http_client:
             issue_response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}",
                 headers=headers,
@@ -338,7 +366,9 @@ async def fetch_issue_comments(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
         comments = await _fetch_paginated(
             http_client,
             f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
@@ -447,7 +477,9 @@ async def _fetch_pr_timeline(
 
     all_comments: list[dict[str, Any]] = []
 
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
         pr_comments, review_comments, reviews = await asyncio.gather(
             _fetch_paginated(
                 http_client,
@@ -558,7 +590,9 @@ async def fetch_pr_branch(
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+        ) as http_client:
             response = await http_client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
                 headers=headers,

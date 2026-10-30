@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -7,9 +7,10 @@ from openswe.expedited_review.readiness import (
     Readiness,
     _latest_reviews_by_user,
     _resolve_mergeability,
-    assess_readiness,
     readiness_blockers,
 )
+from openswe.github.ci import RequiredCheck
+from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import Mergeability, PullRequestClient
 
 
@@ -41,12 +42,10 @@ def test_a_required_check_that_has_not_reported_blocks_even_when_the_rest_is_gre
     assert blockers == ["required checks have not reported yet: e2e"]
 
 
-def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -> None:
+def test_a_failing_check_github_does_not_require_does_not_block() -> None:
     advisory = _snapshot(
         check_state="failure",
         mergeable_state="unstable",
-        failing_checks=["flaky-e2e"],
-        failures_are_required=False,
     )
 
     assert readiness_blockers(advisory) == []
@@ -55,16 +54,14 @@ def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -
 
 def test_a_failing_required_check_blocks_and_names_itself() -> None:
     blockers = readiness_blockers(
-        _snapshot(check_state="failure", failing_checks=["unit tests", "lint"])
+        _snapshot(check_state="failure", failing_required_checks=["unit tests", "lint"])
     )
 
     assert blockers == ["failing checks: unit tests, lint"]
 
 
 def test_checks_still_running_block_even_when_nothing_is_required() -> None:
-    blockers = readiness_blockers(
-        _snapshot(check_state="pending", mergeable_state="unstable", failures_are_required=False)
-    )
+    blockers = readiness_blockers(_snapshot(check_state="pending", mergeable_state="unstable"))
 
     assert any("still running" in blocker for blocker in blockers)
 
@@ -86,6 +83,60 @@ def test_every_gate_reports_independently() -> None:
     assert any("grace" in b for b in blockers)
 
 
+@pytest.mark.parametrize(
+    ("required", "blockers"),
+    [
+        ({RequiredCheck("unit")}, []),
+        ({RequiredCheck("advisory")}, ["failing check: advisory"]),
+    ],
+)
+async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
+    required: set[RequiredCheck], blockers: list[str]
+) -> None:
+    with (
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "newsha"},
+                    "base": {"ref": "main"},
+                    "user": {"login": "ada"},
+                    "mergeable": True,
+                    "mergeable_state": "blocked",
+                }
+            ),
+        ),
+        patch.object(
+            RepoClient,
+            "check_runs",
+            AsyncMock(
+                return_value=[
+                    {"name": "unit", "status": "completed", "conclusion": "success"},
+                    {
+                        "name": "advisory",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    },
+                ]
+            ),
+        ),
+        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
+        patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=required)),
+        patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
+        patch.object(PullRequestClient, "reviews", AsyncMock(return_value=[])),
+        patch.object(PullRequestClient, "mergeability", AsyncMock(return_value=None)),
+    ):
+        result = await Readiness.assess(
+            GitHubClient(MagicMock()).repo("lc", "repo").pull_request(7)
+        )
+
+    assert result is not None
+    assert result.blockers == blockers
+    assert result.ready == (not blockers)
+
+
 @pytest.mark.parametrize("live_approval_id", [None, 123])
 async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
     live_approval_id: int | None,
@@ -96,8 +147,9 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
         else []
     )
     with (
-        patch(
-            "openswe.expedited_review.readiness.fetch_pr",
+        patch.object(
+            PullRequestClient,
+            "pull",
             AsyncMock(
                 return_value={
                     "state": "open",
@@ -109,27 +161,25 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
                 }
             ),
         ),
-        patch(
-            "openswe.expedited_review.readiness.list_check_runs",
+        patch.object(
+            RepoClient,
+            "check_runs",
             AsyncMock(
                 return_value=[
-                    {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"}
+                    {"name": "Open SWE Review", "status": "in_progress"},
+                    {"name": "unit", "status": "completed", "conclusion": "success"},
                 ]
             ),
         ),
-        patch(
-            "openswe.expedited_review.readiness.list_commit_statuses", AsyncMock(return_value=[])
-        ),
-        patch(
-            "openswe.expedited_review.readiness.fetch_required_checks",
-            AsyncMock(return_value=set()),
-        ),
-        patch("openswe.github.http.github_client"),
+        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
+        patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=set())),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
         patch.object(PullRequestClient, "reviews", AsyncMock(return_value=live_reviews)),
         patch.object(PullRequestClient, "mergeability", AsyncMock(return_value=None)),
     ):
-        result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")
+        result = await Readiness.assess(
+            GitHubClient(MagicMock()).repo("lc", "repo").pull_request(7)
+        )
 
     assert result is not None
     assert result.snapshot.check_state == "success"

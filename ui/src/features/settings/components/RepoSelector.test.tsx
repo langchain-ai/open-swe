@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { RepoSelector } from "./RepoSelector"
 
@@ -11,6 +12,45 @@ vi.mock("@/lib/profile", () => ({
 
 afterEach(cleanup)
 
+it("distinguishes an unset selection from an explicit no-repository choice", async () => {
+  const onRepoChange = vi.fn()
+  const props = {
+    repos: [{ full_name: "org/active" }],
+    onRepoChange,
+    placeholder: "Pick a repository…",
+    emptySelectionLabel: "No default repository",
+  }
+  const { rerender } = render(<RepoSelector {...props} />, {
+    wrapper: TooltipProvider,
+  })
+  fireEvent.click(screen.getByRole("button", { name: props.placeholder }))
+  expect(screen.queryByLabelText("Selected")).toBeNull()
+  expect(screen.queryByRole("button", { pressed: true })).toBeNull()
+  fireEvent.click(await screen.findByRole("button", { name: "org/active" }))
+  expect(onRepoChange).toHaveBeenLastCalledWith("org/active")
+
+  rerender(<RepoSelector {...props} selectedRepo="org/active" />)
+  fireEvent.click(screen.getByRole("button", { name: "org/active" }))
+  expect(
+    await screen.findByRole("button", { name: "org/active", pressed: true })
+  ).toBeTruthy()
+  fireEvent.click(
+    await screen.findByRole("button", { name: props.emptySelectionLabel })
+  )
+  expect(onRepoChange).toHaveBeenLastCalledWith(null)
+
+  rerender(<RepoSelector {...props} selectedRepo={null} />)
+  fireEvent.click(
+    screen.getByRole("button", { name: props.emptySelectionLabel })
+  )
+  expect(
+    await screen.findByRole("button", {
+      name: props.emptySelectionLabel,
+      pressed: true,
+    })
+  ).toBeTruthy()
+})
+
 it("never offers archived choices or an archive toggle by default", async () => {
   render(
     <RepoSelector
@@ -19,7 +59,8 @@ it("never offers archived choices or an archive toggle by default", async () => 
         { full_name: "org/legacy", private: false, archived: true },
       ]}
       onRepoChange={vi.fn()}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
   expect(await screen.findByText("org/active")).toBeTruthy()
@@ -39,7 +80,8 @@ it("hides archives even in search until opted in, without clearing the selection
       ]}
       selectedRepo="org/legacy"
       onRepoChange={onRepoChange}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "org/legacy" }))
   expect(

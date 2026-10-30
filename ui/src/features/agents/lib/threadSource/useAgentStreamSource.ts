@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react"
 import { useSubmissionQueue } from "@langchain/react"
 
-import { latestContextTokens } from "@/features/agents/lib/contextUsage"
+import { latestContextUsage } from "@/features/agents/lib/contextUsage"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { queueEntryToTurn } from "@/features/agents/lib/queuedMessages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -17,10 +17,8 @@ import type { StreamThreadSource, ThreadRunInput } from "./types"
 
 /** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
-  const { stream, connection, trackRunAcceptance } = useAgentThreadStream({
-    transport: "cloud",
-    threadId,
-  })
+  const { stream, connection, trackRunAcceptance } =
+    useAgentThreadStream(threadId)
   // `stream.stop()` only cancels server-side when this client dispatched the
   // run, so the cancel endpoint runs first and this only detaches.
   const stop = useCancelRun(threadId, stream.disconnect)
@@ -61,7 +59,11 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
             ? {
                 messages: [
                   {
-                    ...promptMessage(message.text, message.images),
+                    ...promptMessage(
+                      message.text,
+                      message.images,
+                      message.replies
+                    ),
                     id: message.id,
                   },
                 ],
@@ -78,14 +80,15 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
       } catch (error) {
         submitError = error
       }
-      const wasAccepted = await accepted?.()
-      if (submitError && !wasAccepted) throw submitError
+      const acceptance = (await accepted?.()) ?? { accepted: false }
+      if (submitError && !acceptance.accepted)
+        throw acceptance.refusal ?? submitError
     },
     [trackRunAcceptance, stream]
   )
 
-  const contextTokens = useMemo(
-    () => latestContextTokens(stream.messages),
+  const contextUsage = useMemo(
+    () => latestContextUsage(stream.messages),
     [stream.messages]
   )
 
@@ -106,7 +109,7 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     isOffloading: stream.isOffloading,
     routed: stream.routed,
     connection,
-    contextTokens,
+    contextUsage,
     startRun,
     stop,
     hasOlder: false,

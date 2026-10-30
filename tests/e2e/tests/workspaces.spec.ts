@@ -166,6 +166,95 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Workspaces", () => {
+  test("cloud identity form saves federation and governed tags", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    const slug = "cloud-profile-form";
+    const tag = "00000000-0000-0000-0000-000000000001";
+    await deleteWorkspace(page, slug);
+    try {
+      await createWorkspace(page, "Cloud Profile Form", "");
+      await page.goto(`/workspaces/${slug}`);
+      const proxy = page
+        .getByRole("heading", { name: "Sandbox Proxy", exact: true })
+        .locator("xpath=ancestor::section");
+      for (const cloud of ["AWS", "GCP", "Azure"]) {
+        await proxy
+          .getByRole("button", { name: `Add ${cloud} identity`, exact: true })
+          .click();
+        await expect(
+          proxy.getByRole("button", {
+            name: `Add ${cloud} identity`,
+            exact: true,
+          }),
+        ).toBeDisabled();
+      }
+      for (const [label, value] of [
+        ["AWS Role ARN", "arn:aws:iam::123456789012:role/ReadOnly"],
+        [
+          "GCP Workload Identity Provider",
+          "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider",
+        ],
+        [
+          "Service Account Email (Optional)",
+          "sandbox@project.iam.gserviceaccount.com",
+        ],
+        ["Azure Tenant ID", tag],
+        ["Azure Client ID", tag],
+        ["Azure Resources (Comma-Separated)", "https://storage.azure.com"],
+        ["Governed Tag Value IDs", tag],
+      ])
+        await proxy.getByLabel(label, { exact: true }).fill(value);
+      for (const scope of await proxy
+        .getByLabel("Subject Scope", { exact: true })
+        .all())
+        await scope.fill(`tag:${tag}`);
+      await proxy.getByRole("tab", { name: "JSON", exact: true }).click();
+      await expect
+        .poll(async () => {
+          const config: { rules: { aws?: { subject_scope: string } }[] } =
+            JSON.parse(
+              await proxy
+                .getByLabel("Proxy configuration (JSON)", { exact: true })
+                .inputValue(),
+            );
+          return config.rules[0].aws?.subject_scope;
+        })
+        .toBe(`tag:${tag}`);
+      const saved = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/workspaces/${slug}`) &&
+          response.request().method() === "PUT",
+      );
+      await proxy
+        .getByRole("button", { name: "Save proxy configuration" })
+        .click();
+      expect((await saved).status()).toBe(200);
+      await page.reload();
+      await expect(proxy.getByLabel("Governed Tag Value IDs")).toHaveValue(tag);
+      await expect(
+        proxy.getByLabel("Subject Scope", { exact: true }).first(),
+      ).toHaveValue(`tag:${tag}`);
+      await expect(
+        proxy.getByLabel("Azure Resources (Comma-Separated)"),
+      ).toHaveValue("https://storage.azure.com");
+      await proxy.getByLabel("Governed Tag Value IDs").fill("");
+      const refused = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/workspaces/${slug}`) &&
+          response.request().method() === "PUT",
+      );
+      await proxy
+        .getByRole("button", { name: "Save proxy configuration" })
+        .click();
+      expect((await refused).status()).toBe(422);
+      await expect(proxy.getByRole("alert")).toBeVisible();
+    } finally {
+      await deleteWorkspace(page, slug);
+    }
+  });
+
   test("creating a workspace with scripts builds its first image", async ({
     page,
   }) => {
@@ -248,7 +337,7 @@ test.describe("Workspaces", () => {
     await page
       .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
       .click();
-    const confirmation = page.getByRole("alertdialog");
+    const confirmation = page.getByRole("dialog");
     await expect(confirmation).toContainText(`Delete ${DRAFT_NAME}?`);
     await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect(await findWorkspace(page, DRAFT_SLUG)).toBeDefined();
@@ -322,7 +411,7 @@ test.describe("Workspaces", () => {
     await expect(picker).toContainText("Default");
 
     await picker.click();
-    await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
+    await page.getByRole("menuitem", { name: new RegExp(ALT_NAME) }).click();
     await expect(picker).toContainText(ALT_NAME);
 
     await typeIntoComposer(page, "Which workspace am I in?");
@@ -352,7 +441,7 @@ test.describe("Workspaces", () => {
     await resetDefaultWorkspace(page);
   });
 
-  test("an env: tag on the opening Slack message selects the workspace", async ({
+  test("a /workspace: command on the opening Slack message selects the workspace", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
@@ -365,7 +454,7 @@ test.describe("Workspaces", () => {
     await page
       .locator("#text")
       .fill(
-        `<@U0BOT> env:${ALT_SLUG} please add a greet() helper and open a PR`,
+        `<@U0BOT> /workspace:${ALT_SLUG} please add a greet() helper and open a PR`,
       );
     await page.locator("#send").click();
 
@@ -375,8 +464,8 @@ test.describe("Workspaces", () => {
 
     const systemPrompt = await lastSystemPrompt(page);
     expect(systemPrompt).toContain(ALT_WORKSPACE_PROMPT);
-    // The tag itself is consumed, so the agent never sees it in the request.
-    expect(systemPrompt).not.toContain(`env:${ALT_SLUG}`);
+    // The command itself is consumed, so the agent never sees it in the request.
+    expect(systemPrompt).not.toContain(`/workspace:${ALT_SLUG}`);
 
     await deleteWorkspace(page, ALT_SLUG);
   });
@@ -489,8 +578,10 @@ test.describe("Workspaces", () => {
     expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
     expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
 
-    // A later run is told about the workspace: the prompt is appended verbatim.
-    await typeIntoComposer(page, "Thanks — anything else needed?");
+    // A later thread is told about the workspace: the prompt is appended verbatim.
+    // This thread's own system prompt was fixed by its first run, before the save.
+    await openNewAgentHome(page);
+    await typeIntoComposer(page, "Anything else to do? E2E_FOLLOWUP");
     await expect(
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
@@ -508,7 +599,9 @@ test.describe("Workspaces", () => {
     await expect(page.getByText("Refresh log")).toBeVisible();
     // Each stage is visible to everyone, not only through the agent's tools.
     for (const label of ["boot", "setup", "update", "capture"]) {
-      await expect(page.getByText(`✓ ${label}`)).toBeVisible();
+      await expect(
+        page.getByText(label, { exact: true }).getByLabel("Succeeded"),
+      ).toBeVisible();
     }
     await expect(
       page.getByRole("link", { name: "Configure default", exact: true }),

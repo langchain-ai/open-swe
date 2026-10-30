@@ -1,5 +1,39 @@
+diff --git a/dist/components/FileDiff.js b/dist/components/FileDiff.js
+index 4ee3d95f21fa52834ebd4e726d88669a90722dbd..5ce93691ee68f0045537fc160456588eff69fcca 100644
+--- a/dist/components/FileDiff.js
++++ b/dist/components/FileDiff.js
+@@ -39,7 +39,7 @@ import { getDiffHunksRendererOptions } from "../utils/getDiffHunksRendererOption
+ import { toHtml } from "hast-util-to-html";
+ //#region src/components/FileDiff.ts
+ function canHydrateDiff(fileDiff) {
+-	return fileDiff.isPartial && (fileDiff.type === "change" || fileDiff.type === "rename-changed" || fileDiff.type === "rename-pure");
++	return fileDiff.isPartial && fileDiff.disableHydration !== true && (fileDiff.type === "change" || fileDiff.type === "rename-changed" || fileDiff.type === "rename-pure");
+ }
+ let instanceId = -1;
+ var FileDiff = class {
+diff --git a/dist/components/VirtualizedFileDiff.js b/dist/components/VirtualizedFileDiff.js
+index 0d9ee99e6779ad118718f12fa940ec3ab72eecac..bb9f611fc86a74203949366c947e5292cbfada32 100644
+--- a/dist/components/VirtualizedFileDiff.js
++++ b/dist/components/VirtualizedFileDiff.js
+@@ -537,6 +537,7 @@ var VirtualizedFileDiff = class extends FileDiff {
+ 		const headerRegion = getVirtualFileHeaderRegion(this.metrics, disableFileHeader);
+ 		this.height += headerRegion;
+ 		if (collapsed) {
++			if (!disableFileHeader) this.height = this.metrics.diffHeaderHeight;
+ 			this.layoutDirty = false;
+ 			return;
+ 		}
+@@ -1033,7 +1034,7 @@ function hasDiffEstimateOptionChanged(previousOptions, nextOptions) {
+ 	return (previousOptions.disableFileHeader ?? false) !== (nextOptions.disableFileHeader ?? false) || (previousOptions.hunkSeparators ?? "line-info") !== (nextOptions.hunkSeparators ?? "line-info") || Boolean(previousOptions.loadDiffFiles) !== Boolean(nextOptions.loadDiffFiles) || (previousOptions.expandUnchanged ?? false) !== (nextOptions.expandUnchanged ?? false) || (previousOptions.collapsedContextThreshold ?? 1) !== (nextOptions.collapsedContextThreshold ?? 1);
+ }
+ function canHydrateCollapsedContext(fileDiff, hasFileLoader) {
+-	return fileDiff.isPartial && hasFileLoader && (fileDiff.type === "change" || fileDiff.type === "rename-changed");
++	return fileDiff.isPartial && hasFileLoader && fileDiff.disableHydration !== true && (fileDiff.type === "change" || fileDiff.type === "rename-changed");
+ }
+ function getOptionHunkSeparatorType(hunkSeparators) {
+ 	return typeof hunkSeparators === "function" ? "custom" : hunkSeparators ?? "line-info";
 diff --git a/dist/renderers/DiffHunksRenderer.js b/dist/renderers/DiffHunksRenderer.js
-index db8dd4a89fca6d1d18294a8be8deafe9ba0783ab..07b21b81d564603093b153283067e9c3c2c0bd57 100644
+index db8dd4a89fca6d1d18294a8be8deafe9ba0783ab..f1ef2db4314cb020a3c2e56320980da70ec6e50c 100644
 --- a/dist/renderers/DiffHunksRenderer.js
 +++ b/dist/renderers/DiffHunksRenderer.js
 @@ -650,6 +650,7 @@ var DiffHunksRenderer = class {
@@ -35,6 +69,15 @@ index db8dd4a89fca6d1d18294a8be8deafe9ba0783ab..07b21b81d564603093b153283067e9c3
  		expandIndex,
  		chunked,
  		slotName,
+@@ -1191,7 +1194,7 @@ function isDiffMassive(diff, tokenizeMaxLength) {
+ 	return Math.max(diff.additionLines.length, diff.deletionLines.length) > tokenizeMaxLength;
+ }
+ function canHydrateCollapsedContext(fileDiff, hasFileLoader) {
+-	return fileDiff.isPartial && hasFileLoader && (fileDiff.type === "change" || fileDiff.type === "rename-changed");
++	return fileDiff.isPartial && hasFileLoader && fileDiff.disableHydration !== true && (fileDiff.type === "change" || fileDiff.type === "rename-changed");
+ }
+ //#endregion
+ export { DiffHunksRenderer };
 diff --git a/dist/style.js b/dist/style.js
 index c779377e51ec31f7dae08ece601b6a956ef1ee2b..fed9d5d190e9d578d86210bb0e504455554fb084 100644
 --- a/dist/style.js
@@ -46,6 +89,23 @@ index c779377e51ec31f7dae08ece601b6a956ef1ee2b..fed9d5d190e9d578d86210bb0e504455
  //#endregion
  export { style_default as default };
  
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index fc74cc297ece86ff9b4e579a3b4bd305089dd403..59be23ae3ec90e3bfc8cb04de0443588d5ebbf3c 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -274,6 +274,12 @@ interface FileDiffMetadata {
+    * object later is treated as a new partial render model.
+    */
+   isPartial: boolean;
++  /**
++   * Keep a partial diff partial: never load full files for it, and offer no
++   * context expansion. For patches whose hunks do not account for every
++   * change between the full files, such as a subset of a file's hunks.
++   */
++  disableHydration?: boolean;
+   /**
+    * Array of lines from previous version of the file. If `isPartial` is false,
+    * it means that `deletionLines` can be considered the entire contents of the
 diff --git a/dist/utils/createSeparator.d.ts b/dist/utils/createSeparator.d.ts
 index 11e9e3f192539daf6025a0f1a6500710ee7137c7..d10d6ea53bb3545332e1a0c0795272a0dcd582b5 100644
 --- a/dist/utils/createSeparator.d.ts
@@ -107,3 +167,27 @@ index e13a442d292fbd370ba474731f6fae8272c1b2b4..ebf22865ed0b6ee1b0865ca50c3f6010
  			properties: { "data-separator-content": "" }
  		}));
  		if (chunked && expandIndex != null) contentChildren.push(createHastElement({
+diff --git a/dist/utils/parsePatchFiles.js b/dist/utils/parsePatchFiles.js
+index 4d31b9507fca2206982d51fd5e0c84d2c77ce126..862bfdfea80cf5cbbf78cb9a49ce6865540bfebb 100644
+--- a/dist/utils/parsePatchFiles.js
++++ b/dist/utils/parsePatchFiles.js
+@@ -293,9 +293,7 @@ function hasCommitMetadataBoundary(data) {
+ 	return data.startsWith("From ") || data.includes("\nFrom ");
+ }
+ function splitFileContents(contents) {
+-	const lines = splitWithNewlines(contents);
+-	for (let index = 0; index < lines.length; index++) lines[index] = detachString(lines[index]);
+-	return lines;
++	return splitWithNewlines(contents);
+ }
+ function splitWithNewlines(contents) {
+ 	if (contents.length === 0) return [""];
+@@ -480,7 +478,7 @@ function parseRawLineType(firstChar) {
+ }
+ function getParsedLineContent(rawLine) {
+ 	const processedLine = rawLine.slice(1);
+-	return detachString(processedLine === "" ? "\n" : processedLine);
++	return processedLine === "" ? "\n" : processedLine;
+ }
+ function createContentGroup(type, deletionLineIndex, additionLineIndex) {
+ 	if (type === "change") return {

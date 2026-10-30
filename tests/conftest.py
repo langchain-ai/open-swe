@@ -6,25 +6,34 @@ import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
+import httpx2
 import pytest
+from langgraph_sdk.errors import NotFoundError
 
-from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
-from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
+from openswe.slack.allowed_bots import AllowedSlackBot
+from openswe.threads import access, diffs, handlers, index, listing, proxy, runs, summary
+from openswe.threads.index import IndexedThread
+from openswe.threads.store import CommandReply, ThreadStore
 from openswe.tools import access as tool_access
+from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
+from openswe.utils.thread_ops import langgraph_url
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
 
 # What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
 os.environ.setdefault("REDIS_URI", "fake")
 os.environ.setdefault("DATABASE_URI", ":memory:")
+# A test that wants the stall watchdog turns it back on.
+os.environ.setdefault("EVENT_LOOP_STALL_MS", "0")
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 _MAX_PARAM_ID_CHARS = 40
@@ -50,65 +59,87 @@ def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) 
         monkeypatch.setattr(module, name, value)
 
 
-class _FakeStoreNotFoundError(Exception):
-    status_code = 404
+class ThreadStoreOverClient(ThreadStore):
+    """The thread store, kept by whichever fake Agent Server client a test patched in.
 
-
-class FakeStore:
-    """In-memory stand-in for the LangGraph Store, in the SDK's item shape.
-
-    Backs the real ``openswe.store`` code path, so values round-trip through
-    ``model_dump``/``model_validate`` the way they do in production.
+    Lets tests describe one fake thread for both the code that still reads threads
+    through ``langgraph_client`` and the code that reads them from the store.
     """
 
+    async def get(self, thread_id: str) -> IndexedThread | None:
+        try:
+            raw = await proxy.langgraph_client().threads.get(thread_id)
+        except NotFoundError:
+            return None
+        if raw is None:
+            return None
+        now = datetime.now(UTC)
+        return IndexedThread(
+            thread_id=thread_id,
+            runtime="mda",
+            metadata=raw.get("metadata") or {},
+            status=index.as_status(raw.get("status")) or "idle",
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def update(self, thread_id: str, metadata: Mapping[str, Any]) -> IndexedThread | None:
+        # The code under test ignores the updated thread, and some fakes cannot read one back.
+        await proxy.langgraph_client().threads.update(thread_id=thread_id, metadata=dict(metadata))
+        return None
+
+    async def state(self, thread_id: str) -> dict[str, Any] | None:
+        return await proxy.langgraph_client().threads.get_state(thread_id)
+
+    async def command(
+        self, thread_id: str, body: bytes, *, user_id: str | None = None
+    ) -> CommandReply:
+        response = await proxy.langgraph_client().http.client.post(
+            f"/threads/{thread_id}/commands",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        return CommandReply(
+            response.status_code, response.content, response.headers.get("content-type")
+        )
+
+
+class FakeUserRecords:
+    """In-memory stand-in for every ``UserRecords`` kind, keyed like PostgreSQL resolves logins."""
+
     def __init__(self) -> None:
-        self.items: dict[tuple[str, ...], dict[str, dict[str, Any]]] = {}
+        self.items: dict[tuple[str, str, str], dict[str, Any]] = {}
 
-    def seed(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.items.setdefault(tuple(namespace), {})[key] = dict(value)
+    def seed(self, kind: str, login: str, value: dict[str, Any], key: str = "") -> None:
+        self.items[(kind, login.strip().lower(), key)] = dict(value)
 
-    def values(self, namespace: Sequence[str]) -> dict[str, dict[str, Any]]:
-        return self.items.get(tuple(namespace), {})
+    def get(self, kind: str, login: str, key: str = "") -> dict[str, Any]:
+        return self.items[(kind, login.strip().lower(), key)]
 
-    async def get_item(self, namespace: Sequence[str], key: str) -> dict[str, Any]:
-        value = self.values(namespace).get(key)
-        if value is None:
-            raise _FakeStoreNotFoundError
-        return {"value": dict(value)}
-
-    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
-        self.seed(namespace, key, value)
-
-    async def delete_item(self, namespace: Sequence[str], key: str) -> None:
-        self.values(namespace).pop(key, None)
-
-    async def search_items(
-        self,
-        namespace: Sequence[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        matches = [
-            {"value": dict(value)}
-            for value in self.values(namespace).values()
-            if all(value.get(k) == expected for k, expected in (filter or {}).items())
-        ]
-        return {"items": matches[offset : offset + limit]}
-
-
-class FakeStoreClient:
-    def __init__(self) -> None:
-        self.store = FakeStore()
+    def pop(self, kind: str, login: str, key: str = "") -> dict[str, Any] | None:
+        return self.items.pop((kind, login.strip().lower(), key), None)
 
 
 @pytest.fixture
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
-    """Route every ``openswe.store`` access to an in-memory store for this test."""
-    client = FakeStoreClient()
-    monkeypatch.setattr(agent_store, "store_client", lambda: client)
-    return client.store
+def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
+    """Route every ``UserRecords`` access to an in-memory table for this test."""
+    fake = FakeUserRecords()
+
+    async def get(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+        value = fake.items.get((self.kind, login.strip().lower(), key))
+        return None if value is None else dict(value)
+
+    async def put(self: UserRecords, login: str, value: dict[str, Any], key: str = "") -> None:
+        fake.seed(self.kind, login, value, key)
+
+    async def pop(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+        return fake.pop(self.kind, login, key)
+
+    monkeypatch.setattr(UserRecords, "get", get)
+    monkeypatch.setattr(UserRecords, "put", put)
+    monkeypatch.setattr(UserRecords, "delete", pop)
+    monkeypatch.setattr(UserRecords, "pop", pop)
+    return fake
 
 
 @pytest.fixture
@@ -198,6 +229,16 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
 
 
 @pytest.fixture
+def no_local_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every thread takes new activity itself, for tests without the thread index."""
+
+    async def itself(thread_id: str) -> str:
+        return thread_id
+
+    monkeypatch.setattr(index, "live_thread_id", itself)
+
+
+@pytest.fixture
 def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     """Serve dashboard findings from thread metadata, as for threads not yet in PostgreSQL."""
     from openswe.review import reviews
@@ -213,18 +254,71 @@ def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
-    bot = {
-        "team_id": "T123",
-        "bot_id": "B123",
-        "user_id": "U123",
-        "app_id": "A123",
-        "name": "Release bot",
-        "created_by": "alice",
-        "created_at": "2026-09-09",
-    }
-    fake_store.seed(["allowed_slack_bots"], "T123:B123", bot)
+async def allowed_bot(registry_db: None) -> AllowedSlackBot:
+    bot = AllowedSlackBot(
+        team_id="T123",
+        bot_id="B123",
+        user_id="U123",
+        app_id="A123",
+        name="Release bot",
+        created_by="alice",
+        created_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+    await bot.add(None)
     return bot
+
+
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _refusal(url: httpx.URL | httpx2.URL) -> str | None:
+    """Why a test may not reach ``url``: another machine, or the LangGraph server a
+    developer may have running on ``LANGGRAPH_URL``."""
+    if url.host not in _LOOPBACK:
+        reason = "tests never leave this machine"
+    elif (langgraph := httpx.URL(langgraph_url())).host in _LOOPBACK and url.port == langgraph.port:
+        reason = "that is LANGGRAPH_URL, where a developer's LangGraph server may be running"
+    else:
+        return None
+    return f"Refused {url}: {reason}. Fake the boundary this test reaches."
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse real network requests; MockTransport, ASGITransport and local fakes still work."""
+    send_async = httpx.AsyncHTTPTransport.handle_async_request
+    send = httpx.HTTPTransport.handle_request
+    send_async2 = httpx2.AsyncHTTPTransport.handle_async_request
+    send2 = httpx2.HTTPTransport.handle_request
+
+    async def guarded_async(
+        self: httpx.AsyncHTTPTransport, request: httpx.Request
+    ) -> httpx.Response:
+        if refusal := _refusal(request.url):
+            raise httpx.ConnectError(refusal, request=request)
+        return await send_async(self, request)
+
+    def guarded(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        if refusal := _refusal(request.url):
+            raise httpx.ConnectError(refusal, request=request)
+        return send(self, request)
+
+    async def guarded_async2(
+        self: httpx2.AsyncHTTPTransport, request: httpx2.Request
+    ) -> httpx2.Response:
+        if refusal := _refusal(request.url):
+            raise httpx2.ConnectError(refusal, request=request)
+        return await send_async2(self, request)
+
+    def guarded2(self: httpx2.HTTPTransport, request: httpx2.Request) -> httpx2.Response:
+        if refusal := _refusal(request.url):
+            raise httpx2.ConnectError(refusal, request=request)
+        return send2(self, request)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", guarded_async)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", guarded_async2)
+    monkeypatch.setattr(httpx2.HTTPTransport, "handle_request", guarded2)
 
 
 @pytest.fixture(autouse=True)
@@ -236,6 +330,15 @@ def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Serve no dashboard build by default, whatever ``ui/.output`` holds locally."""
     monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-dashboard-build"))
+
+
+@pytest.fixture(autouse=True)
+async def _close_http_pool() -> AsyncIterator[None]:
+    """Each test runs on its own event loop, which takes its connection pool down with it."""
+    from openswe.utils.http_pool import close_pool
+
+    yield
+    await close_pool()
 
 
 @pytest.fixture(autouse=True)
@@ -271,7 +374,7 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
     The dashboard's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
-    is empty in the test environment because there is no live LangGraph Store.
+    is empty in the test environment.
 
     Tests targeting the automatic-review gate should override this fixture or set
     ``monkeypatch.setattr(webhook_common, "is_review_repo_enabled", ...)`` to a stricter stub.
@@ -284,14 +387,60 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def slack_api(monkeypatch: pytest.MonkeyPatch):
-    from openswe.slack import channels, client, code_channels, http
+def github_app(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The App installation token ``GitHubClient.as_app`` mints; ``return_value = None`` fails it."""
+    from openswe.github import app
+
+    monkeypatch.setattr(app, "get_github_app_installation_id_for_repo", AsyncMock(return_value=42))
+    token = AsyncMock(return_value="app-token")
+    monkeypatch.setattr(app, "get_github_app_installation_token", token)
+    return token
+
+
+@pytest.fixture(autouse=True)
+def _slack_api(monkeypatch: pytest.MonkeyPatch):
+    from openswe.slack import http
     from tests.support.slack_api import slack_api_server
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
-        monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
-        monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
-        monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        api.handler = lambda *_: (200, {"ok": False, "error": "missing_scope"}, {})
         yield api
+
+
+@pytest.fixture
+def slack_api(_slack_api):
+    _slack_api.handler = None
+    return _slack_api
+
+
+class MemoryEventClaims:
+    """``openswe.event_claims`` without PostgreSQL: claims held in memory, never lapsing."""
+
+    def __init__(self) -> None:
+        self.held: set[tuple[str, str]] = set()
+
+    async def claim(self, scope: str, key: str, *, ttl: timedelta) -> bool:
+        del ttl
+        if (scope, key) in self.held:
+            return False
+        self.held.add((scope, key))
+        return True
+
+    async def release(self, scope: str, key: str) -> None:
+        self.held.discard((scope, key))
+
+    async def is_held(self, scope: str, key: str) -> bool:
+        return (scope, key) in self.held
+
+
+@pytest.fixture
+def memory_event_claims(monkeypatch: pytest.MonkeyPatch) -> MemoryEventClaims:
+    from openswe import event_claims
+
+    claims = MemoryEventClaims()
+    monkeypatch.setattr(event_claims, "claim", claims.claim)
+    monkeypatch.setattr(event_claims, "release", claims.release)
+    monkeypatch.setattr(event_claims, "held", claims.is_held)
+    return claims

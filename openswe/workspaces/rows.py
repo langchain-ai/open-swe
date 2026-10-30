@@ -39,6 +39,9 @@ class WorkspaceRow(Base):
     update_script: Mapped[str] = mapped_column(server_default="", default="")
     base_snapshot_id: Mapped[str | None] = mapped_column(default=None)
     breakout_channel_id: Mapped[str | None] = mapped_column(default=None)
+    merge_queue_config: Mapped[dict[str, JsonValue] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
     vcpus: Mapped[int | None] = mapped_column(default=None)
     fs_capacity_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -99,8 +102,7 @@ def to_workspace(
 ) -> Workspace:
     """The record this row stores, with the bindings that route to it.
 
-    Validated on the way out, as every stored record was when workspaces lived
-    in the LangGraph Store: the columns are typed, but ``create_params`` and
+    Validated on the way out: the columns are typed, but ``create_params`` and
     ``refresh_steps`` hold whatever an older release wrote there.
     """
     from openswe.workspaces.store import Workspace

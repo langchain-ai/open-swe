@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -12,7 +13,10 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from openswe.act_as.gate import require_consent
+from openswe.agent_api.connections import GITHUB_USER
+from openswe.agent_api.git_metadata import record_pr_target
 from openswe.analytics.usage import record_agent_pr_usage
+from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
     PrAuthorNotAParticipant,
     pr_author_login,
@@ -20,6 +24,7 @@ from openswe.credential_scope import (
 )
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import derive_pr_state
+from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
 from openswe.run_config import RunConfig
@@ -35,10 +40,13 @@ from openswe.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
+from openswe.threads.summary import upsert_pull_request_record
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.run_usage import summarize_run_usage
 
@@ -64,16 +72,52 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | None, str]:
-    """Use the requested or requesting person's OAuth, and the bot for system threads."""
+    """Use the requested or requesting person's OAuth, and the bot for system threads.
+
+    The requester's own GitHub grant, which an MDA run reads from the deployment's
+    connection, comes before their dashboard sign-in.
+    """
     login = await pr_author_login(author)
     if login is None:
         return await get_github_app_installation_token(), "bot"
+    if granted := await _requester_grant(login):
+        return granted, "user"
     from openswe.dashboard.profiles import get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
         raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "private", login)
     return token, "user"
+
+
+async def _requester_grant(login: str) -> str | None:
+    """The run's GitHub grant, when ``login``, whom the PR opens as, is the run's
+    requester and the grant is that account's.
+
+    The run carries only its requester's grant, so another participant the PR opens
+    as keeps their own sign-in. A grant of another account is never used.
+    """
+    token = GITHUB_USER.credential()
+    requester = (RunConfig.from_runtime().github_login or "").strip()
+    if token is None or requester.lower() != login.lower():
+        return None
+    try:
+        async with GitHubClient.connect(token=token) as github:
+            granted = await github.viewer_login()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Could not read whose GitHub grant the run carries; using the requester's sign-in",
+            extra={"github_login": login},
+            exc_info=True,
+        )
+        return None
+    if granted.lower() != login.lower():
+        logger.warning(
+            "The run's GitHub grant is not the requester's account; using their sign-in",
+            extra={"github_login": login, "granted_login": granted},
+        )
+        return None
+    return token
 
 
 async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
@@ -522,34 +566,6 @@ async def _fetch_pr_details(
     return data if isinstance(data, dict) else {}
 
 
-def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[str, Any]]:
-    existing = records if isinstance(records, list) else []
-    repo = record.get("repo_full_name")
-    number = record.get("number")
-    url = record.get("url")
-    for item in existing:
-        if (
-            isinstance(item, dict)
-            and (
-                (item.get("repo_full_name") == repo and item.get("number") == number)
-                or item.get("url") == url
-            )
-            and isinstance(item.get("slack_feedback"), dict)
-        ):
-            record = {**record, "slack_feedback": item["slack_feedback"]}
-            break
-    return [
-        item
-        for item in existing
-        if isinstance(item, dict)
-        and not (
-            item.get("repo_full_name") == repo
-            and item.get("number") == number
-            or item.get("url") == url
-        )
-    ] + [record]
-
-
 async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     try:
         thread = await get_client().threads.get(thread_id)
@@ -618,6 +634,17 @@ async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
     )
 
 
+def _run_model(
+    cfg: RunConfig, run_state: Mapping[str, object] | None
+) -> tuple[str | None, str | None]:
+    """The model and effort this run calls: the one its preparation chose, else its start's."""
+    selected = (run_state or {}).get("selected_model_id")
+    if isinstance(selected, str) and selected:
+        effort = (run_state or {}).get("selected_effort")
+        return selected, effort if isinstance(effort, str) else None
+    return cfg.resolved_agent_model_id, cfg.resolved_agent_effort
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx2.AsyncClient,
@@ -631,6 +658,7 @@ async def _record_pr_telemetry(
     retitle_thread: bool = True,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
+    run_state: Mapping[str, object] | None = None,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -667,8 +695,12 @@ async def _record_pr_telemetry(
             )
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
+        pr_head = details.get("head") or pr.get("head")
+        if isinstance(pr_head, dict) and isinstance(pr_head.get("ref"), str):
+            record_pr_target(f"{owner}/{repo}", pr_head["ref"])
         config = get_config()
         cfg = RunConfig.from_config(config)
+        model_id, effort = _run_model(cfg, run_state)
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -703,7 +735,7 @@ async def _record_pr_telemetry(
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
             invocation_id=cfg.invocation_id,
-            model_id=cfg.resolved_agent_model_id,
+            model_id=model_id,
             source=cfg.source,
             repository_private=(
                 details.get("base", {}).get("repo", {}).get("private")
@@ -716,7 +748,16 @@ async def _record_pr_telemetry(
             await _record_pr_opened_feedback(
                 thread_id, pr_url=pr_url if isinstance(pr_url, str) else ""
             )
-        if isinstance(thread_id, str) and thread_id:
+        if (
+            isinstance(thread_id, str)
+            and thread_id
+            and not (
+                cfg.slack_thread
+                and is_concierge_thread(
+                    cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+                )
+            )
+        ):
             repo_private = None
             base_repo = details.get("base", {}).get("repo")
             if isinstance(base_repo, dict) and isinstance(base_repo.get("private"), bool):
@@ -756,12 +797,9 @@ async def _record_pr_telemetry(
                 "resolves_thread": resolves_thread,
             }
             run_id = config.get("run_id") or cfg.run_id
-            if run_id and cfg.slack_thread and cfg.slack_thread.channel_id:
-                record["slack_feedback"] = {
-                    "run_id": str(run_id),
-                    "channel_id": cfg.slack_thread.channel_id,
-                }
-            pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
+            pull_requests = upsert_pull_request_record(
+                await _thread_pull_requests(thread_id), record
+            )
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
                 "pr_url": pr_url if isinstance(pr_url, str) else "",
@@ -812,10 +850,8 @@ async def _record_pr_telemetry(
                         if record_opening and isinstance(opening_head_sha, str)
                         else ""
                     ),
-                    opening_model_id=(
-                        (cfg.resolved_agent_model_id or "") if record_opening else ""
-                    ),
-                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    opening_model_id=(model_id or "") if record_opening else "",
+                    opening_effort=(effort or "") if record_opening else "",
                     langsmith_run_id=str(run_id) if record_opening and run_id else "",
                     slack_team_id=origin.team_id if origin else "",
                     slack_channel_id=origin.channel_id if origin else "",
@@ -1065,7 +1101,7 @@ async def _open_pull_request(
             failed_step="resolve_pr_author_token",
         )
 
-    async with httpx2.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None
@@ -1136,6 +1172,7 @@ async def _open_pull_request(
                     resolves_thread=resolves_thread,
                     retitle_thread=retitle_thread,
                     creation_response=pr,
+                    run_state=state,
                 )
             return {
                 "success": True,
@@ -1162,6 +1199,7 @@ async def _open_pull_request(
                     resolves_thread=resolves_thread,
                     retitle_thread=retitle_thread,
                     record_opening=False,
+                    run_state=state,
                 )
                 return {
                     "success": True,
@@ -1202,6 +1240,7 @@ async def _open_pull_request(
         )
 
 
+@audit_tool()
 async def open_pull_request(
     owner: str,
     repo: str,
@@ -1237,15 +1276,24 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
     return ref if isinstance(ref, str) else ""
 
 
+@audit_tool()
 async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
+    cfg = RunConfig.from_runtime()
+    if cfg.slack_thread and is_concierge_thread(
+        cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+    ):
+        return {
+            "success": False,
+            "error": "PRs cannot be attached to concierge DM threads. Start a separate thread for PR work.",
+        }
     ref = parse_github_pr_url(pr_url)
     if ref is None:
         return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
     token, kind = await _resolve_pr_author_token()
     if not token:
         return {"success": False, "error": "No GitHub token was available to read the PR"}
-    async with httpx2.AsyncClient(timeout=30.0) as client:
+    async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None

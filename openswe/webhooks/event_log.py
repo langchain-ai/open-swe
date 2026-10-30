@@ -1,4 +1,7 @@
-"""Append-only log of verified GitHub, Slack, and Linear webhook deliveries."""
+"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Open SWE's own workspace events.
+
+Sources in ``ADMIN_ONLY_SOURCES`` are listed and subscribable only from admin threads.
+"""
 
 import asyncio
 import json
@@ -13,21 +16,27 @@ from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
+from openswe import event_claims
 from openswe.database import configured, transaction
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.slack.payloads import SlackEventEnvelope
 from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear"]
+type WebhookSource = Literal["github", "slack", "linear", "deployment", "workspace"]
 
-RETAINED_DAYS = 2
+ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace"})
+
+RETAINED_DAYS = 14
 _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
+# Longer than any sender keeps retrying one delivery.
+_DELIVERY_CLAIM_TTL = timedelta(hours=24)
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
-_SEGMENT_TASKS: set[asyncio.Task[None]] = set()
+_POSTHOG_TASKS: set[asyncio.Task[None]] = set()
 
 _INSERT = text(
     f"""
@@ -46,6 +55,7 @@ _INSERT = text(
              WHERE email <> '' AND lower(email) = lower(CAST(:email AS text)) LIMIT 1)
         ),
         COALESCE(
+            CAST(:workspace_id AS uuid),
             workspace_repository.workspace_id,
             (SELECT workspace_id FROM workspace_slack_channel
              WHERE channel_id = :slack_channel_id)
@@ -67,6 +77,7 @@ _EVENT_KINDS = text(
     FROM {_TABLE}
     WHERE received_at >= :since
       AND (CAST(:source AS text) IS NULL OR source = :source)
+      AND NOT (source = ANY(CAST(:hidden_sources AS text[])))
       AND (CAST(:event_type AS text) = ''
            OR event_type = :event_type
            OR starts_with(event_type, :event_type || '.'))
@@ -123,6 +134,14 @@ class EventRefs(BaseModel):
     slack_user_id: str = ""
     slack_channel_id: str = ""
     email: str = ""
+    workspace_id: UUID | None = None
+
+    @property
+    def pull_request(self) -> PullRequestKey | None:
+        owner, _, repo = self.github_repository.partition("/")
+        if not owner or not repo or self.pull_request_number is None:
+            return None
+        return PullRequestKey.of(owner, repo, self.pull_request_number)
 
     @classmethod
     def github(cls, body: bytes) -> Self:
@@ -236,12 +255,14 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
-    ) -> None:
-        """Log, then wake subscribed threads. Never raises: the delivery is still handled."""
-        from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
+    ) -> bool:
+        """Log, then wake subscribed threads.
 
+        Never raises. False means the row was not stored, so a caller that must
+        not drop the delivery can ask the sender to retry.
+        """
         if not configured():
-            return
+            return False
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 
@@ -250,24 +271,54 @@ class EventLog:
                 channel = await SlackChannel.load(channel_id)
             except Exception:
                 logger.warning("Checking event log Slack channel failed", exc_info=True)
-                return
-            if channel is None or not channel.details.publishes_events:
-                return
-        try:
-            await cls.ensure_partitions()
-        except Exception:  # noqa: BLE001
-            logger.warning("Rotating event log partitions failed", exc_info=True)
+                return True
+            if channel is None:
+                return False
+            if not channel.details.publishes_events:
+                return True
         payload = cls._decode(request, body)
         action = payload.get("action") if isinstance(payload, dict) else None
         if event_type and isinstance(action, str) and action:
             event_type = f"{event_type}.{action}"
+        return await cls.append(
+            source,
+            payload,
+            endpoint=request.url.path,
+            event_type=event_type,
+            delivery_id=delivery_id,
+            refs=refs,
+        )
+
+    @classmethod
+    async def append(
+        cls,
+        source: WebhookSource,
+        payload: JsonValue,
+        *,
+        endpoint: str = "",
+        event_type: str,
+        delivery_id: str,
+        refs: EventRefs | None = None,
+    ) -> bool:
+        """Store one event and wake subscribed threads; ``record`` for a webhook request.
+
+        Never raises. False means the row was not stored.
+        """
+        from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
+
+        if not configured():
+            return False
+        try:
+            await cls.ensure_partitions()
+        except Exception:  # noqa: BLE001
+            logger.warning("Rotating event log partitions failed", exc_info=True)
         try:
             async with transaction() as conn:
                 result = await conn.execute(
                     _INSERT,
                     {
                         "source": source,
-                        "endpoint": request.url.path,
+                        "endpoint": endpoint,
                         "event_type": event_type,
                         "delivery_id": delivery_id,
                         "payload": json.dumps(payload),
@@ -277,31 +328,88 @@ class EventLog:
                 row = result.mappings().one()
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Recording a webhook in the event log failed",
-                extra={"webhook_source": source, "webhook_endpoint": request.url.path},
+                "Recording an event in the event log failed",
+                extra={"webhook_source": source, "webhook_endpoint": endpoint},
                 exc_info=True,
             )
-            return
-        from openswe.analytics.segment import record_webhook
+            return False
+        from openswe.analytics.posthog import record_webhook
 
         event = LoggedEvent.model_validate({**row, "payload": payload})
         task = asyncio.create_task(record_webhook(event))
-        _SEGMENT_TASKS.add(task)
-        task.add_done_callback(_SEGMENT_TASKS.discard)
+        _POSTHOG_TASKS.add(task)
+        task.add_done_callback(_POSTHOG_TASKS.discard)
         await EventSubscription.deliver(event)
+        return True
+
+    @classmethod
+    async def record_once(
+        cls,
+        request: Request,
+        body: bytes,
+        source: WebhookSource,
+        *,
+        event_type: str,
+        delivery_id: str,
+        refs: EventRefs | None = None,
+    ) -> bool:
+        """``record`` a delivery the sender may send more than once, at most once.
+
+        A retry, or another call for the same delivery, logs and wakes nothing
+        again. A delivery that was not stored gives its claim back, so its next
+        try records it. Never raises; False means the row was not stored.
+        """
+        if not configured():
+            return False
+        scope = f"{_TABLE}:{source}"
+        claimed = False
+        try:
+            claimed = await event_claims.claim(scope, delivery_id, ttl=_DELIVERY_CLAIM_TTL)
+        except Exception:  # noqa: BLE001 - a duplicate row beats a lost one
+            logger.warning(
+                "Claiming a delivery for the event log failed; recording it unclaimed",
+                extra={"webhook_source": source, "webhook_delivery": delivery_id},
+                exc_info=True,
+            )
+        else:
+            if not claimed:
+                return True
+        stored = await cls.record(
+            request, body, source, event_type=event_type, delivery_id=delivery_id, refs=refs
+        )
+        if not stored and claimed:
+            try:
+                await event_claims.release(scope, delivery_id)
+            except Exception:  # noqa: BLE001 - the claim lapses on its own
+                logger.warning(
+                    "Releasing an unrecorded delivery's event log claim failed",
+                    extra={"webhook_source": source, "webhook_delivery": delivery_id},
+                    exc_info=True,
+                )
+        return stored
 
     @classmethod
     async def kinds(
-        cls, since: datetime, *, source: WebhookSource | None = None, event_type: str = ""
+        cls,
+        since: datetime,
+        *,
+        source: WebhookSource | None = None,
+        event_type: str = "",
+        admin: bool = False,
     ) -> list[EventKind]:
         """Every distinct source and event type received since ``since``.
 
         ``event_type`` narrows to that type and its ``.<action>`` variants. With
         ``source``, an exact match also gets the newest payload's shape: keys and value
-        types, never values.
+        types, never values. ``ADMIN_ONLY_SOURCES`` are left out unless ``admin``.
         """
         await cls.ensure_partitions()
-        params = {"since": since, "source": source, "event_type": event_type}
+        params = {
+            "since": since,
+            "source": source,
+            "event_type": event_type,
+            "hidden_sources": [] if admin else sorted(ADMIN_ONLY_SOURCES),
+        }
         async with transaction() as conn:
             rows = await conn.execute(_EVENT_KINDS, params)
             kinds = [EventKind.model_validate(dict(row)) for row in rows.mappings()]

@@ -1,95 +1,92 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useEffect, useMemo } from "react"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
-import { ArrowUp, ChevronDown, Clock, X } from "lucide-react"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
-import { UserMessage } from "./UserMessage"
+import { SentReply, UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
+import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
 function QueuedMessages({
   queuedMessages,
-  onSteer,
   onRemove,
 }: {
   queuedMessages: NonNullable<MessagesProps["queuedMessages"]>
-  onSteer?: (id: string) => void
   onRemove?: (id: string) => void
 }) {
   if (queuedMessages.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2" data-testid="queued-messages">
+    <div className="mb-space-3 space-y-space-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
-        const statusLabel =
-          index === 0
-            ? "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
+        const statusLabel = message.waitsForAgent
+          ? "Held for the agent. It reads this before its next step, and it starts no run of its own."
+          : index === 0
+            ? "Sends when the run ends."
             : "Waits for the message ahead of it."
+        const status = message.waitsForAgent
+          ? "Waiting for the agent"
+          : "Queued"
+        const actionable =
+          onRemove && message.mine !== false && !message.waitsForAgent
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
+            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
+            data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
           >
+            {message.replies?.map((reply, replyIndex) => (
+              <SentReply key={replyIndex} reply={reply} />
+            ))}
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
                 <SkillPromptText text={message.content} />
               </div>
             )}
             {imageCount > 0 && (
-              <div className="mt-1 text-xs text-muted-foreground">
+              <div className="mt-space-1 text-xs text-secondary">
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached
               </div>
             )}
-            <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="mt-space-2 flex items-center gap-space-3 text-xs text-secondary">
               <span
-                className="inline-flex h-6 items-center gap-1"
+                className="inline-flex h-6 items-center gap-space-1"
                 title={statusLabel}
-                aria-label={`Queued. ${statusLabel}`}
+                aria-label={`${status}. ${statusLabel}`}
               >
-                <Clock className="size-3.5" aria-hidden />
-                Queued
-                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
+                <ClockIcon size={14} weight="regular" aria-hidden />
+                {status}
+                <span className="ml-space-1 size-1.5 animate-status-pulse rounded-full bg-current" />
               </span>
-              {(onSteer || onRemove) && message.mine !== false && (
+              {message.sender && <span>from {message.sender}</span>}
+              {actionable && (
                 <div className="ml-auto flex items-center gap-0.5">
-                  {onSteer && (
-                    <button
-                      type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                      onPointerDown={(event) => event.preventDefault()}
-                      onClick={() => onSteer(message.id)}
-                      disabled={message.pending}
-                      title="Send now"
-                      aria-label="Send now"
-                      data-testid="queued-message-send-now"
-                    >
-                      <ArrowUp className="size-3.5" aria-hidden />
-                    </button>
-                  )}
-                  {onRemove && (
-                    <button
-                      type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                      onPointerDown={(event) => event.preventDefault()}
-                      onClick={() => onRemove(message.id)}
-                      disabled={message.pending}
-                      title="Cancel and return to the composer"
-                      aria-label="Cancel and return to the composer"
-                      data-testid="queued-message-cancel"
-                    >
-                      <X className="size-3.5" aria-hidden />
-                    </button>
-                  )}
+                  <IconButton
+                    icon={XIcon}
+                    label="Cancel and return to the composer"
+                    size="sm"
+                    color="secondary"
+                    variant="plain"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => onRemove(message.id)}
+                    disabled={message.pending}
+                    data-testid="queued-message-cancel"
+                  />
                 </div>
               )}
             </div>
@@ -105,12 +102,13 @@ export const Messages = memo(function MessagesComponent({
   threadId,
   scrollKey,
   showPlanArtifact = false,
+  runCosts,
   emptyState,
   footer,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
-  onSteerQueuedMessage,
   onRemoveQueuedMessage,
+  onReply,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -119,7 +117,7 @@ export const Messages = memo(function MessagesComponent({
   reconnectLabel = null,
   localRepo,
   contentWidthClass = "max-w-[42rem]",
-  contentPaddingClass = "px-6",
+  contentPaddingClass = "px-space-5",
   bottomInset = 0,
   loadEarlier = null,
   scrollButtonSlot = "internal",
@@ -133,14 +131,20 @@ export const Messages = memo(function MessagesComponent({
   const {
     scrollRef,
     contentRef,
+    reserveRef,
     showScrollToBottom,
     scrollToBottom,
+    pinMessage,
     capturePrependAnchor,
   } = useTranscriptScroll({ scrollKey, messages, isStreaming })
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
+  )
+  const costsByTurn = useMemo(
+    () => turnCosts(visibleMessages, runCosts),
+    [visibleMessages, runCosts]
   )
   const liveMarkdownMessageId = useLiveMarkdownMessageId(
     visibleMessages,
@@ -150,11 +154,11 @@ export const Messages = memo(function MessagesComponent({
 
   useEffect(() => {
     if (!scrollControlRef) return
-    scrollControlRef.current = { scrollToBottom }
+    scrollControlRef.current = { scrollToBottom, pinMessage }
     return () => {
       scrollControlRef.current = null
     }
-  }, [scrollToBottom, scrollControlRef])
+  }, [pinMessage, scrollToBottom, scrollControlRef])
 
   useEffect(() => {
     onShowScrollToBottomChange?.(showScrollToBottom)
@@ -172,13 +176,13 @@ export const Messages = memo(function MessagesComponent({
   }, [isStreaming, repoPath, visibleMessages])
 
   return (
-    <TooltipProvider delay={250} closeDelay={0}>
+    <TooltipProvider delayDuration={250}>
       <div className="relative min-h-0 min-w-0 flex-1">
         <div
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-[14px] leading-[1.6] antialiased"
+          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-space-5 text-sm leading-[1.6] antialiased"
         >
           <div
             ref={contentRef}
@@ -186,19 +190,27 @@ export const Messages = memo(function MessagesComponent({
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
             {loadEarlier && (
-              <button
+              <Button
+                color="secondary"
+                variant="plain"
+                size="sm"
+                aria-label={
+                  loadEarlier.loading
+                    ? "Loading earlier turns…"
+                    : "Load earlier turns"
+                }
                 type="button"
                 disabled={loadEarlier.loading}
                 onClick={() => {
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-3 w-full py-1.5 text-center text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
+                className="mb-space-3 w-full py-space-1 text-center text-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
                   : "Load earlier turns"}
-              </button>
+              </Button>
             )}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
@@ -221,6 +233,7 @@ export const Messages = memo(function MessagesComponent({
                   isMarkdownLive={messageIsMarkdownLive}
                   repoPath={repoPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
+                  costUsd={costsByTurn.get(message.id)}
                   onApprove={onApprove}
                   onReject={onReject}
                   onAutoApprove={onAutoApprove}
@@ -238,12 +251,7 @@ export const Messages = memo(function MessagesComponent({
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
-            <QueuedMessages
-              queuedMessages={queuedMessages}
-              onSteer={onSteerQueuedMessage}
-              onRemove={onRemoveQueuedMessage}
-            />
-            {footer}
+            {/* Above the queue: the live run's activity, then what waits for it. */}
             <ThinkingSpinner
               isActive={
                 !!reconnectLabel ||
@@ -263,19 +271,31 @@ export const Messages = memo(function MessagesComponent({
                 (isOffloading ? "Offloading conversation..." : activityLabel)
               }
             />
+            <QueuedMessages
+              queuedMessages={queuedMessages}
+              onRemove={onRemoveQueuedMessage}
+            />
+            {footer}
           </div>
+          <div ref={reserveRef} aria-hidden />
         </div>
 
+        {onReply && (
+          <SelectionReply containerRef={scrollRef} onReply={onReply} />
+        )}
+
         {scrollButtonSlot === "internal" && showScrollToBottom && (
-          <button
-            type="button"
+          <IconButton
+            icon={CaretDownIcon}
+            label="Scroll to bottom"
+            size="md"
+            round
+            color="secondary"
+            variant="outlined"
             onClick={scrollToBottom}
-            aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            className="absolute left-1/2 z-floating-bar -translate-x-1/2 shadow-md"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
-          >
-            <ChevronDown className="size-3.5" />
-          </button>
+          />
         )}
       </div>
     </TooltipProvider>

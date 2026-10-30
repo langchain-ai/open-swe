@@ -7,6 +7,7 @@
 
 import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
+import { inSendOrder } from "@/features/agents/lib/runStartOrder"
 import {
   REQUEST_ID_HEADER,
   dashboardApiUrl,
@@ -14,6 +15,7 @@ import {
   newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
+import { readPreference as prefersSdkStream } from "@/lib/streamPreference"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   StoredEvent,
@@ -21,30 +23,12 @@ import type {
   TranscriptSnapshot,
   TranscriptTurnPage,
 } from "./types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
 function transcriptPath(threadId: string, suffix = ""): string {
   return `/threads/${encodeURIComponent(threadId)}/transcript${suffix}`
-}
-
-async function apiError(
-  response: Response,
-  requestId?: string
-): Promise<AgentsApiError> {
-  let message = response.statusText
-  try {
-    const body: unknown = await response.json()
-    const detail =
-      body !== null && typeof body === "object" && "detail" in body
-        ? (body as { detail: unknown }).detail
-        : undefined
-    if (typeof detail === "string" && detail) message = detail
-    else if (detail !== undefined) message = JSON.stringify(detail)
-  } catch {
-    // Not a JSON error body; the status text is all we have.
-  }
-  return new AgentsApiError(response.status, message, requestId)
 }
 
 /** The whole thread as of `version`; 404 for threads that predate the log. */
@@ -95,7 +79,7 @@ export function attachmentUrl(threadId: string, attachmentId: string): string {
  */
 export async function fetchImageBlob(url: string): Promise<Blob> {
   const response = await timedFetch(url, { credentials: "include" })
-  if (!response.ok) throw await apiError(response)
+  if (!response.ok) throw await AgentsApiError.fromResponse(response)
   return await response.blob()
 }
 
@@ -195,6 +179,7 @@ export interface RunStartMessage {
   id: string
   text: string
   images?: ReadonlyArray<ImageChunk>
+  replies?: ReadonlyArray<PassageReply>
 }
 
 export interface RunStartCommand {
@@ -205,6 +190,7 @@ export interface RunStartCommand {
     input: { messages: Array<Record<string, unknown>> } | null
     config: { configurable: Record<string, unknown> }
     assistant_id: string
+    stream_resumable?: false
   }
 }
 
@@ -237,7 +223,7 @@ export function runStartCommand({
         ? {
             messages: [
               {
-                ...promptMessage(message.text, message.images),
+                ...promptMessage(message.text, message.images, message.replies),
                 id: message.id,
               },
             ],
@@ -245,6 +231,9 @@ export function runStartCommand({
         : null,
       config: { configurable: { ...configurable, thread_id: threadId } },
       assistant_id: AGENT_ASSISTANT_ID,
+      // Unless this browser streams threads through the SDK, it reads the
+      // transcript, so the server need keep no replay of the run.
+      ...(prefersSdkStream() ? {} : { stream_resumable: false as const }),
     },
   }
 }
@@ -275,21 +264,23 @@ export async function startRun(
   command: RunStartCommand
 ): Promise<void> {
   const requestId = newRequestId()
-  const response = await timedFetch(
-    dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        [REQUEST_ID_HEADER]: requestId,
-      },
-      body: JSON.stringify(command),
-    }
+  const response = await inSendOrder(threadId, () =>
+    timedFetch(
+      dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+        body: JSON.stringify(command),
+      }
+    )
   ).catch((cause: unknown) => {
     throw networkError(cause, requestId)
   })
-  if (!response.ok) throw await apiError(response, requestId)
+  if (!response.ok) throw await AgentsApiError.fromResponse(response, requestId)
   const payload: unknown = await response.json().catch(() => null)
   if (isProtocolFailure(payload)) {
     throw new AgentsApiError(

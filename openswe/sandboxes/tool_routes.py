@@ -1,12 +1,9 @@
-"""Capability-authenticated discovery and invocation of thread tools."""
+"""Capability-authenticated callbacks from a thread's sandbox."""
 
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
-from fastapi.routing import APIRoute
-from pydantic import BaseModel
-from starlette.types import Message, Receive, Scope, Send
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 
 from openswe.sandboxes.tool_access import (
     TOOLS_HEADER,
@@ -14,29 +11,23 @@ from openswe.sandboxes.tool_access import (
     ToolAccess,
     authenticate_tool_access,
 )
-from openswe.sandboxes.tool_models import ToolArguments, ToolDescription, ToolResult
 
 logger = logging.getLogger(__name__)
-MAX_REQUEST_BYTES = 1024 * 1024
 
 
-class ToolRoute(APIRoute):
-    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
-        size = 0
-
-        async def limited_receive() -> Message:
-            nonlocal size
-            message = await receive()
-            if message["type"] == "http.request":
-                size += len(message.get("body", b""))
-                if size > MAX_REQUEST_BYTES:
-                    raise HTTPException(413, "Tool request is too large")
-            return message
-
-        await super().handle(scope, limited_receive, send)
+router = APIRouter(prefix=TOOLS_PATH, tags=["sandbox-tools"])
 
 
-router = APIRouter(prefix=TOOLS_PATH, tags=["sandbox-tools"], route_class=ToolRoute)
+@router.get("", include_in_schema=False)
+@router.get("/list", include_in_schema=False)
+@router.get("/search", include_in_schema=False)
+@router.post("/invoke/{tool_name}", include_in_schema=False)
+async def removed_tool_endpoint() -> None:
+    raise HTTPException(
+        410,
+        "The sandbox tool endpoint was removed. Call the tool directly, "
+        "or find it with search_tools and call it from eval.",
+    )
 
 
 async def require_tool_access(request: Request, response: Response) -> ToolAccess:
@@ -47,27 +38,6 @@ async def require_tool_access(request: Request, response: Response) -> ToolAcces
 
 
 Access = Annotated[ToolAccess, Depends(require_tool_access)]
-
-
-class ToolList(BaseModel):
-    tools: list[ToolDescription]
-    total: int
-
-
-@router.get("", response_model=ToolList)
-@router.get("/list", response_model=ToolList)
-@router.get("/search", response_model=ToolList)
-async def list_tools(
-    access: Access,
-    q: Annotated[str, Query(max_length=512)] = "",
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 100,
-) -> ToolList:
-    from openswe.sandboxes.tool_runtime import load_tool_surface
-
-    surface, _, _ = await load_tool_surface(access.thread_id)
-    tools = surface.catalog(q)
-    return ToolList(tools=tools[offset : offset + limit], total=len(tools))
 
 
 TaskId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]{1,128}$")]
@@ -115,22 +85,33 @@ async def background_task_heartbeat(task_id: TaskId, access: Access) -> None:
         raise HTTPException(409, "Background task is no longer running")
 
 
-@router.post("/invoke/{tool_name}", response_model=ToolResult)
-async def invoke_tool(
-    tool_name: Annotated[str, Path(min_length=1, max_length=256)],
-    arguments: ToolArguments,
-    access: Access,
-) -> ToolResult:
-    from openswe.sandboxes.tool_runtime import load_tool_surface
+MonitorId = Annotated[str, Path(pattern=r"^mon-[0-9a-f-]{1,64}$")]
 
-    surface, config, state = await load_tool_surface(access.thread_id)
+
+@router.post("/monitors/{monitor_id}/sync", status_code=204)
+async def monitor_sync(monitor_id: MonitorId, access: Access) -> None:
+    """A monitor's runner has new events or has ended; a 5xx makes a final sync retry."""
+    from openswe.monitors.delivery import sync_monitor_callback
+
     try:
-        result = await surface.invoke(access.thread_id, config, state, tool_name, arguments.root)
-        return ToolResult.model_validate(result)
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Sandbox tool invocation failed", extra={"tool_name": tool_name})
-        raise HTTPException(
-            500, "Tool invocation failed; inspect server logs before retrying"
-        ) from None
+        await sync_monitor_callback(monitor_id, access)
+    except PermissionError as exc:
+        logger.warning(
+            "Monitor sync rejected",
+            extra={
+                "monitor_id": monitor_id,
+                "agent_thread_id": access.thread_id,
+                "sandbox_id": access.sandbox_id,
+            },
+        )
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        logger.warning(
+            "Monitor sync for an unknown monitor",
+            extra={
+                "monitor_id": monitor_id,
+                "agent_thread_id": access.thread_id,
+                "sandbox_id": access.sandbox_id,
+            },
+        )
+        raise HTTPException(404, str(exc)) from exc

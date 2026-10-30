@@ -4,22 +4,24 @@ from typing import Literal
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.styles import (
     REVIEW_STYLES,
     ApprovalMode,
     ReviewStylePromptUpdate,
     effective_approval_mode,
-    normalize_repo_full_name,
 )
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable
+from openswe.tools.mcp_exposure import expose_mcp
 
 _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "mode"))
 
 
-@audit_tool(skip_read=True)
+@expose_mcp(access="admin")
+@audit_tool(reads={"read"})
 @access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_review_approval_mode(
     action: Literal["read", "set"],

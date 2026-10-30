@@ -1,21 +1,21 @@
 """Turning a dashboard request into a LangGraph run: bodies, models, images, commands."""
 
+import asyncio
 import base64
 import binascii
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -35,7 +35,8 @@ from openswe.dashboard.workspace_settings import (
 from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
-    _run_user_id,
+    TURN_ATTRIBUTION_FIELDS,
+    _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
 )
@@ -49,11 +50,10 @@ from openswe.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
-    lookup_slack_thread_run_mapping,
-    update_slack_trace_reply_for_web_handoff,
-)
+from openswe.slack.client import update_slack_trace_reply_for_web_handoff
+from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -61,7 +61,9 @@ from openswe.threads.access import (
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
+from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -69,7 +71,6 @@ from openswe.threads.summary import (
     _now_ms,
     _parse_repo,
     repo_config_from_metadata,
-    thread_is_owner,
     thread_source,
 )
 from openswe.transcript.attachments import PendingAttachment
@@ -83,9 +84,17 @@ from openswe.transcript.events import (
     TurnQueued,
     TurnRequested,
 )
-from openswe.transcript.turns import open_turn_id, recorded_turn_id
+from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
-from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from openswe.users.repository_defaults import RepositoryDefaults
+from openswe.utils.dashboard_handoff import (
+    DASHBOARD_HANDOFF_BODY,
+    RELAYED_FROM_KEY,
+    REPLIES_KEY,
+    PassageReply,
+    dashboard_input_context,
+    passage_replies,
+)
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
@@ -115,11 +124,6 @@ _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
     "display_name": "Dashboard handoff",
     "platform": "open-swe",
 }
-_SANDBOX_HANDOFF_SYSTEM: SystemIdentity = {
-    "id": "system:sandbox-handoff",
-    "display_name": "Sandbox handoff",
-    "platform": "open-swe",
-}
 _PULL_REQUEST_THREAD_SYSTEM: SystemIdentity = {
     "id": "system:pull-request-thread",
     "display_name": "Pull request thread",
@@ -138,14 +142,6 @@ class DashboardImageBody(BaseModel):
     base64: str = Field(min_length=1)
     mime_type: str = Field(alias="mimeType", min_length=1)
     file_name: str | None = Field(default=None, alias="fileName")
-
-
-class ThreadMessageBody(BaseModel):
-    content: str = Field(default="", max_length=20_000)
-    images: list[DashboardImageBody] = Field(default_factory=list)
-    model_id: str | None = None
-    effort: str | None = None
-    client_message_id: uuid.UUID | None = None
 
 
 class ThreadRenameBody(BaseModel):
@@ -167,9 +163,6 @@ async def _resolve_agent_model_choice(
     settings = await get_workspace_settings(workspace)
     resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
-        profile_model, profile_effort = normalize_profile_overrides(profile)
-        if profile_model and profile_effort:
-            resolved_model, resolved_effort = profile_model, profile_effort
         chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
@@ -264,6 +257,7 @@ async def create_dashboard_thread_record(
     email: str | None = None,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
+    experience: Literal["coding", "agent_workspace"] = "coding",
     prompt: str,
     images: list[DashboardImageBody] | None = None,
     title: str | None = None,
@@ -273,9 +267,13 @@ async def create_dashboard_thread_record(
     visibility: Literal["public", "private"] = "public",
     workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a dashboard thread with immutable ownership and visibility."""
-    profile = await get_profile(login) or {}
+    """Create a dashboard thread with immutable ownership and visibility.
+
+    ``profile`` is the person's profile when the caller already read it.
+    """
+    profile = profile if profile is not None else await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
@@ -288,8 +286,8 @@ async def create_dashboard_thread_record(
     )
     _user_message_content(prompt, images or [], model_id=resolved_model)
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-    metadata_model = chosen_model or profile.get("default_model") or "Default"
-    metadata_effort = chosen_effort or profile.get("reasoning_effort")
+    metadata_model = chosen_model or "Default"
+    metadata_effort = chosen_effort
     if images and not model_supports_images(str(metadata_model)):
         metadata_model = resolved_model
         metadata_effort = resolved_effort
@@ -315,6 +313,8 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+    if experience == "agent_workspace":
+        metadata["experience"] = experience
     if visibility == "private" and is_admin(email, login=login):
         metadata["admin_thread"] = True
     if workspace:
@@ -340,7 +340,7 @@ async def create_dashboard_thread_record(
         client,
         thread_id,
         title=initial_title,
-        metadata={**metadata, "feedback_initiator_login": login},
+        metadata=metadata,
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
@@ -388,6 +388,8 @@ async def _build_dashboard_configurable(
         "user_email": await resolve_run_email(login, profile),
         "background_task_completion": False,
     }
+    if metadata.get("experience") == "agent_workspace":
+        configurable["experience"] = "agent_workspace"
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
         configurable["repo"] = repo_config
@@ -418,6 +420,44 @@ async def _build_dashboard_configurable(
     return configurable
 
 
+class SessionCreateBody(BaseModel):
+    prompt: str = Field(min_length=1)
+    repo: str | None = Field(default=None, pattern=r"^[^/\s]+/[^/\s]+$")
+    workspace: str | None = None
+    visibility: Literal["public", "private"] | None = None
+    start: bool = True
+
+
+async def create_dashboard_session(
+    body: SessionCreateBody, login: str, *, email: str | None = None
+) -> str:
+    """Create a fresh owned thread using the person's dashboard defaults."""
+    profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
+    repo = body.repo if body.repo is not None else profile.repository()
+    workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
+    if body.repo is None:
+        preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
+        if profile.workspace_default_repos.get(preferred_workspace):
+            workspace = preferred_workspace
+        repo = profile.repository(workspace)
+    repo_config = _parse_repo(repo) or {}
+    if repo:
+        if not repo_config:
+            raise HTTPException(422, "repo must be owner/name")
+        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
+    await _ensure_dashboard_github_token(login)
+    thread = await create_dashboard_thread_record(
+        str(uuid.uuid4()),
+        login=login,
+        email=email,
+        repo_config=repo_config,
+        prompt=body.prompt,
+        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        workspace=workspace,
+    )
+    return str(thread["thread_id"])
+
+
 async def start_dashboard_thread(
     login: str,
     email: str | None,
@@ -426,6 +466,7 @@ async def start_dashboard_thread(
     prompt: str,
     repos: Sequence[str],
     visibility: Literal["public", "private"],
+    unlisted: bool = False,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
     repo_configs: list[dict[str, str]] = []
@@ -446,6 +487,7 @@ async def start_dashboard_thread(
         title=title,
         visibility=visibility,
         workspace=await _resolve_requested_workspace(None, primary, login=login),
+        extra_metadata={"unlisted": True} if unlisted else None,
     )
     thread_id = str(thread["thread_id"])
     client = langgraph_client()
@@ -539,6 +581,25 @@ def _command_message_id(params: dict[str, Any]) -> str | None:
         return None
     message_id = last.get("id")
     return message_id if isinstance(message_id, str) and message_id else None
+
+
+def _command_message_replies(params: dict[str, Any]) -> list[PassageReply]:
+    """The passages a ``run.start`` command's newest user message replies to."""
+    run_input = params.get("input")
+    messages = run_input.get("messages") if isinstance(run_input, dict) else None
+    last = messages[-1] if isinstance(messages, list) and messages else None
+    kwargs = last.get("additional_kwargs") if isinstance(last, dict) else None
+    raw = kwargs.get(REPLIES_KEY) if isinstance(kwargs, dict) else None
+    try:
+        return passage_replies(raw)
+    except ValidationError as exc:
+        raise HTTPException(422, f"invalid replies: {exc.errors()[0]['msg']}") from exc
+
+
+def _relayed_from(params: dict[str, Any]) -> str | None:
+    """Take the relaying thread's id off a ``run.start`` command's params."""
+    relayed_from = params.pop(RELAYED_FROM_KEY, None)
+    return relayed_from if isinstance(relayed_from, str) and relayed_from else None
 
 
 def _command_prompt_text(content: Any) -> str:
@@ -639,49 +700,11 @@ async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge
     return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
 
 
-async def _sandbox_handoff(
-    thread_id: str,
-    metadata: Mapping[str, Any],
-    *,
-    bridge: Bridge | None,
-    target: object,
-    login: str,
-) -> dict[str, Any] | None:
-    """The metadata that moves an existing thread to ``bridge`` or to the cloud, if it moves.
-
-    The checkout itself moves at the start of the next run, from the sandbox
-    recorded under ``HANDOFF_FROM_KEY``; a handoff still pending keeps its source.
-    """
-    if target not in (None, "cloud"):
-        raise HTTPException(422, "sandbox_target must be cloud")
-    current = metadata.get("sandbox_id")
-    if bridge is not None and bridge.sandbox_id != current:
-        if metadata.get("visibility") != "private" or not thread_is_owner(metadata, login):
-            raise HTTPException(409, "only its owner's private thread can move to their machine")
-        update: dict[str, Any] = SandboxBridgeBinding.of(bridge).dump()
-    elif bridge is None and target == "cloud" and Bridge.bridge_id_of(current) is not None:
-        update = {"sandbox_id": None, "sandbox_kind": None, "sandbox_bridge_client": None}
-    else:
-        return None
-    if (await langgraph_client().threads.get(thread_id)).get("status") == "busy":
-        raise HTTPException(409, "stop the run before moving this thread")
-    source = metadata.get(HANDOFF_FROM_KEY) or current
-    if (
-        bridge is None
-        and Bridge.bridge_id_of(source)
-        and not await BridgeStore.is_connected(source)
-    ):
-        # A checkout no Mac is serving stays behind; the cloud starts from what was pushed.
-        source = None
-    update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
-    return update
-
-
 async def _bind_thread_to_bridge(
     thread_id: str, bridge: Bridge, metadata: dict[str, Any]
 ) -> dict[str, Any]:
     binding = SandboxBridgeBinding.of(bridge).dump()
-    await langgraph_client().threads.update(thread_id=thread_id, metadata=binding)
+    await THREADS.update(thread_id, binding)
     logger.info(
         "Bound a thread to a sandbox bridge",
         extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
@@ -723,64 +746,88 @@ async def _requested_visibility(
     return cast(Literal["public", "private"], visibility)
 
 
+@dataclass(frozen=True)
+class _ThreadHistory:
+    """What the graph already holds of a thread's conversation, read from its state.
+
+    Only the state carries the dynamic context a run injected, so this is a full
+    state read; callers start it early so it overlaps their other lookups.
+    """
+
+    read: bool = False
+    context_hashes: frozenset[str] | None = None
+    message_ids: frozenset[str] = frozenset()
+
+    @classmethod
+    async def of(cls, thread_id: str) -> _ThreadHistory:
+        """The thread's history, empty when its state cannot be read."""
+        try:
+            state = await THREADS.state(thread_id)
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+            return cls()
+        if state is None:
+            return cls()
+        values = state.get("values")
+        messages = values.get("messages") if isinstance(values, dict) else None
+        if not isinstance(messages, list):
+            return cls(read=True)
+        return cls(
+            read=True,
+            context_hashes=frozenset(dynamic_context_hashes_from_messages(messages)),
+            message_ids=frozenset(
+                message_id
+                for message in messages
+                if isinstance(message, Mapping) and isinstance(message_id := message.get("id"), str)
+            ),
+        )
+
+
 async def _attributed_run_messages(
-    thread_id: str,
     login: str,
     *,
     metadata: Mapping[str, Any],
+    history: _ThreadHistory,
     content: Any,
-    creating: bool,
     email: str | None,
-    client: Any,
-    sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
-) -> tuple[list[RunMessage], set[str], set[str]]:
+    relayed_from: str | None = None,
+    replies: Sequence[PassageReply] = (),
+) -> tuple[list[RunMessage], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
-    Returns the structured messages, the dynamic-context hashes already in the
-    conversation, and the ids of the messages the graph already holds.
+    Returns the structured messages and the dynamic-context hashes already in the
+    conversation.
     """
     if content is None:
         content = ""
     sender_id = f"github:{login}"
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
-    persisted_message_ids: set[str] = set()
-    history_read = False
-    if not creating:
-        try:
-            prior_state = await client.threads.get_state(thread_id)
-            history_read = True
-            values = prior_state.get("values") if isinstance(prior_state, dict) else None
-            if isinstance(values, dict):
-                messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
-                if isinstance(messages, list):
-                    persisted_message_ids = {
-                        message_id
-                        for message in messages
-                        if isinstance(message, Mapping)
-                        and isinstance(message_id := message.get("id"), str)
-                    }
-        except Exception:
-            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+    injected = (
+        set(history.context_hashes)
+        if history.context_hashes is not None
+        else injected_dynamic_context_hashes_from_metadata(metadata)
+    )
     person: PersonIdentity = {"id": sender_id, "github_login": login}
     if email:
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
     notices: list[tuple[SystemIdentity, str]] = []
-    if metadata.get("source") == "slack":
+    if metadata.get("source") == "slack" and relayed_from is None:
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
-    if sandbox_handoff is not None:
-        to_cloud = sandbox_handoff.get("sandbox_id") is None
-        carried = sandbox_handoff.get(HANDOFF_FROM_KEY) is not None
+    moved = metadata.get(SANDBOX_MOVED_KEY)
+    if isinstance(moved, Mapping):
         notices.append(
             (
-                _SANDBOX_HANDOFF_SYSTEM,
-                prompt("runs/sandbox-handoff", to_cloud=to_cloud, carried=carried),
+                SANDBOX_HANDOFF_SYSTEM,
+                prompt(
+                    "runs/sandbox-handoff",
+                    to_cloud=moved.get("to_cloud") is True,
+                    carried=moved.get("carried") is True,
+                ),
             )
         )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
-    if pr_url and history_read and not persisted_message_ids:
+    if pr_url and history.read and not history.message_ids:
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
@@ -793,7 +840,7 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        dashboard_input_context(sender_id, relayed_from, replies),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -806,7 +853,7 @@ async def _attributed_run_messages(
                 injected_dynamic_context_hashes={system["id"]},
             )[0],
         )
-    return structured, injected, persisted_message_ids
+    return structured, injected
 
 
 async def _enrich_run_start_command(
@@ -821,115 +868,158 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
 
-    client = langgraph_client()
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
         command["params"] = params
 
-    await _ensure_dashboard_github_token(login)
+    # The state read is the slowest lookup before dispatch, and nothing below
+    # changes the conversation or the profile, so both run alongside the checks
+    # and any sandbox move.
+    history = None if creating else asyncio.ensure_future(_ThreadHistory.of(thread_id))
+    profile_read = asyncio.ensure_future(get_profile(login))
+    try:
+        await _ensure_dashboard_github_token(login)
 
-    client_config = params.get("config")
-    if not isinstance(client_config, dict):
-        client_config = {}
-    client_configurable = client_config.get("configurable")
-    if not isinstance(client_configurable, dict):
-        client_configurable = {}
+        client_config = params.get("config")
+        if not isinstance(client_config, dict):
+            client_config = {}
+        client_configurable = client_config.get("configurable")
+        if not isinstance(client_configurable, dict):
+            client_configurable = {}
 
-    chosen_model, chosen_effort = normalize_model_choice(
-        client_configurable.get("agent_model_id"),
-        client_configurable.get("agent_effort"),
-    )
-    model_selection = client_configurable.get("model_selection")
-    if model_selection not in {"auto", "explicit"}:
-        if client_configurable.get("agent_model_id"):
-            model_selection = "explicit"
-        else:
-            model_selection = "auto" if creating else metadata.get("model_selection")
-    offloading = offload_requested(params)
-    sandbox_bridge = await _resolve_sandbox_bridge(
-        client_configurable.get("sandbox_bridge_id"),
-        owner_id=Principal.of_login(login, email).sender_id,
-    )
-    sandbox_handoff = (
-        None
-        if creating
-        else await _sandbox_handoff(
-            thread_id,
-            metadata,
-            bridge=sandbox_bridge,
-            target=client_configurable.get("sandbox_target"),
-            login=login,
+        chosen_model, chosen_effort = normalize_model_choice(
+            client_configurable.get("agent_model_id"),
+            client_configurable.get("agent_effort"),
         )
-    )
-    content = _command_message_content(params)
-    if offloading and creating:
-        raise HTTPException(400, "offloading requires an existing conversation")
-    command_images = _dashboard_images_from_content(content)
-    invocation_id = new_invocation_id()
-    invocation_started_at = datetime.now(UTC).isoformat()
-    overrides = with_invocation_id(None, invocation_id)
-    overrides["invocation_started_at"] = invocation_started_at
-    run_model: str | None = None
-    run_effort: str | None = None
+        model_selection = client_configurable.get("model_selection")
+        if model_selection not in {"auto", "explicit"}:
+            if client_configurable.get("agent_model_id"):
+                model_selection = "explicit"
+            else:
+                model_selection = "auto" if creating else metadata.get("model_selection")
+        offloading = offload_requested(params)
+        sandbox_bridge = await _resolve_sandbox_bridge(
+            client_configurable.get("sandbox_bridge_id"),
+            owner_id=Principal.of_login(login, email).sender_id,
+        )
+        move = (
+            None
+            if creating
+            else await SandboxMove.requested(
+                thread_id,
+                metadata,
+                login=login,
+                bridge=sandbox_bridge,
+                target=client_configurable.get("sandbox_target"),
+            )
+        )
+        if move is not None:
+            # A client that still moves a thread with its next message gets the same
+            # move, finished before the run starts.
+            try:
+                await move.carry_out()
+            except Exception as exc:
+                raise HTTPException(502, f"could not move this thread: {exc}") from exc
+            metadata = {**metadata, **move.update}
+        content = _command_message_content(params)
+        replies = _command_message_replies(params)
+        relayed_from = _relayed_from(params)
+        if offloading and creating:
+            raise HTTPException(400, "offloading requires an existing conversation")
+        command_images = _dashboard_images_from_content(content)
+        invocation_id = new_invocation_id()
+        invocation_started_at = datetime.now(UTC).isoformat()
+        overrides = with_invocation_id(None, invocation_id)
+        overrides["invocation_started_at"] = invocation_started_at
+        overrides[RELAYED_FROM_KEY] = relayed_from
+        run_model: str | None = None
+        run_effort: str | None = None
 
-    if creating:
-        # First ``run.start`` for a client-minted thread id: stamp the full
-        # dashboard thread record (owner, title, repo, model) and validate any
-        # attached images against the resolved model before the run is
-        # forwarded to LangGraph. The repo hint rides in the client
-        # configurable; it never reaches the run config (which is rebuilt from
-        # the stamped metadata below).
-        visibility = await _requested_visibility(client_configurable, login=login)
-        repo_config = _parse_repo(client_configurable.get("repo")) or {}
-        thread = await create_dashboard_thread_record(
-            thread_id,
-            login=login,
-            email=email,
-            repo_config=repo_config,
-            repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
-            visibility=visibility,
-            prompt=_command_prompt_text(content),
-            images=command_images,
-            model_id=client_configurable.get("agent_model_id"),
-            effort=client_configurable.get("agent_effort"),
-            model_selection=model_selection or "auto",
-            workspace=await _resolve_requested_workspace(
+        if creating:
+            # First ``run.start`` for a client-minted thread id: stamp the full
+            # dashboard thread record (owner, title, repo, model) and validate any
+            # attached images against the resolved model before the run is
+            # forwarded to LangGraph. The repo hint rides in the client
+            # configurable; it never reaches the run config (which is rebuilt from
+            # the stamped metadata below).
+            visibility = await _requested_visibility(client_configurable, login=login)
+            if sandbox_bridge is not None:
+                # Whoever can prompt a thread runs commands on its machine.
+                visibility = "private"
+            requested_experience = client_configurable.get("experience", "coding")
+            if requested_experience not in ("coding", "agent_workspace"):
+                raise HTTPException(422, "Unknown agent experience")
+            experience: Literal["coding", "agent_workspace"] = (
+                "agent_workspace" if requested_experience == "agent_workspace" else "coding"
+            )
+            if (
+                experience == "agent_workspace"
+                and not (await User.preferences_for_login(login)).experimental_fleet
+            ):
+                raise HTTPException(403, "LangSmith Agent Workspace is not enabled")
+            repo_config = _parse_repo(client_configurable.get("repo")) or {}
+            workspace = await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
                 repo_config,
                 login=login,
-            ),
-        )
-        metadata = thread_metadata(thread)
-        if sandbox_bridge is not None:
-            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
-        run_model, run_effort = normalize_model_choice(
-            metadata.get("resolved_model"), metadata.get("resolved_effort")
-        )
-        if command_images and run_model and run_effort:
-            overrides["agent_model_id"] = run_model
-            overrides["agent_effort"] = run_effort
-        elif chosen_model and chosen_effort:
-            overrides["agent_model_id"] = chosen_model
-            overrides["agent_effort"] = chosen_effort
-    else:
-        run_model, run_effort = (
-            (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
-        )
-        if command_images and run_model and run_effort:
-            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
-        _validate_command_images(content, model_id=run_model)
+            )
+            thread = await create_dashboard_thread_record(
+                thread_id,
+                login=login,
+                email=email,
+                repo_config=repo_config,
+                repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True
+                or (experience == "agent_workspace" and not repo_config),
+                experience=experience,
+                visibility=visibility,
+                prompt=_command_prompt_text(content),
+                images=command_images,
+                model_id=client_configurable.get("agent_model_id"),
+                effort=client_configurable.get("agent_effort"),
+                model_selection=model_selection or "auto",
+                workspace=workspace,
+                profile=await profile_read or {},
+            )
+            metadata = thread_metadata(thread)
+            if sandbox_bridge is not None:
+                metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
+            run_model, run_effort = normalize_model_choice(
+                metadata.get("resolved_model"), metadata.get("resolved_effort")
+            )
+            if command_images and run_model and run_effort:
+                overrides["agent_model_id"] = run_model
+                overrides["agent_effort"] = run_effort
+            elif chosen_model and chosen_effort:
+                overrides["agent_model_id"] = chosen_model
+                overrides["agent_effort"] = chosen_effort
+        else:
+            run_model, run_effort = (
+                (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
+            )
+            if command_images and run_model and run_effort:
+                run_model, run_effort = _with_vision_fallback(
+                    run_model, run_effort, has_images=True
+                )
+            _validate_command_images(content, model_id=run_model)
 
-    structured, injected, persisted_message_ids = await _attributed_run_messages(
-        thread_id,
+        prior = await history if history is not None else _ThreadHistory()
+        profile = await profile_read or {}
+    finally:
+        reads = (profile_read,) if history is None else (history, profile_read)
+        for read in reads:
+            read.cancel()
+        await asyncio.gather(*reads, return_exceptions=True)
+
+    structured, injected = await _attributed_run_messages(
         login,
         metadata=metadata,
+        history=prior,
         content=content,
-        creating=creating,
         email=email,
-        client=client,
-        sandbox_handoff=sandbox_handoff,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
+        relayed_from=relayed_from,
+        replies=replies,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -938,7 +1028,7 @@ async def _enrich_run_start_command(
     ) == TRANSCRIPT_VERSION
     client_message_id = _command_message_id(params)
     message_id: str | None = None
-    if client_message_id and client_message_id not in persisted_message_ids:
+    if client_message_id and client_message_id not in prior.message_ids:
         message_id = client_message_id
     elif transcribed:
         message_id = str(uuid.uuid7())
@@ -948,13 +1038,15 @@ async def _enrich_run_start_command(
     if isinstance(run_input, dict):
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
+        # A relay keeps the thread answering where its person is.
+        **({} if relayed_from else {"source": DASHBOARD_SOURCE}),
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "model_selection": model_selection,
         **await participant_metadata(metadata, login=login, email=email),
         "injected_dynamic_context_hashes": sorted(injected),
-        **(sandbox_handoff or {}),
+        # The agent is told about a move once, with the message after it.
+        **({SANDBOX_MOVED_KEY: None} if metadata.get(SANDBOX_MOVED_KEY) else {}),
     }
     if command_images and run_model and run_effort:
         overrides["agent_model_id"] = run_model
@@ -970,12 +1062,11 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
-        async with agent_thread_pr_state_lock(client, thread_id):
-            current = await client.threads.get(thread_id)
-            metadata = thread_metadata(current)
+        async with agent_thread_pr_state_lock(thread_id):
+            current = await THREADS.get(thread_id)
+            metadata = dict(current.metadata) if current is not None else metadata
             if _is_thread_resolved(metadata):
                 metadata_update["resolved"] = False
                 metadata_update["resolved_at_ms"] = None
@@ -984,7 +1075,7 @@ async def _enrich_run_start_command(
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await THREADS.update(thread_id, metadata_update)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
@@ -992,7 +1083,7 @@ async def _enrich_run_start_command(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await THREADS.update(thread_id, metadata_update)
 
     # Offloading starts a run with no human message, so it has no turn to
     # request; the middleware's ``turn.started`` opens that turn instead.
@@ -1033,6 +1124,9 @@ async def _enrich_run_start_command(
         overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
+    review_page_pr_url = client_configurable.get("review_chat_pr_url")
+    if isinstance(review_page_pr_url, str):
+        overrides["review_page_pr_url"] = review_page_pr_url
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )
@@ -1040,6 +1134,7 @@ async def _enrich_run_start_command(
         thread_id,
         login,
         metadata,
+        profile=profile,
         overrides=overrides,
     )
 
@@ -1051,14 +1146,8 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key
-                not in {
-                    "visibility",
-                    "owner_type",
-                    "owner_login",
-                    "system_authorization",
-                    "user_id",
-                }
+                if key not in TURN_ATTRIBUTION_FIELDS
+                and key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -1078,9 +1167,9 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
-    if user_id:
-        run_metadata["user_id"] = user_id
+    run_metadata.update(
+        await _run_user_metadata({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    )
     config_metadata = client_config.get("metadata")
     if not isinstance(config_metadata, dict):
         config_metadata = {}
@@ -1088,7 +1177,7 @@ async def _enrich_run_start_command(
         **client_config,
         "configurable": merged_configurable,
         "metadata": {
-            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **{k: v for k, v in config_metadata.items() if k not in TURN_ATTRIBUTION_FIELDS},
             **run_metadata,
         },
     }
@@ -1119,58 +1208,62 @@ async def steer_running_thread(
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
+    turn: OpenTurn | None,
     email: str | None = None,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
-    The message joins the active turn instead of opening a new one: it is
-    recorded on the transcript right away and left for the run to pick up
-    before its next model call. The reply mirrors the protocol's success
-    envelope so the caller cannot tell a steer from a start.
+    The message joins ``turn`` instead of opening a new one: it is recorded on
+    the transcript right away and left for the run to pick up before its next
+    model call. The reply mirrors the protocol's success envelope so the caller
+    cannot tell a steer from a start.
     """
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
     content = _command_message_content(params)
+    replies = _command_message_replies(params)
+    relayed_from = _relayed_from(params)
     command_images = _dashboard_images_from_content(content)
-    if not _command_prompt_text(content) and not command_images:
+    if not _command_prompt_text(content) and not command_images and not replies:
         raise HTTPException(422, "a follow-up needs a message")
 
     client = langgraph_client()
     latest_run_id = metadata.get("latest_run_id")
-    live_run_id = latest_run_id if isinstance(latest_run_id, str) and latest_run_id else None
+    # A turn learns its run id only once the run starts or is queued.
+    live_run_id = turn.run_id if turn is not None else None
+    if live_run_id is None and isinstance(latest_run_id, str) and latest_run_id:
+        live_run_id = latest_run_id
     # The run keeps the model it started with, so images are held to it. Thread
     # metadata may already name the model of a follow-up queued behind it.
-    run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
+    live_run_metadata, history = await asyncio.gather(
+        _run_metadata(client, thread_id, live_run_id), _ThreadHistory.of(thread_id)
+    )
+    run_model = live_run_metadata.get(RUN_MODEL_KEY)
     image_blocks = _image_blocks(
         command_images,
         model_id=run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0],
     )
 
-    structured, _, persisted_message_ids = await _attributed_run_messages(
-        thread_id,
+    structured, _ = await _attributed_run_messages(
         login,
         metadata=metadata,
+        history=history,
         content=content,
-        creating=False,
         email=email,
-        client=client,
+        relayed_from=relayed_from,
+        replies=replies,
     )
     client_message_id = _command_message_id(params)
     message_id = (
         client_message_id
-        if client_message_id and client_message_id not in persisted_message_ids
+        if client_message_id and client_message_id not in history.message_ids
         else str(uuid.uuid7())
     )
     structured[-1]["id"] = message_id
 
-    # The live run's own turn, never a follow-up queued behind it.
-    turn_id = (
-        await open_turn_id(thread_id, live_run_id)
-        if metadata.get("transcript") == TRANSCRIPT_VERSION
-        else None
-    )
-    if turn_id is not None:
+    if turn is not None:
+        turn_id = turn.turn_id
         attachments, pending = _transcript_attachments(command_images, message_id)
         await append(
             thread_id,
@@ -1203,10 +1296,13 @@ async def steer_running_thread(
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,
-        "surface": "web",
+        REPLIES_KEY: [reply.model_dump() for reply in replies],
+        "surface": "automation" if relayed_from else "web",
         "created_at_ms": _now_ms(),
     }
-    if metadata.get("source") == "slack":
+    if relayed_from:
+        payload[RELAYED_FROM_KEY] = relayed_from
+    elif metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE
     if not await queue_message_for_thread(thread_id, payload):
         raise HTTPException(502, "failed to deliver the follow-up to the running agent")
@@ -1232,14 +1328,16 @@ async def steer_running_thread(
         thread_id=thread_id,
         metadata={
             "updated_at_ms": now_ms,
-            "feedback_last_activity_at_ms": now_ms,
             **await participant_metadata(metadata, login=login, email=email),
         },
     )
-    try:
-        await _notify_slack_web_handoff(thread_id, metadata, client)
-    except Exception:
-        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
+    if not relayed_from:
+        try:
+            await _notify_slack_web_handoff(thread_id, metadata)
+        except Exception:
+            logger.exception(
+                "Failed to update Slack message for dashboard handoff on %s", thread_id
+            )
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1291,6 +1389,9 @@ async def queue_follow_up_run(
     with this browser long gone. The transcript records the turn as requested
     right away and learns the run id so it can be cancelled before it starts.
     """
+    params = command.get("params")
+    # An agent's relayed message is not its sender's own: it acts as no one.
+    relayed = isinstance(params, dict) and bool(params.get(RELAYED_FROM_KEY))
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )
@@ -1316,6 +1417,8 @@ async def queue_follow_up_run(
             thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
+            # On a channel's thread it starts as its sender, as their message would.
+            as_sender=not relayed,
         )
         run_id = run.get("run_id") if isinstance(run, dict) else None
         if not isinstance(run_id, str) or not run_id:
@@ -1391,10 +1494,7 @@ async def dispatch_pending_follow_ups(
     the store; the new run's first model call picks it up. Returns the run id,
     or ``None`` when nothing was waiting.
     """
-    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    value = queued.get("value") if isinstance(queued, Mapping) else None
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    if not isinstance(messages, list) or not messages:
+    if not await QueuedMessage.for_thread(thread_id):
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(
@@ -1419,9 +1519,7 @@ def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
     return context.dump()["slack_thread"]
 
 
-async def _notify_slack_web_handoff(
-    thread_id: str, metadata: Mapping[str, Any], client: Any
-) -> None:
+async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any]) -> None:
     if metadata.get("source") != "slack":
         return
     slack_thread = _slack_thread_context(metadata)
@@ -1436,11 +1534,9 @@ async def _notify_slack_web_handoff(
 
     trace_message_ts = slack_thread.get("trace_message_ts")
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        mapping = await lookup_slack_thread_run_mapping(client, channel_id, thread_ts)
-        if isinstance(mapping, dict):
-            candidate = mapping.get("trace_message_ts")
-            if isinstance(candidate, str) and candidate:
-                trace_message_ts = candidate
+        mapping = await lookup_slack_thread_run_mapping(channel_id, thread_ts)
+        if mapping is not None:
+            trace_message_ts = mapping.trace_message_ts
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
         logger.info(
             "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id

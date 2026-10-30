@@ -8,7 +8,8 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
-from openswe.bridge.store import BridgeStore
+from openswe.agent_cost import RUN_COST_KEY_PREFIX
+from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
@@ -17,6 +18,7 @@ from openswe.review.findings import (
     reviewer_thread_title,
 )
 from openswe.review.session import ReviewSessionMetadata
+from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
@@ -34,16 +36,22 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# A thread mirroring a person's local Claude Code session, which only its hooks write.
+CLAUDE_CODE_SOURCE = "claude_code"
+# Set on a thread the upload_session tool reserved until its transcript is posted.
+SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = (
     "dashboard",
+    "web",
     "github",
     "slack",
     "linear",
     "schedule",
     "api",
+    CLAUDE_CODE_SOURCE,
 )
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
@@ -56,6 +64,9 @@ SLACK_BOT_TRIGGER_KIND = "slack_bot"
 TRIGGERING_BOT_KEY = "triggering_bot"
 """Metadata key holding the starting bot's ``{team_id}:{bot_id}`` allowlist key."""
 BOT_THREAD_READ_ONLY = "This thread was started by a Slack bot. Reply in Slack to steer it."
+MIRRORED_SESSION_READ_ONLY = (
+    "This thread mirrors a Claude Code session. Continue it in Claude Code."
+)
 
 
 def _now_ms() -> int:
@@ -107,8 +118,8 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
-    """A `/oswe` question thread: readable and promptable, but kept out of thread lists."""
-    return metadata.get("unlisted") is True
+    """Threads that remain accessible directly but stay out of thread lists."""
+    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
 
 
 def thread_is_readable(
@@ -129,9 +140,20 @@ def thread_is_readable(
 
 
 def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
-    """Only the owner may prompt, approve, or open a shell into a private thread."""
-    return thread_source(metadata) in _SURFACED_SOURCES and (
-        not thread_is_private(metadata) or thread_is_owner(metadata, login)
+    """Only the owner may prompt, approve, or open a shell into a private thread.
+
+    Nor may anyone else drive a thread that runs on its owner's machine, even one
+    shared before such threads were kept private. Nobody prompts a mirrored
+    Claude Code session here: it runs in Claude Code.
+    """
+    source = thread_source(metadata)
+    return (
+        source in _SURFACED_SOURCES
+        and source != CLAUDE_CODE_SOURCE
+        and (
+            not (thread_is_private(metadata) or SandboxBridgeBinding.reaches_a_machine(metadata))
+            or thread_is_owner(metadata, login)
+        )
     )
 
 
@@ -150,8 +172,11 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
     """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
 
     A thread a Slack bot started is steered from its Slack thread only, so the
-    dashboard keeps it read-only for everyone, admins included.
+    dashboard keeps it read-only for everyone, admins included, and so does a
+    mirrored Claude Code session.
     """
+    if thread_source(metadata) == CLAUDE_CODE_SOURCE and thread_is_readable(metadata, login):
+        raise HTTPException(403, MIRRORED_SESSION_READ_ONLY)
     if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata):
@@ -162,6 +187,9 @@ def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
     _assert_thread_promptable(metadata, login)
+    # A run here would start without the history the upload is about to seed.
+    if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
+        raise HTTPException(409, "this thread is waiting for its session upload")
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):
@@ -347,6 +375,24 @@ def thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
 
 
+def upsert_pull_request_record(records: object, record: dict[str, Any]) -> list[dict[str, Any]]:
+    """``metadata["pull_requests"]`` with ``record`` replacing any entry for the same PR."""
+    existing = records if isinstance(records, list) else []
+    repo = record.get("repo_full_name")
+    number = record.get("number")
+    url = record.get("url")
+    return [
+        item
+        for item in existing
+        if isinstance(item, dict)
+        and not (
+            item.get("repo_full_name") == repo
+            and item.get("number") == number
+            or item.get("url") == url
+        )
+    ] + [record]
+
+
 def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
@@ -412,6 +458,16 @@ async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bo
         return False
 
 
+def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
+    return {
+        key.removeprefix(RUN_COST_KEY_PREFIX): float(cost)
+        for key, cost in metadata.items()
+        if key.startswith(RUN_COST_KEY_PREFIX)
+        and isinstance(cost, (int, float))
+        and not isinstance(cost, bool)
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -449,6 +505,7 @@ async def _thread_summary(
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
+    browser = ThreadBrowser.of(metadata)
     raw_sandbox_id = metadata.get("sandbox_id")
     sandbox_id = (
         raw_sandbox_id
@@ -458,6 +515,7 @@ async def _thread_summary(
         else None
     )
 
+    run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -509,6 +567,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
+        "costUsd": sum(run_costs.values()) if run_costs else None,
+        "runCosts": run_costs,
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
@@ -522,6 +582,8 @@ async def _thread_summary(
         ),
         # Lists skip it: one bridge lookup per thread would cost a query each.
         "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
+        # What the thread's Browser panel offers: its browser to watch, or to open.
+        "browser": None if browser is None else browser.state,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

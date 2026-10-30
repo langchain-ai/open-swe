@@ -1,60 +1,75 @@
 """Review scout graph.
 
-Cuts a pull request's full diff into an ordered series of commits a reviewer
-can read top to bottom and stores them as the PR's walkthrough, alongside a
-summary of the human input behind it. Runs on its own thread per PR; the
-reviewer starts it and waits for it before reviewing.
+Plans a pull request's shared walkthrough in the background: places every
+changed line in a chunk or in Other, and records a summary of the human input
+behind the change. Runs on its own thread per PR. On a new head it only places
+the lines the carried-over plan does not already cover, and when there are
+none it finishes without a model call.
 """
 
+import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable
+import uuid
+from collections.abc import Mapping
+from functools import partial
 from typing import Any, NotRequired, cast
 
-from deepagents import create_deep_agent
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    hook_config,
+)
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.pull_request_key import PullRequestKey
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
-    ModelCallTimeoutMiddleware,
+    ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
-    ToolErrorMiddleware,
 )
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.author_guidance import SteeringHistory
-from openswe.review.walkthrough import Walkthrough
-from openswe.review_scout.git import ScoutCheckout, ScoutGitError
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
-    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
-    graph_loaded_for_execution,
 )
-from openswe.sandboxes.repo_prep import prepare_review_repo
-from openswe.tools.commit_walkthrough_step import commit_walkthrough_step
+from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
+from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
+from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
+from openswe.tools.plan_walkthrough import (
+    walkthrough_describe_other,
+    walkthrough_move_to_other,
+    walkthrough_plan_chunk,
+    walkthrough_split_hunks,
+)
 from openswe.tools.record_human_input import record_human_input
+from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
+from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
+from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +79,17 @@ _HUMAN_INPUT_TOOL = record_human_input.__name__
 
 
 class ReviewScoutState(PrepareRunState):
-    scout_merge_base: NotRequired[str | None]
+    scout_nothing_to_plan: NotRequired[bool]
     human_input_summary: NotRequired[str]
     has_human_input: NotRequired[bool]
+
+
+async def _workspace(backend: SandboxBackendProtocol, cfg: RunConfig) -> PlanWorkspace:
+    if cfg.repo is None or cfg.pr_number is None:
+        raise PlannerUnavailableError("review scout run is missing its pull request")
+    return await PlanWorkspace.locate(
+        backend, owner=cfg.repo.owner, repo=cfg.repo.name, number=cfg.pr_number
+    )
 
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
@@ -87,7 +110,8 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
         thread_id,
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
-        allow_replacement=True,
+        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
+        abandon_unreachable=True,
     )
 
 
@@ -114,58 +138,115 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         if cfg.repo is None or cfg.pr_number is None or not cfg.base_sha or not cfg.head_sha:
             raise RuntimeError("review scout run is missing its pull request")
         backend = await _ensure_scout_sandbox(self._thread_id, cfg)
-        checkout = await ScoutCheckout.locate(backend, cfg)
-        if checkout is None:
-            raise RuntimeError("review scout repository name is invalid")
-        work_dir = checkout.work_dir
-        ready = await prepare_review_repo(
-            backend,
-            work_dir=work_dir,
-            repo_owner=cfg.repo.owner,
-            repo_name=cfg.repo.name,
-            head_sha=cfg.head_sha,
+        checkout = await PinnedCheckout.locate(backend, cfg.repo.name)
+        work_dir = checkout.repo_dir.rpartition("/")[0]
+        nothing_to_plan = {
+            "work_dir": work_dir,
+            "rendered_system_prompt": "",
+            "scout_nothing_to_plan": True,
+            "has_human_input": False,
+        }
+        for attempt in range(2):
+            failure: ReviewRepoPreparationError | None = None
+            try:
+                await prepare_review_repo_or_raise(
+                    backend,
+                    work_dir=work_dir,
+                    repo_owner=cfg.repo.owner,
+                    repo_name=cfg.repo.name,
+                    head_sha=cfg.head_sha,
+                    pr_number=cfg.pr_number,
+                    base_sha=cfg.base_sha,
+                )
+            except ReviewRepoPreparationError as exc:
+                failure = exc
+                logger.warning(
+                    "Review scout repository preparation failed",
+                    extra={"pr_number": cfg.pr_number, "prep_attempt": attempt + 1},
+                    exc_info=True,
+                )
+            try:
+                async with PullRequestClient.as_app(
+                    cfg.repo.owner, cfg.repo.name, cfg.pr_number
+                ) as pull:
+                    if await pull.head_sha() != cfg.head_sha:
+                        logger.info(
+                            "Review scout head is stale; nothing to plan",
+                            extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                        )
+                        return nothing_to_plan
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Review scout could not check the current pull request head",
+                    extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                    exc_info=True,
+                )
+            if failure is None:
+                break
+            if attempt == 1:
+                raise RuntimeError(
+                    f"review scout could not check out the pull request: {failure}"
+                ) from failure
+            await asyncio.sleep(3)
+        await checkout.pin(
+            full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
+            head_sha=cfg.head_sha,
         )
-        if not ready:
-            raise RuntimeError("review scout could not check out the pull request")
-        merge_base = await checkout.setup(base_sha=cfg.base_sha, head_sha=cfg.head_sha)
+        try:
+            workspace = await _workspace(backend, cfg)
+        except PlanMovedError:
+            # A newer head's scout owns the plan now.
+            logger.info(
+                "Review scout head is stale; nothing to plan",
+                extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+            )
+            workspace = None
+        if workspace is None or workspace.complete:
+            return nothing_to_plan
         system_prompt = prompt(
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
+        )
+        run_context = prompt(
+            "review-scout/run-context",
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=checkout.repo_dir,
-            merge_base=merge_base,
-            patch_dir=f"{work_dir}/.scout-patches",
+            carried=bool(workspace.plan.chunks),
+            plan=workspace.status().model_dump(),
         )
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         if history is not None:
             human_input = prompt("review-scout/human-input", messages=history.messages_block())
-            system_prompt = f"{system_prompt}\n\n{human_input}"
+            run_context = f"{run_context}\n\n{human_input}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
-            "scout_merge_base": merge_base,
+            "messages": [HumanMessage(content=run_context, id=f"run-context:{uuid.uuid4()}")],
+            "scout_nothing_to_plan": False,
             "human_input_summary": "",
             "has_human_input": history is not None,
         }
 
-    async def awrap_model_call(
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(
         self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+        state: ReviewScoutState,
+        runtime: Runtime,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
+        return {"jump_to": "end"} if state.get("scout_nothing_to_plan") else None
+
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        call = await super().ashape_model_call(call, state, runtime)
         # Without messages from the people who asked for the PR, the model would summarize its description instead.
-        if not request.state.get("has_human_input"):
-            request = request.override(
-                tools=[t for t in request.tools if getattr(t, "name", None) != _HUMAN_INPUT_TOOL]
-            )
-        return await super().awrap_model_call(request, handler)
+        return call if state.get("has_human_input") else call.hiding([_HUMAN_INPUT_TOOL])
 
 
-class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
-    """Close the scout's commits on the PR head and store them as the walkthrough."""
+class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
+    """Send whatever the scout left unplanned to Other, so the plan is complete."""
 
     state_schema = ReviewScoutState
 
@@ -174,43 +255,43 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         self._config = config
 
     async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        cfg = RunConfig.from_config(self._config)
-        merge_base = state.get("scout_merge_base")
-        if not merge_base or cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
-            return
-        extra = {
-            "pr_repo_full_name": cfg.repo.full_name,
-            "pr_number": cfg.pr_number,
-            "scout_head_sha": cfg.head_sha,
-        }
-        checkout = await ScoutCheckout.locate(get_cached_sandbox_backend(self._thread_id), cfg)
-        if checkout is None:
-            return
-        try:
-            steps = await checkout.finalize(merge_base=merge_base, head_sha=cfg.head_sha)
-        except ScoutGitError:
-            logger.exception("Review scout could not finalize its walkthrough", extra=extra)
-            return
-        if not any(not step.is_other for step in steps):
-            logger.warning("Review scout committed no walkthrough steps", extra=extra)
-            return
-        leftover = next((step for step in steps if step.is_other), None)
-        if leftover is not None:
-            logger.info(
-                "Review scout walkthrough has an other step",
-                extra={**extra, "scout_other_files": len(leftover.files)},
-            )
-        await Walkthrough.replace(
-            cfg.repo.owner,
-            cfg.repo.name,
-            cfg.pr_number,
-            head_sha=cfg.head_sha,
-            merge_base_sha=merge_base,
-            scout_thread_id=self._thread_id,
-            steps=steps,
-            human_input_summary=state.get("human_input_summary", ""),
-        )
-        logger.info("Stored review walkthrough", extra={**extra, "scout_steps": len(steps)})
+        await finish_scout_plan(self._thread_id, self._config, state.get("human_input_summary", ""))
+
+
+async def finish_scout_plan(
+    thread_id: str, config: RunnableConfig, human_input_summary: str
+) -> None:
+    """Send whatever the scout left unplanned to Other, and keep what people asked for."""
+    cfg = RunConfig.from_config(config)
+    if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
+        return
+    extra = {
+        "pr_repo_full_name": cfg.repo.full_name,
+        "pr_number": cfg.pr_number,
+        "scout_head_sha": cfg.head_sha,
+    }
+    try:
+        workspace = await _workspace(get_cached_sandbox_backend(thread_id), cfg)
+        settled = await workspace.settle()
+    except PlanMovedError:
+        logger.info("Review scout head is stale; leaving the plan to the newer head", extra=extra)
+        return
+    except CheckoutError, PlannerUnavailableError:
+        logger.exception("Review scout could not finish its plan", extra=extra)
+        return
+    if human_input_summary:
+        await Walkthrough.set_human_input(workspace.pull_request.id, human_input_summary)
+    await Topic.PULL_REQUESTS.invalidate(
+        key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+    )
+    logger.info(
+        "Review scout finished its plan",
+        extra={
+            **extra,
+            "scout_chunks": len(workspace.plan.chunks),
+            "scout_settled_lines": settled,
+        },
+    )
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -221,60 +302,88 @@ def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> 
         return make_deferred_error_model(e, model_id=model_id)
 
 
-async def get_review_scout(config: RunnableConfig) -> Pregel:
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    cfg = RunConfig.parse(configurable)
-    thread_id = cfg.thread_id
-
-    if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
-
+async def scout_models(cfg: RunConfig) -> SurfaceModels:
+    """The model the workspace picked for its review scout, which plans without subagents."""
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
-    model = _make_model_or_defer(
+    choice = ModelChoice(
         model_id,
-        use_gateway=settings.effective_gateway_enabled,
-        **provider_model_kwargs(
-            model_id,
-            effort,
-            max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            openai_reasoning_default=DEFAULT_LLM_REASONING,
+        dict(
+            provider_model_kwargs(
+                model_id,
+                effort,
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                openai_reasoning_default=DEFAULT_LLM_REASONING,
+            )
         ),
     )
-
-    async def reconnect_backend(
-        _thread_id: str = thread_id, _cfg: RunConfig = cfg
-    ) -> SandboxBackendProtocol:
-        return await _ensure_scout_sandbox(_thread_id, _cfg)
-
-    return create_deep_agent(
-        model=model,
-        system_prompt="",
-        tools=apply_tool_descriptions([commit_walkthrough_step, record_human_input]),
-        backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
-                ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                RepairOrphanedToolCallsMiddleware(),
-                StableToolResultOrderMiddleware(),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ModelErrorMiddleware(),
-                ModelCallTimeoutMiddleware(),
-                StoreWalkthroughMiddleware(thread_id=thread_id, config=config),
-            ],
-        ),
-    ).with_config(bindable_config(config))
+    return SurfaceModels(
+        main=choice, subagent=choice, use_gateway=settings.effective_gateway_enabled
+    )
 
 
-# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
-traced_review_scout = get_review_scout
+def scout_tools() -> list[BaseTool]:
+    """The scout's tools, wherever the graph that calls them runs."""
+    return apply_tool_descriptions(
+        [
+            walkthrough_plan_chunk,
+            walkthrough_split_hunks,
+            walkthrough_move_to_other,
+            walkthrough_describe_other,
+            record_human_input,
+        ]
+    )
+
+
+def scout_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The scout thread's box, connected again whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_ensure_scout_sandbox, thread_id, cfg)
+    )
+
+
+async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
+    config = config.copy()
+    configurable = dict(config.get("configurable") or {})
+    config["configurable"] = configurable
+    cfg = RunConfig.parse(configurable)
+    thread_id = cfg.thread_id
+    if thread_id is None:
+        raise ValueError("A scout run needs a thread")
+
+    models = await scout_models(cfg)
+
+    middleware = cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [
+            PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
+            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
+            ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
+            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
+            RepairOrphanedToolCallsMiddleware(),
+            ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            ModelErrorMiddleware(),
+            FinishPlanMiddleware(thread_id=thread_id, config=config),
+        ],
+    )
+    surface.base_tools = scout_tools()
+    surface.middleware = middleware
+    surface.loop = LoopRules(
+        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
+        # Without messages from the people who asked for the PR, the model would
+        # summarize its description instead.
+        hidden_unless={"has_human_input": [_HUMAN_INPUT_TOOL]},
+        stop_when=["scout_nothing_to_plan"],
+        at_end=["finish_scout_plan"],
+    )
+    surface.files = scout_box(thread_id, cfg)
+    surface.models = models
+    surface.subagents = [
+        SurfaceSubagent(
+            name=GENERAL_PURPOSE_SUBAGENT["name"],
+            description=GENERAL_PURPOSE_SUBAGENT["description"],
+            system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        )
+    ]

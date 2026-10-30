@@ -18,10 +18,10 @@ import sys
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -49,7 +49,7 @@ from e2e_env import (  # noqa: E402
     TEST_USERS,
     UNLINKED_USER,
 )
-from fastapi import HTTPException, Request  # noqa: E402
+from fastapi import Body, HTTPException, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
@@ -72,10 +72,12 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 }
 
 from langgraph_sdk import get_client  # noqa: E402
+from langgraph_sdk.errors import NotFoundError  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
+from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -105,16 +107,28 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 
 
 # --- control + Slack compose (the test driver) -----------------------------
+# Where the inbox spec holds its run: the fake model waits on it, the spec releases it.
+INBOX_GATE = {"waiting": False, "released": False}
+
+
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    INBOX_GATE.update(waiting=False, released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
     await _cancel_inflight_runs()
     await _reset_durable_pr_state()
     from langgraph_api.cache import cache_set
+    from sqlalchemy import delete
 
+    from openswe.database import postgres
+    from openswe.threads.pins import THREAD_PINS
+    from openswe.users.records import UserRecord
+
+    async with postgres.session() as session:
+        await session.execute(delete(UserRecord).where(UserRecord.kind == THREAD_PINS.kind))
     for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
         await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})
@@ -126,9 +140,14 @@ async def _cancel_inflight_runs() -> None:
     # Per run, not cancel_many(status=...): the inmem runtime never delivers a status-only interrupt to a running run.
     for thread in await client.threads.search(status="busy", limit=1000):
         thread_id = thread["thread_id"]
-        for status in ("pending", "running"):
-            for run in await client.runs.list(thread_id, status=status, limit=100):
-                await client.runs.cancel(thread_id, run["run_id"], wait=True)
+        try:
+            for status in ("pending", "running"):
+                for run in await client.runs.list(thread_id, status=status, limit=100):
+                    await client.runs.cancel(thread_id, run["run_id"], wait=True)
+        except NotFoundError:
+            # Deleted since the search, so nothing of it is left running. Raising
+            # here aborted the reset before it cleared the durable PR state.
+            continue
 
 
 @app.post("/control/reset-default-workspace")
@@ -170,7 +189,7 @@ async def _reset_durable_pr_state() -> None:
     """
     from openswe.baby_sit import WATCHES, stop_watch
 
-    for watch in await WATCHES.search_all():
+    for watch in await WATCHES.list_active():
         await stop_watch(watch.key)
 
     from sqlalchemy import text
@@ -195,23 +214,10 @@ async def control_state() -> JSONResponse:
     )
 
 
-@app.post("/control/slack-run-complete")
-async def control_slack_run_complete() -> JSONResponse:
-    """Deliver the platform completion event omitted by the local runtime."""
-    from openswe.completion import handle_run_completion
-    from openswe.slack.client import lookup_slack_thread_run_mapping
-
-    client = get_client(url=BASE_URL)
-    channel = CURRENT_THREAD["channel"]
-    thread_ts = CURRENT_THREAD["thread_ts"]
-    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
-    mapping = await lookup_slack_thread_run_mapping(client, channel, thread_ts)
-    if not thread_id or not mapping:
-        raise HTTPException(409, "Run mapping not ready")
-    run = await client.runs.get(thread_id, mapping["run_id"])
-    if run["status"] != "success":
-        raise HTTPException(409, "Run has not completed")
-    return JSONResponse(await handle_run_completion(dict(run)))
+@app.get("/control/plans")
+async def control_plans(thread_id: str) -> JSONResponse:
+    """Each time the backend planned the thread's runs, by the call that needed the plan."""
+    return JSONResponse([plan["call"] for plan in fakes.PLANS if plan["thread_id"] == thread_id])
 
 
 @app.get("/control/snapshots")
@@ -225,7 +231,16 @@ async def control_last_system_prompt() -> JSONResponse:
     """The system prompt of the most recent model call (what the agent was told)."""
     from fake_llm import LAST_SYSTEM_PROMPT
 
-    return JSONResponse({"text": LAST_SYSTEM_PROMPT["text"]})
+    return JSONResponse({"text": LAST_SYSTEM_PROMPT.text})
+
+
+@app.post("/control/last-system-prompt")
+async def control_record_system_prompt(request: Request) -> JSONResponse:
+    """Where the Managed Deep Agents server's fake model reports each system prompt."""
+    from fake_llm import LAST_SYSTEM_PROMPT
+
+    LAST_SYSTEM_PROMPT.text = (await request.json())["text"]
+    return JSONResponse({"ok": True})
 
 
 @app.post("/control/repo-private")
@@ -280,6 +295,23 @@ async def control_repo_merge_methods(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
 
 
+@app.post("/control/session-upload")
+async def control_reserve_session_upload(request: Request) -> JSONResponse:
+    """Reserve an upload thread as the remote MCP's ``upload_session`` tool does.
+
+    The E2E deployment mounts no remote MCP, so a spec reserves here and then
+    posts to the returned ``upload_url`` with ``upload_token`` as the agent's curl does."""
+    from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
+
+    body = await request.json()
+    login = str(body.pop("login"))
+    email = body.pop("email", None)
+    reservation = await reserve_session_upload(
+        SessionUploadHeader.model_validate(body), login, email=email
+    )
+    return JSONResponse(reservation.model_dump())
+
+
 @app.post("/control/pull-request")
 async def control_seed_pull_request(request: Request) -> JSONResponse:
     """Seed an open pull request the PR search returns, without running the agent.
@@ -327,26 +359,37 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
-    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
-    from openswe.review.walkthrough import FileLines, StepDraft, Walkthrough
+    """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
+    from openswe.github.pull_requests import PullRequest
+    from openswe.sandbox_scripts.walkthrough import parse_index
+    from openswe.walkthrough.diff import DiffIndex
+    from openswe.walkthrough.plan import Plan, PlanChunk
+    from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    await Walkthrough.replace(
-        pull["owner"],
-        pull["repo"],
-        pull["number"],
-        head_sha=pull["head_sha"],
-        merge_base_sha=fakes.base_sha(pull),
-        scout_thread_id="",
-        steps=[
-            StepDraft(
-                title=str(body.get("title") or "Seeded step"),
-                files=[FileLines(path=file["filename"]) for file in pull["files"]],
-            )
-        ],
-        human_input_summary=str(body.get("human_input") or ""),
+    diff = "\n".join(
+        f"diff --git a/{file['filename']} b/{file['filename']}\n"
+        f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+        for file in pull["files"]
     )
+    index = DiffIndex.model_validate({"files": parse_index(diff.splitlines())})
+    plan = Plan(
+        head_sha=pull["head_sha"],
+        chunks=[PlanChunk(title=str(body.get("title") or "Seeded chunk"), lines=index.lines)],
+    )
+    pull_request = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
+    ).ensure()
+    await Walkthrough.dismiss(pull["owner"], pull["repo"], pull["number"])
+    await Walkthrough.install(
+        pull_request.id,
+        plan,
+        merge_base_sha=fakes.base_sha(pull),
+        index=index,
+        replacing=None,
+    )
+    await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))
     return JSONResponse({"ok": True})
 
 
@@ -380,6 +423,30 @@ async def control_thread_idle(thread_id: str) -> JSONResponse:
             "idle": all(run["status"] not in {"pending", "running"} for run in runs),
         }
     )
+
+
+@app.get("/control/inbox-gate")
+async def control_inbox_gate(waiting: bool = False) -> JSONResponse:
+    """Whether the held run may go on; the fake model asking with ``waiting`` marks it held."""
+    if waiting:
+        INBOX_GATE["waiting"] = True
+    return JSONResponse(INBOX_GATE)
+
+
+@app.post("/control/inbox-gate")
+async def control_release_inbox_gate() -> JSONResponse:
+    INBOX_GATE["released"] = True
+    return JSONResponse(INBOX_GATE)
+
+
+@app.post("/control/monitors/sync")
+async def control_sync_monitors(thread_id: str) -> JSONResponse:
+    """Read the thread's monitors now, as the per-minute poll does, and count the events it is owed."""
+    from openswe.monitors.delivery import poll_monitors
+    from openswe.webhooks.event_matches import EventMatch
+
+    await poll_monitors(thread_id)
+    return JSONResponse({"events": len(await EventMatch.owed(thread_id))})
 
 
 @app.post("/control/collaborator-permission")
@@ -451,10 +518,27 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                     }
                     for vote in approval.participants
                 ],
+                "pull_request_id": str(approval.pull_request_id),
+                "excluded_hunks": approval.excluded_hunks,
             }
             for approval in approvals
         ]
     )
+
+
+@app.get("/control/audit-logs")
+async def control_audit_logs(operation_name: str) -> JSONResponse:
+    """The last day's audit entries for one operation, newest first."""
+    from openswe.audit_logs.store import list_logs
+
+    now = datetime.now(UTC)
+    page = await list_logs(
+        start_time=now - timedelta(days=1),
+        end_time=now,
+        limit=50,
+        operation_name=operation_name,
+    )
+    return JSONResponse([entry.model_dump(mode="json") for entry in page.items])
 
 
 @app.get("/control/human-review-requests")
@@ -545,22 +629,15 @@ async def control_repo_file(request: Request) -> JSONResponse:
 
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
-    """Count the follow-ups parked on a busy thread's message queue.
+    """The follow-ups parked on a busy thread's message queue, oldest first.
 
-    While the agent is busy, debounced follow-ups accumulate here (namespace
-    ``("queue", thread_id)``) until the active run drains them together at its
+    While the agent is busy, debounced follow-ups accumulate in
+    ``thread_queued_message`` until the active run drains them together at its
     next model call. Lets the E2E assert coalescing instead of per-message runs."""
-    from langgraph_sdk import get_client
+    from openswe.message_queue import QueuedMessage
 
-    value: Any = None
-    try:
-        client = get_client(url=os.environ["LANGGRAPH_URL"])
-        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
-        value = item.get("value") if item else None
-    except Exception:  # noqa: BLE001
-        value = None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+    messages = [message.content for message in await QueuedMessage.for_thread(thread_id)]
+    return JSONResponse({"queued_count": len(messages), "messages": messages})
 
 
 _MAPPINGS_SEEDED = False
@@ -649,11 +726,10 @@ async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> 
     event = payload["event"]
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
-    client = get_client(url=os.environ["LANGGRAPH_URL"])
-    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
+    thread_id = await lookup_slack_thread_id(channel, thread_ts)
     if thread_id is None and channel.startswith("D"):
         # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
-        concierge_thread_id = await lookup_slack_thread_id(client, channel, "0")
+        concierge_thread_id = await lookup_slack_thread_id(channel, "0")
         if concierge_thread_id is not None:
             thread_ts, thread_id = "0", concierge_thread_id
     return JSONResponse(
@@ -756,6 +832,7 @@ async def slack_action(request: Request) -> JSONResponse:
 
     payload = {
         "type": "block_actions",
+        "trigger_id": f"trigger-{fakes.next_slack_ts()}",
         "user": {"id": user_id},
         "channel": {"id": channel_id},
         "container": {
@@ -775,19 +852,24 @@ async def slack_action(request: Request) -> JSONResponse:
     return JSONResponse(response.json(), status_code=response.status_code)
 
 
+async def _signed_in(login: str, email: str) -> User:
+    """The ``users`` row a real sign-in would give ``login``, created like the OAuth callback does."""
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    if user is not None:
+        return user
+    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
+    return await User.sign_in("github", github_id, login=login, email=email)
+
+
 @app.post("/control/login")
 async def control_login(request: Request) -> JSONResponse:
     """Simulate a signed-in dashboard user by minting the real session cookie."""
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -820,13 +902,8 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -874,13 +951,8 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -1055,6 +1127,11 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+# The backend calls these over HTTP from this same process, and they run git,
+# so they are sync handlers FastAPI runs off the event loop.
+_JsonBody = Annotated[dict[str, Any], Body()]
+
+
 @app.get("/fake-gh/user/installations")
 async def gh_user_installations() -> JSONResponse:
     return JSONResponse(
@@ -1165,7 +1242,7 @@ async def gh_list_installation_repositories() -> JSONResponse:
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
-async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
+def gh_get_repo(owner: str, repo: str) -> JSONResponse:
     return JSONResponse(
         {
             "full_name": f"{owner}/{repo}",
@@ -1176,21 +1253,25 @@ async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
 
 
 @app.get("/fake-gh/search/issues")
-async def gh_search_issues(
+def gh_search_issues(
     q: str = "",
     per_page: int = 100,
     page: int = 1,
     sort: str = "updated",
     order: str = "desc",
 ) -> JSONResponse:
-    """The PR search ``list_open_pull_requests`` drives the "Mine" dashboard with.
-
-    Only the qualifiers that code sends are honoured: ``is:pr``, ``is:open``,
-    ``author:<login>`` and any number of ``repo:<owner>/<name>`` (OR'd, as GitHub
-    does)."""
+    """Search authored or awaiting-review PRs for the dashboard."""
     terms = q.split()
     author = next(
         (term.removeprefix("author:") for term in terms if term.startswith("author:")), ""
+    )
+    reviewer = next(
+        (
+            term.removeprefix("review-requested:")
+            for term in terms
+            if term.startswith("review-requested:")
+        ),
+        "",
     )
     repositories = {
         term.removeprefix("repo:").lower() for term in terms if term.startswith("repo:")
@@ -1200,6 +1281,10 @@ async def gh_search_issues(
         pull
         for pull in fakes.pulls()
         if (not author or pull["author"].lower() == author.lower())
+        and (
+            not reviewer
+            or reviewer.lower() in {login.lower() for login in pull["requested_reviewers"]}
+        )
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
     ]
@@ -1217,26 +1302,46 @@ async def gh_search_issues(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
-async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
+def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
     if not fakes.branch_exists(owner, repo, branch):
         return JSONResponse({"message": "Branch not found"}, status_code=404)
     return JSONResponse({"name": branch, "commit": {"sha": "deadbeef"}})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
-async def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
-    return JSONResponse([])
+def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:
+    required_checks: set[str] = {
+        check[context_key]
+        for pull in fakes.pulls()
+        if (pull["owner"], pull["repo"], pull["base"]) == (owner, repo, branch)
+        for checks, context_key in ((pull["check_runs"], "name"), (pull["statuses"], "context"))
+        for check in checks
+        if check.get("required")
+    }
+    return JSONResponse(
+        [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": name} for name in sorted(required_checks)
+                    ]
+                },
+            }
+        ]
+        if required_checks
+        else []
+    )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")
-async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
+def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse([])
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls")
-async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONResponse:
+def gh_create_pull(owner: str, repo: str, request: Request, body: _JsonBody) -> JSONResponse:
     """Open a pull request authored by the person whose token opened it, as GitHub does."""
-    body = await request.json()
     pr = fakes.create_pull(
         owner,
         repo,
@@ -1251,7 +1356,7 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
+def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1260,8 +1365,15 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
     return JSONResponse(_gh_pr_json(pr))
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
+def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
-async def gh_list_pull_comments(
+def gh_list_pull_comments(
     owner: str, repo: str, number: int, request: Request, page: int = 1
 ) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
@@ -1272,31 +1384,26 @@ async def gh_list_pull_comments(
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
-async def gh_create_pull_comment(
-    owner: str, repo: str, number: int, request: Request
-) -> JSONResponse:
+def gh_create_pull_comment(owner: str, repo: str, number: int, body: _JsonBody) -> JSONResponse:
     """A standalone inline comment. Recorded so a spec can prove nothing posts one."""
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    pr["standalone_comment_posts"].append(await request.json())
+    pr["standalone_comment_posts"].append(body)
     return JSONResponse({"message": "Standalone comments are not used"}, status_code=422)
 
 
 @app.delete("/fake-gh/repos/{owner}/{repo}/pulls/comments/{comment_id}")
-async def gh_delete_pull_comment(
-    owner: str, repo: str, comment_id: int, request: Request
-) -> Response:
+def gh_delete_pull_comment(owner: str, repo: str, comment_id: int, request: Request) -> Response:
     if not fakes.delete_review_comment(owner, repo, comment_id, author=_token_login(request)):
         return JSONResponse({"message": "Not Found"}, status_code=404)
     return Response(status_code=204)
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/events")
-async def gh_submit_pending_review(
-    owner: str, repo: str, number: int, review_id: int, request: Request
+def gh_submit_pending_review(
+    owner: str, repo: str, number: int, review_id: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
-    body = await request.json()
     status, payload = fakes.submit_pending_review(
         number,
         owner,
@@ -1310,7 +1417,7 @@ async def gh_submit_pending_review(
 
 
 @app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}")
-async def gh_delete_pending_review(
+def gh_delete_pending_review(
     owner: str, repo: str, number: int, review_id: int, request: Request
 ) -> JSONResponse:
     status, payload = fakes.delete_pending_review(
@@ -1320,7 +1427,7 @@ async def gh_delete_pending_review(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
-async def gh_list_issue_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+def gh_list_issue_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1328,7 +1435,7 @@ async def gh_list_issue_comments(owner: str, repo: str, number: int, page: int =
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/compare/{basehead:path}")
-async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
+def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
     base, _, head = basehead.partition("...")
     merge_base = fakes.merge_base(owner, repo, base, head)
     if merge_base is None:
@@ -1342,9 +1449,7 @@ async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits")
-async def gh_list_commits(
-    owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH
-) -> JSONResponse:
+def gh_list_commits(owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH) -> JSONResponse:
     """Commits touching ``path``; an author is a GitHub user only when a test user owns the email."""
     logins = {user["email"]: user["login"] for user in TEST_USERS}
     return JSONResponse(
@@ -1356,7 +1461,7 @@ async def gh_list_commits(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/contents/{path:path}")
-async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
+def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
     content = fakes.file_at_ref(owner, repo, path, ref)
     if content is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1364,11 +1469,10 @@ async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRAN
 
 
 @app.patch("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
+def gh_update_pull(owner: str, repo: str, number: int, body: _JsonBody) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     state = body.get("state")
     if state is not None:
         if state not in {"open", "closed"}:
@@ -1382,19 +1486,23 @@ async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/files")
-async def gh_list_pull_files(owner: str, repo: str, number: int) -> JSONResponse:
+def gh_list_pull_files(
+    owner: str, repo: str, number: int, page: int = 1, per_page: int = 30
+) -> JSONResponse:
+    """One page of the pull's files; like GitHub, at most 3000 of them in all."""
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse(pr["files"])
+    size = max(min(per_page, 100), 1)
+    start = max(page - 1, 0) * size
+    return JSONResponse(pr["files"][:3000][start : start + size])
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
-async def gh_submit_pull_review(
-    owner: str, repo: str, number: int, request: Request
+def gh_submit_pull_review(
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
     """Submit a review as the person whose token was used, as GitHub does."""
-    body = await request.json()
     author = _token_login(request)
     if not author:
         return JSONResponse({"message": "Resource not accessible by integration"}, status_code=403)
@@ -1416,13 +1524,12 @@ async def gh_submit_pull_review(
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
-async def gh_create_issue_comment(
-    owner: str, repo: str, number: int, request: Request
+def gh_create_issue_comment(
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     comment = fakes.add_issue_comment(
         pr, author=_token_login(request), body=str(body.get("body") or "")
     )
@@ -1430,13 +1537,10 @@ async def gh_create_issue_comment(
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
-async def gh_request_reviewers(
-    owner: str, repo: str, number: int, request: Request
-) -> JSONResponse:
+def gh_request_reviewers(owner: str, repo: str, number: int, body: _JsonBody) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     for login in body.get("reviewers") or []:
         if login == pr["author"]:
             return JSONResponse(
@@ -1448,9 +1552,22 @@ async def gh_request_reviewers(
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
+def gh_remove_requested_reviewers(
+    owner: str, repo: str, number: int, body: _JsonBody
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    removed = set(body.get("reviewers") or [])
+    pr["requested_reviewers"] = [
+        login for login in pr["requested_reviewers"] if login not in removed
+    ]
+    return JSONResponse(_gh_pr_json(pr))
+
+
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
-async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
-    body = await request.json()
+def gh_merge_pull(owner: str, repo: str, number: int, body: _JsonBody) -> JSONResponse:
     status, payload = fakes.merge_pull(
         number,
         owner,
@@ -1464,7 +1581,7 @@ async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) ->
 # Seeded reviews carry only ``{author, state}``, so the list has to be
 # normalised: the dashboard's review-decision read needs a login and an id.
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
-async def gh_list_pull_reviews(
+def gh_list_pull_reviews(
     owner: str, repo: str, number: int, request: Request, page: int = 1
 ) -> JSONResponse:
     """Submitted reviews, plus a pending one only for its author, as GitHub does."""
@@ -1484,14 +1601,14 @@ async def gh_list_pull_reviews(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/collaborators/{username}/permission")
-async def gh_collaborator_permission(owner: str, repo: str, username: str) -> JSONResponse:  # noqa: ARG001
+def gh_collaborator_permission(owner: str, repo: str, username: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse(
         {"permission": fakes.collaborator_permission(username), "user": {"login": username}}
     )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/check-runs")
-async def gh_get_check_runs(owner: str, repo: str, sha: str) -> JSONResponse:
+def gh_get_check_runs(owner: str, repo: str, sha: str) -> JSONResponse:
     pr = fakes.find_pull_by_sha(owner, repo, sha)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1499,7 +1616,7 @@ async def gh_get_check_runs(owner: str, repo: str, sha: str) -> JSONResponse:
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/status")
-async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
+def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
     pr = fakes.find_pull_by_sha(owner, repo, sha)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1507,8 +1624,7 @@ async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
 
 
 @app.post("/fake-gh/graphql")
-async def gh_graphql(request: Request) -> JSONResponse:
-    body = await request.json()
+def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
     variables = body.get("variables", {})
     query = body.get("query", "")
     if "MarkPullRequestReady" in query:
@@ -1671,6 +1787,47 @@ async def slack_conversations_open(request: Request) -> JSONResponse:
     body = await _slack_form(request)
     user = str(body.get("users") or "")
     return _ok({"channel": {"id": f"D_{user.removeprefix('U_')}"}})
+
+
+@app.post("/fake-slack/views.open")
+async def slack_views_open(request: Request) -> JSONResponse:
+    body = await _slack_form(request)
+    view = body.get("view")
+    if isinstance(view, str):
+        view = json.loads(view)
+    if not isinstance(view, dict) or not body.get("trigger_id"):
+        return JSONResponse({"ok": False, "error": "invalid_arguments"})
+    opened = {**view, "id": f"V{fakes.next_slack_ts().replace('.', '')}"}
+    fakes.VIEWS.append(opened)
+    return _ok({"view": opened})
+
+
+@app.get("/mock/slack/views")
+async def mock_slack_views() -> JSONResponse:
+    return JSONResponse(fakes.VIEWS)
+
+
+@app.post("/mock/slack/view-submit")
+async def mock_slack_view_submit(request: Request) -> JSONResponse:
+    """Submit an opened modal as ``user`` with ``values``, the way Slack delivers it."""
+    body = await request.json()
+    view = next((item for item in fakes.VIEWS if item["id"] == body.get("view_id")), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
+    payload = {
+        "type": "view_submission",
+        "user": {"id": str(body.get("user") or "")},
+        "view": {
+            "id": view["id"],
+            "callback_id": view.get("callback_id", ""),
+            "private_metadata": view.get("private_metadata", ""),
+            "state": {"values": body.get("values") or {}},
+        },
+    }
+    response = await _deliver_slack_interaction(payload)
+    return JSONResponse(
+        response.json() if response.content else {}, status_code=response.status_code
+    )
 
 
 @app.post("/fake-slack/chat.postEphemeral")

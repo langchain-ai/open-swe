@@ -1,6 +1,5 @@
 import http from "node:http"
 import { execSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
@@ -10,17 +9,23 @@ import { nitro } from "nitro/vite"
 import type { IncomingMessage } from "node:http"
 import type { Plugin } from "vite"
 
-// Paths the backend owns, not the app router. `/dashboard/api` is the only one a
-// deployed dashboard serves; the rest exist when the backend is the mock harness,
-// and a browser navigates to `/fake-gh` mid-login, so dev has to reach them too.
-const BACKEND_PREFIXES = [
+// Backend paths a deployed dashboard fronts: its API, webhook deliveries, and the
+// remote MCP server with the OAuth discovery an MCP client fetches from its origin.
+const DEPLOYED_PREFIXES = [
   "/dashboard/api",
   "/webhooks",
+  "/oswe",
+  "/.well-known/oauth-protected-resource",
+  "/.well-known/oauth-authorization-server",
+]
+
+// Served when the backend is the mock harness; a browser navigates to `/fake-gh`
+// mid-login, so dev has to reach them too.
+const E2E_HARNESS_PREFIXES = [
   "/mock",
   "/control",
   "/fake-gh",
   "/fake-slack",
-  "/static",
   "/ok",
   // LangGraph's own API, which the harness serves alongside the fake SaaS. The
   // app router has no route under either, so fronting them shadows nothing.
@@ -28,18 +33,21 @@ const BACKEND_PREFIXES = [
   "/store",
 ]
 
-// The harness-owned subset: everything but the two a deployment fronts and
-// `/static`, which would shadow nitro's own assets.
-const E2E_HARNESS_PREFIXES = BACKEND_PREFIXES.filter(
-  (prefix) => !["/dashboard/api", "/webhooks", "/static"].includes(prefix)
-)
+// Paths the backend owns, not the app router. Only dev fronts `/static`; a
+// deployed build serves nitro's own assets there.
+const BACKEND_PREFIXES = [
+  ...DEPLOYED_PREFIXES,
+  "/static",
+  ...E2E_HARNESS_PREFIXES,
+]
 
 function matchesBackendPrefix(url?: string): boolean {
   return (
     !!url &&
-    BACKEND_PREFIXES.some(
-      (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
-    )
+    (url.split("?")[0] === "/desktop-ui.json" ||
+      BACKEND_PREFIXES.some(
+        (p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`)
+      ))
   )
 }
 
@@ -146,11 +154,14 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production"
 const devRouteRules = IS_PRODUCTION
   ? {}
   : Object.fromEntries(
-      BACKEND_PREFIXES.map((prefix) => [
-        `${prefix}/**`,
+      [
+        "/desktop-ui.json",
+        ...BACKEND_PREFIXES.map((prefix) => `${prefix}/**`),
+      ].map((route) => [
+        route,
         {
           proxy: {
-            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
+            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${route}`,
             fetchOptions: { redirect: "manual" as const },
           },
         },
@@ -267,15 +278,16 @@ function buildInfoStamp(): Plugin {
   return {
     name: "build-info-stamp",
     apply: "build",
-    closeBundle() {
+    applyToEnvironment: (environment) => environment.name === "client",
+    generateBundle() {
       const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
       const commit = sourceCommit()
       if (commit) info.commit = commit
-      mkdirSync(".output/public", { recursive: true })
-      writeFileSync(
-        ".output/public/open-swe-build-info.json",
-        JSON.stringify(info)
-      )
+      this.emitFile({
+        type: "asset",
+        fileName: "open-swe-build-info.json",
+        source: JSON.stringify(info),
+      })
     },
   }
 }
@@ -309,21 +321,26 @@ const config = defineConfig({
     devtools(),
     nitro({
       routeRules: devRouteRules,
+      // Ships gzip and brotli copies of the build, served to a browser that accepts them.
+      compressPublicAssets: true,
       // Registered explicitly: nitro's convention scan does not reach this
       // directory under the vite plugin. The backend prefixes are proxied by a
       // deployed build only — dev proxies them through devRouteRules, which has
       // a localhost default the handler deliberately refuses to have. Only the
-      // two prefixes a deployed dashboard fronts, since proxying `/static`
-      // would shadow nitro's assets.
+      // prefixes a deployed dashboard fronts, since proxying `/static` would
+      // shadow nitro's assets.
       handlers: IS_PRODUCTION
         ? [
+            {
+              route: "/desktop-ui.json",
+              handler: "./server/backend-proxy.ts",
+            },
             {
               route: "/.well-known/apple-app-site-association",
               handler: "./server/apple-app-site-association.ts",
             },
             ...[
-              "/dashboard/api",
-              "/webhooks",
+              ...DEPLOYED_PREFIXES,
               // A built server fronting the mock harness fronts its fake-SaaS and
               // control routes too, so the E2E browser has the one origin a
               // deployment gives it and reaches the backend the way it really

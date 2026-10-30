@@ -1,5 +1,6 @@
-import { Bot } from "lucide-react"
-import { IoLogoSlack } from "react-icons/io5"
+import { Button } from "@langchain/macaw-components/Button"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -11,6 +12,8 @@ import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
+import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
@@ -27,6 +30,30 @@ export function UserMessage({ message }: { message: Message }) {
   return <StandardUserMessage message={message} />
 }
 
+/** A passage the sender replied to, shown as they selected it, then their comment. */
+export function SentReply({ reply }: { reply: PassageReply }) {
+  return (
+    <div className="mb-space-2 flex flex-col gap-space-1 text-sm leading-[1.6]">
+      {reply.file ? (
+        <CodeBlock
+          title={`${reply.file}:${reply.lines ?? ""}`}
+          language={reply.file.split(".").pop() ?? ""}
+          text={reply.selection}
+        />
+      ) : (
+        <blockquote className="border-l-2 border-default pl-space-3 [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+          {reply.selection}
+        </blockquote>
+      )}
+      {reply.comment && (
+        <p className="[overflow-wrap:anywhere] whitespace-pre-wrap text-primary">
+          {reply.comment}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
@@ -38,7 +65,12 @@ function StandardUserMessage({ message }: { message: Message }) {
   )
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
+  const replies = message.replies ?? []
+  const hasBody =
+    Boolean(text) ||
+    images.length > 0 ||
+    excerpts.length > 0 ||
+    replies.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -58,9 +90,12 @@ function StandardUserMessage({ message }: { message: Message }) {
     <>
       {hasBody && (
         <div
-          className={`relative overflow-hidden rounded-2xl p-3 ${
-            isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
-          }`}
+          className={cn(
+            "relative max-w-full overflow-hidden rounded-xl p-space-3",
+            isSystem
+              ? "mt-space-1 border border-default bg-surface-level-2"
+              : "bg-surface-level-2"
+          )}
         >
           {excerpts.map((excerpt, i) => (
             <CodeBlock
@@ -70,12 +105,15 @@ function StandardUserMessage({ message }: { message: Message }) {
               text={excerpt.code}
             />
           ))}
+          {replies.map((reply, i) => (
+            <SentReply key={i} reply={reply} />
+          ))}
           {images.length > 0 && (
-            <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+            <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
               {images.map((img, i) => (
                 <div
                   key={i}
-                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                  className="overflow-hidden rounded-lg border border-default bg-surface-level-1"
                 >
                   <MessageImage
                     chunk={img}
@@ -88,9 +126,10 @@ function StandardUserMessage({ message }: { message: Message }) {
           {text && (
             <div
               ref={textRef}
-              className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
-                !isSystem && !expanded ? "overflow-hidden" : ""
-              }`}
+              className={cn(
+                "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
+                !isSystem && !expanded && "overflow-hidden"
+              )}
               style={
                 !isSystem && !expanded
                   ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX }
@@ -105,15 +144,19 @@ function StandardUserMessage({ message }: { message: Message }) {
             </div>
           )}
           {!isSystem && isTruncated && (
-            <button
+            <Button
+              color="secondary"
+              variant="plain"
+              size="sm"
+              aria-label={expanded ? "Show less" : "Show more"}
               type="button"
               onClick={() => setExpanded((value) => !value)}
               aria-expanded={expanded}
               data-testid="user-message-show-more"
-              className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+              className="mt-space-1 h-auto border-0 px-0 text-secondary hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               {expanded ? "Show less" : "Show more"}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -121,7 +164,7 @@ function StandardUserMessage({ message }: { message: Message }) {
         <MessageTimestamp
           timestamp={message.timestamp}
           align={isSystem ? "left" : "right"}
-          className="mt-1 pr-1"
+          className="mt-space-1 pr-space-1"
         />
       )}
     </>
@@ -129,25 +172,39 @@ function StandardUserMessage({ message }: { message: Message }) {
 
   return (
     <div
-      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      className={cn(
+        "group/turn my-space-4 flex flex-col gap-space-1",
+        isSystem ? "items-start" : "items-end"
+      )}
       data-testid="user-message"
       data-message-id={message.id}
       data-message-delivery-status={message.deliveryStatus}
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
     >
-      <div className="max-w-[80%]">
+      <div
+        className={cn(
+          "flex max-w-[80%] flex-col",
+          isSystem ? "items-start" : "items-end"
+        )}
+      >
         {!isSystem &&
           (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
-            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
+            <div className="mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary">
               {isSlack && (
-                <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
+                <SlackLogoIcon
+                  size={12}
+                  weight="fill"
+                  role="img"
+                  aria-label="Slack"
+                />
               )}
               {message.structuredSenderIsBot && (
-                <Bot
-                  className="size-3"
+                <RobotIcon
+                  size={12}
+                  weight="regular"
                   role="img"
                   aria-label="Bot"
                   data-testid="user-message-bot-icon"
@@ -157,7 +214,7 @@ function StandardUserMessage({ message }: { message: Message }) {
                 <span>{message.structuredSenderName}</span>
               )}
               {message.structuredSenderNote && (
-                <span className="font-normal text-muted-foreground/70">
+                <span className="font-normal text-tertiary">
                   {" · "}
                   {message.structuredSenderNote}
                 </span>
@@ -171,7 +228,7 @@ function StandardUserMessage({ message }: { message: Message }) {
               <>
                 <span>{message.structuredSenderName || "Context"}</span>
                 {message.structuredSenderNote && (
-                  <span className="text-muted-foreground/70">
+                  <span className="text-tertiary">
                     · {message.structuredSenderNote}
                   </span>
                 )}
@@ -185,11 +242,12 @@ function StandardUserMessage({ message }: { message: Message }) {
         )}
         {message.deliveryStatus && (
           <div
-            className={`mt-1 pr-1 text-right text-[11px] ${
+            className={cn(
+              "mt-space-1 pr-space-1 text-right text-xxs leading-4",
               message.deliveryStatus === "failed"
-                ? "text-destructive"
-                : "text-muted-foreground"
-            }`}
+                ? "text-error-secondary"
+                : "text-secondary"
+            )}
           >
             {message.deliveryStatus !== "failed" ? (
               "Sending"

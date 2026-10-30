@@ -1,17 +1,17 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 from cryptography.fernet import Fernet
 from mcp.types import Tool
 
-from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import MCPConnection, MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as settings
 from openswe.tool_loaders import workspace_mcp as loader
 
-SEARCH = Tool(name="search", inputSchema={"type": "object"})
-FETCH = Tool(name="fetch", inputSchema={"type": "object"})
+SEARCH = Tool(name="search", input_schema={"type": "object"})
+FETCH = Tool(name="fetch", input_schema={"type": "object"})
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ async def names() -> list[str]:
     return [(tool.metadata or {})["mcp_tool_name"] for tool in tools]
 
 
-async def test_changed_connection_rediscovers(fake_store, monkeypatch):
+async def test_changed_connection_rediscovers(registry_db, monkeypatch):
     await save(allowed_tools=["search", "fetch"])
     discover = AsyncMock(side_effect=[[SEARCH], [SEARCH, FETCH]])
     monkeypatch.setattr(runtime, "_discover_tools", discover)
@@ -43,7 +43,7 @@ async def test_changed_connection_rediscovers(fake_store, monkeypatch):
     assert sorted(await names()) == ["fetch", "search"]
 
 
-async def test_stale_catalog_is_served_then_refreshed(fake_store, monkeypatch):
+async def test_stale_catalog_is_served_then_refreshed(registry_db, monkeypatch):
     from langgraph_api import cache
 
     await save(allowed_tools=["search", "fetch"])
@@ -66,11 +66,44 @@ async def test_stale_catalog_is_served_then_refreshed(fake_store, monkeypatch):
     assert sorted(await names()) == ["fetch", "search"]
 
 
+async def test_discovery_caps_active_requests(monkeypatch):
+    active = peak = 0
+
+    async def discover(record, namespace):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0)
+            return [SEARCH]
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
+    results = await asyncio.wait_for(
+        asyncio.gather(*(runtime.discover_tools(record, ("ns",)) for _ in range(24))), 2
+    )
+    assert results == [[SEARCH]] * 24
+    assert peak == 8
+
+
+async def test_discovery_deadline_includes_waiting_for_capacity(monkeypatch):
+    monkeypatch.setattr(runtime, "_DISCOVERY_CONCURRENCY", 1)
+    monkeypatch.setattr(runtime, "_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[SEARCH]))
+    record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
+    async with runtime._discovery_slots():
+        with pytest.raises(ValueError, match="discovery timed out"):
+            await asyncio.wait_for(runtime.discover_tools(record, ("ns",)), 1)
+    assert await runtime.discover_tools(record, ("ns",)) == [SEARCH]
+
+
 @pytest.mark.parametrize(
     ("raised", "message"),
     [
         (
-            ExceptionGroup("session", [httpx.ConnectError("[Errno 8] nodename not known")]),
+            ExceptionGroup("session", [httpx2.ConnectError("[Errno 8] nodename not known")]),
             "Could not reach the MCP server: [Errno 8] nodename not known",
         ),
         (

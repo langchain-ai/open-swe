@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from openswe.config import ENV
 from openswe.dashboard.profiles import get_valid_access_token
+from openswe.github.http import github_reauth_message
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
 from openswe.utils.json_types import ThreadLike, thread_metadata
@@ -31,16 +32,7 @@ async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
 async def _ensure_dashboard_github_token(login: str) -> None:
     token = await get_valid_access_token(login)
     if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-
-
-# No app-installation-token fallback: PR file contents must be fetched with
-# the user's own credential so GitHub enforces their current repo access.
-async def _github_token_for_login(login: str) -> str:
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "github token unavailable, re-login required")
-    return token
+        raise HTTPException(401, github_reauth_message(login))
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:

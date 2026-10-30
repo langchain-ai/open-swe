@@ -28,8 +28,8 @@ from openswe.slack.client import (
     post_slack_ephemeral_message,
     remove_slack_reaction,
     replace_slack_command_message,
-    strip_bot_mention,
 )
+from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.thinking import settle_slack_thread_status
 from openswe.slack.webhook import workspace_scoped_default_repo
@@ -41,8 +41,7 @@ from openswe.workspaces.routing import resolve_workspace
 logger = logging.getLogger(__name__)
 
 ASK_COMMAND = "/oswe"
-BY_THE_WAY_COMMAND = "/btw"
-_BY_THE_WAY_RE = re.compile(r"/btw(?:\s+(?P<question>.*))?", re.DOTALL | re.IGNORECASE)
+BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
 CHANNEL_CONTEXT_MESSAGE_LIMIT = 30
@@ -54,6 +53,7 @@ _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context
 _NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
+_SHORTCUT_ACKNOWLEDGEMENT = "Working on it — I’ll send a separate reply, visible only to you."
 _ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
 _BY_THE_WAY_USAGE = "Ask a question after it: `@Open SWE /btw how does thread routing work?`"
 _BY_THE_WAY_TOO_LONG = (
@@ -69,16 +69,10 @@ class SlackAskRequest(BaseModel):
     command: str = ASK_COMMAND
     team_id: str = ""
     response_url: str = ""
+    selected_message: str = ""
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
-
-    @staticmethod
-    def by_the_way_question(text: str, bot_user_id: str) -> str | None:
-        """The question in an `@Open SWE /btw ...` mention; None when it is not one."""
-        clean = strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
-        match = _BY_THE_WAY_RE.fullmatch(clean)
-        return None if match is None else (match.group("question") or "").strip()
 
     @property
     def by_the_way(self) -> bool:
@@ -183,25 +177,16 @@ async def _refuse(request: SlackAskRequest, text: str) -> None:
 
 async def _runnable_login(request: SlackAskRequest, login: str | None, email: str) -> str | None:
     """The GitHub login to run as, or None once the asker has been asked to link one."""
-    if login:
-        try:
-            if await common.get_valid_access_token(login):
-                return login
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not resolve a GitHub token for %s", login, exc_info=True)
-    has_record = False
-    if login:
-        try:
-            has_record = await common.has_access_token_record(login)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not check the GitHub token record for %s", login, exc_info=True)
+    reason = await common.account_link_reason(login)
+    if reason is None:
+        return login
     await _settle_thinking_status(request)
     await common.post_account_link_prompt(
         request.channel_id,
         request.reply_thread_ts,
         request.user_id,
         email or None,
-        reason="revoked" if has_record else "unlinked",
+        reason=reason,
         ephemeral=True,
     )
     if request.response_url:
@@ -211,7 +196,10 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
     if request.response_url:
-        await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
+        await acknowledge_slack_command(
+            request.response_url,
+            _SHORTCUT_ACKNOWLEDGEMENT if request.selected_message else _ACKNOWLEDGEMENT,
+        )
     if request.by_the_way:
         await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
         if not request.question:
@@ -253,8 +241,8 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         )
     ).slug
     resolved_repo = resolution.repo
-    if resolved_repo is not None and not resolution.explicit:
-        resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace)
+    if not resolution.explicit:
+        resolved_repo = await workspace_scoped_default_repo(resolved_repo, workspace, login)
     repo = resolved_repo.model_dump() if resolved_repo else None
     slack_thread = SlackThreadRef(
         channel_id=request.channel_id,
@@ -301,10 +289,16 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "environment": workspace,
     }
     run_prompt = prompt(
-        "runs/slack-by-the-way" if request.by_the_way else "runs/slack-ask",
+        "runs/slack-explain"
+        if request.selected_message
+        else "runs/slack-by-the-way"
+        if request.by_the_way
+        else "runs/slack-ask",
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
+        selected_message=_CONTEXT_FENCE_RE.sub(r"&lt;\1", request.selected_message),
+        message_ts=request.message_ts,
         channel_id=request.channel_id,
         channel_name=_channel_label(channel_context),
         in_slack_thread=request.in_slack_thread,

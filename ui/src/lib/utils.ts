@@ -1,25 +1,25 @@
-import { clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
-import type { ClassValue } from "clsx"
+/**
+ * Macaw's token-aware merge: stock tailwind-merge treats `text-secondary` and
+ * `text-xs` as the same group and drops one.
+ */
+export { cn } from "@langchain/macaw-components/utils/cn"
 
 /**
- * Merge class names into a single string.
- * @param inputs - The class names to merge.
- * @returns The merged class name string.
- * @example
- * cn("text-red-500", "bg-blue-500") // "text-red-500 bg-blue-500"
- * cn("text-red-500", "bg-blue-500", "text-2xl") // "text-red-500 bg-blue-500 text-2xl"
+ * For Macaw `Link`s inside metadata text (authors, timestamps, GitHub links):
+ * Link sets its own type size and colors its inner span as a link; these take
+ * the surrounding size and color instead, so the anchor's own `text-*` classes show.
  */
-export function cn(...inputs: Array<ClassValue>) {
-  return twMerge(clsx(inputs))
-}
+export const INHERITED_LINK =
+  "text-[length:inherit] leading-[inherit] tracking-[inherit] [&>span]:text-inherit [&>span]:hover:text-inherit"
 
 /**
  * Format an elapsed duration in milliseconds as a compact string (e.g. "5s", "3m 20s").
  */
 export function formatElapsed(ms: number): string {
   const secs = Math.max(1, Math.ceil(ms / 1000))
-  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
+  if (secs < 60) return `${secs}s`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m ${secs % 60}s`
 }
 
 /**

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from operator import attrgetter
 from pathlib import Path
 from time import perf_counter
@@ -9,6 +9,7 @@ from time import perf_counter
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.util import CommandError
 from sqlalchemy import (
     Connection,
     ExceptionContext,
@@ -80,8 +81,8 @@ def engine() -> AsyncEngine:
         _ENGINE = create_async_engine(
             database_uri,
             pool_pre_ping=True,
-            pool_size=ENV.ANALYTICS_POOL_SIZE.get_int(5),
-            max_overflow=ENV.ANALYTICS_POOL_OVERFLOW.get_int(5),
+            pool_size=ENV.ANALYTICS_POOL_SIZE.get_int(20),
+            max_overflow=ENV.ANALYTICS_POOL_OVERFLOW.get_int(20),
             pool_timeout=ENV.ANALYTICS_POOL_TIMEOUT_SECONDS.get_int(5),
             connect_args={"server_settings": {"application_name": "open-swe"}},
         )
@@ -150,8 +151,21 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
         yield conn
 
 
+def read_only_transaction() -> AbstractAsyncContextManager[AsyncConnection]:
+    return _read_only_transaction(discard_connection=False)
+
+
+def untrusted_read_only_transaction() -> AbstractAsyncContextManager[AsyncConnection]:
+    """A ``read_only_transaction`` for arbitrary SQL, whose connection never returns to the pool.
+
+    Read-only SQL can still leave session state that a rollback keeps, such as
+    a session advisory lock.
+    """
+    return _read_only_transaction(discard_connection=True)
+
+
 @asynccontextmanager
-async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
+async def _read_only_transaction(*, discard_connection: bool) -> AsyncIterator[AsyncConnection]:
     async with engine().connect() as conn:
         transaction = await conn.begin()
         try:
@@ -161,7 +175,8 @@ async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
         finally:
             if transaction.is_active:
                 await transaction.rollback()
-            await conn.invalidate()
+            if discard_connection:
+                await conn.invalidate()
 
 
 @asynccontextmanager
@@ -236,37 +251,54 @@ def upgrade(
         },
     )
     if ENV.OPENSWE_ENV.optional() == "preview":
-        drop_superseded_revisions(conn, context, migrations, schema)
+        drop_stale_revisions(conn, context, migrations, schema)
     with Operations.context(context):
         context.run_migrations()
 
 
-def drop_superseded_revisions(
+def drop_stale_revisions(
     conn: Connection,
     context: MigrationContext,
     migrations: ScriptDirectory,
     schema: str,
 ) -> None:
-    """Forget stamped revisions that a rebased preview branch now chains beneath another."""
+    """Forget stamped revisions the preview tree no longer chains to its heads.
+
+    A revision is stale when its branch left the preview tree, so no script knows it
+    (its tables stay behind), or when a rebase chained it beneath another stamped one.
+    """
     current = set(context.get_current_heads())
-    superseded = current & {
+    unknown = current - {script.revision for script in migrations.walk_revisions()}
+    known = current - unknown
+    if unknown and not known:
+        # An empty alembic_version would replay every migration over the existing schema.
+        raise CommandError(
+            f"Every stamped revision is unknown ({', '.join(sorted(unknown))}); "
+            "stamp a known revision before migrating"
+        )
+    superseded = known & {
         script.revision
-        for head in current
+        for head in known
         for script in migrations.walk_revisions(head=head)
         if script.revision != head
     }
-    if not superseded:
-        return
-    logger.warning(
-        "Dropping superseded migration revisions",
-        extra={"superseded_revisions": sorted(superseded)},
-    )
-    conn.execute(
-        text(f"DELETE FROM {schema}.alembic_version WHERE version_num IN :revisions").bindparams(
-            bindparam("revisions", expanding=True)
-        ),
-        {"revisions": sorted(superseded)},
-    )
+    if unknown:
+        logger.warning(
+            "Dropping unknown migration revisions",
+            extra={"unknown_revisions": sorted(unknown)},
+        )
+    if superseded:
+        logger.warning(
+            "Dropping superseded migration revisions",
+            extra={"superseded_revisions": sorted(superseded)},
+        )
+    if stale := sorted(unknown | superseded):
+        conn.execute(
+            text(
+                f"DELETE FROM {schema}.alembic_version WHERE version_num IN :revisions"
+            ).bindparams(bindparam("revisions", expanding=True)),
+            {"revisions": stale},
+        )
 
 
 def execute_revision(conn: Connection, migrations: ScriptDirectory, revision: str) -> None:

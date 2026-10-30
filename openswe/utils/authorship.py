@@ -1,16 +1,22 @@
 """Helpers for collaborative commit and PR attribution."""
 
+import hashlib
 import logging
-from collections.abc import Iterable
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import asdict, dataclass
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
 
 import httpx2
 
 from openswe.analytics.identity import DisplayNameSource
 from openswe.input_messages import PersonIdentity
 from openswe.utils import ttl_cache
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +25,11 @@ _GITHUB_API_HEADERS = {
     "X-GitHub-Api-Version": "2022-11-28",
 }
 _PUBLIC_PROFILE_CACHE_TTL_SECONDS = 3600.0
+# A thread's runs land on any worker, so a per-process cache misses most of them.
+_PUBLIC_PROFILE_SHARED_CACHE_TTL = timedelta(hours=24)
+_INSTALLATION_TOKEN_PREFIX = "ghs_"
+# A revoked token stops resolving within this window.
+_TOKEN_IDENTITY_CACHE_TTL = timedelta(hours=1)
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -135,12 +146,58 @@ def _github_noreply_email(login: str, user_id: Any = None) -> str:
     return f"{normalized_login}@users.noreply.github.com"
 
 
-async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
-    if not github_token:
-        return None
+async def _cached_across_workers[D: DataclassInstance](
+    key: str, ttl: timedelta, kind: type[D], load: Callable[[], Awaitable[D | None]]
+) -> D | None:
+    """``load()`` cached in the platform cache every worker shares.
+
+    Only hits are stored, and nothing is served past ``ttl``.
+    """
+    from langgraph_api.cache import cache_get, cache_set
 
     try:
-        async with httpx2.AsyncClient(timeout=5.0) as client:
+        cached = await cache_get(key)
+    except Exception:
+        logger.warning(
+            "Shared cache read failed", extra={"cached_kind": kind.__name__}, exc_info=True
+        )
+        cached = None
+    if isinstance(cached, dict):
+        try:
+            return kind(**cached)
+        except TypeError:
+            logger.warning(
+                "Ignoring a value cached in an older shape",
+                extra={"cached_kind": kind.__name__},
+                exc_info=True,
+            )
+    value = await load()
+    if value is not None:
+        try:
+            await cache_set(key, asdict(value), ttl)
+        except Exception:
+            logger.warning(
+                "Shared cache write failed", extra={"cached_kind": kind.__name__}, exc_info=True
+            )
+    return value
+
+
+async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
+    # An installation token (GitHub's `ghs_` prefix) acts for no user, so `/user`
+    # always answers 403; asking cost every bot-authenticated run a round trip.
+    if not github_token or github_token.startswith(_INSTALLATION_TOKEN_PREFIX):
+        return None
+    return await _cached_across_workers(
+        "openswe:github-token-identity:v1:" + hashlib.sha256(github_token.encode()).hexdigest(),
+        _TOKEN_IDENTITY_CACHE_TTL,
+        CollaboratorIdentity,
+        lambda: _fetch_identity_from_github_token(github_token),
+    )
+
+
+async def _fetch_identity_from_github_token(github_token: str) -> CollaboratorIdentity | None:
+    try:
+        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=5.0) as client:
             response = await client.get(
                 "https://api.github.com/user",
                 headers={
@@ -208,7 +265,9 @@ async def _fetch_public_github_profile(login: str) -> GitHubPublicProfile | None
     if not token:
         return None
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+        ) as client:
             response = await client.get(
                 f"https://api.github.com/users/{login}",
                 headers={
@@ -246,7 +305,12 @@ async def resolve_public_github_profile(login: str) -> GitHubPublicProfile | Non
         return None
 
     async def _load() -> GitHubPublicProfile | None:
-        return await _fetch_public_github_profile(normalized)
+        return await _cached_across_workers(
+            f"openswe:github-public-profile:v1:{normalized.lower()}",
+            _PUBLIC_PROFILE_SHARED_CACHE_TTL,
+            GitHubPublicProfile,
+            lambda: _fetch_public_github_profile(normalized),
+        )
 
     try:
         return await ttl_cache.cached(

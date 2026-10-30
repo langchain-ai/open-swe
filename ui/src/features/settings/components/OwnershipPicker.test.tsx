@@ -2,12 +2,14 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { OwnershipPicker, type PickerItem } from "./OwnershipPicker"
 import { useSlackChannelDirectory } from "@/lib/slack-channels"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 
-vi.mock("@/lib/slack-channels", () => ({
+vi.mock("@/lib/slack-channels", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
   useSlackChannelDirectory: vi.fn(),
 }))
 
@@ -67,7 +69,8 @@ function renderPicker(
         invalidHint: "Channel IDs start with C.",
       }}
       {...overrides}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
   return { onChange }
@@ -85,7 +88,7 @@ describe("OwnershipPicker", () => {
       num_members: 10,
     }))
     const directory = {
-      data: { channels, partial: false },
+      data: { channels, refreshing: false },
       isLoading: false,
       isError: false,
       error: null,
@@ -100,15 +103,17 @@ describe("OwnershipPicker", () => {
       workspaceSlug: "oss",
       workspaces: [],
     }
-    const { rerender } = render(<SlackChannelPicker {...props} />)
+    const { rerender } = render(<SlackChannelPicker {...props} />, {
+      wrapper: TooltipProvider,
+    })
     fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    const absent = await screen.findByRole<HTMLInputElement>("checkbox", {
+    const absent = await screen.findByRole<HTMLButtonElement>("checkbox", {
       name: "#design",
     })
     expect(absent.disabled).toBe(false)
     fireEvent.click(absent)
     expect(
-      screen.getByRole<HTMLInputElement>("checkbox", { name: "#design" })
+      screen.getByRole<HTMLButtonElement>("checkbox", { name: "#design" })
         .disabled
     ).toBe(true)
     expect(screen.queryByRole("switch")).toBeNull()
@@ -126,7 +131,7 @@ describe("OwnershipPicker", () => {
     })
     rerender(<SlackChannelPicker {...props} selected={["CJOINED01"]} />)
     fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    const joined = await screen.findByRole<HTMLInputElement>("checkbox", {
+    const joined = await screen.findByRole<HTMLButtonElement>("checkbox", {
       name: "#design",
     })
     expect(joined.disabled).toBe(false)
@@ -143,7 +148,8 @@ describe("OwnershipPicker", () => {
         onChange={onChange}
         workspaceSlug="oss"
         workspaces={[]}
-      />
+      />,
+      { wrapper: TooltipProvider }
     )
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
     expect(await screen.findByText("Available · 3")).toBeTruthy()
@@ -179,9 +185,10 @@ describe("OwnershipPicker", () => {
       screen.queryByRole("checkbox", { name: "org/public-archive" })
     ).toBeNull()
     expect(
-      screen.getByRole<HTMLInputElement>("checkbox", { name: "org/public-sdk" })
-        .checked
-    ).toBe(true)
+      screen
+        .getByRole("checkbox", { name: "org/public-sdk" })
+        .getAttribute("aria-checked")
+    ).toBe("true")
     expect(
       screen.getByRole("checkbox", { name: "org/internal-sdk" })
     ).toBeTruthy()

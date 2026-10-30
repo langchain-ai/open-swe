@@ -2,18 +2,20 @@
 
 import hashlib
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
+from runtime_api.loop import VISIBLE_FROM
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
 # summary message followed by messages[cutoff_index:].
 SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
-Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval"]
+Surface = Literal["slack", "linear", "github", "web", "automation", "eval", "deployment"]
 EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
 
@@ -71,12 +73,19 @@ class SystemIdentity(TypedDict):
 Identity = PersonIdentity | ChannelIdentity | SystemIdentity
 
 
+type FieldValue = str | int | float | bool
+type FieldValues = Mapping[str, FieldValue | None]
+# A scalar is an attribute of the envelope; a mapping is a ``Fields`` element inside it,
+# and a list of mappings is one such element apiece, all with the same tag.
+type EnvelopeData = Mapping[str, FieldValue | FieldValues | list[FieldValues]]
+
+
 class InputMessageContext(TypedDict):
     sender_id: str
     surface: Surface
     kind: MessageKind
     channel_id: NotRequired[str]
-    data: NotRequired[dict[str, object]]
+    data: NotRequired[EnvelopeData]
 
 
 class RunMessage(TypedDict):
@@ -204,6 +213,11 @@ def input_message_timestamps(content: object) -> set[str]:
     }
 
 
+# Starts the id of every message that carries an event sent to the thread, such as
+# monitor output or a task report.
+EVENT_MESSAGE_PREFIX: Final = "event-match:"
+
+
 def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     """Ids of the event matches whose envelopes are already among ``messages``."""
     return {
@@ -214,7 +228,7 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
-def dynamic_context_hash(content: object) -> str | None:
+def _dynamic_context(content: object) -> tuple[tuple[str, str], str] | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
@@ -230,8 +244,14 @@ def dynamic_context_hash(content: object) -> str | None:
         canonical = ElementTree.tostring(root, encoding="unicode")
         context_hash = hashlib.sha256(canonical.encode()).hexdigest()
         if claimed_hash is None or claimed_hash == context_hash:
-            return context_hash
+            key = (root.get("kind", ""), root.get("id") or context_hash)
+            return key, context_hash
     return None
+
+
+def dynamic_context_hash(content: object) -> str | None:
+    context = _dynamic_context(content)
+    return context[1] if context else None
 
 
 def _message_content(message: object) -> object:
@@ -246,12 +266,13 @@ def _message_content(message: object) -> object:
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
-    hashes: set[str] = set()
+    latest: dict[tuple[str, str], str] = {}
     for message in messages:
-        context_hash = dynamic_context_hash(_message_content(message))
-        if context_hash is not None:
-            hashes.add(context_hash)
-    return hashes
+        context = _dynamic_context(_message_content(message))
+        if context is not None:
+            key, context_hash = context
+            latest[key] = context_hash
+    return set(latest.values())
 
 
 def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
@@ -266,34 +287,77 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
     event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else state.get(VISIBLE_FROM)
     if isinstance(cutoff, int) and cutoff >= 0:
         messages = messages[cutoff:]
     return dynamic_context_hashes_from_messages(messages)
 
 
-def _entity_field_line(field: str, value: object) -> str:
-    text = _xml_text(value)
-    if "\n" not in text:
-        return f"{field}: {text}"
-    indented = "\n".join(f"  {line}" for line in text.split("\n"))
-    return f"{field}:\n{indented}"
+@dataclass(frozen=True)
+class Fields:
+    """Structured data as the model reads it: one ``name: value`` line per field.
+
+    Empty fields are left out. A value spanning lines puts nothing after the colon and indents
+    each of its lines by two spaces. Entity introductions and the data an input message carries
+    are an ``element`` of these lines; ``text`` is the same lines inside a message body, which
+    the envelope escapes.
+    """
+
+    values: FieldValues
+
+    def text(self) -> str:
+        return self._lines(escape=False)
+
+    def element(self, tag: str, attributes: Mapping[str, str] | None = None) -> str:
+        opening = " ".join(
+            [
+                _validate_name(tag),
+                *(f'{_validate_name(k)}="{_xml_attr(v)}"' for k, v in (attributes or {}).items()),
+            ]
+        )
+        body = self._lines(escape=True)
+        return f"<{opening}>\n{body}\n</{tag}>" if body else f"<{opening}></{tag}>"
+
+    def _lines(self, *, escape: bool) -> str:
+        lines: list[str] = []
+        for name, value in self.values.items():
+            if value is None or value == "":
+                continue
+            text = _xml_text(value) if escape else str(value)
+            if "\n" in text:
+                indented = "\n".join(f"  {line}" for line in text.split("\n"))
+                lines.append(f"{name}:\n{indented}")
+            else:
+                lines.append(f"{name}: {text}")
+        return "\n".join(lines)
+
+
+def _validate_name(name: str) -> str:
+    if not name.replace("_", "").replace("-", "").isalnum():
+        raise ValueError(f"invalid structured data field: {name}")
+    return name
 
 
 def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     entity_id = _validate_entity_id(identity["id"])
-    lines: list[str] = []
-    for field in _ENTITY_FIELDS[kind]:
-        value = identity.get(field)  # type: ignore[union-attr]
-        if value is None or value == "":
-            continue
-        lines.append(_entity_field_line(field, value))
-    body = "\n".join(lines)
-    canonical = f'<dynamic-context kind="{kind}" id="{_xml_attr(entity_id)}">'
-    if body:
-        canonical += f"\n{body}\n"
-    canonical += "</dynamic-context>"
-    return {"role": "user", "content": canonical}
+    fields = Fields({field: identity.get(field) for field in _ENTITY_FIELDS[kind]})  # type: ignore[misc]
+    return {
+        "role": "user",
+        "content": fields.element("dynamic-context", {"kind": kind, "id": entity_id}),
+    }
+
+
+def run_context(context_id: str, guidance: str) -> str:
+    """Guidance for the run that can change between turns, kept out of the system prompt.
+
+    The latest block with each ``context_id`` is the one in force, so it is added
+    again only when it changes or the model no longer sees it.
+    """
+    body = guidance.strip().replace("]]>", "]]]]><![CDATA[>")
+    return (
+        f'<dynamic-context kind="run" id="{_xml_attr(context_id)}">'
+        f"<![CDATA[\n{body}\n]]></dynamic-context>"
+    )
 
 
 def person_introduction(person: PersonIdentity) -> RunMessage:
@@ -308,18 +372,6 @@ def system_introduction(system: SystemIdentity) -> RunMessage:
     return _entity_message(system, "system")
 
 
-def _data_element(name: str, value: object) -> str:
-    if not name.replace("_", "").replace("-", "").isalnum():
-        raise ValueError(f"invalid structured data field: {name}")
-    if isinstance(value, dict):
-        children = "\n".join(_data_element(str(key), item) for key, item in value.items())
-        return f"<{name}>\n{children}\n</{name}>"
-    if isinstance(value, (list, tuple)):
-        children = "\n".join(_data_element("item", item) for item in value)
-        return f"<{name}>\n{children}\n</{name}>"
-    return f"<{name}>{_xml_text(value)}</{name}>"
-
-
 def _serialize_message(text: str, context: InputMessageContext) -> str:
     sender_id = _validate_entity_id(context["sender_id"])
     attributes = [
@@ -332,12 +384,12 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
         attributes.insert(1, f'channel="{_xml_attr(_validate_entity_id(channel_id))}"')
     children: list[str] = []
     for name, value in context.get("data", {}).items():
-        if isinstance(value, (dict, list, tuple)):
-            children.append(_data_element(name, value))
-        elif not name.replace("_", "").replace("-", "").isalnum():
-            raise ValueError(f"invalid structured data field: {name}")
+        if isinstance(value, Mapping):
+            children.append(Fields(value).element(name))
+        elif isinstance(value, list):
+            children.extend(Fields(item).element(name) for item in value)
         else:
-            attributes.append(f'{name}="{_xml_attr(value)}"')
+            attributes.append(f'{_validate_name(name)}="{_xml_attr(value)}"')
     body = "\n".join([_xml_text(text), *children])
     return f"<input-message {' '.join(attributes)}>\n{body}\n</input-message>"
 
@@ -356,6 +408,12 @@ def _structured_content(
             blocks.append({**block, "text": _serialize_message(block["text"], context)})
         else:
             blocks.append(block)
+    # Data elements live in the envelope, so a message without text still needs one.
+    carries_elements = any(
+        isinstance(value, Mapping | list) for value in context.get("data", {}).values()
+    )
+    if carries_elements and not any(block.get("type") == "text" for block in content):
+        blocks.append({"type": "text", "text": _serialize_message("", context)})
     return blocks
 
 

@@ -26,6 +26,10 @@ _ERROR_TYPE_CODES = {
     "RecursionError": "step_limit",
     "SandboxConnectionError": "sandbox_unreachable",
     "SandboxUnreachableError": "sandbox_unreachable",
+    "BackendUnavailableError": "backend_interrupted",
+    "BackendTimeoutError": "backend_interrupted",
+    # Not raised: the stalled-run sweep names it when it fails a run that went silent.
+    "RunStalledError": "run_stalled",
 }
 
 

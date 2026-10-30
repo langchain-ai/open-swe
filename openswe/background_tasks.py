@@ -14,15 +14,17 @@ from typing import Any, Literal, NamedTuple
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
+from pydantic import JsonValue
 
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.input_messages import InputMessageContext, SystemIdentity
+from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
-from openswe.tools.background_execute import TASK_ROOT, control_script, encoded, execute
+from openswe.tools.background_execute import TASK_ROOT, list_tasks
 from openswe.utils.background_task_state import (
     RUNNING_BACKGROUND_TASKS_KEY,
     update_background_task_state,
@@ -36,7 +38,6 @@ CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 # The server drops a `thread_id` key from cron metadata, so crons are tagged with this instead.
 CRON_THREAD_KEY = "agent_thread_id"
-_CRON_PAGE_SIZE = 1000
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 _BACKGROUND_TASK_SENDER: SystemIdentity = {
@@ -55,61 +56,23 @@ def _client():
     return get_client(url=langgraph_url())
 
 
-async def ensure_background_task_cron(thread_id: str) -> str:
-    client = _client()
-    crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
-        limit=10,
-    )
-    ids = [
-        cron_id
-        for cron in crons or []
-        if isinstance(cron, dict) and isinstance((cron_id := cron.get("cron_id")), str)
-    ]
-    if ids:
-        for duplicate in ids[1:]:
-            await client.crons.delete(duplicate)
-        return ids[0]
-    cron = await client.crons.create(
-        "scheduler",
-        schedule=CRON_SCHEDULE,
-        input={"task": CRON_KIND, "thread_id": thread_id},
-        config={"configurable": {"task": CRON_KIND, "thread_id": thread_id}},
-        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
-        timezone="UTC",
-    )
-    cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
-    if not isinstance(cron_id, str) or not cron_id:
-        raise RuntimeError("background-task cron creation did not return a cron_id")
-    return cron_id
+def _polling_job_key(thread_id: str) -> str:
+    return f"{CRON_KIND}:{thread_id}"
 
 
-async def _delete_crons(thread_id: str) -> None:
-    client = _client()
-    tagged = await client.crons.search(
-        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id}, limit=10
+async def ensure_background_task_polling(thread_id: str) -> None:
+    """Poll ``thread_id``'s background tasks every minute until none is running."""
+    await queue.schedule(
+        CRON_KIND,
+        {"thread_id": thread_id},
+        cron=CRON_SCHEDULE,
+        key=_polling_job_key(thread_id),
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
     )
-    cron_ids = [cron["cron_id"] for cron in tagged]
-    # Crons created before CRON_THREAD_KEY lack it, so match those on the payload instead.
-    # Collect every page before deleting so deletes do not shift later offsets.
-    offset = 0
-    while True:
-        page = await client.crons.search(
-            metadata={"kind": CRON_KIND}, limit=_CRON_PAGE_SIZE, offset=offset
-        )
-        for cron in page:
-            payload_input = cron.get("payload", {}).get("input")
-            if (
-                isinstance(payload_input, dict)
-                and payload_input.get("thread_id") == thread_id
-                and cron["cron_id"] not in cron_ids
-            ):
-                cron_ids.append(cron["cron_id"])
-        if len(page) < _CRON_PAGE_SIZE:
-            break
-        offset += _CRON_PAGE_SIZE
-    for cron_id in cron_ids:
-        await client.crons.delete(cron_id)
+
+
+async def _stop_polling(thread_id: str) -> None:
+    await queue.cancel_key(_polling_job_key(thread_id))
 
 
 def _notification(task: dict[str, Any]) -> str:
@@ -128,26 +91,19 @@ def _notification(task: dict[str, Any]) -> str:
     )
 
 
-def _thread_workspace(metadata: dict[str, Any]) -> str | None:
-    """The workspace to carry into a follow-up run; ``environment`` is the pre-workspace key."""
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+async def completion_configurable(
+    thread_id: str, metadata: Mapping[str, object]
+) -> dict[str, JsonValue]:
+    """The configurable of a run that reports sandbox work back to ``thread_id``."""
+    if metadata.get("task_id") or (
+        metadata.get("visibility") == "private" and metadata.get("owner_type") == "user"
+    ):
+        from openswe.tasks.service import recipient_config
 
-
-def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    configurable: dict[str, Any] = {"thread_id": thread_id}
-    for key in ("source", "repo", "github_login", "triggering_user_email"):
-        value = metadata.get(key)
-        if value is not None:
-            configurable["user_email" if key == "triggering_user_email" else key] = value
-    workspace = _thread_workspace(metadata)
-    if workspace is not None:
-        configurable["workspace"] = workspace
-        configurable["environment"] = workspace
-    configurable.update(SourceContext.from_metadata(metadata).dump())
+        configurable = await recipient_config(thread_id)
+    else:
+        configurable = follow_up_configurable(metadata, thread_id)
+    configurable["background_task_completion"] = True
     return configurable
 
 
@@ -175,16 +131,7 @@ async def _mark_delivered(backend: Any, task_id: str) -> None:
 
 
 async def _list_tasks(backend: Any, *, required: bool = False) -> list[dict[str, Any]]:
-    script = control_script("list", None)
-    result = await execute(
-        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
-    )
-    tasks = result.get("tasks") if isinstance(result, dict) else None
-    if isinstance(tasks, list):
-        return tasks
-    if required:
-        raise RuntimeError("Background-task list could not be read")
-    return []
+    return list(await list_tasks(backend, required=required))
 
 
 class _Reconciled(NamedTuple):
@@ -200,6 +147,18 @@ def _belongs_to_thread(
     owner = task.get("owner_thread_id")
     # Commands created before ownership tracking belong to the sandbox's host.
     return owner == thread_id or (owner is None and owns_legacy_tasks)
+
+
+async def thread_tasks(
+    backend: Any, thread_id: str, metadata: Mapping[str, object]
+) -> list[dict[str, Any]]:
+    """The sandbox commands in ``backend`` that ``thread_id`` launched."""
+    owns_legacy_tasks = not metadata.get(SANDBOX_HOST_THREAD_KEY)
+    return [
+        task
+        for task in await _list_tasks(backend)
+        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
+    ]
 
 
 async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
@@ -249,11 +208,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
         await sync_slack_background_status(client, thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
     backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
-    tasks = [
-        task
-        for task in await _list_tasks(backend)
-        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
-    ]
+    tasks = await thread_tasks(backend, thread_id, metadata)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
     running_ids = [task_id for task in running if isinstance((task_id := task.get("task_id")), str)]
@@ -294,13 +249,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
             continue
         message = _notification(task)
         try:
-            if metadata.get("task_id"):
-                from openswe.tasks.service import recipient_config
-
-                configurable = await recipient_config(thread_id)
-            else:
-                configurable = _dispatch_config(metadata, thread_id)
-            configurable["background_task_completion"] = True
+            configurable = await completion_configurable(thread_id, metadata)
             # A completion run can change task state before delivery finishes.
             status_metadata = None
             await dispatch_agent_run(
@@ -351,7 +300,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     reconciled = await _reconcile(thread_id)
     backend = reconciled.backend
     if backend is None:
-        await _delete_crons(thread_id)
+        await _stop_polling(thread_id)
     elif reconciled.result["status"] == "idle" and reconciled.tracked:
         lock = await backend.aexecute(
             f"mkdir -p {shlex.quote(TASK_ROOT)} && mkdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null",
@@ -370,7 +319,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                         task, thread_id, owns_legacy_tasks=reconciled.owns_legacy_tasks
                     )
                 ):
-                    await _delete_crons(thread_id)
+                    await _stop_polling(thread_id)
             finally:
                 await backend.aexecute(
                     f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10

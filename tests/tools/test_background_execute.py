@@ -1,6 +1,8 @@
+import base64
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -12,22 +14,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from deepagents.backends import LocalShellBackend
 from fastapi import FastAPI
 from langgraph_sdk.errors import NotFoundError
 
 from openswe import background_tasks
 from openswe.background_tasks import monitor_background_tasks, reconcile_background_tasks
-from openswe.sandboxes import tool_access, tool_routes
+from openswe.sandboxes import state, tool_access, tool_routes
+from openswe.sandboxes.scripts import source
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import service as task_service
 from openswe.tools import threads
-from openswe.tools.background_execute import (
-    TASK_ROOT,
-    _launch_command,
-    _runner,
-    background_execute,
-    control_script,
-)
+from openswe.tools.background_execute import TASK_ROOT, background_execute, current_backend
 from openswe.utils.background_task_state import update_background_task_state
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
@@ -41,6 +39,8 @@ codes = (root / "codes").read_text().split() if (root / "codes").exists() else [
 print(codes[0] if codes else "204", end="")
 """
 
+pytestmark = pytest.mark.usefixtures("memory_event_claims")
+
 
 @pytest.fixture
 def fake_curl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -53,14 +53,46 @@ def fake_curl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _run_control(action: str, task_id: str) -> dict:
+def _script(**constants: str) -> Path:
+    """The real background-task script in the task root, with ``constants`` replaced."""
+    text = source("background_task.py")
+    for name, value in constants.items():
+        text, count = re.subn(rf"^{name} = .*$", f"{name} = {value}", text, flags=re.M)
+        assert count == 1, name
+    path = Path(TASK_ROOT, f"test-script-{uuid.uuid4().hex}.py")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def _run(script: Path, action: str, **fields: object) -> dict:
+    request = base64.b64encode(json.dumps({"action": action, **fields}).encode()).decode()
     result = subprocess.run(
-        ["python3", "-c", control_script(action, task_id)],
-        capture_output=True,
-        check=True,
-        text=True,
+        ["python3", str(script), request], capture_output=True, text=True, timeout=10
     )
-    return json.loads(result.stdout)
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def _launch(script: Path, task_id: str, command: str, timeout: int, *, callback: bool) -> dict:
+    return _run(
+        script,
+        "launch",
+        task_id=task_id,
+        command=command,
+        timeout=timeout,
+        callback=callback,
+        owner_thread_id="thread-a",
+        tools_url_env=tool_access.TOOLS_URL_ENV,
+        tools_url_file=tool_access.TOOLS_URL_FILE,
+    )
+
+
+def _finished(script: Path, task_id: str) -> dict:
+    deadline = time.monotonic() + 5
+    while (state := _run(script, "status", task_id=task_id))["status"] == "running":
+        assert time.monotonic() < deadline
+        time.sleep(0.1)
+    return state
 
 
 @pytest.mark.parametrize(
@@ -68,77 +100,61 @@ def _run_control(action: str, task_id: str) -> dict:
     [(True, ["503", "000", "204"], 3), (True, ["401"], 1), (False, [], 0)],
 )
 def test_runner_calls_back_on_completion_until_accepted(
-    fake_curl: Path, monkeypatch: pytest.MonkeyPatch, callback: bool, codes: list[str], calls: int
+    fake_curl: Path, callback: bool, codes: list[str], calls: int
 ) -> None:
     (fake_curl / "codes").write_text("\n".join(codes))
-    module = importlib.import_module("openswe.tools.background_execute")
-    monkeypatch.setattr(module, "CALLBACK_RETRY_DELAYS", (0, 0, 0, 0))
+    script = _script(CALLBACK_RETRY_DELAYS="(0, 0, 0, 0)")
     task_id = f"test-{uuid.uuid4().hex}"
-    task_dir = Path(TASK_ROOT, task_id)
-    task_dir.mkdir(parents=True)
-    runner = task_dir / "runner.py"
-    runner.write_text(_runner(task_id, "echo hi", 10, callback, owner_thread_id="thread-a"))
     try:
-        subprocess.run(["python3", str(runner)], check=True, timeout=10)
+        _launch(script, task_id, "echo hi", 10, callback=callback)
+        state = _finished(script, task_id)
 
-        state = json.loads((task_dir / "state.json").read_text())
         assert state["status"] == "completed"
         assert state["owner_thread_id"] == "thread-a"
         url = f"{TOOLS_URL}/background-tasks/{task_id}/complete"
         calls_file = fake_curl / "calls"
+        deadline = time.monotonic() + 5
+        while (
+            calls
+            and len(calls_file.read_text().splitlines() if calls_file.exists() else []) < calls
+        ):
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        time.sleep(0.2)
         recorded = calls_file.read_text().splitlines() if calls_file.exists() else []
         assert recorded == [f'url = "{url}"'] * calls
     finally:
-        shutil.rmtree(task_dir, ignore_errors=True)
+        shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
+        script.unlink(missing_ok=True)
 
 
 def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch) -> None:
     if Path(tool_access.TOOLS_URL_FILE).exists():
         pytest.skip("this host has a provisioned sandbox tools URL")
     monkeypatch.delenv("OPEN_SWE_TOOLS_URL", raising=False)
+    script = _script()
     task_id = f"test-{uuid.uuid4().hex}"
     try:
-        result = subprocess.run(
-            [
-                "/bin/sh",
-                "-c",
-                _launch_command(task_id, "true", 10, callback=True, owner_thread_id="thread-a"),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        assert result.returncode == 75
+        result = _launch(script, task_id, "true", 10, callback=True)
+        assert "callback URL" in result["error"] or "curl" in result["error"]
         assert not Path(TASK_ROOT, task_id).exists()
     finally:
         shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
+        script.unlink(missing_ok=True)
 
 
 def test_background_command_returns_while_running_then_caps_output(fake_curl: Path) -> None:
+    script = _script()
     task_id = f"test-{uuid.uuid4().hex}"
-    task_dir = Path(TASK_ROOT, task_id)
     command = "python3 -c \"print('x' * 1200000)\"; sleep .5; echo done"
     try:
         started = time.monotonic()
-        launched = subprocess.run(
-            [
-                "/bin/sh",
-                "-c",
-                _launch_command(task_id, command, 10, callback=True, owner_thread_id="thread-a"),
-            ],
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=3,
-        )
+        launched = _launch(script, task_id, command, 10, callback=True)
         assert time.monotonic() - started < 2
-        assert json.loads(launched.stdout)["status"] == "running"
-        assert json.loads(launched.stdout)["owner_thread_id"] == "thread-a"
+        assert launched["status"] == "running"
+        assert launched["owner_thread_id"] == "thread-a"
 
-        deadline = time.monotonic() + 5
-        while (state := _run_control("status", task_id))["status"] == "running":
-            assert time.monotonic() < deadline
-            time.sleep(0.1)
+        state = _finished(script, task_id)
 
         assert state["status"] == "completed"
         assert state["exit_code"] == 0
@@ -146,36 +162,24 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
         assert state["output"].endswith("done\n")
         assert len(state["output"].encode()) < 65_600
     finally:
-        shutil.rmtree(task_dir, ignore_errors=True)
+        shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
+        script.unlink(missing_ok=True)
 
 
 def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
-    for timeout, stop, expected in ((1, False, "timed_out"), (10, True, "stopped")):
-        task_id = f"test-{uuid.uuid4().hex}"
-        task_dir = Path(TASK_ROOT, task_id)
-        try:
-            subprocess.run(
-                [
-                    "/bin/sh",
-                    "-c",
-                    _launch_command(
-                        task_id, "sleep 30", timeout, callback=False, owner_thread_id="thread-a"
-                    ),
-                ],
-                capture_output=True,
-                check=True,
-                text=True,
-                timeout=3,
-            )
-            if stop:
-                assert _run_control("stop", task_id)["status"] == "stopped"
-            deadline = time.monotonic() + 4
-            while (state := _run_control("status", task_id))["status"] == "running":
-                assert time.monotonic() < deadline
-                time.sleep(0.1)
-            assert state["status"] == expected
-        finally:
-            shutil.rmtree(task_dir, ignore_errors=True)
+    script = _script()
+    try:
+        for timeout, stop, expected in ((1, False, "timed_out"), (10, True, "stopped")):
+            task_id = f"test-{uuid.uuid4().hex}"
+            try:
+                _launch(script, task_id, "sleep 30", timeout, callback=False)
+                if stop:
+                    assert _run(script, "stop", task_id=task_id)["status"] == "stopped"
+                assert _finished(script, task_id)["status"] == expected
+            finally:
+                shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
+    finally:
+        script.unlink(missing_ok=True)
 
 
 async def _callback_client(monkeypatch: pytest.MonkeyPatch) -> tuple[httpx.AsyncClient, str]:
@@ -313,7 +317,7 @@ async def test_cron_tick_deletes_its_cron_only_once_nothing_is_left(
     monkeypatch.setattr(background_tasks, "_reconcile", AsyncMock(return_value=reconciled))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=relisted))
     delete_crons = AsyncMock()
-    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("thread-1") == {"status": status}
 
@@ -352,7 +356,7 @@ async def test_shared_sandbox_monitors_deliver_only_their_own_completions(
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
-    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("worker-b") == {
         "status": "idle",
@@ -405,7 +409,7 @@ async def test_callbacks_follow_the_triggering_persons_flag(
             module.RunConfig, "from_runtime", return_value=SimpleNamespace(github_login=login)
         ),
     ):
-        assert await module._uses_completion_callback() is enabled
+        assert await module.uses_completion_callback() is enabled
     if login:
         get_profile.assert_awaited_once_with(login)
 
@@ -417,18 +421,20 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
     launches = [{"task_id": "cmd-1", "status": "running"}]
     with (
         patch(
-            "openswe.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=callback),
         ),
         patch(
-            "openswe.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "openswe.tools.background_execute.current_backend", return_value=("thread-1", backend)
         ),
         patch(
             "openswe.tools.background_execute.execute",
             AsyncMock(side_effect=launches if callback else [{"tasks": []}, *launches]),
         ),
         patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
-        patch("openswe.background_tasks.ensure_background_task_cron", AsyncMock()) as ensure_cron,
+        patch(
+            "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
+        ) as ensure_cron,
     ):
         result = await background_execute("sleep 10")
 
@@ -442,19 +448,19 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
 
     with (
         patch(
-            "openswe.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=False),
         ),
         patch("openswe.tools.background_execute.update_background_task_state", AsyncMock()),
         patch(
-            "openswe.tools.background_execute._current_backend", return_value=("thread-1", backend)
+            "openswe.tools.background_execute.current_backend", return_value=("thread-1", backend)
         ),
         patch(
             "openswe.tools.background_execute.execute",
             AsyncMock(side_effect=[{"tasks": []}, {"task_id": "task-1", "status": "running"}]),
         ),
         patch(
-            "openswe.background_tasks.ensure_background_task_cron",
+            "openswe.background_tasks.ensure_background_task_polling",
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
@@ -469,10 +475,11 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
 
 
 @pytest.mark.parametrize(
-    ("tracking_failure", "worker"), [(False, False), (True, False), (False, True)]
+    ("tracking_failure", "worker", "private"),
+    [(False, False, False), (True, False, False), (False, True, False), (False, False, True)],
 )
 async def test_reconcile_enqueues_one_claimed_completion(
-    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool
+    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool, private: bool
 ) -> None:
     task = {
         "task_id": "task-1",
@@ -494,15 +501,18 @@ async def test_reconcile_enqueues_one_claimed_completion(
             "running_background_tasks": ["task-1"],
         }
     }
-    if worker:
+    if worker or private:
         client.threads.get.return_value["metadata"].update(
             source="dashboard",
             source_context={},
-            task_id=str(uuid.uuid4()),
-            sandbox_host_thread_id="coordinator",
+            visibility="private" if private else "public",
             owner_type="user",
             owner_login="worker-owner",
         )
+        if worker:
+            client.threads.get.return_value["metadata"].update(
+                task_id=str(uuid.uuid4()), sandbox_host_thread_id="coordinator"
+            )
         monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
         monkeypatch.setattr(task_service, "enforce_github_login_gate", AsyncMock())
         monkeypatch.setattr(
@@ -534,10 +544,20 @@ async def test_reconcile_enqueues_one_claimed_completion(
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
     configurable = dispatch.await_args.args[2]
-    source = "dashboard" if worker else "slack"
+    source = "dashboard" if worker or private else "slack"
     assert configurable["source"] == source
     assert configurable["background_task_completion"] is True
     assert dispatch.await_args.kwargs["source"] == source
+    if private:
+        from openswe.credential_scope import private_owner_login
+        from openswe.run_config import RunConfig
+
+        assert (
+            private_owner_login(
+                RunConfig.parse(configurable), client.threads.get.return_value["metadata"]
+            )
+            == "worker-owner"
+        )
     if worker:
         config = {"configurable": configurable}
         monkeypatch.setattr(threads, "get_config", lambda: config)
@@ -638,7 +658,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
 async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     monkeypatch: pytest.MonkeyPatch, slack: bool, run_active: bool
 ) -> None:
-    from openswe import dispatch, thread_feedback
+    from openswe import dispatch
 
     client = AsyncMock()
     stored: dict[str, object] = {
@@ -666,7 +686,6 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
-    monkeypatch.setattr(thread_feedback, "note_feedback_activity", AsyncMock())
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
         background_tasks,
@@ -710,7 +729,7 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     )
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
-    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_thread"}
     delete_crons.assert_awaited_once_with("thread-1")
@@ -732,7 +751,7 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         tracked.update(running)
         tracked.difference_update(finished)
 
-    async def launch(backend: object, command: str) -> dict[str, str]:
+    async def launch(backend: object, action: str, **fields: object) -> dict[str, str]:
         assert len(tracked) == 1, "the runner starts inside this call"
         if launch_fails:
             raise RuntimeError("active task limit reached")
@@ -740,11 +759,11 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
 
     with (
         patch(
-            "openswe.tools.background_execute._uses_completion_callback",
+            "openswe.tools.background_execute.uses_completion_callback",
             AsyncMock(return_value=True),
         ),
         patch(
-            "openswe.tools.background_execute._current_backend", return_value=("thread-1", object())
+            "openswe.tools.background_execute.current_backend", return_value=("thread-1", object())
         ),
         patch("openswe.tools.background_execute.execute", side_effect=launch),
         patch("openswe.tools.background_execute.update_background_task_state", side_effect=update),
@@ -756,34 +775,25 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
     assert bool(tracked) is not launch_fails
 
 
-@pytest.mark.parametrize("replaced", [False, True])
-async def test_reattach_reconciles_tracked_tasks_even_on_a_replacement_sandbox(
-    replaced: bool,
-) -> None:
+async def test_reattach_reconciles_tracked_tasks() -> None:
+    """A reconnect, to the box the thread kept or to the one MDA opened after, finds lost tasks."""
     import asyncio
 
     from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-    from openswe.sandboxes.providers.registry import SandboxGoneError
 
     SANDBOX_BACKENDS.clear()
     sandbox = MagicMock()
-    sandbox.id = "sandbox-replacement" if replaced else "sandbox-old"
+    sandbox.id = "sandbox-mda"
     reconcile = AsyncMock()
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             AsyncMock(
-                return_value={"sandbox_id": "sandbox-old", "running_background_tasks": ["cmd-1"]}
+                return_value={"sandbox_id": "sandbox-mda", "running_background_tasks": ["cmd-1"]}
             ),
         ),
         patch(
             "openswe.sandboxes.lifecycle._connect_existing_sandbox",
-            AsyncMock(
-                side_effect=SandboxGoneError("gone") if replaced else None, return_value=sandbox
-            ),
-        ),
-        patch(
-            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             AsyncMock(return_value=sandbox),
         ),
         patch("openswe.sandboxes.lifecycle.client.threads.update", AsyncMock()),
@@ -797,3 +807,52 @@ async def test_reattach_reconciles_tracked_tasks_even_on_a_replacement_sandbox(
 
     reconcile.assert_awaited_once_with("thread-1")
     SANDBOX_BACKENDS.clear()
+
+
+async def test_background_tools_reconnect_on_a_replica_without_a_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = importlib.import_module("openswe.tools.background_execute")
+    backend = LocalShellBackend(root_dir=str(tmp_path), inherit_env=True)
+    monkeypatch.setattr(
+        module.RunConfig, "from_runtime", lambda: SimpleNamespace(thread_id="thread-mda")
+    )
+    monkeypatch.setattr(
+        state,
+        "get_sandbox_metadata",
+        AsyncMock(return_value={"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}),
+    )
+
+    async def connect(sandbox_id: str, *, thread_id: str | None = None) -> LocalShellBackend:
+        assert (sandbox_id, thread_id) == ("mda-sandbox", "thread-mda")
+        return backend
+
+    monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
+    monkeypatch.setattr(state, "SANDBOX_BACKENDS", {})
+
+    thread_id, proxy = current_backend()
+    result = await proxy.aexecute("printf reconnected")
+
+    assert thread_id == "thread-mda"
+    assert result.exit_code == 0
+    assert result.output == "reconnected"
+
+
+async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("openswe.tools.background_execute")
+    monkeypatch.setattr(
+        module.RunConfig, "from_runtime", lambda: SimpleNamespace(thread_id="unprepared")
+    )
+    monkeypatch.setattr(module, "uses_completion_callback", AsyncMock(return_value=False))
+    monkeypatch.setattr(state, "get_sandbox_metadata", AsyncMock(return_value={}))
+    connect = AsyncMock(side_effect=AssertionError("connected without a sandbox id"))
+    monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)
+    state.SANDBOX_BACKENDS.clear()
+
+    result = await background_execute("echo hello")
+
+    assert result["success"] is False
+    assert "Missing sandbox_id in thread metadata for unprepared" in result["error"]
+    connect.assert_not_awaited()

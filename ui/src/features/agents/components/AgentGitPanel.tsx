@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { DownloadIcon } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
@@ -10,6 +11,11 @@ import {
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
+import {
+  BackgroundWorkPanel,
+  useHasBackgroundWork,
+} from "@/features/agents/components/BackgroundWorkPanel"
 import {
   selectThreadDiffScope,
   useDiffPanelStore,
@@ -25,9 +31,13 @@ import {
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
+import { normalizeSelection } from "@/features/agents/utils/passageReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 interface AgentGitPanelProps {
   onComment?: (content: string) => Promise<void>
+  /** Takes replies to text selected in the panel's files and terminals. */
+  onReply?: (reply: PassageReply) => void
   thread: AgentThread
   revealFilePath?: string | null
   revealChangesKey?: number
@@ -38,6 +48,7 @@ interface AgentGitPanelProps {
 export function AgentGitPanel({
   thread,
   onComment,
+  onReply,
   revealFilePath,
   revealChangesKey = 0,
   collapsed,
@@ -72,6 +83,20 @@ export function AgentGitPanel({
   const terminalAvailable =
     Boolean(localThread) ||
     (Boolean(thread.sandboxId) && !thread.sandboxBridgeClient)
+
+  // The browser can be opened once the agent's first run names it, and its
+  // panel shows on its own when it opens, once per thread view.
+  const browserAvailable = Boolean(thread.browser)
+  const browserOpened = thread.browser === "opened"
+  const browserShownRef = useRef(browserOpened)
+  useEffect(() => {
+    if (!browserOpened || browserShownRef.current) return
+    browserShownRef.current = true
+    openSurface(threadRef, "preview")
+    onCollapsedChange(false)
+  }, [browserOpened, onCollapsedChange, openSurface, threadRef])
+
+  const backgroundWorkAvailable = useHasBackgroundWork(thread.id)
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
@@ -195,8 +220,26 @@ export function AgentGitPanel({
       cwd={cwd}
       terminalAvailable={terminalAvailable}
       diffAvailable
+      browserAvailable={browserAvailable}
+      renderBrowser={() => (
+        <BrowserPanel threadId={thread.id} opened={browserOpened} />
+      )}
+      backgroundWorkAvailable={backgroundWorkAvailable}
+      renderBackgroundWork={() => <BackgroundWorkPanel threadId={thread.id} />}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
+      onReply={onReply}
+      {...(onReply && {
+        // The terminal hands over only the selected text, so there is no context to add.
+        onTerminalAddToChat: (text: string) =>
+          onReply({
+            source: "terminal",
+            before: "",
+            selection: normalizeSelection(text),
+            after: "",
+            comment: "",
+          }),
+      })}
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}
@@ -216,16 +259,19 @@ export function AgentGitPanel({
           onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
-              <button
-                type="button"
-                aria-label="Download recovery patch"
-                title={recoveryError ?? "Download recovery patch"}
+              <IconButton
+                icon={DownloadSimpleIcon}
+                label="Download recovery patch"
+                tooltipProps={
+                  recoveryError ? { title: recoveryError } : undefined
+                }
+                size="sm"
+                color="secondary"
+                variant="plain"
+                loading={recoveringPatch}
                 disabled={recoveringPatch}
                 onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                <DownloadIcon className="size-3.5" />
-              </button>
+              />
             ) : undefined
           }
         />

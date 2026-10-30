@@ -16,8 +16,14 @@ from openswe.utils.authorship import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_slack_id", ["", "U_CURRENT"])
-async def test_participant_context_includes_slack_identity(
-    monkeypatch: pytest.MonkeyPatch, source_slack_id: str
+@pytest.mark.parametrize(
+    ("run_login", "canonical_found"), [("mason", True), ("", True), ("mason", False)]
+)
+async def test_participant_context_resolves_canonical_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    source_slack_id: str,
+    run_login: str,
+    canonical_found: bool,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -27,9 +33,13 @@ async def test_participant_context_includes_slack_identity(
 
     user = User(
         display_name="Mason",
-        identities=[UserIdentity(provider="slack", external_id="U_LINKED")],
+        identities=[
+            UserIdentity(provider="slack", external_id="U_LINKED"),
+            UserIdentity(provider="github", external_id="123", login="mason"),
+        ],
     )
-    monkeypatch.setattr("openswe.server._user_for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=user if canonical_found else None))
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=user))
     monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
     monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -40,12 +50,16 @@ async def test_participant_context_includes_slack_identity(
             display_name="Mason",
             commit_name="Mason",
             commit_email="mason@example.com",
-            github_login="mason",
+            github_login=run_login,
         ),
         {},
+        person_id=f"user:{user.id}",
         slack_user_id=source_slack_id,
     )
     content = person_introduction(participant.as_person())["content"]
+    assert "open_swe_account: linked" in content
+    assert "github_login: mason" in content
+    assert "commit_email: mason@users.noreply.github.com" in content
     assert f"slack_user_id: {source_slack_id or 'U_LINKED'}" in content
 
 
@@ -156,3 +170,38 @@ async def test_config_identity_without_trusted_slack_name_stays_blank(
     assert identity.analytics_display_name == ""
     assert identity.display_name_source is None
     assert identity.commit_name == "Linear Mason"
+
+
+async def test_installation_token_identity_skips_the_user_endpoint(
+    github_client: _FakeAsyncClient, installation_token: None
+) -> None:
+    github_client._responses.append(
+        _FakeResponse(200, {"id": 42, "login": "mason-gh", "name": "Mason"})
+    )
+    config = {"configurable": {"source": "slack", "github_login": "mason-gh"}}
+
+    identity = await resolve_triggering_user_identity(config, "ghs_workspacebot")
+
+    assert identity is not None
+    assert identity.github_login == "mason-gh"
+    assert [url for url, _ in github_client.requests] == ["https://api.github.com/users/mason-gh"]
+
+
+async def test_user_token_identity_is_shared_until_it_expires_but_failures_are_not(
+    github_client: _FakeAsyncClient,
+) -> None:
+    github_client._responses.extend(
+        [
+            _FakeResponse(401, {"message": "Bad credentials"}),
+            _FakeResponse(200, {"id": 7, "login": "mason-gh", "name": "Mason"}),
+        ]
+    )
+    no_login: dict[str, Any] = {"configurable": {}}
+
+    assert await resolve_triggering_user_identity(no_login, "gho_user") is None
+    first = await resolve_triggering_user_identity(no_login, "gho_user")
+    second = await resolve_triggering_user_identity(no_login, "gho_user")
+
+    assert first is not None and first.github_login == "mason-gh"
+    assert second == first
+    assert [url for url, _ in github_client.requests] == ["https://api.github.com/user"] * 2

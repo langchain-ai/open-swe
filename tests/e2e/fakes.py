@@ -8,6 +8,7 @@ sees in the UI is exactly what the agent produced.
 import shutil
 import subprocess
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from e2e_env import (
     SECOND_BARE_REMOTE,
     SECOND_OWNER,
     SECOND_REPO,
+    TEST_USERS,
     TMP,
 )
 
@@ -26,6 +28,7 @@ from e2e_env import (
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
+VIEWS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
 _slack_epoch = int(time.time())
@@ -214,42 +217,48 @@ def seed_sandbox_repo() -> None:
     _git("clone", str(BARE_REMOTE), str(work / "repo"))
 
 
+_FILE_STATUSES = {"A": "added", "D": "removed", "M": "modified"}
+
+
 def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, Any]]:
-    """Compute changed files for a PR from the pushed branch in the bare remote."""
+    """Compute changed files for a PR from the pushed branch in the bare remote.
+
+    The three ``git diff`` runs list the files in the same order, so they zip together.
+    """
     remote = _REMOTES.get((owner, repo))
     if remote is None:
         return []
+    diff = ["--git-dir", str(remote), "diff", "--no-renames", base, head]
     try:
-        out = _git("--git-dir", str(remote), "diff", "--numstat", base, head)
+        numstat = _git(*diff, "--numstat").splitlines()
+        if not numstat:
+            return []
+        statuses = _git(*diff, "--name-status").splitlines()
+        patches = _git(*diff).split("\ndiff --git ")
     except subprocess.CalledProcessError:
         return []
     files = []
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3:
-            adds, dels, name = parts
-            files.append(
-                {
-                    "filename": name,
-                    "additions": int(adds) if adds.isdigit() else 0,
-                    "deletions": int(dels) if dels.isdigit() else 0,
-                    "patch": _file_patch(remote, base, head, name),
-                }
-            )
+    for counts, status, patch in zip(numstat, statuses, patches, strict=True):
+        adds, dels, name = counts.split("\t", 2)
+        files.append(
+            {
+                "filename": name,
+                "status": _FILE_STATUSES.get(status.split("\t", 1)[0], "modified"),
+                "additions": int(adds) if adds.isdigit() else 0,
+                "deletions": int(dels) if dels.isdigit() else 0,
+                "patch": _hunks(patch),
+            }
+        )
     return files
 
 
-def _file_patch(remote: Path, base: str, head: str, filename: str) -> str | None:
+def _hunks(file_diff: str) -> str | None:
     """One file's unified diff, hunks only, as GitHub's ``patch`` field carries it.
 
     ``None`` for a blob git produced no textual hunks for (a binary file), which
     is how the real API reports one — and what callers key "no readable diff" on.
     """
-    try:
-        out = _git("--git-dir", str(remote), "diff", base, head, "--", filename)
-    except subprocess.CalledProcessError:
-        return None
-    lines = out.splitlines()
+    lines = file_diff.splitlines()
     start = next((index for index, line in enumerate(lines) if line.startswith("@@")), None)
     return "\n".join(lines[start:]) if start is not None else None
 
@@ -604,6 +613,12 @@ def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def github_user_id(login: str) -> int:
+    """The account id GitHub sends with every user; stable per login across runs."""
+    known = next((user["github_id"] for user in TEST_USERS if user["login"] == login), None)
+    return int(known) if known else zlib.crc32(login.encode())
+
+
 def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
     """A review as the REST ``/pulls/{n}/reviews`` list returns it.
 
@@ -615,10 +630,15 @@ def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
     resolved_id = (
         review_id if isinstance(review_id, int) and not isinstance(review_id, bool) else index + 1
     )
+    resolved_login = login if isinstance(login, str) else ""
     return {
         "id": resolved_id,
         "node_id": review.get("node_id") or f"PRR_node_{resolved_id}",
-        "user": {"login": login if isinstance(login, str) else "", "avatar_url": ""},
+        "user": {
+            "id": github_user_id(resolved_login),
+            "login": resolved_login,
+            "avatar_url": "",
+        },
         "state": review.get("state", ""),
         "body": review.get("body", ""),
         "html_url": review.get("url") or f"https://github.com/pullrequestreview-{resolved_id}",
@@ -646,9 +666,12 @@ def repo_private() -> bool:
 
 # --- LangSmith snapshots ---------------------------------------------------
 # Captures the workspace tools asked for: {"snapshot_id", "name", "sandbox_id"}.
-# The E2E sandbox is the local provider, so there is no real snapshot service —
+# The E2E's sandboxes are stand-ins (sandbox_service.py), so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []
+# Each time the backend planned a run: the thread, and the call it planned it for
+# (``start`` when it started the run).
+PLANS: list[dict[str, str]] = []
 DELETED_SNAPSHOTS: list[str] = []
 _snapshot_seq = [0]
 
@@ -909,6 +932,7 @@ def review_threads_graphql(pull: dict[str, Any], viewer: str) -> list[dict[str, 
     """``reviewThreads`` with the comment ids and review links the pending-review read selects."""
     return [
         {
+            "id": f"PRRT_node_{comment['id']}",
             "path": comment["path"],
             "line": comment["line"],
             "startLine": comment["start_line"],
@@ -991,11 +1015,13 @@ def merge_pull(
 def reset() -> None:
     SLACK_MESSAGES.clear()
     EPHEMERALS.clear()
+    VIEWS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
     REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    PLANS.clear()
     COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0

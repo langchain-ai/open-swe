@@ -9,13 +9,13 @@
   "sortTailwindcss": {
     "stylesheet": "ui/src/styles.css",
     "functions": [
-      "cn",
-      "cva"
+      "cn"
     ]
   },
   "ignorePatterns": [
     "**/node_modules/**",
     ".venv/**",
+    "vendor/**",
     "**/*.md",
     "**/*.json",
     "**/*.jsonc",

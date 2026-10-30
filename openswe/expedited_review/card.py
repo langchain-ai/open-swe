@@ -2,7 +2,7 @@
 
 import json
 
-from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
@@ -35,25 +35,31 @@ def _button_value(action: str, approval: HumanReviewRequest) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(approval.id)})
 
 
-def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
-    """``author`` and the approvers are Slack mentions, so none of this is escaped."""
-    if not approval.approvals:
-        return f"Needs one approval from someone other than {author}."
+def _vote_summary(approval: HumanReviewRequest) -> str:
+    """Approvers are Slack mentions, so none of this is escaped."""
     return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
 
 
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
-    label = f"{pr.owner}/{pr.repo}#{pr.number}"
+    label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]
 
 
-def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
-    shown, tests = ChangedFile.split(files)
-    trailer = [*_overflow_note(shown), *_test_diffstat(tests)]
+def _diff_sections(
+    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
+) -> list[Block]:
+    diff = ExpeditedDiff(files, approval.excluded_hunks)
+    shown = diff.shown
+    trailer = [
+        *_overflow_note(shown),
+        *_diffstat("Tests", "test files", diff.tests),
+        *_diffstat("Generated", "generated files", diff.generated),
+        *_excluded_summary(diff),
+    ]
     if diff_image_id:
         names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
         return [image(diff_image_id, f"Diff of {names}"), *trailer]
@@ -79,21 +85,52 @@ def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
 
 
-def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
-    """Test files are never drawn; the card lists them with their line counts instead."""
-    if not tests:
+def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
+    """Test and generated files are never drawn; the card lists them with line counts instead."""
+    if not files:
         return []
-    heading = "*Tests (not shown)*\n"
+    heading = f"*{title} (not shown)*\n"
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
-    for file in tests[:_MAX_FILE_SECTIONS]:
+    for file in files[:_MAX_FILE_SECTIONS]:
         line = f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
         budget -= len(line) + 1
         if budget < 0:
             break
         lines.append(line)
-    if len(lines) < len(tests):
-        lines.append(f"{len(tests) - len(lines)} more test files on GitHub.")
+    if len(lines) < len(files):
+        lines.append(f"{len(files) - len(lines)} more {noun} on GitHub.")
+    return [context(heading + "\n".join(lines))]
+
+
+def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
+    """One line per APPROVALS.md guideline the agent cited, naming the files it covers."""
+    if not diff.excluded:
+        return []
+    stats: dict[str, dict[str, list[int]]] = {}
+    for entry in diff.excluded:
+        counts = stats.setdefault(entry["guideline"], {}).setdefault(entry["path"], [0, 0, 0])
+        counts[0] += 1
+        counts[1] += entry["additions"]
+        counts[2] += entry["deletions"]
+    heading = "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for guideline, paths in stats.items():
+        parts: list[str] = []
+        for path, (hunks, added, deleted) in paths.items():
+            share = f" {hunks} {'hunk' if hunks == 1 else 'hunks'}"
+            parts.append(
+                f"`{escape(path)}`{share if path in diff.partially_shown else ''} "
+                f"+{added} −{deleted}"
+            )
+        line = f"_{escape(guideline)}_: {', '.join(parts)}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    if len(lines) < len(stats):
+        lines.append(f"{len(stats) - len(lines)} more guidelines; see the audit log.")
     return [context(heading + "\n".join(lines))]
 
 
@@ -131,7 +168,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
         initial=options[0],
     )
     send = button(
-        "Send",
+        "Broadcast",
         action_id="open_swe_option_select_send",
         value=_button_value("send", approval),
     )
@@ -157,12 +194,14 @@ def readiness_prompt(
 ) -> tuple[str, list[Block]]:
     """The full author-only draft card."""
     pr = approval.pull_request
-    text = f"Mark {pr.url} ready for review so someone else can approve it."
+    text = f"Review {pr.url} carefully yourself before clicking Mark ready for review."
     return text, [
         *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        section("*Draft.* Mark it ready for review to request an approval in the thread."),
+        section(
+            f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
+        ),
         actions(_ready_button(approval), _dismiss_button(approval)),
     ]
 
@@ -181,7 +220,7 @@ def _voting_diff(
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
         return []
-    return [*_diff_sections(files, diff_image_id), divider()]
+    return [*_diff_sections(approval, files, diff_image_id), divider()]
 
 
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
@@ -191,7 +230,6 @@ def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoi
             actions(_dismiss_button(approval)),
         ]
     return [
-        section(_vote_summary(approval, author)),
         actions(*_vote_buttons(approval)),
         *_send_controls(approval, choices),
     ]
@@ -215,8 +253,8 @@ def open_card(
     """
     pr = approval.pull_request
     if approval.approved and not approval.awaiting_ready:
-        label = f"{pr.owner}/{pr.repo}#{pr.number}"
-        heading = f"Expedited review: {_vote_summary(approval, author)}"
+        label = pr.label
+        heading = f"Expedited review: {_vote_summary(approval)}"
         return f"{heading} — {pr.url}", [
             section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
         ]
@@ -248,7 +286,7 @@ def closed_card(
     """
     pr = approval.pull_request
     if approval.state in {"merged", "cancelled"}:
-        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        label = pr.label
         return f"Expedited review: {outcome} — {pr.url}", [
             section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
         ]
@@ -257,6 +295,20 @@ def closed_card(
         divider(),
         *_voting_diff(approval, files, diff_image_id),
         section(f"*{outcome}*"),
-        context(_vote_summary(approval, author)),
+        *([context(_vote_summary(approval))] if approval.approvals else []),
     ]
     return f"{outcome} — {pr.url}", blocks
+
+
+def author_status(
+    approval: HumanReviewRequest, outcome: str, *, origin_url: str | None = None
+) -> tuple[str, list[Block]]:
+    """The persistent author DM record, without a diff or actions."""
+    pr = approval.pull_request
+    text = f"Expedited review: {outcome} — {pr.url}"
+    blocks: list[Block] = [
+        section(f"*Expedited review: {outcome}*\n<{pr.url}|{pr.label}> {escape(pr.title)}")
+    ]
+    if origin_url:
+        blocks.append(context(f"Requested from <{origin_url}|this thread>."))
+    return text, blocks

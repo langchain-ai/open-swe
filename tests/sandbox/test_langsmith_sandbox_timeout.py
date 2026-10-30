@@ -12,6 +12,7 @@ from deepagents.backends.protocol import ExecuteResponse
 from langsmith.sandbox import (
     CommandTimeoutError,
     SandboxConnectionError,
+    SandboxOperationError,
     SandboxRetryableConnectionError,
 )
 
@@ -73,9 +74,12 @@ def _no_grace(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "0")
 
 
-async def test_aexecute_kills_on_client_timeout() -> None:
+@pytest.mark.parametrize("reset", [False, True])
+async def test_aexecute_kills_on_client_timeout(reset: bool) -> None:
     handle = _FakeHandle(sleep=5.0)
     sb = _backend(handle)
+    if reset:
+        sb.reset_git_identity()
     start = time.monotonic()
     resp = await sb.aexecute("sleep 999", timeout=1)
     assert time.monotonic() - start < 3.0
@@ -84,6 +88,11 @@ async def test_aexecute_kills_on_client_timeout() -> None:
     assert handle.killed_while_streaming
     sandbox = cast(_FakeSandbox, sb._async_sandbox)
     assert sandbox.run_calls[0]["wait"] is False
+    assert sb._git_identity_pending is None
+    handle._sleep = 0
+    handle._result = SimpleNamespace(stdout="next command", stderr="", exit_code=0)
+    assert (await sb.aexecute("echo next command", timeout=1)).output == "next command"
+    assert sandbox.run_calls[-1]["command"] == "echo next command"
 
 
 async def test_cancelling_aexecute_kills_the_running_command() -> None:
@@ -106,13 +115,17 @@ async def test_aexecute_success_combines_streams() -> None:
     assert not handle.killed
 
 
-async def test_aexecute_server_timeout_not_killed() -> None:
+@pytest.mark.parametrize("reset", [False, True])
+async def test_aexecute_server_timeout_not_killed(reset: bool) -> None:
     handle = _FakeHandle(raises=CommandTimeoutError("server enforced"))
     sb = _backend(handle)
+    if reset:
+        sb.reset_git_identity()
     resp = await sb.aexecute("make hang", timeout=2)
     assert resp.exit_code == 124
     assert "on the sandbox" in resp.output
     assert not handle.killed
+    assert sb._git_identity_pending is None
 
 
 def _patch_base_execute(monkeypatch: pytest.MonkeyPatch, sink: dict[str, Any]) -> None:
@@ -159,6 +172,37 @@ async def test_aexecute_midstream_ws_drop_falls_back_to_base(
     resp = await sb.aexecute("git status", timeout=5)
     assert called["command"] == "git status"
     assert resp.output == "via-http"
+
+
+@pytest.mark.parametrize(
+    ("error_type", "operation"),
+    [
+        ("CommandNotFound", "reconnect"),
+        ("CommandNotFound", "command"),
+        ("OtherFailure", "reconnect"),
+    ],
+)
+async def test_aexecute_operation_error_does_not_replay(
+    monkeypatch: pytest.MonkeyPatch, error_type: str, operation: str
+) -> None:
+    error = SandboxOperationError(
+        "Command not found: command-id", error_type=error_type, operation=operation
+    )
+    sb = _backend(_FakeHandle(raises=error))
+    fallback = AsyncMock()
+    monkeypatch.setattr(sb, "_afallback_execute", fallback)
+
+    if error_type == "CommandNotFound" and operation == "reconnect":
+        with pytest.raises(RuntimeError, match="outcome is unknown") as caught:
+            await sb.aexecute("git commit", timeout=5)
+        assert caught.value.__cause__ is error
+    else:
+        with pytest.raises(SandboxOperationError) as caught:
+            await sb.aexecute("git commit", timeout=5)
+        assert caught.value is error
+
+    assert len(cast(_FakeSandbox, sb._async_sandbox).run_calls) == 1
+    fallback.assert_not_awaited()
 
 
 def test_execute_is_async_only() -> None:
@@ -217,3 +261,32 @@ async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.Monkey
 
     assert resp.exit_code == 0
     assert attempts == 2
+
+
+class _StatSandbox(_FakeSandbox):
+    def __init__(self, handle: _FakeHandle, *, size_bytes: int):
+        super().__init__(handle)
+        self._size_bytes = size_bytes
+
+    async def stat(self, path: str) -> SimpleNamespace:  # noqa: ARG002
+        return SimpleNamespace(size_bytes=self._size_bytes)
+
+
+async def test_aread_pages_a_large_file_inside_the_sandbox() -> None:
+    """The file API returns whole files, so a large one must not be pulled into the worker."""
+    handle = _FakeHandle(result=SimpleNamespace(stdout="", stderr="", exit_code=0))
+    sb = _backend(handle)
+    sandbox = _StatSandbox(handle, size_bytes=64 * 1024 * 1024)
+    object.__setattr__(sb, "_async_sandbox", sandbox)
+    downloads: list[str] = []
+
+    def read(path: str, **_: object) -> bytes:
+        downloads.append(path)
+        return b""
+
+    object.__setattr__(sb, "_sandbox", SimpleNamespace(name="sandbox-test", read=read))
+
+    await sb.aread("/workspace/build.log", limit=100)
+
+    assert downloads == []
+    assert sandbox.run_calls

@@ -11,6 +11,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { toast } from "sonner"
 
 import {
   api,
@@ -21,10 +22,14 @@ import {
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
 } from "@/lib/api"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 const FETCHED_AT = "2026-09-11T12:01:30Z"
 
@@ -108,6 +113,7 @@ function modelRows(table: HTMLTableElement) {
 
 afterEach(() => {
   cleanup()
+  vi.clearAllMocks()
   vi.restoreAllMocks()
 })
 
@@ -116,7 +122,7 @@ it("labels the shared date range and changes it independently of usage scope", a
   const onPeriodChange = vi.fn()
   mountReport(onPeriodChange)
   const range = screen.getByRole("combobox", { name: "Date range" })
-  const outcomes = screen.getByText("PR outcomes", { selector: "h2" })
+  const outcomes = screen.getByText("PR Outcomes", { selector: "h2" })
   expect(
     range.compareDocumentPosition(outcomes) & Node.DOCUMENT_POSITION_FOLLOWING
   ).toBeTruthy()
@@ -392,8 +398,7 @@ it.each([
 
     const openCount = within(row).getByRole("button", { name: "3 (43%)" })
     if (interaction === "hover") {
-      fireEvent.mouseEnter(openCount)
-      fireEvent.mouseMove(openCount)
+      fireEvent.pointerMove(openCount, { pointerType: "mouse" })
     } else if (interaction === "focus") {
       act(() => openCount.focus())
     } else {
@@ -1201,11 +1206,15 @@ it("links the user name and avatar to their GitHub profile only when a login exi
   expect(linked.getAttribute("target")).toBe("_blank")
   expect(linked.getAttribute("rel")).toBe("noreferrer")
   expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
-  const avatarLink = screen.getByText("CR").closest("a")
+  const avatarLink = linked
+    .closest("td")!
+    .querySelector('a[aria-hidden="true"]')
   expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
   expect(avatarLink?.getAttribute("target")).toBe("_blank")
   expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
-  expect(screen.getByText("AR").closest("a")).toBeNull()
+  expect(
+    screen.getByText("Anonymous Reader").closest("td")!.querySelector("a")
+  ).toBeNull()
   client.clear()
 })
 
@@ -1597,9 +1606,11 @@ it("copies an allowlisted diagnostics snapshot to the clipboard", async () => {
   fireEvent.click(await screen.findByText("Details"))
   const copy = screen.getByRole("button", { name: "Copy diagnostics" })
   fireEvent.click(copy)
-  expect(
-    await screen.findByText("Diagnostics copied to clipboard.")
-  ).toBeTruthy()
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      "Diagnostics copied to clipboard."
+    )
+  )
 
   expect(writeText).toHaveBeenCalledTimes(1)
   const text = writeText.mock.calls[0]?.[0] as string
@@ -1668,9 +1679,11 @@ it.each([
     ).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
-    expect(
-      await screen.findByText("Diagnostics copied to clipboard.")
-    ).toBeTruthy()
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Diagnostics copied to clipboard."
+      )
+    )
     const copied = JSON.parse(writeText.mock.calls[0]?.[0] as string)
     expect(copied.pr_report.last_refresh_failed).toBe(true)
     expect(copied.metrics.avg_delivery_seconds).toEqual({
@@ -1692,11 +1705,11 @@ it("copies diagnostics from the keyboard and reports a denied clipboard", async 
   expect(document.activeElement).toBe(copy)
   fireEvent.keyDown(copy, { key: "Enter" })
   fireEvent.click(copy)
-  expect(
-    await screen.findByText(
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
       "Clipboard unavailable. Check the browser's clipboard permission."
     )
-  ).toBeTruthy()
+  )
   expect(writeText).toHaveBeenCalled()
   client.clear()
 })

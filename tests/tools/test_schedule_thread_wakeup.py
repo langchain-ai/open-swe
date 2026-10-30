@@ -1,14 +1,41 @@
 import asyncio
 import importlib
+import logging
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+
+from openswe.threads import wake_budget
+from openswe.threads.oswe_thread import OsweThreadState
 
 wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
 
 # Captured before the autouse stub replaces it, for the one test that needs the real wrapper.
 _real_purge_best_effort = wakeup_tool._purge_expired_wakeups_best_effort
+
+
+class _FakeJobs:
+    def __init__(self) -> None:
+        self.scheduled: list[dict[str, Any]] = []
+        self.cancelled: list[dict[str, Any]] = []
+
+    async def schedule(self, kind: str, payload: dict[str, Any], **kwargs: Any) -> Any:
+        self.scheduled.append({"kind": kind, "payload": payload, **kwargs})
+        return type("Job", (), {"id": f"job-{len(self.scheduled)}"})()
+
+    async def cancel_matching(self, metadata: dict[str, Any]) -> int:
+        self.cancelled.append(metadata)
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def fake_jobs(monkeypatch: pytest.MonkeyPatch) -> _FakeJobs:
+    jobs = _FakeJobs()
+    monkeypatch.setattr(wakeup_tool, "queue", jobs)
+    return jobs
 
 
 @pytest.fixture(autouse=True)
@@ -125,7 +152,7 @@ def _config(**overrides: Any) -> dict[str, Any]:
 
 
 async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
 ) -> None:
     timers = [
         {**_wakeup_cron(f"worker-{index}", None), "thread_id": "worker"} for index in range(3)
@@ -140,7 +167,14 @@ async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
 
     await wakeup_tool.cancel_thread_wakeups("worker")
 
+    assert fake_jobs.cancelled == [{"kind": "thread_wakeup", "thread_id": "worker"}]
     assert await client.crons.search() == unrelated
+
+
+def _human_message_key(*messages: dict[str, str]) -> str:
+    return OsweThreadState.model_validate(
+        {"values": {"messages": list(messages)}}
+    ).latest_human_message_key
 
 
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
@@ -169,16 +203,15 @@ async def test_schedule_thread_wakeup_rejects_delay_over_24h(
     assert "1440" in result["error"]
 
 
-async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_schedule_thread_wakeup_schedules_a_wakeup(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    async def fake_create_wakeup_cron(
+    async def fake_schedule_wakeup(
         *,
         thread_id: str,
         fire_time: datetime,
         prompt: str,
         configurable: dict[str, Any],
-        client: Any,
     ) -> dict[str, Any]:
         captured.update(
             {
@@ -196,7 +229,7 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
         }
 
     monkeypatch.setattr("openswe.run_config.get_config", _config)
-    monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
+    monkeypatch.setattr(wakeup_tool, "_schedule_wakeup", fake_schedule_wakeup)
 
     result = await wakeup_tool.schedule_thread_wakeup(10, prompt="Check CI status")
 
@@ -222,11 +255,11 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
 async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
     client = _FakeClient([], messages=[human])
-    generation = wakeup_tool._latest_human_generation([human])
+    generation = _human_message_key(human)
     client.threads.metadata.update(
         {
-            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
-            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: generation,
+            wake_budget.THREAD_WAKEUP_COUNT_KEY: 10,
         }
     )
     client.threads.messages.extend(
@@ -241,11 +274,13 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
     assert result["success"] is True
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 1
-    assert client.threads.metadata[wakeup_tool._WAKEUP_GENERATION_METADATA_KEY] != generation
+    assert client.threads.metadata[wake_budget.THREAD_WAKEUP_COUNT_KEY] == 1
+    assert client.threads.metadata[wake_budget.THREAD_WAKEUP_GENERATION_KEY] != generation
 
 
-async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_system_wakeup_does_not_reset_wakeup_limit(
+    monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
+) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
     client = _FakeClient(
         [],
@@ -254,10 +289,8 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
             _input_message("wakeup-10", kind="system", sender="system:thread-wakeup"),
         ],
         metadata={
-            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: (
-                wakeup_tool._latest_human_generation([human])
-            ),
-            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: (_human_message_key(human)),
+            wake_budget.THREAD_WAKEUP_COUNT_KEY: 10,
         },
     )
     monkeypatch.setattr("openswe.run_config.get_config", _config)
@@ -266,11 +299,11 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
     assert result["success"] is False
-    assert not client.crons.created
+    assert not fake_jobs.scheduled
 
 
 async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
 ) -> None:
     client = _FakeClient(
         [],
@@ -288,18 +321,20 @@ async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
 
     assert result["success"] is False
     assert result["error"] == "Unable to record the thread wakeup limit"
-    assert not client.crons.created
+    assert not fake_jobs.scheduled
 
 
-async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_parallel_schedules_share_one_wakeup_budget(
+    monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
+) -> None:
     human = _input_message("user-1", kind="human", sender="slack:U1")
-    generation = wakeup_tool._latest_human_generation([human])
+    generation = _human_message_key(human)
     client = _FakeClient(
         [],
         messages=[human],
         metadata={
-            wakeup_tool._WAKEUP_GENERATION_METADATA_KEY: generation,
-            wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 9,
+            wake_budget.THREAD_WAKEUP_GENERATION_KEY: generation,
+            wake_budget.THREAD_WAKEUP_COUNT_KEY: 9,
         },
     )
     monkeypatch.setattr("openswe.run_config.get_config", _config)
@@ -311,8 +346,8 @@ async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.Mo
     )
 
     assert sum(result["success"] is True for result in results) == 1
-    assert len(client.crons.created) == 1
-    assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
+    assert len(fake_jobs.scheduled) == 1
+    assert client.threads.metadata[wake_budget.THREAD_WAKEUP_COUNT_KEY] == 10
 
 
 async def test_purge_deletes_only_expired_wakeups() -> None:
@@ -332,3 +367,63 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
     assert client.crons.deleted == ["expired-1", "expired-2"]
     # Search is scoped to the thread_wakeup kind so other crons are never seen.
     assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
+
+
+@pytest.mark.parametrize("lateness_seconds", [-60, 0, 90, 91, 600])
+async def test_queued_wakeups_run_even_when_late(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, lateness_seconds: int
+) -> None:
+    started: list[dict[str, object]] = []
+
+    class _Runs:
+        async def create(
+            self, thread_id: str, assistant_id: str, **kwargs: object
+        ) -> dict[str, str]:
+            started.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
+            return {"run_id": "run-1"}
+
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: SimpleNamespace(runs=_Runs()))
+    monkeypatch.setattr(wakeup_tool, "COMPLETION_WEBHOOK_URL", "https://example.com/complete")
+    now = datetime.now(UTC)
+    due_at = now - timedelta(seconds=lateness_seconds)
+    original_input = wakeup_tool.build_run_input(
+        "Check CI status",
+        {"sender_id": "system:thread-wakeup", "surface": "automation", "kind": "system"},
+    )
+    payload = wakeup_tool._json.validate_python(
+        {
+            "thread_id": "t1",
+            "input": original_input,
+            "config": {"configurable": {"thread_id": "t1", "source": "slack"}},
+            "metadata": {"kind": "thread_wakeup", "thread_id": "t1"},
+            "expires_at": (due_at + timedelta(seconds=90)).isoformat(),
+        }
+    )
+    with patch.object(wakeup_tool, "datetime") as clock:
+        clock.now.return_value = now
+        assert (
+            await wakeup_tool.run_thread_wakeup(payload, job_id="job-1", due_at=due_at) == "run-1"
+        )
+
+    [run] = started
+    assert run["thread_id"] == "t1"
+    assert run["assistant_id"] == "agent"
+    assert run["config"] == payload["config"]
+    assert run["metadata"] == payload["metadata"]
+    assert run["multitask_strategy"] == "enqueue"
+    assert run["webhook"] == "https://example.com/complete"
+    run_input = wakeup_tool._run_input.validate_python(run["input"])
+    if lateness_seconds > 90:
+        assert run_input["messages"][1:] == original_input["messages"]
+        note = str(run_input["messages"][0]["content"])
+        assert "running late" in note
+        assert f"{lateness_seconds / 60:.1f} minutes" in note
+        [warning] = caplog.records
+        assert warning.levelno == logging.WARNING
+        assert warning.thread_id == "t1"
+        assert warning.job_id == "job-1"
+        assert warning.lateness_seconds == lateness_seconds
+    else:
+        assert run_input == original_input
+        assert caplog.records == []
+    assert payload["input"] == original_input

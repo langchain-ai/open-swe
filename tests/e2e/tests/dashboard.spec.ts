@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
   OTHER_USER,
   SAME_USER,
@@ -26,41 +26,45 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       login: "workspace-default-onboarding-e2e",
       email: "workspace-default-onboarding-e2e@example.com",
     });
+    const initialProfile = await page.request.get("/dashboard/api/profile");
+    expect(initialProfile.ok()).toBeTruthy();
+    const reset = await page.request.put("/dashboard/api/profile", {
+      headers: { origin: new URL(initialProfile.url()).origin },
+      data: { slack_onboarding_dismissed: false },
+    });
+    expect(reset.ok()).toBeTruthy();
+    const sessionResponse = await page.request.get("/dashboard/api/me");
+    expect(sessionResponse.ok()).toBeTruthy();
+    const session = (await sessionResponse.json()) as Record<string, unknown>;
+    let slackEnabled = false;
     await page.route("**/dashboard/api/me", async (route) => {
-      const response = await route.fetch();
-      const session = (await response.json()) as Record<string, unknown>;
       await route.fulfill({
-        json: { ...session, slack_oauth_enabled: false },
+        json: {
+          ...session,
+          slack_oauth_enabled: slackEnabled,
+          slack_user_id: null,
+        },
       });
     });
+    await page.clock.setFixedTime(Date.now() + 61_000);
     const profileBefore = await page.request.get("/dashboard/api/profile");
     expect(profileBefore.ok()).toBeTruthy();
     expect(await profileBefore.json()).not.toHaveProperty("default_model");
 
     await page.goto("/agents");
-    await page.getByTestId("composer-editor").click();
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.reload();
-    await page.getByTestId("composer-editor").click();
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
 
     const profileAfter = await page.request.get("/dashboard/api/profile");
     expect(profileAfter.ok()).toBeTruthy();
     expect(await profileAfter.json()).not.toHaveProperty("default_model");
 
-    await page.unroute("**/dashboard/api/me");
-    await page.route("**/dashboard/api/me", async (route) => {
-      const response = await route.fetch();
-      const session = (await response.json()) as Record<string, unknown>;
-      await route.fulfill({
-        json: { ...session, slack_oauth_enabled: true, slack_user_id: null },
-      });
-    });
+    slackEnabled = true;
+    await page.clock.setFixedTime(Date.now() + 121_000);
     await page.reload();
-    await page.clock.setFixedTime(Date.now() + 61_000);
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("visibilitychange")),
-    );
     await expect(
       page.getByRole("button", { name: "Don't ask again" }),
     ).toBeVisible();
@@ -76,7 +80,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(dismissed).not.toHaveProperty("default_model");
     expect(dismissed).not.toHaveProperty("reasoning_effort");
     await page.reload();
-    await page.getByTestId("composer-editor").click();
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 
@@ -235,6 +239,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await page.goto(`/agents/${threadId}`);
     const sentMessage = page.getByText("On it!", { exact: true });
     await expect(sentMessage).toBeVisible();
+    // Stop only once the delegated task is under way: the model loop runs on
+    // Managed Deep Agents, so its start reaches the transcript a hop after the reply.
+    await expect(
+      page.getByRole("button", { name: /^Delegating .* · 1 action$/ }),
+    ).toBeVisible();
     const stopRun = page.getByRole("button", { name: "Stop run" });
     await expect(stopRun).toBeVisible();
     await stopRun.click();
@@ -256,6 +265,58 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         await liveGroupedWork.elementHandle(),
       ),
     ).toBe(true);
+  });
+
+  test("keeps the live activity row below a Slack reply sent mid-run", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    const threadId = await sendSegmentedReplies(page);
+
+    await page.goto(`/agents/${threadId}`);
+    await expectInDocumentOrder([
+      page.getByText("On it!", { exact: true }),
+      page.getByRole("button", { name: /^Worked(?: for .*)? · 1 action$/ }),
+      page.getByText("Found the cause.", { exact: true }),
+      page.getByRole("button", { name: /^Running · sleep 10 · 1 action$/ }),
+    ]);
+  });
+
+  test("folds each stretch of settled work between its replies", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    const threadId = await sendSegmentedReplies(page);
+
+    await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("Fixed it.", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await waitForThreadIdle(page, threadId);
+
+    const folds = page.getByRole("button", {
+      name: /^Worked(?: for .*)? · 1 action$/,
+    });
+    await expect(folds).toHaveCount(2);
+    const ordered = [
+      page.getByText("On it!", { exact: true }),
+      page.getByText("Exploring before reporting progress.", { exact: true }),
+      folds.first(),
+      page.getByText("Reporting progress mid-run.", { exact: true }),
+      page.getByText("Found the cause.", { exact: true }),
+      page.getByText(
+        "Running a long fix while the progress reply is on screen.",
+        { exact: true },
+      ),
+      folds.last(),
+      page.getByText("Reporting the outcome.", { exact: true }),
+      page.getByText("Fixed it.", { exact: true }),
+    ];
+    await expectInDocumentOrder(ordered);
+    await page.reload();
+    await expectInDocumentOrder(ordered);
   });
 
   test("keeps follow-ups visible across the queued-to-transcript handoff", async ({
@@ -642,6 +703,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     };
 
     await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
     const stopButton = page.getByRole("button", { name: "Stop run" });
     await expect(stopButton).toBeVisible();
 
@@ -684,6 +746,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     };
 
     await page.goto(`/agents/${threadId}`);
+    await expect(page.getByText("On it!", { exact: true })).toBeVisible();
     const stopButton = page.getByRole("button", { name: "Stop run" });
     await expect(stopButton).toBeVisible();
 
@@ -828,3 +891,32 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     release();
   });
 });
+
+async function sendSegmentedReplies(page: Page): Promise<string> {
+  const send = await page.request.post("/mock/slack/send", {
+    data: { text: "<@U0BOT> E2E_SLACK_REPLY_SEGMENTS report progress mid-run" },
+  });
+  expect(send.ok()).toBeTruthy();
+  return ((await send.json()) as { thread_id: string }).thread_id;
+}
+
+async function expectInDocumentOrder(locators: Array<Locator>) {
+  for (const locator of locators) await expect(locator).toBeVisible();
+  const [first, ...rest] = await Promise.all(
+    locators.map((locator) => locator.elementHandle()),
+  );
+  expect(
+    await first!.evaluate(
+      (head, tail) =>
+        [head, ...tail].every(
+          (node, index, nodes) =>
+            index === 0 ||
+            Boolean(
+              nodes[index - 1]!.compareDocumentPosition(node!) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+            ),
+        ),
+      rest,
+    ),
+  ).toBe(true);
+}

@@ -7,14 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.review.assessment_feedback import ASSESSMENTS
+from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import Finding, new_finding
 from openswe.review.publish import (
     ReviewAssessment,
     post_pull_request_review,
     render_inline_comment_body,
 )
-from tests.conftest import FakeStore
 
 
 def _assessment(head_sha: str = "a" * 40) -> ReviewAssessment:
@@ -96,7 +95,7 @@ def _f(**overrides: Any) -> Finding:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_publish_review_pr_state(fake_store: FakeStore) -> Iterator[None]:
+def _isolate_publish_review_pr_state() -> Iterator[None]:
     with (
         patch(
             "openswe.tools.publish_review.get_workspace_settings",
@@ -107,6 +106,7 @@ def _isolate_publish_review_pr_state(fake_store: FakeStore) -> Iterator[None]:
         patch("openswe.tools.publish_review.replace_findings", AsyncMock()),
         patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
         patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
+        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()),
         patch(
             "openswe.tools.publish_review.resolve_review_head_sha",
             AsyncMock(
@@ -216,8 +216,10 @@ async def test_advisory_summary_updates_latest_commented_review() -> None:
     from openswe.review.publish import review_summary_marker
 
     marker = review_summary_marker(1)
-    listed = MagicMock()
-    listed.json.return_value = [
+    import httpx2
+
+    request_url = "https://api.github.com/repos/o/r/pulls/1/reviews"
+    reviews = [
         {"id": 10, "state": "COMMENTED", "body": marker},
         {
             "id": 11,
@@ -231,11 +233,15 @@ async def test_advisory_summary_updates_latest_commented_review() -> None:
             "body": f"**Open SWE Review** found 3 potential issues.\n{marker}",
         },
     ]
-    updated = MagicMock()
-    updated.json.return_value = {"id": 11, "body": f"Updated assessment {marker}"}
-    with patch(
-        "openswe.review.publish.github_request", AsyncMock(side_effect=[listed, updated])
-    ) as request:
+    responses = [
+        httpx2.Response(200, json=reviews, request=httpx2.Request("GET", request_url)),
+        httpx2.Response(
+            200,
+            json={"id": 11, "body": f"Updated assessment {marker}"},
+            request=httpx2.Request("PUT", f"{request_url}/11"),
+        ),
+    ]
+    with patch("openswe.github.http.github_request", AsyncMock(side_effect=responses)) as request:
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -263,7 +269,7 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
 
     client_cm = AsyncMock()
     client_cm.__aenter__.return_value = client_cm
-    client_cm.post = AsyncMock(return_value=response)
+    client_cm.request = AsyncMock(return_value=response)
 
     with patch("openswe.github.http.httpx2.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
@@ -859,7 +865,7 @@ async def test_publish_review_matches_comment_ids_by_marker_not_path_line_body()
 
 @pytest.mark.asyncio
 async def test_publish_review_drops_unresolvable_findings_and_retries_once(
-    fake_store: FakeStore,
+    registry_db: None,
 ) -> None:
     """When GitHub rejects the batch with an ``unresolved_anchor`` 422, the
     tool must filter the bad findings against the PR diff_line_set, re-POST
@@ -938,7 +944,7 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
     assert result["review_id"] == 7777
-    assert await ASSESSMENTS.get("7777") is None
+    assert await PublishedAssessment.get(7777) is None
     assert result["surfaced_count"] == 1
     assert result["unresolvable_findings"] == ["f_bad"]
     assert "update_finding" in result["hint"]
@@ -1115,6 +1121,7 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     current_head: bool,
     expected_event: str,
     has_assessment: bool,
+    registry_db: None,
 ) -> None:
     from openswe.tools.publish_review import _publish_review_async
 
@@ -1140,6 +1147,7 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
         patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
         patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
+        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()) as withdraw,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1155,10 +1163,17 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     assert result["success"] is True
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == expected_event
+    # Every earlier Open SWE approval goes; only an approval this publish posted may stand.
+    assert withdraw.await_args is not None
+    assert withdraw.await_args.kwargs["keep_review_id"] == (
+        77 if expected_event == "APPROVE" else None
+    )
+    # Scoped to this publish's own review so a sibling deployment's approval stands.
+    assert withdraw.await_args.kwargs["scope_to_review_id"] == 77
     body = post.await_args.kwargs["body"]
     assert ("Risk:" in body) is has_assessment
     assert ("(dry run)" in body) is (has_assessment and mode == "dry_run")
-    saved = await ASSESSMENTS.get("77")
+    saved = await PublishedAssessment.get(77)
     assert (saved is not None) is has_assessment
     if saved is not None:
         assert saved.dry_run is (mode == "dry_run")
@@ -1220,7 +1235,7 @@ async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None
     ],
 )
 async def test_approval_publication_handles_github_rejections(
-    status: int, error_body: dict[str, object], retry: bool, succeeds: bool
+    status: int, error_body: dict[str, object], retry: bool, succeeds: bool, registry_db: None
 ) -> None:
     import httpx2
 
@@ -1238,13 +1253,17 @@ async def test_approval_publication_handles_github_rejections(
             )
         )
     with (
+        patch("openswe.github.http.github_request", AsyncMock(side_effect=responses[1:2])),
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("openswe.tools.publish_review.approval_mode_for", AsyncMock(return_value="approve")),
         patch(
             "openswe.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)
         ),
         patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
-        patch("openswe.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
+        patch(
+            "openswe.review.publish.github_request",
+            AsyncMock(side_effect=[responses[0], *responses[2:]]),
+        ) as post,
         patch(
             "openswe.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)
         ),
@@ -1276,7 +1295,7 @@ async def test_approval_publication_handles_github_rejections(
         assert payloads[1]["commit_id"] == "a" * 40
         assert "Would approve" in payloads[1]["body"]
         assert "Approved" not in payloads[1]["body"]
-    saved = await ASSESSMENTS.get("77")
+    saved = await PublishedAssessment.get(77)
     if succeeds:
         assert saved is not None
         assert saved.approved is False

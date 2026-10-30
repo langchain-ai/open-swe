@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -17,14 +17,14 @@ from openswe.slack import routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common, event_log
-from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, EventRefs
 
 
-async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
-    from openswe.analytics import segment
+async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
+    from openswe.analytics import posthog
     from openswe.webhooks.event_log import LoggedEvent
 
-    monkeypatch.setenv("SEGMENT_WRITE_KEY", "test-key")
+    monkeypatch.setenv("POSTHOG_API_KEY", "test-key")
     monkeypatch.setenv("DD_ENV", "staging")
     requests: list[dict[str, object]] = []
 
@@ -34,7 +34,7 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
 
     client_type = httpx.AsyncClient
     monkeypatch.setattr(
-        segment.httpx,
+        posthog.httpx,
         "AsyncClient",
         lambda **kwargs: client_type(**kwargs, transport=httpx.MockTransport(respond)),
     )
@@ -47,11 +47,16 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         workspace_id=None,
         repository_id=None,
         pull_request_id=None,
-        payload={"action": "created", "comment": {"body": "private content"}},
+        payload={
+            "action": "created",
+            "repository": {"full_name": "acme/widgets"},
+            "comment": {"body": "private content"},
+        },
     )
-    await segment.record_webhook(event)
-    assert requests[0]["anonymousId"] == "open-swe:webhook:github"
+    await posthog.record_webhook(event)
+    assert requests[0]["properties"]["distinct_id"] == "open-swe:webhook:github"
     assert requests[0]["event"] == "Webhook Received"
+    assert requests[0]["properties"]["repo"] == "acme/widgets"
     assert "private content" not in json.dumps(requests)
     assert requests[0]["properties"]["action"] == "created"
     assert requests[0]["properties"]["environment"] == "staging"
@@ -59,28 +64,44 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     from openswe.users import User
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
-    await segment.record_webhook(event.model_copy(update={"user_id": user_id}))
+    await posthog.record_webhook(event.model_copy(update={"user_id": user_id}))
     for event_type in ("page", "track"):
-        await segment.record_usage(
+        await posthog.record_usage(
             login="alice",
             email="alice@example.com",
             event_type=event_type,
             name="usage",
-            properties={},
+            properties={
+                "inputs": "private inputs",
+                "results": "private results",
+                "tool": "safe_tool",
+                "is_error": False,
+            },
         )
-    assert {request["userId"] for request in requests[1:]} == {str(user_id)}
-    assert requests[2]["traits"]["github_login"] == "alice"
+    assert {request["properties"]["distinct_id"] for request in requests[1:]} == {str(user_id)}
+    assert requests[2]["properties"]["$set"] == {
+        "email": "alice@example.com",
+        "github_login": "alice",
+    }
+    for email in (None, ""):
+        await posthog.record_usage(
+            login="alice", email=email, event_type="page", name="usage", properties={}
+        )
+        assert requests[-1]["properties"]["$set"] == {"github_login": "alice"}
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
-    await segment.record_usage(
+    await posthog.record_usage(
         login="unknown",
         email=None,
         event_type="page",
         name="usage",
         properties={},
     )
-    assert len(requests) == 6
-    monkeypatch.delenv("SEGMENT_WRITE_KEY")
-    await segment.record_webhook(event)
+    assert "private inputs" not in json.dumps(requests)
+    assert "private results" not in json.dumps(requests)
+    assert requests[3]["properties"]["tool"] == "safe_tool"
+    assert requests[3]["properties"]["is_error"] is False
+    monkeypatch.delenv("POSTHOG_API_KEY")
+    await posthog.record_webhook(event)
     assert len(requests) == 6
 
 
@@ -95,10 +116,7 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
-async def test_kinds_name_actions_and_narrow_by_prefix(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> None:
     request = Request(
         {
             "type": "http",
@@ -134,22 +152,23 @@ async def test_kinds_name_actions_and_narrow_by_prefix(
     assert opened.payload_shape == {"action": "string", "number": "number"}
 
 
-async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
-    await EventLog.rotate_partitions(date(2026, 9, 1))
+async def test_rotation_keeps_the_retained_days_and_tomorrow(registry_db: None) -> None:
+    first = date(2026, 9, 1)
+    await EventLog.rotate_partitions(first)
     assert await _partitions() == {"event_log_20260901", "event_log_20260902"}
 
-    await EventLog.rotate_partitions(date(2026, 9, 3))
+    today = first + timedelta(days=RETAINED_DAYS)
+    await EventLog.rotate_partitions(today)
     assert await _partitions() == {
-        "event_log_20260902",
-        "event_log_20260903",
-        "event_log_20260904",
+        f"event_log_{day.strftime('%Y%m%d')}"
+        for day in (first + timedelta(days=1), today, today + timedelta(days=1))
     }
 
 
 async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from openswe.analytics import segment
+    from openswe.analytics import posthog
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -158,8 +177,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         started.set()
         await release.wait()
 
-    monkeypatch.setattr(segment, "record_webhook", slow_export)
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    monkeypatch.setattr(posthog, "record_webhook", slow_export)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
@@ -200,7 +218,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         await asyncio.wait_for(started.wait(), timeout=2)
     finally:
         release.set()
-        await asyncio.gather(*event_log._SEGMENT_TASKS)
+        await asyncio.gather(*event_log._POSTHOG_TASKS)
 
     async with transaction() as conn:
         row = (
@@ -217,10 +235,38 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     )
 
 
-async def test_record_links_a_github_pr_comment_to_its_rows(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+async def test_slack_event_log_reuses_directory_without_fetching_permissions(
+    registry_db: None,
+    slack_api,
 ) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhooks/slack",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    refs = EventRefs(slack_channel_id="CLOG")
+    await SlackChannel.save_all(
+        {
+            "id": "CLOG",
+            "is_channel": True,
+            "is_private": False,
+            "is_member": True,
+            "is_im": False,
+            "is_mpim": False,
+        }
+    )
+    assert await EventLog.record(request, b"{}", "slack", refs=refs)
+    assert slack_api.calls == []
+    async with transaction() as conn:
+        count = await conn.scalar(text("SELECT count(*) FROM event_log"))
+    assert count == 1
+
+
+async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -> None:
     ids = {name: uuid4() for name in ("user", "workspace", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
@@ -264,13 +310,47 @@ async def test_record_links_a_github_pr_comment_to_its_rows(
     assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
 
 
+async def test_a_delivery_asked_about_again_is_logged_and_wakes_threads_once(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.webhooks.event_subscriptions import EventSubscription
+
+    wake = AsyncMock()
+    monkeypatch.setattr(EventSubscription, "deliver", wake)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/linear/channel/events",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    body = json.dumps({"type": "Comment", "action": "create"}).encode()
+
+    # A delivery that wasn't stored gives its claim back, so its retry records it.
+    with monkeypatch.context() as unstored:
+        unstored.setattr(EventLog, "record", AsyncMock(return_value=False))
+        assert not await EventLog.record_once(
+            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
+        )
+    for _ in range(2):
+        assert await EventLog.record_once(
+            request, body, "linear", event_type="Comment", delivery_id="delivery-1"
+        )
+
+    async with transaction() as conn:
+        count = await conn.scalar(text("SELECT count(*) FROM event_log"))
+    assert count == 1
+    wake.assert_awaited_once()
+
+
 @pytest.mark.parametrize("kind", ["message", "me_message", "edit", "multiple", "unknown"])
 async def test_slack_event_links_a_single_known_pr_without_dispatching(
     registry_db: None,
     monkeypatch: pytest.MonkeyPatch,
     kind: Literal["message", "me_message", "edit", "multiple", "unknown"],
 ) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
         AsyncMock(

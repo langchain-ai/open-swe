@@ -52,6 +52,41 @@ async def test_tool_audit_outcome_without_payloads(
     assert "returned-secret" not in entry.model_dump_json()
 
 
+async def test_mcp_caller_writes_are_attributed_and_filed_under_their_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entries: list[AuditLog] = []
+    filed: list[str] = []
+    user = User(id=uuid4())
+    monkeypatch.setattr(
+        tools, "configurable", lambda: RunConfig(source="mcp", github_login="alice")
+    )
+
+    async def lookup(*_args: object) -> User:
+        return user
+
+    async def enrich(_entry: AuditLog, workspace: str) -> None:
+        filed.append(workspace)
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(User, "for_login", lookup)
+    monkeypatch.setattr(tools, "enrich_workspace", enrich)
+    monkeypatch.setattr(tools, "append_safely", append)
+
+    @tools.audit_tool(reads={"status"}, target_workspace="workspace")
+    async def control(action: str, workspace: str) -> dict[str, object]:
+        return {"ok": True}
+
+    await control("status", "core")
+    assert entries == []
+    await control("edit", "core")
+    (entry,) = entries
+    assert entry.user_id == user.id
+    assert filed == ["core"]
+
+
 async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,7 +102,7 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
 
     monkeypatch.setattr(tools, "append_safely", append)
 
-    @tools.audit_tool(skip_read=True)
+    @tools.audit_tool(reads={"read"})
     async def mutate(action: Literal["read", "set"]) -> dict[str, object]:
         if action == "set":
             raise ValueError("exception-secret")
@@ -82,3 +117,72 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
     assert entry.user_id is None
     assert entry.enrichments.actor_login is None
     assert "exception-secret" not in entry.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("create_automation", {"prompt": "secret", "workspace": "secret", "triggers": []}),
+        ("update_automation", {"automation_id": "secret"}),
+        ("trigger_automation", {"automation_id": "secret"}),
+        ("delete_automation", {"automation_id": "secret"}),
+        ("snapshotctl", {"action": "rebuild", "workspace": "secret"}),
+        (
+            "snapshotctl",
+            {"action": "edit", "workspace": "secret", "setup_script": "secret"},
+        ),
+        ("delete_workspace", {"name": "secret"}),
+        ("configure_repository", {"workspace": "secret", "repo": "secret"}),
+        ("save_organization_skill", {"name": "secret", "description": "secret"}),
+        ("delete_organization_skill", {"name": "secret"}),
+    ],
+)
+async def test_mcp_admin_mutations_audit_policy_refusals_without_arguments(
+    monkeypatch: pytest.MonkeyPatch, name: str, arguments: dict[str, object]
+) -> None:
+    from openswe.mcp.caller import _exposed
+    from openswe.tools import access as access_module
+
+    entries: list[AuditLog] = []
+    monkeypatch.setattr(tools, "configurable", lambda: RunConfig(source="mcp"))
+
+    async def refuse() -> access_module.Access:
+        return access_module.Access()
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(access_module, "resolve_access", refuse)
+    monkeypatch.setattr(tools, "append_safely", append)
+    tool, _access = _exposed()[name]
+    result = await tool.ainvoke(arguments)
+    assert result["ok"] is False
+    (entry,) = entries
+    assert entry.operation_name == name
+    assert entry.operation_succeeded is False
+    assert "secret" not in entry.model_dump_json()
+
+
+async def test_opted_in_skill_tool_records_policy_refusal_without_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.tools import access as access_module
+    from openswe.tools import user_skills
+
+    entries: list[AuditLog] = []
+    monkeypatch.setattr(tools, "configurable", lambda: RunConfig(source="schedule"))
+
+    async def refuse() -> access_module.Access:
+        return access_module.Access()
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(access_module, "resolve_access", refuse)
+    monkeypatch.setattr(tools, "append_safely", append)
+    result = await user_skills.save_user_skill("secret-skill", "secret-description")
+    assert result["ok"] is False
+    (entry,) = entries
+    assert entry.operation_name == "save_user_skill"
+    assert entry.operation_succeeded is False
+    assert "secret" not in entry.model_dump_json()

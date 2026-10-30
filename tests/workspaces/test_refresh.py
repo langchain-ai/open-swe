@@ -1,8 +1,12 @@
+import asyncio
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import text
 
+from openswe.database import transaction
+from openswe.webhooks import event_log
 from openswe.workspaces import refresh
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -27,9 +31,6 @@ def _scripts_run(backend: MagicMock) -> list[str]:
         encoded = str(call.args[0]).split("printf %s ")[1].split(" |")[0].strip("'")
         bodies.append(base64.b64decode(encoded).decode())
     return bodies
-
-
-# --- script command (sync) ---
 
 
 # --- refresh ---
@@ -141,7 +142,100 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
+@pytest.mark.parametrize(
+    "capture_error",
+    [None, TimeoutError(), RuntimeError("capture failed with opaque-build-credential")],
+)
+async def test_refresh_history_keeps_outcomes_without_raw_diagnostics(
+    capture_error: Exception | None,
+) -> None:
+    """Historical events must not copy arbitrary credentials from logs or exception messages."""
+    backend = _backend(_Result("Updating repo with opaque-build-credential", 0))
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock(side_effect=capture_error)),
+        patch.object(event_log, "_ROTATED_AT", None),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        await refresh.refresh_workspace("base")
+        record = await WORKSPACES.get("base")
+
+    assert record is not None
+    status = "failed" if capture_error is not None else "success"
+    expected_error = (str(capture_error) or type(capture_error).__name__) if capture_error else None
+    assert record.refresh_error == expected_error
+    assert record.refresh_log is not None
+    assert "opaque-build-credential" in record.refresh_log
+    async with transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT event_type, payload, workspace_id FROM event_log WHERE source = 'workspace'"
+            )
+        )
+        [(event_type, payload, workspace_id)] = rows.tuples().all()
+    assert event_type == f"refresh.{status}"
+    assert workspace_id == await WORKSPACES.id_for_slug("base")
+    assert "error" not in payload
+    assert "log_tail" not in payload
+    assert "opaque-build-credential" not in str(payload)
+    assert [(step["label"], step["status"]) for step in payload["steps"]] == [
+        ("boot", "success"),
+        ("setup", "success"),
+        ("capture", status),
+    ]
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_refresh_in_flight_blocks_a_second_one_but_not_its_own_retry() -> None:
+    """A job retried after a redeploy cut it short must not wait hours behind itself."""
+    create = AsyncMock(return_value=_backend(_Result("provisioned", 0)))
+    release = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", create),
+        patch.object(refresh, "_release_builder_sandbox", release),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        original = await WORKSPACES.mark_refreshing("base", run_id="run-a")
+        assert original is not None
+        await original.publish_builder("sb-lost")
+        other = await refresh.refresh_workspace("base", run_id="run-b")
+        create.assert_not_awaited()
+        retried = await refresh.refresh_workspace("base", run_id="run-a")
+        # A stalled original that outlived its lease can no longer settle over the retry.
+        await original.settle("failed", error="builder stopped")
+        record = await WORKSPACES.get("base")
+
+    assert other["status"] == "already_refreshing"
+    assert retried["status"] == "success"
+    assert record is not None
+    assert record.refresh_status == "success"
+    assert record.refresh_error is None
+    # The cut-short attempt's builder is stopped, not leaked.
+    assert [call.args[0] for call in release.await_args_list] == ["sb-lost", "sb-builder"]
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_queued_job_never_takes_over_a_cron_refresh_that_claimed_first() -> None:
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
         await WORKSPACES.create(
@@ -153,11 +247,43 @@ async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
             ),
             "ramon",
         )
-        await WORKSPACES.mark_refreshing("base")
-        result = await refresh.refresh_workspace("base")
+        # Queueing a job writes its id before the job runs; the nightly cron claims meanwhile.
+        await WORKSPACES.set_refresh_run_id("base", "job-y")
+        assert await WORKSPACES.mark_refreshing("base") is not None
+        result = await refresh.refresh_workspace("base", run_id="job-y")
 
     assert result["status"] == "already_refreshing"
     create.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_cancelled_refresh_is_settled_so_its_retry_can_run() -> None:
+    backend = _backend()
+    backend.aexecute = AsyncMock(side_effect=asyncio.CancelledError)
+    release = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", release),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await refresh.refresh_workspace("base", run_id="run-a")
+        record = await WORKSPACES.get("base")
+
+    release.assert_awaited_once_with("sb-builder")
+    assert record is not None
+    assert record.refresh_status == "failed"
+    assert record.refresh_error == "interrupted"
+    assert not record.refresh_in_flight()
 
 
 # --- update kind + lazy trigger ---

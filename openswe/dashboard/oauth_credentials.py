@@ -11,19 +11,15 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, ScalarSelect, delete, func, select
+from sqlalchemy import ForeignKey, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.users.models import UserIdentity
+from openswe.users.records import UnknownUser, user_id_for_login
 
 type OAuthProvider = Literal["langsmith"]
-
-
-class UnknownUser(LookupError):
-    """No Open SWE user signed in with this GitHub login."""
 
 
 class OAuthCredential(Base):
@@ -45,24 +41,11 @@ class OAuthCredential(Base):
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
-def _user_id_for_login(login: str) -> ScalarSelect[UUID]:
-    return (
-        select(UserIdentity.user_id)
-        .where(
-            UserIdentity.provider == "github",
-            func.lower(UserIdentity.login) == login.strip().lower(),
-        )
-        .order_by(UserIdentity.last_seen_at.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
 async def load_credential(provider: OAuthProvider, login: str) -> OAuthCredential | None:
     async with postgres.session() as session:
         return await session.scalar(
             select(OAuthCredential).where(
-                OAuthCredential.user_id == _user_id_for_login(login),
+                OAuthCredential.user_id == user_id_for_login(login),
                 OAuthCredential.provider == provider,
             )
         )
@@ -82,7 +65,7 @@ async def save_credential(
 ) -> None:
     """Insert or replace the person's credential for ``provider``."""
     async with postgres.session() as session:
-        user_id = await session.scalar(select(_user_id_for_login(login)))
+        user_id = await session.scalar(select(user_id_for_login(login)))
         if user_id is None:
             raise UnknownUser(login)
         values = {
@@ -107,7 +90,7 @@ async def delete_credential(provider: OAuthProvider, login: str) -> None:
     async with postgres.session() as session:
         await session.execute(
             delete(OAuthCredential).where(
-                OAuthCredential.user_id == _user_id_for_login(login),
+                OAuthCredential.user_id == user_id_for_login(login),
                 OAuthCredential.provider == provider,
             )
         )

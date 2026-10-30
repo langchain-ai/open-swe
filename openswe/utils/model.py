@@ -3,12 +3,8 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 from langchain.chat_models import init_chat_model
 
 from openswe.config import ENV
-from openswe.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from openswe.dashboard.options import DEFAULT_MODEL_ID, model_context_window
 from openswe.utils.gateway import gateway_env_default, gateway_overrides
-from openswe.utils.openai_oauth import (
-    build_desktop_openai_oauth_model,
-    desktop_openai_oauth_available,
-)
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
@@ -106,7 +102,8 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`openswe.utils.gateway`).
     """
-    model_kwargs: dict[str, object] = dict(kwargs)
+    model_kwargs: dict[str, object] = dict(model_request_defaults(model_id))
+    model_kwargs.update(kwargs)
     model_kwargs.setdefault("max_retries", DEFAULT_MAX_RETRIES)
     if model_id.startswith(_TIMEOUT_PROVIDER_PREFIXES):
         model_kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS)
@@ -121,25 +118,13 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     gateway_applied = False
-    oauth_applied = False
     if enabled:
         overrides = gateway_overrides(model_id)
         if overrides is not None:
             model_kwargs.update(overrides)
             gateway_applied = True
 
-    if (
-        model_id.startswith("openai:")
-        and not gateway_applied
-        and not ENV.OPENAI_API_KEY.optional()
-        and desktop_openai_oauth_available()
-    ):
-        model_kwargs.pop("base_url", None)
-        oauth_applied = True
-
     if model_id.startswith("openai:"):
-        if oauth_applied:
-            model_kwargs.pop("max_tokens", None)
         _configure_openai_responses_kwargs(model_kwargs)
         _coerce_openai_chat_completions_kwargs(model_kwargs)
 
@@ -154,17 +139,24 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             model_kwargs["base_url"] = BASETEN_BASE_URL
             model_kwargs["api_key"] = api_key
 
-    profile_override = model_profile_with_context_override(model_id)
-    if profile_override is not None:
-        model_kwargs["profile"] = profile_override
+    codex_profile = _codex_profile(model_id)
+    if codex_profile is not None:
+        model_kwargs["profile"] = codex_profile
 
-    if oauth_applied:
-        model = build_desktop_openai_oauth_model(
-            model_id.split(":", 1)[1], **cast(dict[str, Any], model_kwargs)
-        )
-    else:
-        model = init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
-    return model
+    return init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
+
+
+def _codex_profile(model_id: str) -> dict[str, object] | None:
+    """OpenAI's models.dev profile with the smaller window Codex serves them at."""
+    context_window = model_context_window(model_id)
+    if not model_id.startswith("openai:") or context_window is None:
+        return None
+    # The bundled profile has no public accessor; init_chat_model imports this module next anyway.
+    from langchain_openai.chat_models.base import _get_default_model_profile  # noqa: PLC2701
+
+    profile: dict[str, object] = dict(_get_default_model_profile(model_id.partition(":")[2]))
+    profile["max_input_tokens"] = context_window
+    return profile
 
 
 def fallback_model_id_for(primary_model_id: str) -> str | None:
@@ -181,9 +173,14 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     return None
 
 
-def is_gemini_3_family(model_id: str) -> bool:
-    model_name = model_id.split(":", 1)[-1]
-    return model_name.startswith("gemini-3")
+def model_request_defaults(model_id: str) -> ModelKwargs:
+    if model_id == "google_genai:gemini-4-argon":
+        return {"timeout": 900.0, "temperature": None}
+    return {}
+
+
+def supports_google_thinking_level(model_id: str) -> bool:
+    return model_id.startswith("google_genai:gemini-3") or model_id == "google_genai:gemini-4-argon"
 
 
 def openai_reasoning_for(
@@ -273,7 +270,8 @@ def provider_model_kwargs(
     openai_reasoning_default: OpenAIReasoning | None = None,
 ) -> ModelKwargs:
     """Build provider-specific kwargs for ``make_model`` from a model id and effort."""
-    kwargs: ModelKwargs = {"max_tokens": max_tokens}
+    kwargs = model_request_defaults(model_id)
+    kwargs["max_tokens"] = max_tokens
     if model_id.startswith("openai:"):
         reasoning = openai_reasoning_for(profile_effort)
         if reasoning is not None:
@@ -287,7 +285,7 @@ def provider_model_kwargs(
         effort = anthropic_effort_for(profile_effort)
         if effort is not None:
             kwargs["effort"] = effort
-    elif model_id.startswith("google_genai:") and is_gemini_3_family(model_id):
+    elif supports_google_thinking_level(model_id):
         thinking_level = google_thinking_level_for(profile_effort)
         if thinking_level is not None:
             kwargs["thinking_level"] = thinking_level
@@ -319,11 +317,7 @@ def validate_local_dev_llm_config() -> None:
 
     model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
 
-    if (
-        model_id.startswith("openai:")
-        and not ENV.OPENAI_API_KEY.optional()
-        and not desktop_openai_oauth_available()
-    ):
+    if model_id.startswith("openai:") and not ENV.OPENAI_API_KEY.optional():
         raise ValueError(f"OPENAI_API_KEY is required for configured model {model_id}")
     elif model_id.startswith("anthropic:") and not ENV.ANTHROPIC_API_KEY.optional():
         raise ValueError(f"ANTHROPIC_API_KEY is required for configured model {model_id}")

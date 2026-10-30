@@ -1,26 +1,22 @@
-import asyncio
 import logging
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
-from openswe.database import postgres
 from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
-from openswe.review.walkthrough import WalkthroughView
 from openswe.thread_ids import review_scout_thread_id
-from openswe.utils.thread_ops import thread_run_error
+from openswe.threads import index, succession
+from openswe.threads.creation import ensure_titled_thread
+from openswe.threads.status import thread_run_error
+from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)
 
 ASSISTANT_ID = "review-scout"
-# The reviewer waits this long for the walkthrough before reviewing without it;
-# the scout keeps running and still stores its result for the review page.
-SCOUT_WAIT_SECONDS = 600
-_POLL_SECONDS = 5
-_ACTIVE_STATUSES = frozenset({"pending", "running"})
+_FAILED_STATUSES = frozenset({"error", "timeout"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
 
@@ -31,7 +27,7 @@ class _ScoutRun(BaseModel):
     metadata: dict[str, object] = {}
 
 
-_COMMIT_STEP_TOOL = "commit_walkthrough_step"
+_PLAN_CHUNK_TOOL = "walkthrough_plan_chunk"
 
 
 _RECENT_ACTIONS = 5
@@ -56,7 +52,7 @@ class _ToolCall(BaseModel):
         return ScoutAction(tool=self.name, target=target[:_ACTION_TARGET_CHARS] if target else None)
 
 
-class _CommitResult(BaseModel):
+class _PlanResult(BaseModel):
     success: bool = False
 
 
@@ -67,17 +63,17 @@ class _ScoutMessage(BaseModel):
     tool_call_id: str | None = None
     tool_calls: list[_ToolCall] = []
 
-    def committed(self) -> bool:
+    def planned(self) -> bool:
         if (
             self.type != "tool"
-            or self.name != _COMMIT_STEP_TOOL
+            or self.name != _PLAN_CHUNK_TOOL
             or not isinstance(self.content, str)
         ):
             return False
         try:
-            return _CommitResult.model_validate_json(self.content).success
+            return _PlanResult.model_validate_json(self.content).success
         except ValidationError:
-            logger.warning("Unparseable review scout commit result", exc_info=True)
+            logger.warning("Unparseable review scout plan result", exc_info=True)
             return False
 
 
@@ -113,9 +109,11 @@ class ReviewScoutTarget(BaseModel):
     head_sha: str
     workspace_slug: str | None
 
-    @property
-    def thread_id(self) -> str:
-        return review_scout_thread_id(self.owner, self.repo, self.pr_number)
+    async def current_thread_id(self) -> str:
+        """The scout thread to read, which follows its successor once one exists."""
+        return await index.current_thread_id(
+            review_scout_thread_id(self.owner, self.repo, self.pr_number)
+        )
 
     @property
     def log_extra(self) -> dict[str, object]:
@@ -131,9 +129,10 @@ class ReviewScoutTarget(BaseModel):
     async def active_run(self) -> str | None:
         """A scout run already working on this head, so a retry joins it instead of restarting it."""
         client = dispatch_client()
+        thread_id = await self.current_thread_id()
         for status in ("running", "pending"):
             try:
-                runs = await client.runs.list(self.thread_id, status=status, limit=5)
+                runs = await client.runs.list(thread_id, status=status, limit=5)
             except NotFoundError:
                 return None
             for raw in runs:
@@ -145,7 +144,7 @@ class ReviewScoutTarget(BaseModel):
     async def progress(self) -> ScoutProgress:
         """How far the running scout has got, from its latest checkpoint."""
         state = _ScoutState.model_validate(
-            await dispatch_client().threads.get_state(self.thread_id)
+            await dispatch_client().threads.get_state(await self.current_thread_id())
         )
         messages = state.values.messages
         run_start = max((i for i, m in enumerate(messages) if m.type == "human"), default=0)
@@ -153,12 +152,7 @@ class ReviewScoutTarget(BaseModel):
         calls = [
             call for message in messages if message.type == "ai" for call in message.tool_calls
         ]
-        other_calls = {call.id for call in calls if call.args.get("other") is True}
-        steps = sum(
-            1
-            for message in messages
-            if message.committed() and message.tool_call_id not in other_calls
-        )
+        steps = sum(1 for message in messages if message.planned())
         last = messages[-1] if messages else None
         return ScoutProgress(
             steps=steps,
@@ -169,16 +163,22 @@ class ReviewScoutTarget(BaseModel):
     async def last_failure(self) -> str | None:
         """The error that ended the latest scout run on this head, when it failed."""
         client = dispatch_client()
+        thread_id = await self.current_thread_id()
         try:
-            runs = await client.runs.list(self.thread_id, limit=1)
+            runs = await client.runs.list(thread_id, limit=1)
         except NotFoundError:
             return None
         if not runs:
             return None
         run = _ScoutRun.model_validate(runs[0])
-        if run.status != "error" or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha:
+        if (
+            run.status not in _FAILED_STATUSES
+            or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha
+        ):
             return None
-        return await thread_run_error(self.thread_id) or "The review scout run ended with an error."
+        if run.status == "timeout":
+            return "The review scout run timed out."
+        return await thread_run_error(thread_id) or "The review scout run ended with an error."
 
     async def start(self) -> str:
         """The scout run for this head, started when none is already running.
@@ -186,11 +186,25 @@ class ReviewScoutTarget(BaseModel):
         A newer head interrupts a scout still working on an older one, so only
         the latest head's walkthrough is ever written.
         """
+        client = dispatch_client()
+        thread_id = await succession.succeed(
+            review_scout_thread_id(self.owner, self.repo, self.pr_number)
+        )
+        await ensure_titled_thread(
+            client, thread_id, title=f"Walkthrough: {self.pr_title} #{self.pr_number}"
+        )
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                "kind": ASSISTANT_ID,
+                "pr": {"owner": self.owner, "name": self.repo, "number": self.pr_number},
+            },
+        )
         active = await self.active_run()
         if active is not None:
             return active
         configurable = {
-            "thread_id": self.thread_id,
+            "thread_id": thread_id,
             "repo": {"owner": self.owner, "name": self.repo},
             "pr_number": self.pr_number,
             "pr_title": self.pr_title,
@@ -199,7 +213,7 @@ class ReviewScoutTarget(BaseModel):
             "workspace": self.workspace_slug,
         }
         run = await create_durable_run(
-            self.thread_id,
+            thread_id,
             ASSISTANT_ID,
             input=build_run_input(
                 prompt("review-scout/kickoff", pr_number=self.pr_number),
@@ -209,33 +223,9 @@ class ReviewScoutTarget(BaseModel):
                 ],
             ),
             source="review-scout",
-            thread_title=f"Walkthrough: {self.pr_title} #{self.pr_number}",
+            thread_title=None,
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             metadata={_HEAD_METADATA_KEY: self.head_sha},
         )
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id
-
-    async def await_walkthrough(self) -> WalkthroughView | None:
-        """This head's walkthrough, running the scout first when it has none yet.
-
-        ``None`` when the scout cannot run or does not finish within
-        ``SCOUT_WAIT_SECONDS``; the reviewer then reviews without it.
-        """
-        if not postgres.configured() or not self.base_sha or not self.head_sha:
-            return None
-        existing = await self.walkthrough()
-        if existing is not None:
-            return existing
-        run_id = await self.start()
-        # Polled rather than joined: one join request idles for the whole run
-        # and would hit the client's 300s read timeout first.
-        client = dispatch_client()
-        deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
-        while asyncio.get_running_loop().time() < deadline:
-            run = _ScoutRun.model_validate(await client.runs.get(self.thread_id, run_id))
-            if run.status not in _ACTIVE_STATUSES:
-                return await self.walkthrough()
-            await asyncio.sleep(_POLL_SECONDS)
-        logger.warning("Review scout did not finish in time for the reviewer", extra=self.log_extra)
-        return None

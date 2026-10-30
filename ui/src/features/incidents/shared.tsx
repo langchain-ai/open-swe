@@ -1,6 +1,11 @@
-import { ArrowUpRight, CircleAlert, LoaderCircle, Radar } from "lucide-react"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 import type { ReactNode } from "react"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
 import type { IncidentReport, IncidentView, Timestamp } from "./api"
@@ -34,32 +39,24 @@ export function formatTime(value: Timestamp | null) {
 
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span
+    <Badge
+      size="xxs"
+      color={
+        status === "needs_attention"
+          ? "warning"
+          : ["pending", "watching", "investigating"].includes(status)
+            ? "primary"
+            : "secondary"
+      }
+      leftDecorator={CircleIcon}
+      iconWeight="fill"
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        {
-          "border-info/20 bg-info/5 text-info-foreground": [
-            "pending",
-            "watching",
-            "investigating",
-          ].includes(status),
-          "border-warning/20 bg-warning/5 text-warning-foreground":
-            status === "needs_attention",
-          "border-border bg-muted text-muted-foreground": [
-            "paused",
-            "completed",
-          ].includes(status),
-        }
+        "shrink-0",
+        status === "investigating" && "[&_svg]:animate-pulse"
       )}
     >
-      <span
-        className={cn(
-          "size-1.5 rounded-full bg-current",
-          status === "investigating" && "animate-pulse"
-        )}
-      />
       {humanize(status)}
-    </span>
+    </Badge>
   )
 }
 
@@ -67,9 +64,9 @@ export function LoadingState() {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground"
+      className="flex items-center justify-center gap-space-2 py-24 text-sm text-secondary"
     >
-      <LoaderCircle className="size-4 animate-spin" />
+      <Spinner size="xs" />
       Loading incidents…
     </div>
   )
@@ -83,18 +80,18 @@ export function ErrorState({
   retry: () => void
 }) {
   return (
-    <div
-      role="alert"
-      className="rounded-xl border border-destructive/20 bg-destructive/5 p-5"
-    >
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <CircleAlert className="size-4 text-destructive" />
-        Unable to load Incidents
-      </div>
-      <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
-      <Button variant="outline" size="sm" className="mt-4" onClick={retry}>
-        Try again
-      </Button>
+    <div role="alert">
+      <Banner
+        intent="error"
+        title="Unable to load Incidents"
+        action={
+          <Button color="secondary" variant="outlined" onClick={retry}>
+            Try again
+          </Button>
+        }
+      >
+        {error.message}
+      </Banner>
     </div>
   )
 }
@@ -111,18 +108,17 @@ export function ExternalLink({
   if (!href || !/^https?:\/\//i.test(href))
     return <span className={className}>{children}</span>
   return (
-    <a
+    <MacawLink
+      variant="xs"
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={cn(
-        "inline-flex items-center gap-1.5 hover:underline",
-        className
-      )}
+      rightDecorator={ArrowUpRightIcon}
+      iconWeight="regular"
+      className={className}
     >
       {children}
-      <ArrowUpRight className="size-3.5 shrink-0" />
-    </a>
+    </MacawLink>
   )
 }
 
@@ -143,7 +139,7 @@ export function CitedText({
             <ExternalLink
               key={source.id}
               href={source.url}
-              className="mx-0.5 text-[10px] font-medium text-info-foreground [&_svg]:hidden"
+              className="mx-0.5 text-xxs font-medium text-brand-primary [&_svg]:hidden"
             >
               <span
                 aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}
@@ -155,7 +151,7 @@ export function CitedText({
         })}
       </sup>
     ) : part.startsWith("[") && !citationPreview(part) ? (
-      <span key={index} className="text-xs text-muted-foreground">
+      <span key={index} className="text-xs text-secondary">
         [source unavailable]
       </span>
     ) : (
@@ -174,19 +170,6 @@ export function sourceLabel(summary: string, channelName: string) {
 export function slackMessageTime(url: string | null | undefined) {
   const timestamp = url?.match(/\/archives\/[^/]+\/p(\d{10})(\d{6})(?:[?#]|$)/)
   return timestamp ? Number(timestamp[1]) : null
-}
-
-export function IncidentsMark({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        "flex size-9 items-center justify-center rounded-xl border border-info/20 bg-info/5 text-info-foreground",
-        className
-      )}
-    >
-      <Radar className="size-5" />
-    </div>
-  )
 }
 
 export function isReadUnavailable(error: Error) {

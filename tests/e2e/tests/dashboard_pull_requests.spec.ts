@@ -64,6 +64,14 @@ test.describe("thread pull requests", () => {
       }),
     ).toBeVisible();
     await expect(companionLink).toBeVisible();
+
+    await companionLink.click();
+    await expect(page).toHaveURL(
+      /\/agents\/reviews\/anotherorg\/companion\/2$/,
+    );
+    await expect(
+      page.getByRole("heading", { name: /Add companion integration/ }),
+    ).toBeVisible();
   });
 
   test("shows live pull request health and submits actionable fixes", async ({
@@ -76,13 +84,10 @@ test.describe("thread pull requests", () => {
 
     const summary = page.getByTestId("pr-summary-fakeorg/demo-1");
     const fixButton = page.getByRole("button", { name: "Fix PR #1" });
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-muted-foreground",
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-secondary");
     await expect(summary).not.toHaveAttribute(
       "data-pr-tone",
-      "text-success-foreground",
+      "text-success-secondary",
     );
     await expect(summary).toContainText("draft");
     await expect(fixButton).toHaveCount(0);
@@ -100,7 +105,7 @@ test.describe("thread pull requests", () => {
     await page.reload();
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
-      "text-success-foreground",
+      "text-success-secondary",
     );
     await expect(summary).toContainText("open");
     await expect(fixButton).toHaveCount(0);
@@ -118,11 +123,9 @@ test.describe("thread pull requests", () => {
       window.dispatchEvent(new Event("visibilitychange")),
     );
     await failedRefresh;
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-muted-foreground",
-      { timeout: 5_000 },
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-secondary", {
+      timeout: 5_000,
+    });
     await summary.focus();
     await expect(
       page.getByTestId("pr-hover-card-fakeorg/demo-1"),
@@ -205,7 +208,10 @@ test.describe("thread pull requests", () => {
     });
     await page.reload();
 
-    await expect(summary).toHaveAttribute("data-pr-tone", "text-destructive");
+    await expect(summary).toHaveAttribute(
+      "data-pr-tone",
+      "text-error-secondary",
+    );
     await expect(summary).toContainText("3 checks");
     await expect(summary).toContainText("2 comments");
     await expect(summary).toContainText("Conflict");
@@ -231,21 +237,20 @@ test.describe("thread pull requests", () => {
     );
 
     await page.keyboard.press("Escape");
+    // Conflicts and checks share the button; the caret holds the comments.
     await fixButton.click();
-    await expect(
-      page.getByRole("menuitem", { name: "Fix conflicts on PR #1" }),
-    ).toBeVisible();
     await expect(
       page.getByRole("menuitem", { name: "Address comments on PR #1" }),
     ).toBeVisible();
-    await page.getByRole("menuitem", { name: "Fix checks on PR #1" }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Fix", exact: true }).click();
     const fixPrompt = "Fresh GitHub scan:";
     await waitForStateToContain(page, threadId, fixPrompt);
     const state = await page.request.get(`/threads/${threadId}/state`);
     const stateText = JSON.stringify(await state.json());
     expect(stateText).toContain("[required] unit-tests: FAILURE");
     expect(stateText).toContain("[optional] browser-e2e: TIMED_OUT");
-    // A check fix is never handed the review comments to act on.
+    // A fix is never handed the review comments to act on.
     expect(stateText).not.toContain(
       "The fallback must preserve the original exception.",
     );

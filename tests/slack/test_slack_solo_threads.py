@@ -19,21 +19,8 @@ from openswe.utils.json_types import JsonObject
 from openswe.webhooks import common
 
 
-class _Store:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], JsonObject] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> JsonObject | None:
-        value = self.items.get((namespace, key))
-        return {"value": dict(value)} if value is not None else None
-
-    async def put_item(self, namespace: tuple[str, ...], key: str, value: JsonObject) -> None:
-        self.items[(namespace, key)] = dict(value)
-
-
 class _Harness:
     def __init__(self) -> None:
-        self.store = _Store()
         self.history: list[JsonObject] = []
         self.pages: list[JsonObject] | None = None
         self.now = 1000.0
@@ -105,7 +92,7 @@ class _Harness:
 
 
 @pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
+def harness(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> _Harness:
     state = _Harness()
     state.history.append({"ts": "1000.0", "user": "U1", "text": "initial question"})
     monkeypatch.setattr(solo_threads.SlackClient, "bot", state.bot)

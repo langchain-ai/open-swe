@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard import profiles
 from openswe.github import pull_request_context
 from openswe.threads import handlers
 from tests.conftest import patch_thread_module
@@ -32,24 +33,21 @@ _BROKEN_PR = {
 
 
 def test_fix_prompt_sanitizes_fields_and_escapes_braces() -> None:
-    checks = pull_request_context.build_fix_prompt(_BROKEN_PR, "checks")
+    repair = pull_request_context.build_fix_prompt(_BROKEN_PR, "repair")
     comments = pull_request_context.build_fix_prompt(_BROKEN_PR, "comments")
 
-    for prompt in (checks, comments):
+    for prompt in (repair, comments):
         assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG not in prompt
         assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG not in prompt
-    assert "[required] unit [blocked-untrusted-comment-tag-close]: FAILURE" in checks
+    assert "[required] unit [blocked-untrusted-comment-tag-close]: FAILURE" in repair
     assert "reviewer: fix {{this}}" in comments
 
 
 def test_fix_prompt_hands_the_agent_only_its_scope() -> None:
-    checks = pull_request_context.build_fix_prompt(_BROKEN_PR, "checks")
-    conflicts = pull_request_context.build_fix_prompt(_BROKEN_PR, "conflicts")
+    repair = pull_request_context.build_fix_prompt(_BROKEN_PR, "repair")
     comments = pull_request_context.build_fix_prompt(_BROKEN_PR, "comments")
 
-    assert "fix {{this}}" not in checks
-    assert "fix {{this}}" not in conflicts
-    assert ": FAILURE" not in conflicts
+    assert "fix {{this}}" not in repair
     assert ": FAILURE" not in comments
 
 
@@ -102,11 +100,11 @@ async def test_thread_context_requires_tracked_pull_before_token_lookup(
 
     token = AsyncMock(return_value="oauth-token")
     patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
-    patch_thread_module(monkeypatch, "_github_token_for_login", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     with pytest.raises(HTTPException) as exc_info:
         await handlers.get_dashboard_thread_pull_request_context(
-            "thread-1", "owner", repo_full_name="other/repo", number=8, scope="checks"
+            "thread-1", "owner", repo_full_name="other/repo", number=8, scope="repair"
         )
 
     assert exc_info.value.status_code == 404

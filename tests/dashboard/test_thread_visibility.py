@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.sandboxes import browsers
+from openswe.sandboxes.browsers import LangSmithBrowser, ThreadBrowser
 from openswe.threads import (
     access,
     blobs,
@@ -14,17 +16,18 @@ from openswe.threads import (
     workflow_approval_api,
 )
 from openswe.tools import threads as tools
+from openswe.ui_invalidations.topics import Topic
 
 _ADMINS = {"admin", "admin@example.com"}
 
 
-@pytest.fixture
-def private_thread(monkeypatch):
+@pytest.fixture(params=["dashboard", "web"])
+def private_thread(monkeypatch, request):
     thread = {
         "thread_id": "private-thread",
         "status": "idle",
         "metadata": {
-            "source": "dashboard",
+            "source": request.param,
             "visibility": "private",
             "owner_login": "alice",
             "participant_logins": {"alice": True, "bob": True},
@@ -65,6 +68,21 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
     assert not summary.thread_is_promptable(metadata, "admin")
     assert summary.thread_is_readable({"source": "dashboard"}, "bob")
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
+
+
+def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
+    metadata = {
+        "source": "dashboard",
+        "pr_url": "https://github.com/langchain-ai/open-swe/pull/3795",
+        "title": "A renamed review chat",
+        "review_chat": True,
+        "unlisted": False,
+    }
+    assert not listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
+    assert summary.thread_is_readable(metadata, "alice")
+    assert summary.thread_is_promptable(metadata, "alice")
+    metadata["review_chat"] = False
+    assert listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
 
 
 @pytest.mark.parametrize(
@@ -159,6 +177,77 @@ async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
     )
 
 
+async def test_sharing_deletes_the_threads_browser(private_thread, monkeypatch):
+    thread, client = private_thread
+    thread["metadata"]["browser"] = {"browser": "browser-1"}
+    deleted: list[str] = []
+
+    async def delete(browser: LangSmithBrowser) -> None:
+        deleted.append(browser.name)
+
+    monkeypatch.setattr(LangSmithBrowser, "delete", delete)
+    monkeypatch.setattr(handlers, "mirror_thread_metadata", AsyncMock())
+    monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
+
+    await handlers.share_thread_with_workspace("private-thread", "alice")
+
+    assert deleted == ["browser-1"]
+    # MDA keeps the name, so the panel can still open a fresh browser.
+    metadata = client.threads.update.call_args.kwargs["metadata"]
+    assert metadata["browser_name"] == "browser-1"
+    assert metadata["browser_opened"] is False
+
+
+async def test_a_run_starting_never_undoes_a_browse(private_thread, monkeypatch):
+    _, client = private_thread
+    monkeypatch.setattr(browsers, "langgraph_client", lambda: client)
+    monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
+
+    await ThreadBrowser(browser="browser-1", opened=False).report("private-thread")
+    assert client.threads.update.call_args.kwargs["metadata"] == {"browser_name": "browser-1"}
+
+    await ThreadBrowser(browser="browser-1", opened=True).report("private-thread")
+    assert client.threads.update.call_args.kwargs["metadata"] == {
+        "browser_name": "browser-1",
+        "browser_opened": True,
+    }
+
+
+async def test_sharing_waits_for_the_threads_browser_to_go(private_thread, monkeypatch):
+    thread, client = private_thread
+    thread["metadata"]["browser"] = {"browser": "browser-1"}
+    monkeypatch.setattr(
+        LangSmithBrowser, "delete", AsyncMock(side_effect=RuntimeError("LangSmith is down"))
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+
+    assert exc.value.status_code == 502
+    client.threads.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        {"sandbox_id": "bridge:b1", "sandbox_kind": "bridge", "sandbox_bridge_client": "cli"},
+        {"sandbox_id": "sbx", "sandbox_handoff_from": "bridge:b1"},
+    ],
+)
+async def test_a_thread_on_its_owners_machine_stays_theirs(private_thread, binding):
+    thread, client = private_thread
+    thread["metadata"].update(binding)
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+    assert exc.value.status_code == 409
+    client.threads.update.assert_not_awaited()
+    # Shared before such threads were kept private.
+    shared = {**thread["metadata"], "visibility": "public"}
+    assert summary.thread_is_promptable(shared, "alice")
+    assert not summary.thread_is_promptable(shared, "bob")
+    assert not summary.thread_is_promptable(shared, "admin")
+
+
 @pytest.mark.parametrize("login", ["bob", "admin"])
 async def test_only_owner_can_publish_even_when_admin_can_read(private_thread, login):
     _, client = private_thread
@@ -219,7 +308,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
         assert key not in metadata
-    (state_call,) = client.threads.update_state.await_args_list
+    state_call, _ = client.threads.update_state.await_args_list
     assert state_call.args[0] == client.threads.create.call_args.kwargs["thread_id"]
     copied = state_call.kwargs["values"]["messages"]
     assert [m["content"] for m in copied] == ["hi", "hello"]
@@ -229,12 +318,14 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert copied[0]["additional_kwargs"]["x"] == 1
 
 
-async def test_continue_privately_copies_referenced_blobs(private_thread, fake_store):
+async def test_continue_privately_copies_referenced_blobs(private_thread, registry_db):
     thread, client = private_thread
     thread["metadata"]["visibility"] = "public"
     kept, gone, unreferenced = "a" * 64, "b" * 64, "c" * 64
     for digest in (kept, unreferenced):
-        fake_store.seed(blobs.blob_namespace("private-thread"), f"/{digest}", {"digest": digest})
+        await blobs.ThreadBlobs("private-thread").aput(
+            blobs.blob_namespace("private-thread"), f"/{digest}", {"digest": digest}
+        )
     image = {"type": "image", "mime_type": "image/png"}
     client.threads.get_state.return_value = {
         "values": {
@@ -248,7 +339,8 @@ async def test_continue_privately_copies_referenced_blobs(private_thread, fake_s
     await handlers.continue_thread_privately("private-thread", "bob")
 
     new_thread_id = client.threads.create.call_args.kwargs["thread_id"]
-    assert fake_store.values(blobs.blob_namespace(new_thread_id)) == {f"/{kept}": {"digest": kept}}
+    copies = await blobs.ThreadBlobs(new_thread_id).asearch(blobs.blob_namespace(new_thread_id))
+    assert [(item.key, item.value) for item in copies] == [(f"/{kept}", {"digest": kept})]
 
 
 async def test_continue_privately_rolls_back_when_blob_copy_fails(private_thread, monkeypatch):
@@ -259,7 +351,9 @@ async def test_continue_privately_rolls_back_when_blob_copy_fails(private_thread
         "values": {"messages": [{"type": "human", "content": [image]}]}
     }
     client.threads.delete = AsyncMock()
-    monkeypatch.setattr(blobs, "get_value", AsyncMock(side_effect=RuntimeError("store down")))
+    monkeypatch.setattr(
+        handlers, "copy_thread_blobs", AsyncMock(side_effect=RuntimeError("database down"))
+    )
     with pytest.raises(HTTPException) as exc:
         await handlers.continue_thread_privately("private-thread", "bob")
     assert exc.value.status_code == 502
@@ -316,7 +410,11 @@ async def test_manage_thread_denies_private_thread_outside_private_context(
 
     thread["metadata"]["visibility"] = "public"
     result = await tools.manage_thread("private-thread", "cancel")
-    assert result == {"success": False, "error": "thread not found", "status_code": 404}
+    assert result == {
+        "success": False,
+        "error": "this private thread can only be reached from its owner's private conversation",
+        "status_code": 403,
+    }
     cancel.assert_not_awaited()
 
     thread["metadata"]["visibility"] = "private"

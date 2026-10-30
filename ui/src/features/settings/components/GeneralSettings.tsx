@@ -5,19 +5,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useState } from "react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Select } from "@langchain/macaw-components/Select"
+import { Switch } from "@langchain/macaw-components/Switch"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
 import {
   notificationsEnabled,
   notificationsSupported,
@@ -26,7 +19,6 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
 import type {
   FollowUpBehavior,
@@ -34,6 +26,7 @@ import type {
   UserPreferences,
 } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
+import { ConfirmDialog } from "./ConfirmDialog"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -51,8 +44,8 @@ const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
   { value: "steer", label: "Steer" },
 ]
 
-// Radix's Select rejects an empty-string item value, so "no default" needs a
-// sentinel that is translated back to null on save.
+// Select values are non-empty strings, so "no default" needs a sentinel that
+// is translated back to null on save.
 const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
 
 const PREFERENCES_KEY = ["myPreferences"]
@@ -60,7 +53,6 @@ const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
 export function GeneralSettings() {
   const { theme, setTheme } = useTheme()
-  const { prefs, setCollapseSubagentsByDefault } = useSidebarPrefs()
   const qc = useQueryClient()
   const pendingPreferences = useMutationState({
     filters: {
@@ -105,10 +97,12 @@ export function GeneralSettings() {
       label: workspace.name,
     })),
   ]
+  const [confirmingArchive, setConfirmingArchive] = useState(false)
   const archiveThreads = useMutation({
     meta: { errorTitle: "Couldn't archive threads" },
     mutationFn: agentsApi.resolveAllThreads,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
+    onSettled: () => setConfirmingArchive(false),
   })
   const supported = notificationsSupported()
   const [enabled, setEnabled] = useState(() => notificationsEnabled())
@@ -139,21 +133,12 @@ export function GeneralSettings() {
           description="Color theme for the dashboard on this device."
           control={
             <Select
-              items={THEMES}
+              aria-label="Theme"
+              options={THEMES}
               value={theme}
-              onValueChange={(v) => v && setTheme(v)}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {THEMES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(v) => v && setTheme(v)}
+              triggerClassName="w-40"
+            />
           }
         />
       </SettingsSection>
@@ -167,24 +152,15 @@ export function GeneralSettings() {
           description="Private threads can use your personal connections and only you can prompt them. Workspace threads are open to everyone. Visibility can't change later."
           control={
             <Select
-              items={VISIBILITIES}
+              aria-label="Default visibility"
+              options={VISIBILITIES}
               value={preferences.data?.default_visibility ?? "private"}
-              onValueChange={(v) =>
+              onChange={(v) =>
                 v && savePreferences.mutate({ default_visibility: v })
               }
               disabled={preferences.isLoading}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {VISIBILITIES.map((v) => (
-                  <SelectItem key={v.value} value={v.value}>
-                    {v.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-40"
+            />
           }
         />
         <SettingsRow
@@ -192,64 +168,35 @@ export function GeneralSettings() {
           description="Preselected in the composer when the chosen repository doesn't belong to another workspace."
           control={
             <Select
-              items={workspaceItems}
+              aria-label="Default workspace"
+              options={workspaceItems}
               value={
                 preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE
               }
-              onValueChange={(v) =>
+              onChange={(v) =>
                 v &&
                 savePreferences.mutate({
                   default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
                 })
               }
               disabled={preferences.isLoading || workspaceOptions.isLoading}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {workspaceItems.map((workspace) => (
-                  <SelectItem key={workspace.value} value={workspace.value}>
-                    {workspace.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-48"
+            />
           }
         />
         <SettingsRow
           label="Follow-up behavior"
-          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message."
           control={
             <Select
-              items={FOLLOW_UP_BEHAVIORS}
+              aria-label="Follow-up behavior"
+              options={FOLLOW_UP_BEHAVIORS}
               value={preferences.data?.follow_up_behavior ?? "steer"}
-              onValueChange={(v) =>
+              onChange={(v) =>
                 v && savePreferences.mutate({ follow_up_behavior: v })
               }
               disabled={preferences.isLoading}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FOLLOW_UP_BEHAVIORS.map((behavior) => (
-                  <SelectItem key={behavior.value} value={behavior.value}>
-                    {behavior.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-        <SettingsRow
-          label="Collapse subagent threads"
-          description="Keep nested subagent threads folded in the sidebar until you expand them."
-          control={
-            <Switch
-              aria-label="Collapse subagent threads"
-              checked={prefs.collapseSubagentsByDefault}
-              onCheckedChange={setCollapseSubagentsByDefault}
+              triggerClassName="w-40"
             />
           }
         />
@@ -269,37 +216,12 @@ export function GeneralSettings() {
             <Switch
               aria-label="Desktop notifications"
               checked={enabled}
-              onCheckedChange={(v) => void toggleNotifications(v)}
+              onChange={(v) => void toggleNotifications(v)}
               disabled={!supported || denied}
             />
           }
         />
       </SettingsSection>
-
-      {typeof window !== "undefined" && window.openSweDesktop && (
-        <SettingsSection title="Desktop app">
-          <SettingsRow
-            label="Local tracing project"
-            description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
-            control={
-              <Input
-                className="w-56"
-                placeholder={
-                  preferences.data?.default_local_tracing_project ??
-                  "Shared cloud project"
-                }
-                defaultValue={preferences.data?.local_tracing_project ?? ""}
-                disabled={preferences.isLoading}
-                onBlur={(event) =>
-                  savePreferences.mutate({
-                    local_tracing_project: event.target.value.trim() || null,
-                  })
-                }
-              />
-            }
-          />
-        </SettingsSection>
-      )}
 
       <SettingsSection title="Data">
         <SettingsRow
@@ -311,24 +233,27 @@ export function GeneralSettings() {
           }
           control={
             <Button
-              size="sm"
-              variant="outline"
+              size="xs"
+              color="secondary"
+              variant="outlined"
               disabled={archiveThreads.isPending}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Archive all your threads? They will remain available in the resolved view."
-                  )
-                ) {
-                  archiveThreads.mutate()
-                }
-              }}
+              onClick={() => setConfirmingArchive(true)}
             >
               {archiveThreads.isPending ? "Archiving…" : "Archive all"}
             </Button>
           }
         />
       </SettingsSection>
+      <ConfirmDialog
+        open={confirmingArchive}
+        onOpenChange={setConfirmingArchive}
+        title="Archive all your threads?"
+        description="They will remain available in the resolved view."
+        confirmLabel="Archive all"
+        pendingLabel="Archiving…"
+        pending={archiveThreads.isPending}
+        onConfirm={() => archiveThreads.mutate()}
+      />
     </>
   )
 }

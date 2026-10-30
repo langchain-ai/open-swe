@@ -29,13 +29,13 @@ from openswe.github.comments import fence_github_comment_body
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.input_messages import Fields
 from openswe.prompts import prompt
-from openswe.webhooks.event_log import LoggedEvent, WebhookSource
+from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, LoggedEvent, WebhookSource
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
-_TRUSTED_GITHUB_BOTS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
 # CI results describe a commit, so they matter even when Open SWE pushed it.
 _CI_EVENT_TYPES = frozenset({"check_run", "check_suite", "workflow_run"})
 _MAX_BODY_CHARS = 8_000
@@ -150,16 +150,10 @@ class EventSummary(BaseModel):
     @property
     def details(self) -> str:
         """Every field the sender controls, for fencing as one block."""
-        lines = [
-            f"{label}: {value}"
-            for label, value in (
-                ("On", self.target),
-                ("From", self.sender),
-                ("Status", self.status),
-                ("Link", self.link),
-            )
-            if value
-        ]
+        fields = Fields(
+            {"On": self.target, "From": self.sender, "Status": self.status, "Link": self.link}
+        ).text()
+        lines = [fields] if fields else []
         if self.body:
             lines.extend(("", self.body[:_MAX_BODY_CHARS]))
         return "\n".join(lines)
@@ -171,6 +165,10 @@ class EventSummary(BaseModel):
             return cls._github(event, _GitHubDelivery.model_validate(payload))
         if event.source == "slack":
             return cls._slack(event, _SlackDelivery.model_validate(payload))
+        if event.source == "deployment":
+            return cls._deployment(event, payload)
+        if event.source == "workspace":
+            return cls._workspace(event, payload)
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod
@@ -197,7 +195,7 @@ class EventSummary(BaseModel):
             link=link,
             status=status,
             body=body or "",
-            trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
+            trusted=event.user_id is not None or sender in INTERNAL_BOT_LOGINS,
             from_open_swe=(
                 sender in OPEN_SWE_GITHUB_LOGINS
                 or (commented is not None and commented.authored_by_app(ENV.GITHUB_APP_ID.get()))
@@ -231,6 +229,36 @@ class EventSummary(BaseModel):
             trusted=event.user_id is not None,
             from_open_swe=bool(own_user) and message.user_id == own_user,
             slack_channel_id=message.channel_id,
+        )
+
+    @classmethod
+    def _deployment(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
+        """A verified deploy. ``from_open_swe`` stays false so a subscription can wake."""
+        target = payload.get("target")
+        commits = payload.get("commits")
+        count = len(commits) if isinstance(commits, list) else 0
+        return cls(
+            source="deployment",
+            event_type=event.event_type,
+            target=target.strip() if isinstance(target, str) else "",
+            status="deployed",
+            body=(
+                "This deploy includes the merge commit the thread subscribed for "
+                f"({count} commits)."
+            ),
+            trusted=True,
+        )
+
+    @classmethod
+    def _workspace(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
+        """Open SWE's own workspace activity, e.g. a snapshot refresh settling."""
+        slug = payload.get("workspace_slug")
+        return cls(
+            source="workspace",
+            event_type=event.event_type,
+            target=slug if isinstance(slug, str) else "",
+            status=event.event_type.partition(".")[2],
+            trusted=True,
         )
 
     @classmethod
@@ -402,7 +430,11 @@ class EventSubscription(Base):
                 select(cls).where(
                     cls.workspace_id == event.workspace_id,
                     ~cls._expired(),
-                    or_(func.cardinality(cls.sources) == 0, cls.sources.contains([event.source])),
+                    cls.sources.contains([event.source])
+                    if event.source in ADMIN_ONLY_SOURCES
+                    else or_(
+                        func.cardinality(cls.sources) == 0, cls.sources.contains([event.source])
+                    ),
                     or_(cls.repository_id.is_(None), cls.repository_id == event.repository_id),
                     or_(
                         cls.pull_request_id.is_(None),
@@ -419,7 +451,9 @@ class EventSubscription(Base):
             return list(rows.unique())
 
     async def sees(self, summary: EventSummary) -> bool:
-        """Only joined non-DM Slack channels reach subscriptions."""
+        """Only admin threads see admin-only sources, and only joined non-DM Slack channels reach any."""
+        if summary.source in ADMIN_ONLY_SOURCES:
+            return self.run_config.get("admin_thread") is True
         if summary.source != "slack":
             return True
         from openswe.slack.channels import SlackChannel

@@ -6,7 +6,8 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
-from openswe.server import get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import plan_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -28,14 +29,8 @@ def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureR
     monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
 
 
-class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
-        self.config = config
-        return self
-
-
 @pytest.mark.asyncio
-async def test_agent_subagent_inherits_profile_model_override_without_explicit_pair() -> None:
+async def test_agent_subagent_uses_workspace_defaults_despite_profile_override() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -44,13 +39,7 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         },
         "metadata": {},
     }
-    main_model = MagicMock(name="main_model")
-    subagent_model = MagicMock(name="subagent_model")
-    captured: dict[str, object] = {}
-
-    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
-        captured.update(kwargs)
-        return _DummyAgent()
+    surface = ToolSurface()
 
     with (
         patch(
@@ -83,26 +72,19 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
             },
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        await plan_agent(config, surface)
 
-    subagents = captured["subagents"]
-    assert isinstance(subagents, list)
-    assert subagents[0]["model"] is subagent_model
-    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-5-5",)
-    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-5-5",)
-    assert make_model.call_args_list[1].kwargs["thinking"] == {
-        "type": "adaptive",
-        "display": "summarized",
-    }
-    assert make_model.call_args_list[1].kwargs["effort"] == "high"
+    assert surface.models is not None
+    assert surface.models.subagent == surface.models.main
+    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
+    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
 
 
 @pytest.mark.asyncio
-async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
+async def test_agent_ignores_disabled_fable_profile() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -111,13 +93,7 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
         },
         "metadata": {},
     }
-    main_model = MagicMock(name="main_model")
-    subagent_model = MagicMock(name="subagent_model")
-    captured: dict[str, object] = {}
-
-    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
-        captured.update(kwargs)
-        return _DummyAgent()
+    surface = ToolSurface()
 
     with (
         patch(
@@ -151,13 +127,12 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
             },
         ),
         patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
+        patch("openswe.server.make_model", return_value=MagicMock()) as make_model,
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        await plan_agent(config, surface)
 
-    # Fable was scrubbed to Opus for both main and subagent; effort preserved.
-    assert make_model.call_args_list[0].args == ("anthropic:claude-opus-5-5",)
-    assert make_model.call_args_list[0].kwargs["effort"] == "high"
-    assert make_model.call_args_list[1].args == ("anthropic:claude-opus-5-5",)
+    assert make_model.call_args_list[0].args == ("openai:gpt-6.1-sol",)
+    assert make_model.call_args_list[0].kwargs["reasoning"]["effort"] == "medium"
+    assert surface.models is not None
+    assert surface.models.subagent == surface.models.main

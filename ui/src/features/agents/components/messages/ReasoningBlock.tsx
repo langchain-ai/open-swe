@@ -1,7 +1,9 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight } from "lucide-react"
 
-import { formatElapsed } from "@/lib/utils"
+import { cn, formatElapsed } from "@/lib/utils"
+import { ElapsedSeconds } from "./ElapsedSeconds"
 
 function reasoningLabel(elapsedMs: number | null): string {
   if (elapsedMs === null) return "Thought"
@@ -45,32 +47,44 @@ export function ReasoningBlock({
   const expanded = isLive || userExpanded
 
   return (
-    <div className="my-1">
-      <button
+    <div className="my-space-1">
+      <Button
+        color="secondary"
+        variant="plain"
+        size="sm"
+        aria-label={isLive ? "Thinking..." : reasoningLabel(elapsedMs)}
         type="button"
         onClick={() => {
           if (!isLive) setUserExpanded((value) => !value)
         }}
-        className="flex items-center gap-1 text-left transition-opacity hover:opacity-90 disabled:cursor-default"
+        className="group/reasoning h-auto justify-start gap-space-1 border-0 px-0 text-left text-inherit focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default disabled:bg-transparent"
         aria-expanded={expanded}
         disabled={isLive}
       >
         {isLive ? (
-          <span className="shimmer-text text-[13px]">Thinking...</span>
+          <>
+            <span className="shimmer-text">Thinking...</span>
+            <ElapsedSeconds />
+          </>
         ) : (
           <>
-            <ChevronRight
-              className={`size-3 shrink-0 text-muted-foreground/65 transition-transform ${expanded ? "rotate-90" : ""}`}
+            <CaretRightIcon
+              size={12}
+              weight="bold"
+              className={cn(
+                "shrink-0 text-icon-tertiary transition-transform duration-fast",
+                expanded && "rotate-90"
+              )}
               aria-hidden
             />
-            <span className="text-[13px] text-muted-foreground">
+            <span className="text-secondary transition-colors duration-normal group-hover/reasoning:text-primary">
               {reasoningLabel(elapsedMs)}
             </span>
           </>
         )}
-      </button>
+      </Button>
       {expanded && trimmed && (
-        <div className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+        <div className="ms-space-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
           {trimmed}
         </div>
       )}

@@ -3,11 +3,10 @@
 from collections.abc import Mapping
 from typing import Any
 
-import langgraph_sdk
-
 from openswe.run_config import RunConfig
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from openswe.utils.thread_reads import read_thread
 
 
 class PrAuthorNotAParticipant(RuntimeError):
@@ -29,7 +28,7 @@ async def _thread_scope(
     thread_id = thread_id or cfg.thread_id
     if not thread_id:
         raise RuntimeError("Cannot resolve credential scope without a thread_id")
-    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    thread = await read_thread(thread_id)
     metadata = thread_metadata(thread)
     visibility = metadata.get("visibility", "public")
     if visibility not in ("public", "private"):
@@ -91,30 +90,20 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
+    if metadata.get("visibility", "public") == "private":
+        return _private_owner_login(cfg, metadata)
     owner = metadata.get("owner_login")
     has_owner = isinstance(owner, str) and bool(owner.strip())
-    shared_user_thread = (
-        metadata.get("visibility", "public") != "private"
-        and metadata.get("owner_type") != "system"
-        and (has_owner or metadata.get("owner_type") == "user")
+    shared_user_thread = metadata.get("owner_type") != "system" and (
+        has_owner or metadata.get("owner_type") == "user"
     )
     if shared_user_thread and (participant := _requested_participant(requested, metadata)):
         return participant
-    if (
-        cfg.background_task_completion
-        and metadata.get("owner_type") != "system"
-        and (
-            metadata.get("visibility") == "private"
-            or metadata.get("owner_type") == "user"
-            or has_owner
-        )
-    ):
+    if shared_user_thread and cfg.background_task_completion:
         raise RuntimeError(
             "Background completion cannot identify the PR requester; pass `author` naming a "
             "thread participant"
         )
-    if metadata.get("visibility", "public") == "private":
-        return _private_owner_login(cfg, metadata)
     if metadata.get("owner_type") == "system":
         return None
     if has_owner:

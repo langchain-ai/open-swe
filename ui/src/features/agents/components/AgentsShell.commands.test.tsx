@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
@@ -52,8 +53,6 @@ const stub = vi.hoisted(() => {
       addProject: fn(),
       removeProject: fn(),
     },
-    localThreads: { data: [] },
-    activity: {},
     session: { data: { login: "octocat" } },
     theme: { toggleTheme: fn() },
   }
@@ -80,16 +79,19 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => stub.noop,
-  useRouterState: () => undefined,
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: {
+      location: { pathname: string; search: Record<string, unknown> }
+    }) => unknown
+  }) => select({ location: { pathname: "/agents/thread-1", search: {} } }),
   useSearch: () => undefined,
   useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
 
 vi.mock("@/lib/session", () => ({ useSession: () => stub.session }))
 vi.mock("@/lib/theme", () => ({ useTheme: () => stub.theme }))
-vi.mock("@/lib/chatRoutes", () => ({
-  useChatRoutes: () => ({ home: "/agents", thread: "/agents/$threadId" }),
-}))
 
 vi.mock("@/features/agents/lib/queries", async (actual) => ({
   ...((await actual()) as object),
@@ -114,14 +116,6 @@ vi.mock("@/features/agents/lib/prChecks", () => ({
 
 vi.mock("@/features/agents/lib/useRunCompletionNotifier", () => ({
   useRunCompletionNotifier: () => {},
-}))
-
-vi.mock("@/features/agents/lib/legacyLocal", async (actual) => ({
-  ...((await actual()) as object),
-  useLegacyLocalThreads: () => stub.localThreads,
-  useLegacyLocalActivity: () => stub.activity,
-  useRefreshLegacyLocalThreads: () => stub.noop,
-  useMarkLegacyLocalThreadViewed: () => stub.noop,
 }))
 
 vi.mock("@/features/agents/lib/desktopProjects", () => ({
@@ -213,16 +207,17 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   const client = new QueryClient()
   render(
     <QueryClientProvider client={client}>
-      <SidebarThreadRow
-        item={cloudSidebarThread(parent)}
-        isActive={false}
-        activeThreadId="worker"
-        pinned={false}
-        archived={false}
-        onDeleteLocal={stub.noop}
-        onTogglePin={stub.noop}
-        onToggleArchived={stub.noop}
-      />
+      <TooltipProvider>
+        <SidebarThreadRow
+          item={cloudSidebarThread(parent)}
+          isActive={false}
+          activeThreadId="worker"
+          pinned={false}
+          archived={false}
+          onTogglePin={stub.noop}
+          onToggleArchived={stub.noop}
+        />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   const workerLink = screen.getByRole("link", { name: /Implement change/ })

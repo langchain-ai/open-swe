@@ -4,23 +4,31 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from tests.conftest import FakeStore
+from openswe.database import postgres
+from openswe.threads.plan_store import (
+    ThreadPlan,
+)
 
 
-async def test_save_plan_rejects_html_outside_plans_dir() -> None:
-    from openswe.tools.save_plan import save_plan
+async def _seed_plan(thread_id: str, value: dict[str, Any]) -> None:
+    async with postgres.session() as session:
+        session.add(ThreadPlan(thread_id=thread_id, value=value))
 
-    result = await save_plan("/workspace/plan.html")
+
+async def test_publish_artifact_rejects_html_outside_plans_dir() -> None:
+    from openswe.tools.publish_artifact import publish_artifact
+
+    result = await publish_artifact("/workspace/plan.html")
     assert result["success"] is False
     assert "/workspace/plans" in result["error"]
 
 
-async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
+async def test_publish_artifact_wraps_a_fragment_with_a_title_from_the_filename(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import importlib
 
-    save_plan_tool = importlib.import_module("openswe.tools.save_plan")
+    publish_artifact_tool = importlib.import_module("openswe.tools.publish_artifact")
 
     saved: dict[str, Any] = {}
 
@@ -42,10 +50,12 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
     monkeypatch.setattr(
         "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
-    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
-    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
+    monkeypatch.setattr(publish_artifact_tool, "get_sandbox_backend", fake_backend)
+    monkeypatch.setattr(publish_artifact_tool, "save_plan_content", fake_save_content)
 
-    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-add-webhook-retries.html")
+    result = await publish_artifact_tool.publish_artifact(
+        artifact_file_path="/workspace/plans/2026-06-29-add-webhook-retries.html"
+    )
 
     assert result["success"] is True
     assert saved["html"].startswith("<!doctype html>")
@@ -78,7 +88,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 
 
 async def test_republished_artifact_drops_legacy_approval(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
@@ -104,7 +114,7 @@ async def test_republished_artifact_drops_legacy_approval(
 
 
 async def test_dismissal_clears_when_artifact_is_republished(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
@@ -125,13 +135,11 @@ async def test_dismissal_clears_when_artifact_is_republished(
 
 @pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])
 async def test_artifact_comments_remain_authorized_without_approval_gates(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, status: str
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, status: str
 ) -> None:
-    from openswe.threads import plan_api, plan_store
+    from openswe.threads import plan_api
 
-    fake_store.seed(
-        plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>", "status": status}
-    )
+    await _seed_plan("t", {"html": "<p>Report</p>", "status": status})
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
@@ -146,11 +154,11 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
 
 
 async def test_submit_artifact_comments_dispatches_only_for_comment_author(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    from openswe.threads import plan_api, plan_store
+    from openswe.threads import plan_api
 
-    fake_store.seed(plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>"})
+    await _seed_plan("t", {"html": "<p>Report</p>"})
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
@@ -173,13 +181,12 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
 
 
 async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
     path = "/workspace/plans/legacy.md"
-    fake_store.seed(
-        plan_store.PLAN_CONTENT_NAMESPACE,
+    await _seed_plan(
         "t",
         {
             "markdown": "# Old plan",
@@ -200,3 +207,34 @@ async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     assert (await plan_api.get_plan("t", author))["markdown"] == "# Updated"
     assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
     write.assert_awaited_once_with("t", "# Updated", plan_file_path=path)
+
+
+async def test_artifact_replies_survive_parent_deletion(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    from openswe.threads import plan_api
+
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
+    )
+    alice = {"sub": "alice"}
+    bob = {"sub": "bob"}
+    parent = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), alice)
+    reply = await plan_api.post_plan_comment(
+        "t", plan_api.CommentBody(body="Follow-on", parent_id=parent["id"]), bob
+    )
+    assert reply["parent_id"] == parent["id"]
+    assert (await plan_api.get_plan_comments("t", alice))["comments"] == [parent, reply]
+    for thread_id, parent_id, status in [("other", parent["id"], 404), ("t", reply["id"], 422)]:
+        with pytest.raises(HTTPException) as exc:
+            await plan_api.post_plan_comment(
+                thread_id, plan_api.CommentBody(body="Invalid reply", parent_id=parent_id), alice
+            )
+        assert exc.value.status_code == status
+    await plan_api.remove_plan_comment("t", parent["id"], alice)
+    assert (await plan_api.get_plan_comments("t", bob))["comments"] == [
+        {**reply, "parent_id": None}
+    ]
+    with pytest.raises(HTTPException) as exc:
+        await plan_api.remove_plan_comment("t", reply["id"], alice)
+    assert exc.value.status_code == 403

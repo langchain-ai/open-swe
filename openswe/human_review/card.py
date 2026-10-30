@@ -6,6 +6,7 @@ signed up to review it on GitHub and where each of them stands.
 
 import json
 
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, slack_mention
 from openswe.slack.blocks import Block, ButtonElement, actions, button, context, escape, section
 from openswe.users import User
@@ -29,7 +30,7 @@ def _button_value(action: str, request: HumanReviewRequest) -> str:
 
 def _label(request: HumanReviewRequest) -> str:
     pr = request.pull_request
-    return f"{pr.owner}/{pr.repo}#{pr.number}"
+    return pr.label
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
@@ -53,28 +54,39 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
     return blocks
 
 
-def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
+async def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
     link = f"<{request.pull_request.url}|{_label(request)}>"
     if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
         return f":mag: *Review requested*  {link}"
-    return f":white_check_mark: *Approved by {_approvers(request, states)}*  {link}"
+    return f":white_check_mark: *Approved by {await _approvers(request, states)}*  {link}"
 
 
-def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
+async def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
     mentions = {r.github_login.lower(): r.slack_mention for r in request.reviewers}
-    return ", ".join(
-        mentions.get(login.lower(), f"@{login}")
-        for login, state in states.items()
-        if state == "APPROVED"
-    )
+    approvers: list[str] = []
+    for login, state in states.items():
+        if state != "APPROVED":
+            continue
+        if login.lower() not in mentions:
+            mentions[login.lower()] = slack_mention(await User.for_login("github", login), login)
+        approvers.append(mentions[login.lower()])
+    return ", ".join(approvers)
 
 
-def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> str:
+def _stats(
+    request: HumanReviewRequest,
+    author: str,
+    requester: str | None,
+    files: list[ChangedFile] | None,
+) -> str:
     pr = request.pull_request
     parts = [f"By {author}"]
-    if pr.additions is not None and pr.deletions is not None:
-        files = f" in {pr.changed_files} files" if pr.changed_files else ""
-        parts.append(f"+{pr.additions} −{pr.deletions}{files}")
+    if files is not None:
+        non_test_files = [file for file in files if not file.is_test]
+        additions = sum(file.additions for file in non_test_files)
+        deletions = sum(file.deletions for file in non_test_files)
+        noun = "file" if len(non_test_files) == 1 else "files"
+        parts.append(f"+{additions} −{deletions} in {len(non_test_files)} non-test {noun}")
     if pr.head_ref and pr.base_ref:
         parts.append(f"`{escape(pr.head_ref)}` → `{escape(pr.base_ref)}`")
     if requester is not None and requester != author:
@@ -91,6 +103,31 @@ def accept_button(request: HumanReviewRequest) -> ButtonElement:
         url=request.pull_request.url,
         style="primary",
     )
+
+
+def decline_button(request: HumanReviewRequest) -> ButtonElement:
+    return button(
+        "Decline",
+        action_id="open_swe_option_select_decline",
+        value=_button_value("decline", request),
+    )
+
+
+def snooze_button(request: HumanReviewRequest) -> ButtonElement:
+    return button(
+        "Snooze",
+        action_id="open_swe_option_select_snooze",
+        value=_button_value("snooze", request),
+    )
+
+
+PICK_BUTTON_IDS = frozenset(
+    {
+        "open_swe_option_select_accept",
+        "open_swe_option_select_decline",
+        "open_swe_option_select_snooze",
+    }
+)
 
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
@@ -111,23 +148,27 @@ def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     ]
 
 
-def open_card(
+async def open_card(
     request: HumanReviewRequest,
     *,
     title: str,
     author: str,
     requester: str | None,
     review_states: dict[str, str],
+    files: list[ChangedFile] | None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open request.
 
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    blocks: list[Block] = [section(f"{_heading(request, review_states)}\n*{escape(title)}*")]
+    blocks: list[Block] = [section(f"{await _heading(request, review_states)}\n*{escape(title)}*")]
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
-    blocks.append(context(_stats(request, author, requester)))
+    blocks.append(context(_stats(request, author, requester, files)))
+    blocks.append(
+        context("Auto-merge enabled" if request.auto_merge else "Manual merge — auto-merge is off")
+    )
     blocks.extend(_reviewers(request, review_states))
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
@@ -135,7 +176,7 @@ def open_card(
     return f"Review requested for {_label(request)}: {title}", blocks
 
 
-def closed_card(
+async def closed_card(
     request: HumanReviewRequest,
     *,
     title: str,
@@ -143,12 +184,15 @@ def closed_card(
     outcome: str,
     review_states: dict[str, str],
 ) -> tuple[str, list[Block]]:
-    """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
-    pr = request.pull_request
-    if outcome == "merged" and (approvers := _approvers(request, review_states)):
-        outcome = f"merged — approved by {approvers}"
-    return f"Review request: {outcome} — {pr.url} — by {author}", [
-        section(
-            f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
-        )
-    ]
+    """A finished or approved request collapses to one line; ``outcome`` is our own mrkdwn."""
+    pull = f"<{request.pull_request.url}|{_label(request)}> {escape(title)} — authored by {author}"
+    approvers = await _approvers(request, review_states)
+    if outcome in ("approved", "merged"):
+        line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
+        if approvers:
+            line += f" — approved by {approvers}"
+        if outcome == "approved" and not request.auto_merge:
+            line += " — awaiting manual merge"
+    else:
+        line = f"Review request: {outcome} — {pull}"
+    return line, [section(line)]

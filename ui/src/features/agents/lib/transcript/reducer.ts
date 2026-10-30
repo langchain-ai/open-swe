@@ -17,7 +17,6 @@
 
 import {
   INTERNAL_TOOLS,
-  mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
@@ -27,7 +26,10 @@ import {
   isSilentSender,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
-import { contextTokensFromUsageMetadata } from "@/features/agents/lib/contextUsage"
+import {
+  type ContextUsage,
+  contextUsageFromUsageMetadata,
+} from "@/features/agents/lib/contextUsage"
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
@@ -63,6 +65,10 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** What a system message's sender is called when its text introduces no name. */
+  senderName?: string
+  /** Invocation an AI message ran under, when the provider reported usage. */
+  invocationId?: string
   createdAt: string
 }
 
@@ -126,8 +132,8 @@ export interface TranscriptState {
    * turns have settled and can no longer change.
    */
   olderCursor: string | null
-  /** Context size the newest AI message reported, for the composer's meter. */
-  contextTokens: number | null
+  /** Context size and model the newest AI message reported, for the composer's meter. */
+  contextUsage: ContextUsage | null
   /** Sender entities parsed out of human message text, rebuilt only when that text changes. */
   entities: ReadonlyMap<string, StructuredEntity>
 }
@@ -179,6 +185,8 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      senderName: row.sender?.display_name ?? undefined,
+      invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
     }
   }
@@ -298,7 +306,7 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     // `snapshot.messages` is ordered by `created_at`, so the last root AI row
     // is the newest one, and its usage is what the composer's meter reads.
     // Subagents report their own context, which is not this conversation's.
-    contextTokens: contextTokensFromUsageMetadata(
+    contextUsage: contextUsageFromUsageMetadata(
       snapshot.messages.findLast(
         (message) => message.role === "ai" && message.namespace.length === 0
       )?.usage
@@ -335,7 +343,7 @@ export function applySnapshot(
   if (!continuous) {
     return {
       ...fresh,
-      contextTokens: fresh.contextTokens ?? state.contextTokens,
+      contextUsage: fresh.contextUsage ?? state.contextUsage,
     }
   }
   const messages = { ...state.messages, ...fresh.messages }
@@ -351,7 +359,7 @@ export function applySnapshot(
     olderCursor: state.olderCursor,
     // A window whose AI messages reported no usage leaves the last known
     // context size in place rather than blanking the composer's meter.
-    contextTokens: fresh.contextTokens ?? state.contextTokens,
+    contextUsage: fresh.contextUsage ?? state.contextUsage,
     entities: collectStructuredEntities(humanTexts(messages)),
   }
 }
@@ -440,6 +448,22 @@ function settledStatus(
 }
 
 /**
+ * A request no run ever took (its start died with the server) that a later
+ * turn has already overtaken. It never runs, so it is not waiting for anything.
+ */
+function isStrandedTurn(
+  state: TranscriptState,
+  turn: TranscriptTurnState
+): boolean {
+  if (turn.state !== "requested" || turn.runId !== null) return false
+  const requestedAt = Date.parse(turn.requestedAt)
+  return Object.values(state.turns).some(
+    (other) =>
+      other.startedAt !== null && Date.parse(other.requestedAt) > requestedAt
+  )
+}
+
+/**
  * Waiting behind the live run. A requested turn is queued once its run exists,
  * and already while another turn is running: the run id only follows the
  * request by a moment, and the row should not change shape in between.
@@ -450,6 +474,7 @@ function isQueuedTurn(
 ): boolean {
   if (turn.state !== "requested") return false
   if (turn.runId !== null) return true
+  if (isStrandedTurn(state, turn)) return false
   return Object.values(state.turns).some(
     (other) => other.turnId !== turn.turnId && other.state === "running"
   )
@@ -527,12 +552,20 @@ function putMessage(
   turn: TranscriptTurnState,
   message: TranscriptMessageState
 ): void {
+  // A message stays in the turn that first recorded it, as the server's
+  // projection keeps it: the run that continues a steered turn opens a turn of
+  // its own with the steered turn's message, which must not show it twice.
+  const recorded = draft.state.messages[message.messageId]
+  const home = (recorded && draft.state.turns[recorded.turnId]) || turn
   draft.state = {
     ...draft.state,
-    messages: { ...draft.state.messages, [message.messageId]: message },
+    messages: {
+      ...draft.state.messages,
+      [message.messageId]: { ...message, turnId: home.turnId },
+    },
   }
-  draft.touched.add(turn.turnId)
-  addItem(draft, turn, { kind: "message", id: message.messageId })
+  draft.touched.add(home.turnId)
+  addItem(draft, home, { kind: "message", id: message.messageId })
   if (message.role !== "human") return
   // Only a human message's own text can declare an entity, and a write that
   // declares none keeps the very same Map: every per-turn render cache keys on
@@ -611,6 +644,7 @@ export function applyEvent(
         namespace: [],
         attachments: payload.attachments,
         senderLogin: payload.sender?.login ?? null,
+        senderName: payload.sender?.display_name ?? undefined,
         createdAt: at,
       })
       break
@@ -691,6 +725,8 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        senderName: payload.sender?.display_name ?? existing?.senderName,
+        invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai" && payload.namespace.length === 0) {
@@ -699,9 +735,9 @@ export function applyEvent(
         // this conversation's, so it never moves the meter. A message the
         // provider reported no usage for leaves the last known size in place
         // rather than blanking the meter.
-        const tokens = contextTokensFromUsageMetadata(payload.usage)
-        if (tokens !== null)
-          draft.state = { ...draft.state, contextTokens: tokens }
+        const usage = contextUsageFromUsageMetadata(payload.usage)
+        if (usage !== null)
+          draft.state = { ...draft.state, contextUsage: usage }
       }
       break
     }
@@ -834,6 +870,38 @@ export function subagentToolCalls(
   return calls
 }
 
+const outputLoaders = new WeakMap<
+  TranscriptToolCallState,
+  () => Promise<string>
+>()
+
+/**
+ * One loader per settled call, sharing one fetch: a call's turn is rebuilt on
+ * every event while it streams, and consumers keyed on the loader's identity
+ * would otherwise fetch the output again each time. A failed fetch is retried
+ * on the next load.
+ */
+function outputLoader(
+  threadId: string,
+  call: TranscriptToolCallState
+): () => Promise<string> {
+  const existing = outputLoaders.get(call)
+  if (existing) return existing
+  let output: Promise<string> | null = null
+  const load = () => {
+    output ??= fetchToolOutput(threadId, call.toolCallId).then(
+      (response) => response.output,
+      (error: unknown) => {
+        output = null
+        throw error
+      }
+    )
+    return output
+  }
+  outputLoaders.set(call, load)
+  return load
+}
+
 function toolChunk(
   threadId: string,
   call: TranscriptToolCallState
@@ -842,6 +910,7 @@ function toolChunk(
   const chunk: ToolExecutionChunk = {
     kind: "tool-execution",
     toolCallId: call.toolCallId,
+    toolName: call.name,
     timestamp: call.startedAt,
     title: toolTitle(call.name, call.input),
     toolKind: kind,
@@ -850,10 +919,8 @@ function toolChunk(
   }
   const output = call.output?.trim()
   if (output) chunk.output = output
-  if (call.hasOutput && !call.outputComplete) {
-    chunk.loadOutput = async () =>
-      (await fetchToolOutput(threadId, call.toolCallId)).output
-  }
+  if (call.hasOutput && !call.outputComplete)
+    chunk.loadOutput = outputLoader(threadId, call)
   const diffData = maybeDiffFromArgs(call.input)
   if (diffData) chunk.diffData = diffData
   // A `task` call owns the namespace of the subagent it spawned, which is what
@@ -862,6 +929,27 @@ function toolChunk(
     chunk.subagentNamespace = [...call.namespace, call.toolCallId]
   }
   return chunk
+}
+
+/**
+ * The tool calls an `eval` call's code made: the transcript records them under
+ * a namespace that ends in the `eval` call's id, as it does a subagent's.
+ */
+function codeCalls(
+  state: TranscriptState,
+  turn: TranscriptTurnState,
+  call: TranscriptToolCallState
+): Array<ToolExecutionChunk> {
+  const namespace = [...call.namespace, call.toolCallId]
+  const calls: Array<ToolExecutionChunk> = []
+  for (const item of turn.items) {
+    if (item.kind !== "tool") continue
+    const nested = state.toolCalls[item.id]
+    if (!nested || !sameNamespace(nested.namespace, namespace)) continue
+    if (INTERNAL_TOOLS.has(nested.name)) continue
+    calls.push(toolChunk(state.threadId, nested))
+  }
+  return calls
 }
 
 /**
@@ -932,9 +1020,10 @@ function buildHumanMessage(
   if (entity?.senderType === "self") return null
   const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
   const text = taskEvent?.content ?? parsed.content
+  const replies = parsed.type === "message" ? parsed.replies : undefined
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
-  if (!chunks.length && !taskEvent) return null
+  if (!chunks.length && !taskEvent && !replies) return null
   return {
     id: row.messageId,
     ...(taskEvent ? { taskEvent } : {}),
@@ -949,9 +1038,12 @@ function buildHumanMessage(
           structuredSenderId: parsed.sender,
           structuredSenderKind: parsed.senderKind,
           structuredSurface: parsed.surface,
+          ...(replies ? { replies } : {}),
           structuredSenderName:
             entity?.displayName ??
-            (entity?.handle ? `@${entity.handle}` : undefined),
+            (entity?.handle ? `@${entity.handle}` : undefined) ??
+            row.senderName,
+          structuredSenderLogin: row.senderLogin ?? undefined,
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
@@ -968,6 +1060,7 @@ interface AgentDraft {
   timestamp: string
   startedAt: string
   turnKey?: string
+  invocationIds: Array<string>
   chunks: Array<Chunk>
 }
 
@@ -1027,12 +1120,20 @@ function turnMessages(
       timestamp: agent.timestamp,
       startedAt: agent.startedAt,
       ...(agent.turnKey ? { turnKey: agent.turnKey } : {}),
-      chunks: mergeTextChunks(agent.chunks),
+      ...(agent.invocationIds.length
+        ? { invocationIds: agent.invocationIds }
+        : {}),
+      chunks: agent.chunks,
     })
     agent = null
   }
 
-  const append = (id: string, timestamp: string, chunks: Array<Chunk>) => {
+  const append = (
+    id: string,
+    timestamp: string,
+    chunks: Array<Chunk>,
+    invocationId?: string
+  ) => {
     if (!chunks.length) return
     if (!agent) {
       agent = {
@@ -1040,11 +1141,14 @@ function turnMessages(
         timestamp,
         startedAt: timestamp,
         turnKey,
+        invocationIds: invocationId ? [invocationId] : [],
         chunks: [...chunks],
       }
       return
     }
     agent.timestamp = timestamp
+    if (invocationId && !agent.invocationIds.includes(invocationId))
+      agent.invocationIds.push(invocationId)
     agent.chunks.push(...chunks)
   }
 
@@ -1057,7 +1161,15 @@ function turnMessages(
         const message = humanMessage(state.threadId, row, state.entities)
         if (!message) continue
         turnKey = row.messageId
-        out.push(message)
+        out.push(
+          turn.state === "failed" && turn.startedAt === null
+            ? {
+                ...message,
+                deliveryStatus: "failed",
+                deliveryError: turn.error ?? undefined,
+              }
+            : message
+        )
         continue
       }
       const chunks: Array<Chunk> = []
@@ -1065,14 +1177,19 @@ function turnMessages(
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
-      if (text) chunks.push({ kind: "text", text })
-      append(row.messageId, row.createdAt, chunks)
+      if (text) chunks.push({ kind: "text", text, timestamp: row.createdAt })
+      append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }
     const call = state.toolCalls[item.id]
     if (!call || !sameNamespace(call.namespace, namespace)) continue
     if (INTERNAL_TOOLS.has(call.name)) continue
-    append(call.toolCallId, call.startedAt, [toolChunk(state.threadId, call)])
+    const chunk = toolChunk(state.threadId, call)
+    if (chunk.toolKind === "code") {
+      const calls = codeCalls(state, turn, call)
+      if (calls.length) chunk.calls = calls
+    }
+    append(call.toolCallId, call.startedAt, [chunk])
   }
   flush()
 
