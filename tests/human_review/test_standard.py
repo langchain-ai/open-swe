@@ -340,8 +340,18 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
             UserIdentity(provider="slack", external_id="U_GRACE", login="grace"),
         ]
     )
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
-    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    pr = PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        author="ada",
+        title="Fix <review> cards",
+        head_ref="review-card",
+        base_ref="main",
+    )
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", tldr="Show the PR author"
+    )
     request.pull_request = pr
 
     @asynccontextmanager
@@ -369,7 +379,8 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(standard, "send_dm_with_location", AsyncMock(return_value=None)) as dm,
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
-        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(standard, "_permalink", AsyncMock(return_value="https://slack.com/card")),
+        patch.object(standard, "dashboard_base_url", return_value="https://openswe.example"),
     ):
         clock.now.return_value = now
         result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
@@ -379,6 +390,22 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
     if allowed:
         github_review.assert_awaited_once()
         dm.assert_awaited_once()
+        assert "authored by @ada" in dm.call_args.args[1]
+        blocks = dm.call_args.kwargs["blocks"]
+        assert "Fix &lt;review&gt; cards" in blocks[0]["text"]["text"]
+        assert blocks[1]["text"]["text"] == ">Show the PR author"
+        assert "By @ada" in blocks[2]["elements"][0]["text"]
+        assert "`review-card` → `main`" in blocks[2]["elements"][0]["text"]
+        details = blocks[3]["text"]["text"]
+        assert "nearby reviewer" in details
+        assert "Accept within 120 minutes" in details
+        assert "https://slack.com/card" in details
+        assert ("Turn off automatic review picks" in details) is (not named)
+        assert [element["text"]["text"] for element in blocks[4]["elements"]] == [
+            "Accept",
+            "Decline",
+            "Snooze",
+        ]
     else:
         assert ("out of office" if out_of_office else "outside working hours") in result.error
         github_review.assert_not_awaited()

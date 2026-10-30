@@ -45,7 +45,13 @@ from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
-from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.card import (
+    accept_button,
+    decline_button,
+    mention,
+    snooze_button,
+    summary_blocks,
+)
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
@@ -791,18 +797,21 @@ async def assign(
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
-        dm_text = (
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
-        )
+        author = await added.author_mention()
+        heading = f"Open SWE picked you to review {label}"
+        details = f"{why.strip()}{deadline}{card}".strip()
         if not replace and (base := dashboard_base_url()):
-            dm_text += f" <{base}/my-settings/agent|Turn off automatic review picks>."
+            details += f" <{base}/my-settings/agent|Turn off automatic review picks>."
+        dm_text = f"{heading} *{escape(pr.title)}* — authored by {author}. {details}"
+        blocks = summary_blocks(added, heading=heading, title=pr.title, author=author)
         origin = added.dm_origin
         sent = await send_dm_with_location(
             user.slack_user_id,
             dm_text,
             blocks=block_payload(
                 [
-                    section(dm_text),
+                    *blocks,
+                    section(details),
                     accept,
                     *await origin_footer(added.thread_id, origin.location if origin else None),
                 ]
