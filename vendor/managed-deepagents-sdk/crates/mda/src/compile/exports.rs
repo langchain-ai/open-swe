@@ -19,6 +19,9 @@ use anyhow::{bail, Context, Result};
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{Declaration, Expression, Statement};
 
+use clap::ValueEnum;
+
+use crate::channel::ChannelKind;
 use crate::project::{Language, Project};
 use crate::python_extract::{run_python_extractor, scripts};
 use crate::typescript::{
@@ -178,6 +181,21 @@ pub(super) fn scan_exported_channels(project: &Project) -> Result<ChannelScan> {
         needs_public_url,
         providers,
     })
+}
+
+/// One build warning per declared experimental channel provider.
+pub(super) fn experimental_channel_warnings(providers: &BTreeSet<String>) -> Vec<String> {
+    ChannelKind::value_variants()
+        .iter()
+        .filter(|kind| kind.is_experimental() && providers.contains(kind.command()))
+        .map(|kind| {
+            format!(
+                "the {} channel (`channels.{}`) is experimental and may change in a minor release",
+                kind.label(),
+                kind.command()
+            )
+        })
+        .collect()
 }
 
 /// Whether any channel declares Events ingress that needs a public HTTPS URL
@@ -600,6 +618,19 @@ mod tests {
             "channels/slack.ts",
         )
         .unwrap());
+    }
+
+    #[test]
+    fn warns_only_for_experimental_channel_providers() {
+        let providers = BTreeSet::from(["github", "linear", "slack"].map(String::from));
+        assert_eq!(
+            experimental_channel_warnings(&providers),
+            [
+                "the GitHub channel (`channels.github`) is experimental and may change in a minor release",
+                "the Linear channel (`channels.linear`) is experimental and may change in a minor release",
+            ]
+        );
+        assert!(experimental_channel_warnings(&BTreeSet::from(["slack".to_string()])).is_empty());
     }
 
     #[test]

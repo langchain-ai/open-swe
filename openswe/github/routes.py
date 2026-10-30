@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Response
 
+from openswe.github import forwarding
 from openswe.github import webhook as service
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
@@ -14,6 +15,14 @@ from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
+
+
+async def _start_issue_run(request: common.Request, body: bytes) -> None:
+    """Hand an issue mention to MDA's GitHub channel, which owns the issue's conversation.
+
+    The channel asks ``/github/channel/events`` what to start.
+    """
+    await forwarding.queue_forward(body, request.headers)
 
 
 async def _launch_automations(
@@ -227,7 +236,7 @@ async def github_webhook(
             return gate_rejection
 
         common.logger.info("Accepted GitHub issue webhook, scheduling background task")
-        background_tasks.add_task(service.process_github_issue, payload, event_type)
+        await _start_issue_run(request, body)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     action = payload.get("action", "")
@@ -305,7 +314,7 @@ async def github_webhook(
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 
     if is_issue_comment:
-        background_tasks.add_task(service.process_github_issue, payload, event_type)
+        await _start_issue_run(request, body)
         return {"status": "accepted", "message": "Processing GitHub issue comment event"}
 
     common.logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)

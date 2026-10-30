@@ -56,10 +56,10 @@ pub(crate) use trigger_server::TransientSetupError;
 pub(crate) use trigger_server::{
     is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
     ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
-    SlackCustomerApp, SlackManager, SlackTriggerMode,
+    SlackCustomerApp, SlackManager, SlackTriggerMode, TriggerChannel,
 };
-pub(crate) use workspaces::AuthIdentity;
 pub use workspaces::DeployTarget;
+pub(crate) use workspaces::{AuthIdentity, KeyCheck};
 
 pub(crate) use login::{
     is_cli_session_api_key, note_session_api_key, resolve_login_api_url, ApiKey, Login,
@@ -245,21 +245,24 @@ pub struct Secret {
     pub value: String,
 }
 
-/// Deployment type accepted by `mda deploy --deployment-type` and forwarded to
-/// the LangSmith host backend.
+/// Deployment type accepted by `mda deploy --deployment-type`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum DeploymentType {
     #[default]
+    Serverless,
+    #[value(alias = "prod")]
+    Dedicated,
+    #[value(hide = true)]
     Dev,
-    Prod,
 }
 
 impl DeploymentType {
     /// Wire value sent to the LangSmith host backend.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Serverless => "dev_zero",
+            Self::Dedicated => "prod",
             Self::Dev => "dev",
-            Self::Prod => "prod",
         }
     }
 }
@@ -438,12 +441,12 @@ impl Client {
 
     /// The headers that authenticate a request as this client, for senders
     /// with their own HTTP stack.
-    pub(crate) fn auth_headers(&self) -> Result<Vec<(&'static str, String)>> {
+    pub(crate) fn auth_headers(&self) -> Vec<(&'static str, String)> {
         let mut headers = vec![("X-Api-Key", self.api_key().to_string())];
         if let Some(tenant) = &self.tenant_id {
             headers.push((TENANT_HEADER, tenant.clone()));
         }
-        Ok(headers)
+        headers
     }
 
     /// Perform a request against `base_url` and decode the JSON response (or

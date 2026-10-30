@@ -81,7 +81,13 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
     if blueprint.channels.contains(&InitChannel::GitHub) {
         entries.push((
             format!("channels/github.{ext}"),
-            "GitHub channel (GitHub App set up on deploy)".to_string(),
+            "GitHub channel, experimental (GitHub App set up on deploy)".to_string(),
+        ));
+    }
+    if blueprint.channels.contains(&InitChannel::Linear) {
+        entries.push((
+            format!("channels/linear.{ext}"),
+            "Linear channel, experimental (Linear app set up on deploy)".to_string(),
         ));
     }
     entries.extend(
@@ -149,10 +155,13 @@ This copies your files verbatim, generates a managed entry module, and writes a
 deployable build (including `langgraph.json`) to `.mda/build`. The CLI uploads
 that build to LangSmith to run your agent on the managed runtime.
 
+The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
+for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+
 Common options:
 
 ```bash
-mda deploy --name {name}-dev --deployment-type dev
+mda deploy --name {name}-dev --deployment-type serverless
 mda deploy --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy --no-wait
 ```
@@ -193,6 +202,14 @@ secrets. Provider keys must be in `.env` or configured as LangSmith workspace
 secrets — a value exported in your shell is not read. Set
 `LANGSMITH_WORKSPACE_ID` or pass `--workspace-id` if your LangSmith API key
 requires a workspace selection.
+
+To keep separate settings per environment, pass `--env-file` to `mda dev`,
+`mda chat`, `mda deploy`, `mda delete`, `mda logs` or `mda connections` in
+place of `.env`:
+
+```bash
+mda deploy --agent-environment staging --env-file .env.staging
+```
 "#
     )
 }
