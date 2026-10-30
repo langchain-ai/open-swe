@@ -10,10 +10,14 @@ import langgraph_sdk
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
+from runtime_api.catalog import McpServerSpec
+from runtime_api.connections import ConnectionRef
 
+from openswe.agent_api.connections import ACTING_USER_KEY
 from openswe.agent_api.loop import ModelChoices
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.mcp.runtime import MCPTools
 from openswe.middleware.model_selection import RouteSelection
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -46,7 +50,11 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     saved_thread_scope["visibility"] = "public"
     config = _base_config()
     config["configurable"]["source"] = "dashboard"
-    with patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]) as mcps:
+    with patch(
+        "openswe.server._mcp_tools_for",
+        new_callable=AsyncMock,
+        return_value=MCPTools(),
+    ) as mcps:
         captured = await _plan_agent(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
     assert "/skills/" not in captured["backend"].routes
@@ -93,6 +101,14 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert "Do it." in personal.content
     # The runtime answers reads of skills itself; the files API serves none of them.
     assert not set(surface.skill_sources) & set(surface.backend_paths)
+
+
+@pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])
+async def test_monitor_is_available_without_opt_in(profile: dict[str, object] | None) -> None:
+    captured = await _plan_agent(profile=profile)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert "monitor" in {_registered_tool_name(tool) for tool in tools}
 
 
 async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
@@ -167,6 +183,50 @@ async def test_unknown_scope_omits_workspace_and_personal_mcps():
     ):
         await _plan_agent()
     mcps.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("background", "attributed", "acting", "personal"),
+    [
+        (False, "OctoCat", True, True),
+        # A background task's completion runs for no person: on a channel's thread as MDA's
+        # channel service, which reads no user connections, and elsewhere as the backend's
+        # own key, which every such run shares: one person's grant would reach them all.
+        (True, None, False, False),
+        (False, None, False, False),
+        (False, "someone-else", True, False),
+        # A wakeup attributed to its owner that they didn't start acts as no one.
+        (False, "OctoCat", False, False),
+    ],
+)
+async def test_a_personal_mda_mcp_server_goes_only_to_a_run_that_acts_for_its_owner(
+    background: bool, attributed: str | None, acting: bool, personal: bool
+) -> None:
+    def server(name: str, owner: Literal["agent", "user"]) -> McpServerSpec:
+        return McpServerSpec(
+            name=name,
+            url=f"https://{name}.example/mcp",
+            transport="streamable_http",
+            tools={"search": f"mcp_{name}_search"},
+            connection=ConnectionRef(slug=f"open-swe-mcp-{name}", owner=owner),
+        )
+
+    config = _base_config()
+    config["configurable"]["background_task_completion"] = background
+    if attributed is not None:
+        config["metadata"] = {"ls_attribution_identifier": attributed}
+    if acting:
+        config["metadata"] = {**config["metadata"], ACTING_USER_KEY: "user-1"}
+    loaded = MCPTools(runtime_servers=[server("shared", "agent"), server("own", "user")])
+    with patch(
+        "openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=loaded
+    ) as mcps:
+        captured = await _plan_agent(config)
+    # The private thread's owner started it, so the personal tier loads either way.
+    mcps.assert_awaited_once_with("octocat", ANY, ANY)
+    surface = cast(ToolSurface, captured["surface"])
+    expected = ["shared", "own"] if personal else ["shared"]
+    assert [server.name for server in surface.mcp_servers] == expected
 
 
 def _base_config() -> RunnableConfig:

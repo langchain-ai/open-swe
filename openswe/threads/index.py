@@ -7,7 +7,7 @@ to the thread's runtimes. Runs, checkpoints and streams stay with the runtime.
 
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final, Literal, Self, get_args
 from uuid import uuid7
 
@@ -392,6 +392,88 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
             .first()
         )
     return None if row is None else IndexedThread.from_row(row)
+
+
+async def put_entry(
+    thread_id: str, key: str, entry: str, value: JsonValue, *, expired_before: float
+) -> None:
+    """Set ``metadata[key][entry]`` in one statement, so concurrent puts and takes keep
+    each other's entries; drops the entries under ``key`` whose ``at`` is before
+    ``expired_before``."""
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE thread_index SET metadata = metadata || jsonb_build_object("
+                "CAST(:key AS text), COALESCE((SELECT jsonb_object_agg(kept.key, kept.value) "
+                "FROM jsonb_each(CASE WHEN jsonb_typeof(metadata -> CAST(:key AS text)) = 'object' "
+                "THEN metadata -> CAST(:key AS text) ELSE '{}'::jsonb END) AS kept "
+                "WHERE CASE WHEN jsonb_typeof(kept.value -> 'at') = 'number' "
+                "THEN CAST(kept.value ->> 'at' AS double precision) >= :expired_before "
+                "ELSE false END), '{}'::jsonb) "
+                "|| jsonb_build_object(CAST(:entry AS text), CAST(:value AS jsonb))), "
+                "updated_at = clock_timestamp() WHERE thread_id = :thread_id"
+            ),
+            {
+                "thread_id": thread_id,
+                "key": key,
+                "entry": entry,
+                "value": json.dumps(value),
+                "expired_before": expired_before,
+            },
+        )
+
+
+async def take_entry(thread_id: str, key: str, entry: str) -> JsonValue | None:
+    """Remove ``metadata[key][entry]`` and return it, or ``None`` when it isn't there;
+    one taker gets it, however many ask at once."""
+    async with transaction() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "WITH taken AS (SELECT thread_id, "
+                    "metadata -> CAST(:key AS text) -> CAST(:entry AS text) AS value "
+                    "FROM thread_index WHERE thread_id = :thread_id FOR UPDATE) "
+                    "UPDATE thread_index SET metadata = thread_index.metadata "
+                    "#- CAST(ARRAY[CAST(:key AS text), CAST(:entry AS text)] AS text[]), "
+                    "updated_at = clock_timestamp() FROM taken "
+                    "WHERE thread_index.thread_id = taken.thread_id AND taken.value IS NOT NULL "
+                    "RETURNING taken.value"
+                ),
+                {"thread_id": thread_id, "key": key, "entry": entry},
+            )
+        ).first()
+    if row is None:
+        return None
+    value = row[0]
+    return json.loads(value) if isinstance(value, str) else value
+
+
+async def entries_between(
+    key: str, *, after: float, before: float, limit: int = 200
+) -> list[tuple[str, str]]:
+    """``(thread_id, entry)`` for each ``metadata[key][entry]`` whose ``at`` falls between
+    ``after`` and ``before``, oldest first; only threads updated since ``after`` hold one."""
+    async with transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT thread_index.thread_id, entry.key FROM thread_index "
+                "CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof("
+                "thread_index.metadata -> CAST(:key AS text)) = 'object' "
+                "THEN thread_index.metadata -> CAST(:key AS text) ELSE '{}'::jsonb END) AS entry "
+                "WHERE thread_index.updated_at >= :since "
+                "AND jsonb_typeof(entry.value -> 'at') = 'number' "
+                "AND CAST(entry.value ->> 'at' AS double precision) BETWEEN :after AND :before "
+                "ORDER BY CAST(entry.value ->> 'at' AS double precision) LIMIT :limit"
+            ),
+            {
+                "key": key,
+                "since": datetime.fromtimestamp(after, UTC),
+                "after": after,
+                "before": before,
+                "limit": limit,
+            },
+        )
+        return [(str(thread_id), str(entry)) for thread_id, entry in rows]
 
 
 async def set_status(thread_id: str, status: ThreadStatus) -> None:

@@ -1,4 +1,4 @@
-This run was triggered from Linear.
-- Use the configured Linear MCP tools for essential questions, progress updates, plan-review links, and the final outcome.
+This run was triggered from a Linear agent session.
+- Your final response is posted to the session as your answer; write it for the person who asked.
+- Use the configured Linear MCP tools only to read the issue and to make changes the task asks for, such as its state or labels; don't post comments to answer.
 - Load only the Linear MCP tools needed for the task before calling them.
-- For information-only requests, put the complete answer in the Linear comment and do not duplicate it in the final assistant response.

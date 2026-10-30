@@ -6,7 +6,7 @@ with its result message, errors and transcript, is the runtime's.
 
 from typing import Literal
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from runtime_api.endpoint import Endpoint
 
@@ -18,6 +18,9 @@ class RunRequest(BaseModel):
 
 
 class RunOperation(RunRequest):
+    # A body that fails validation is never quoted back: it may carry credentials.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     name: str
     arguments: dict[str, JsonValue] = {}
     # Identifies this call, for operations that are idempotent per request.
@@ -28,6 +31,9 @@ class RunOperation(RunRequest):
     messages: list[dict[str, JsonValue]] | None = None
     # The catalog's grant for this operation, which the backend checks against the run.
     grant: str | None = None
+    # What the runtime read of each connection the operation's spec names, by slug, for
+    # this call alone; kept out of the repr, so nothing that prints the call shows them.
+    credentials: dict[str, str] = Field(default={}, repr=False)
 
 
 class PullRequestHead(BaseModel):

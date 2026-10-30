@@ -3,7 +3,6 @@ import { test, expect } from "@playwright/test";
 import {
   SAME_USER,
   dismissOnboardingIfShown,
-  enableMonitors,
   loginAs,
 } from "./helpers/dashboard";
 
@@ -16,7 +15,6 @@ test.describe("background work panel (real dashboard UI)", () => {
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await loginAs(page, SAME_USER);
-    await enableMonitors(page);
     await page.goto("/mock/slack");
     await page.locator("#reset").click();
     await page

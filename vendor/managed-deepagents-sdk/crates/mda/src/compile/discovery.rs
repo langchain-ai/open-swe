@@ -153,6 +153,42 @@ pub(super) fn find_channel_entries(project: &Project) -> Vec<PathBuf> {
     find_plugin_entries(project, "channels")
 }
 
+/// How a channel module declares a Slack channel, in either SDK.
+const SLACK_CHANNEL_CALLS: [&str; 3] = ["channels.slack(", "slackChannel(", "slack_channel("];
+
+/// Whether a channel module calls the SDK's Slack constructor, read from source
+/// so preflights can run before compile. Line comments are skipped, so a
+/// commented-out call does not count. A miss is caught once compile emits the
+/// channel requirements.
+pub(crate) fn declares_slack_channel(project: &Project) -> Result<bool> {
+    for entry in find_channel_entries(project) {
+        let path = project.root.join(&entry);
+        let source = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let calls_slack = source.lines().any(|line| {
+            let code = line.trim_start();
+            !code.starts_with("//")
+                && !code.starts_with('#')
+                && SLACK_CHANNEL_CALLS.iter().any(|call| calls(code, call))
+        });
+        if calls_slack {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether `code` contains `call` as a whole name, so `slack_channel(` is not
+/// found inside `post_to_slack_channel(`.
+fn calls(code: &str, call: &str) -> bool {
+    code.match_indices(call).any(|(at, _)| {
+        !code[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|before| before.is_alphanumeric() || before == '_' || before == '$')
+    })
+}
+
 /// Plugin modules directly under the top-level `directory`, sorted by path.
 fn find_plugin_entries(project: &Project, directory: &str) -> Vec<PathBuf> {
     let mut entries: Vec<PathBuf> = project
@@ -367,6 +403,71 @@ mod tests {
             find_mcp_entry(&project),
             Some(PathBuf::from("tools/mcp.ts"))
         );
+    }
+
+    #[test]
+    fn a_slack_channel_is_found_in_either_sdk() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("channels")).unwrap();
+        let cases = [
+            (
+                "channels/slack.py",
+                "channel = channels.slack(name=\"Bot\")",
+                true,
+            ),
+            (
+                "channels/bot.ts",
+                "export const channel = channels.slack({",
+                true,
+            ),
+            (
+                "channels/bot.ts",
+                "export const channel = slackChannel({",
+                true,
+            ),
+            (
+                "channels/github.ts",
+                "export const channel = channels.github({",
+                false,
+            ),
+            (
+                "channels/bot.ts",
+                "// export const channel = channels.slack({",
+                false,
+            ),
+            (
+                "channels/bot.py",
+                "# channel = channels.slack(name=\"Bot\")",
+                false,
+            ),
+            (
+                "channels/bot.py",
+                "channel = slack_channel(name=\"Bot\")",
+                true,
+            ),
+            ("channels/bot.py", "post_to_slack_channel(\"hi\")", false),
+            ("channels/bot.ts", "const x = mySlackChannel({", false),
+        ];
+
+        for (file, source, expected) in cases {
+            fs::write(root.path().join(file), source).unwrap();
+            let project = Project {
+                root: root.path().to_path_buf(),
+                language: if file.ends_with(".py") {
+                    Language::Python
+                } else {
+                    Language::TypeScript
+                },
+                agent_file: PathBuf::from("agent.ts"),
+                files: vec![PathBuf::from(file)],
+            };
+
+            assert_eq!(
+                declares_slack_channel(&project).unwrap(),
+                expected,
+                "{file}"
+            );
+        }
     }
 
     #[test]

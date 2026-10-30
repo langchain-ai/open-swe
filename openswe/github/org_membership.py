@@ -23,7 +23,11 @@ OPEN_SWE_GITHUB_LOGINS: frozenset[str] = frozenset(
 )
 INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
     OPEN_SWE_GITHUB_LOGINS
-    | {login.strip() for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",") if login.strip()}
+    | {
+        login.strip().lower()
+        for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",")
+        if login.strip()
+    }
 )
 
 
