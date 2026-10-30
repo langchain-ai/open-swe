@@ -1,6 +1,7 @@
 """Structured detail and coarse classification for provider exceptions."""
 
 import json
+import re
 import traceback
 from typing import Any
 
@@ -33,9 +34,26 @@ _ERROR_TYPE_CODES = {
 }
 
 
+# A backend call that failed on MDA, as Open SWE's runtime names it (``mda/rt/backend.py``):
+# ``<call> failed: <ErrorClass>: <message>``.
+_BACKEND_CALL_FAILURE = re.compile(r"\A\S+ failed: (\w+)(?::|\Z)")
+# The causes a failed backend call can name. A class like ``InternalServerError`` is the
+# backend's own 500 there, not the model provider's.
+_BACKEND_CALL_CODES = frozenset({"sandbox_unreachable", "backend_interrupted"})
+
+
 def code_for_error_type(error_type: str | None) -> str | None:
     """Failure code for a bare exception class name."""
     return _ERROR_TYPE_CODES.get(error_type) if error_type else None
+
+
+def code_for_failure(error_type: str | None, message: object = None) -> str | None:
+    """Failure code for a run's error, looking inside a backend call that failed on MDA."""
+    if error_type == "BackendCallError" and isinstance(message, str):
+        match = _BACKEND_CALL_FAILURE.match(message)
+        code = code_for_error_type(match.group(1)) if match else None
+        return code if code in _BACKEND_CALL_CODES else None
+    return code_for_error_type(error_type)
 
 
 def classify_exception(exc: BaseException) -> str | None:
