@@ -397,8 +397,6 @@ def _worker_metadata(
             GITHUB_TOKEN_REPOSITORIES_KEY,
             PARTICIPANT_LOGINS_KEY,
             PARTICIPANT_EMAILS_KEY,
-            # MDA creates a channel conversation's workers as that conversation's own,
-            # so the backend acts on them in it, as on the coordinator.
             CHANNEL_METADATA_KEY,
         )
         if key in values
