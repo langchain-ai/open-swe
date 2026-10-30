@@ -926,6 +926,8 @@ Supported keys:
   `workflow_run.completed`. `push` and `status` have no action, so their key is
   the event name. A CI event continues a pull request's conversation when it
   ran for exactly one pull request.
+- Merge queue: `merge_group.checks_requested`, `merge_group.destroyed`. A
+  merge group belongs to no conversation, so each delivery gets its own thread.
 
 GitHub sends no event for a mention, so each event lists the handles the
 text it wrote mentions in `event.mentions`: the body of a new or edited
@@ -965,7 +967,11 @@ is application code; incoming webhook payloads are validated at runtime.
 
 Signatures are verified against the raw bytes. Ping returns 200; other valid
 receipts return 202. An unconfigured event or the App's own activity starts
-nothing. The request awaits the configured callback and run creation before
+nothing. The App's own activity is what the agent does with the App's token,
+such as its comments, its pushes or a pull request it opened; set
+`include_own_events=True` to hand those to handlers too, with `event.from_app`
+set. A handler that answers comments or reviews then skips `event.from_app`,
+or the agent answers itself. The request awaits the configured callback and run creation before
 acknowledgment (an endpoint's is asked after; see "Asking your service what to
 start"); synchronous and async callbacks are supported. A handler returns
 what `agent.invoke` takes: a nonblank string (one user message), a message such
@@ -983,7 +989,10 @@ The handler's second argument is the conversation's `thread`: `thread.id` is
 the thread the run starts on, for context that names it, such as a token your
 backend signs for the thread.
 `None` skips without a thread or run.
-Other results and callback failures are safely logged and start nothing.
+Other results are safely logged and start nothing. A handler that raises fails
+the delivery: MDA logs the error's type only and answers GitHub with an error, so
+the delivery shows as failed in the App's settings, to redeliver. Nothing
+started for it, so the redelivery asks the handler again.
 
 Each issue or pull request has one thread, so the agent keeps the conversation:
 an issue, its comments, and a pull request with its reviews and review comments
@@ -991,7 +1000,38 @@ continue the same thread, as does a workflow run for exactly one pull request.
 Other events get a thread of their own. A redelivered webhook starts nothing,
 because each thread runs a delivery once. A comment that arrives while the agent
 is still working waits for that run to finish, so it never skips a decision the
-run stops for. There is no automatic retry.
+run stops for. GitHub never redelivers on its own.
+
+A handler may instead return a list of `(input, options)` to start several
+runs for one event, on threads it chooses (GitHub, Linear and HTTP channels):
+
+```python
+def on_comment(event, thread):
+    return [
+        # The issue's conversation; this run's answer isn't posted.
+        (prompt, {"reply": "none"}),
+        # A fresh thread, deleted once the run ends; its answer posts on the issue.
+        (triage, {
+            "thread": {"mode": "ephemeral"},
+            "deliver_to": {"channel": "github", "to": {"type": "current_thread"}},
+        }),
+        # A thread your service keeps across events, by its UUID.
+        (plan, {"thread": {"mode": "persistent", "id": plan_thread_id},
+                "multitask_strategy": "interrupt"}),
+    ]
+```
+
+`thread` takes what `define_schedule` does. At most one run may omit it and
+start on the event's conversation; only that run may set `reply`, and only a
+run with `thread` may set `deliver_to`, for now to the event's own conversation
+(`current_thread`). `multitask_strategy` overrides the channel's for one run.
+A persistent id must be a UUID; which ids an event may reach is yours to
+check. The handler is asked once per delivery, before any thread is read, and
+not at all once the conversation has seen the delivery. While the conversation
+waits on a decision, the handler is still asked (on GitHub with
+`thread.interrupted` set): its runs on other threads start, and a run on the
+conversation is skipped, with the usual waiting notice. An empty list starts
+nothing.
 
 Handlers can call GitHub with a client of your choice and the App's installation
 token from `await connections.get("mda/github-token", {"type": "agent"})`, which
@@ -1175,6 +1215,11 @@ LangSmith Studio, where the decision is made, also when Studio resumed it;
 replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
+
+A handler that raises fails the delivery, and Linear sends it again (after a
+minute, an hour and six hours), asking the handler again; the error is logged by
+type only. In an agent session it doesn't: the session hears at once that
+something went wrong, since its author waits.
 
 `app` also names the app deploy asks the admin to create: `name` (2-80
 characters, without "Linear"; defaults to the agent's name), `description`,
