@@ -107,16 +107,38 @@ async def test_a_review_run_leaves_its_lost_sandbox_to_its_own_failure_notice() 
 
 @pytest.mark.parametrize(
     ("assistant_id", "notified"),
-    [("reviewer", False), ("review-scout", False), ("agent", True), (None, True)],
+    [("reviewer", False), ("review-scout", False), ("agent", True)],
 )
+@pytest.mark.parametrize("token_run", [False, True])
 async def test_only_a_review_skips_the_lost_sandbox_notice(
-    assistant_id: str | None, notified: bool
+    assistant_id: str, notified: bool, token_run: bool
 ) -> None:
-    from openswe.agent_api import graph
+    from runtime_api.loop import SandboxGone
 
+    from openswe.agent_api import graph
+    from openswe.agent_api.tokens import RemoteRun
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    if token_run:
+        run = graph.TokenRun(
+            graph.RemoteGraph(assistant_id, AsyncMock()),
+            RemoteRun(
+                thread_id="thread-1", assistant_id=assistant_id, configurable={}, expires_at=0
+            ),
+            "run-1",
+        )
+    else:
+        run = graph.RunSession(
+            ToolSurface(), _CONFIG, None, started_here=True, assistant_id=assistant_id
+        )
     with patch.object(
         graph, "post_sandbox_unreachable_notification", new_callable=AsyncMock
     ) as notify:
-        await graph._tell_sandbox_gone(_CONFIG, assistant_id, sandbox_id="sb-dead")
+        await run.sandbox_unreachable(SandboxGone(sandbox_id="sb-dead", reason="Image pull failed"))
 
-    assert notify.await_count == (1 if notified else 0)
+    if notified:
+        notify.assert_awaited_once_with(
+            run.config, sandbox_id="sb-dead", reason="Image pull failed"
+        )
+    else:
+        notify.assert_not_awaited()
