@@ -442,7 +442,7 @@ test.describe("threads workspace", () => {
       await page.reload();
       await expect(row).toBeVisible();
       await expect(sidebar.getByRole("tab")).toHaveCount(0);
-      await page.goto("/agents/chat");
+      await page.goto(`/agents/chat?chat=${THREAD_IDS.ready}`);
       await expect(page).toHaveURL(/\/agents\/?$/);
     } finally {
       const restored = await page.request.put("/dashboard/api/profile", {
