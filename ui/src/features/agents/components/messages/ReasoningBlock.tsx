@@ -19,7 +19,9 @@ function thoughtPreview(text: string): string {
   const firstLine = text.split("\n").find((line) => line.trim()) ?? ""
   return firstLine
     .replace(/^\s*#+\s*/, "")
-    .replace(/[*_`]/g, "")
+    .replace(/[*`]/g, "")
+    // Underscores are emphasis only at a word edge; inside a name they are the name.
+    .replace(/(^|\W)_+|_+(?=\W|$)/g, "$1")
     .trim()
     .slice(0, MAX_PREVIEW_LENGTH)
 }

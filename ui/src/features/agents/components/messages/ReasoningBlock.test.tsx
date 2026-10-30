@@ -23,4 +23,19 @@ describe("ReasoningBlock", () => {
 
     expect(screen.getByText(/The image looks stale/)).toBeTruthy()
   })
+
+  it("keeps underscores that are part of a name", () => {
+    render(
+      <ReasoningBlock
+        isLive={false}
+        text="Rename `reasoning_label` to _thought_preview_"
+      />
+    )
+
+    expect(
+      screen.getByRole("button", {
+        name: "Rename reasoning_label to thought_preview",
+      })
+    ).toBeTruthy()
+  })
 })
