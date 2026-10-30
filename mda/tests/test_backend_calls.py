@@ -61,7 +61,7 @@ from managed_deepagents import (
     shared_factory,
 )
 from managed_deepagents._run_input import ManagedTurnTracer
-from managed_deepagents.runtime import compile_managed_agent_async
+from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
     BackendCallError,
@@ -384,6 +384,66 @@ async def test_managed_traces_keep_the_requested_project_without_mirroring(
                 assert root["reference_example_id"] == example_id
                 assert root["_replica_auths"][0].api_key == "synthetic-replica-key"
     assert parent.replicas == replicas
+
+
+@pytest.mark.parametrize(
+    "replicas",
+    [
+        [],
+        [{"project_name": "deployment"}],
+        [{"project_name": "canonical"}, {"project_name": "deployment"}],
+    ],
+)
+async def test_async_worker_keeps_its_coordinators_requested_project(
+    monkeypatch: pytest.MonkeyPatch, replicas: list[WriteReplica]
+) -> None:
+    from managed_deepagents.runtime import _parent_trace
+
+    monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    launch_client = MagicMock()
+    launch_client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
+    launch_client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
+    traced = MagicMock(spec=Client)
+    monkeypatch.setattr("langsmith.run_trees.get_cached_client", lambda **kwargs: traced)
+    with tracing_context(enabled=True, client=traced, project_name="deployment", replicas=replicas):
+        await _launch_worker(monkeypatch, launch_client, project="canonical")
+    assert launch_client.runs.create.await_args is not None
+    headers = launch_client.runs.create.await_args.kwargs["headers"]
+    parent = RunTree.from_headers(headers)
+    assert parent is not None
+    assert parent.session_name == "canonical"
+    wait_for_all_tracers()
+    coordinator_spans = [call.kwargs for call in traced.create_run.call_args_list]
+    assert {span["session_name"] for span in coordinator_spans} == {"canonical"}
+    assert any(span["id"] == parent.id for span in coordinator_spans)
+    worker_config: ManagedRunConfig = {
+        "configurable": {
+            "langsmith-trace": headers["langsmith-trace"],
+            "langsmith-project": parent.session_name,
+            "langsmith-metadata": parent.metadata,
+        }
+    }
+    worker = await compile_managed_agent_async(
+        define_deep_agent(
+            name="worker", model=FakeListChatModel(responses=["done"]), replicate_traces=False
+        ),
+        worker_config,
+        report_telemetry=False,
+    )
+    traced.reset_mock()
+    with (
+        tracing_context(enabled=True, client=traced, project_name="deployment", replicas=replicas),
+        _parent_trace(worker_config),
+    ):
+        await worker.ainvoke({"messages": [("user", "work")]}, {"run_name": "worker"})
+    wait_for_all_tracers()
+    spans = [call.kwargs for call in traced.create_run.call_args_list]
+    assert spans
+    assert {span["session_name"] for span in spans} == {"canonical"}
+    [root] = [span for span in spans if span["name"] == "worker"]
+    assert root["parent_run_id"] == parent.id
+    assert all(span["trace_id"] == parent.trace_id for span in spans)
+    assert all(span["dotted_order"].startswith(parent.dotted_order) for span in spans)
 
 
 @pytest.mark.parametrize(
@@ -1996,7 +2056,11 @@ COORDINATOR_CATALOG = Catalog(skill_sources=["/skills/coordinator/"])
 
 
 async def _launch_worker(
-    monkeypatch: pytest.MonkeyPatch, client: MagicMock, *, also: Sequence[ToolCall] = ()
+    monkeypatch: pytest.MonkeyPatch,
+    client: MagicMock,
+    *,
+    also: Sequence[ToolCall] = (),
+    project: str | None = None,
 ) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]]]:
     """Run a coordinator that launches a worker through deepagents' ``start_async_task``."""
     from deepagents.middleware import async_subagents
@@ -2043,7 +2107,18 @@ async def _launch_worker(
     model = _ToolCallingModel(
         messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
     )
-    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+    middleware = [AsyncWorkerLaunchMiddleware(backend), launches]
+    graph = (
+        await compile_managed_agent_async(
+            define_deep_agent(
+                name="coordinator", model=model, middleware=middleware, replicate_traces=False
+            ),
+            {"configurable": {"__langsmith_project__": project}},
+            report_telemetry=False,
+        )
+        if project
+        else create_agent(model, middleware=middleware)
+    )
     values = await graph.ainvoke(
         {"messages": [("user", "fix login in the background")]},
         {

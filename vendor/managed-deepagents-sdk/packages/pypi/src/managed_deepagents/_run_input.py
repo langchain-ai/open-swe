@@ -8,6 +8,7 @@ from functools import cached_property
 from typing import Any, cast
 from uuid import UUID
 
+from deepagents.middleware.async_subagents import _NEST_UNDER_PARENT
 from langchain_core.callbacks import AsyncCallbackManager
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tracers.langchain import LangChainTracer
@@ -177,7 +178,11 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     replicate_traces: bool = True
 
     def _tracing(self, config: RunnableConfig | None) -> AbstractContextManager[None]:
-        project = ensure_config(self.config, config)["configurable"].get("__langsmith_project__")
+        configurable = ensure_config(self.config, config)["configurable"]
+        project = configurable.get("__langsmith_project__")
+        metadata = configurable.get("langsmith-metadata")
+        if not project and isinstance(metadata, Mapping) and metadata.get(_NEST_UNDER_PARENT) is True:
+            project = configurable.get("langsmith-project")
         if self.replicate_traces or not project:
             return nullcontext()
         context = get_tracing_context()
@@ -187,7 +192,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             if replica.get("project_name") == project
         ]
         if not replicas:
-            return nullcontext()
+            context["project_name"] = project
         context["replicas"] = replicas
         parent = context["parent"]
         if parent is not None:
