@@ -92,7 +92,6 @@ html[data-agent-workspace] {
     --workspace-canvas: oklch(from var(--bg-surface-level-1) l 0 h);
     --workspace-sidebar: oklch(from var(--bg-surface-level-2) l 0 h);
     --workspace-surface: oklch(from var(--bg-elevated) l 0 h);
-    --workspace-hover: oklch(from var(--bg-surface-level-3) l 0 h);
     --workspace-border: oklch(from var(--border-subtle) l 0 h);
     --workspace-text: oklch(from var(--text-primary) l 0 h);
     --workspace-secondary: color-mix(in oklch, oklch(from var(--text-secondary) l 0 h) 90%, var(--workspace-canvas));
@@ -104,22 +103,12 @@ html.dark[data-agent-workspace] {
     --workspace-canvas: color-mix(in oklch, oklch(from var(--bg-surface-level-2) l 0 h), oklch(from var(--bg-surface-level-3) l 0 h));
     --workspace-sidebar: oklch(from var(--bg-surface-level-3) l 0 h);
     --workspace-surface: oklch(from var(--bg-surface-level-4) l 0 h);
-    --workspace-hover: oklch(from var(--bg-surface-level-4) l 0 h);
 }
 
 html[data-agent-workspace] body {
     --bg-surface-level-1: var(--workspace-canvas);
-    --bg-surface-level-1-hover: var(--workspace-hover);
     --bg-surface-level-2: var(--workspace-sidebar);
-    --bg-surface-level-2-hover: var(--workspace-hover);
-    --bg-surface-level-3: var(--workspace-hover);
-    --bg-surface-level-4: var(--workspace-hover);
     --bg-elevated: var(--workspace-surface);
-    --bg-elevated-hover: var(--workspace-hover);
-    --bg-elevated-selected: var(--workspace-hover);
-    --bg-selected: var(--workspace-hover);
-    --bg-selected-hover: var(--workspace-hover);
-    --bg-disabled: var(--workspace-hover);
     --border-default: var(--workspace-border);
     --border-subtle: color-mix(in oklch, var(--workspace-border) 60%, var(--workspace-canvas));
     --border-muted: var(--border-subtle);

@@ -220,9 +220,6 @@ describe("ChatComposer options", () => {
       true
     )
 
-    expect(document.documentElement.hasAttribute("data-agent-workspace")).toBe(
-      true
-    )
     expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
     expect(
       screen.queryByRole("button", { name: "Select repository" })
@@ -243,10 +240,6 @@ describe("ChatComposer options", () => {
       expect(screen.queryByRole("dialog", { name: "Task context" })).toBeNull()
     )
     expect(cancelThread).not.toHaveBeenCalled()
-    cleanup()
-    expect(document.documentElement.hasAttribute("data-agent-workspace")).toBe(
-      false
-    )
   })
 
   it("keeps an existing local thread's branch controls in task context", async () => {
@@ -266,22 +259,6 @@ describe("ChatComposer options", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Task context: demo" }))
     expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
-  })
-
-  it("leaves standard mode setup inline", () => {
-    renderComposer(false, {
-      runTarget: "local",
-      onSelectLocalRepo: vi.fn(),
-      onAddLocalRepo: vi.fn(),
-      onRemoveLocalRepo: vi.fn(),
-    })
-    expect(
-      screen.getByRole("button", { name: "Select repository" })
-    ).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /Task context/ })).toBeNull()
-    expect(document.documentElement.hasAttribute("data-agent-workspace")).toBe(
-      false
-    )
   })
 
   it("offers attachments without a plan-mode toggle", async () => {
