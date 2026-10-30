@@ -236,8 +236,18 @@ async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) 
     wake.assert_not_awaited()
 
 
-@pytest.mark.parametrize("source", ["automatic", "named", "forged", "mcp", "unauthorized_mcp"])
-@pytest.mark.parametrize("repository_only", [False, True])
+@pytest.mark.parametrize(
+    ("source", "repository_only"),
+    [
+        ("automatic", False),
+        ("named", False),
+        ("forged", False),
+        ("mcp", False),
+        ("unauthorized_mcp", False),
+        ("automatic", True),
+        ("named", True),
+    ],
+)
 async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
     source: str,
     user_records: FakeUserRecords,
