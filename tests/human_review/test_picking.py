@@ -99,6 +99,7 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
     ("profile", "classification", "skip_reason"),
     [
         (None, None, "opted_out"),
+        (None, "repository_opt_out", "opted_out"),
         ({"display_name": "Ada (oOo)"}, None, "out_of_office"),
         ({"display_name": "Ada", "real_name": "Ada Smith (OOO)"}, None, "out_of_office"),
         (
@@ -138,7 +139,13 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     )
     grace = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
     if skip_reason == "opted_out":
-        user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
+        user_records.seed(
+            "profile",
+            "ada",
+            {"auto_human_review_excluded_repos": ["lc/repo"]}
+            if classification == "repository_opt_out"
+            else {"auto_human_review_enabled": False},
+        )
     monkeypatch.setattr(
         picking,
         "get_slack_user_info",

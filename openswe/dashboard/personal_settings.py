@@ -27,6 +27,7 @@ PROFILE_SETTING_KEYS = frozenset(
         "branch_prefix",
         "auto_fix_ci",
         "auto_human_review_enabled",
+        "auto_human_review_excluded_repos",
         "draft_prs",
         "review_draft_prs",
     }
@@ -38,7 +39,7 @@ PREFERENCE_SETTING_KEYS = frozenset(
         "follow_up_behavior",
     }
 )
-type SettingValue = str | bool | dict[str, str] | None
+type SettingValue = str | bool | dict[str, str] | list[str] | None
 
 
 async def patch_personal_settings(

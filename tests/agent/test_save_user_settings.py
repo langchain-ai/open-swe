@@ -83,7 +83,12 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     user_records.seed("dashboard_preferences", "Alice", prefs)
     user_records.seed("github_oauth_token", "Alice", {"encrypted_gh_token": "secret"})
     result = await save_user_settings(
-        {"auto_fix_ci": False, "auto_human_review_enabled": False, "default_workspace": "  NEW  "}
+        {
+            "auto_fix_ci": False,
+            "auto_human_review_enabled": False,
+            "auto_human_review_excluded_repos": ["Org/Repo"],
+            "default_workspace": "  NEW  ",
+        }
     )
     assert result == {
         "ok": True,
@@ -91,6 +96,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "updated": {
             "auto_fix_ci": False,
             "auto_human_review_enabled": False,
+            "auto_human_review_excluded_repos": ["org/repo"],
             "default_workspace": "new",
         },
     }
@@ -100,6 +106,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     assert saved["auto_fix_ci"] is False
     participant = (await read_user_settings())["participants"][0]
     assert participant["profile"]["auto_human_review_enabled"] is False
+    assert participant["profile"]["auto_human_review_excluded_repos"] == ["org/repo"]
     assert user_records.get("profile", "bob") == {"draft_prs": True}
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
     saved_prefs = user_records.get("dashboard_preferences", "Alice")
@@ -175,6 +182,9 @@ async def test_unavailable_thread_scope_fails_closed(
     "settings",
     [
         {},
+        {"auto_human_review_excluded_repos": ["invalid"], "auto_fix_ci": False},
+        {"auto_human_review_excluded_repos": ["org/re po"]},
+        {"auto_human_review_excluded_repos": None},
         {"login": "bob"},
         {"encrypted_gh_token": "secret"},
         {"admin": True},

@@ -323,6 +323,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
+  auto_human_review_excluded_repos?: string[]
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
@@ -343,6 +344,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
+  auto_human_review_excluded_repos?: string[]
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean

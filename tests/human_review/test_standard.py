@@ -236,9 +236,23 @@ async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) 
     wake.assert_not_awaited()
 
 
-@pytest.mark.parametrize("source", ["automatic", "named", "forged", "mcp", "unauthorized_mcp"])
+@pytest.mark.parametrize(
+    ("source", "repository_only"),
+    [
+        ("automatic", False),
+        ("named", False),
+        ("forged", False),
+        ("mcp", False),
+        ("unauthorized_mcp", False),
+        ("automatic", True),
+        ("named", True),
+    ],
+)
 async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
-    source: str, user_records: FakeUserRecords, monkeypatch: pytest.MonkeyPatch
+    source: str,
+    user_records: FakeUserRecords,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_only: bool,
 ) -> None:
     from openswe.human_review import standard
     from openswe.human_review.people import Participant
@@ -252,7 +266,13 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
         pull_request_id=pr.id, head_sha="abc", kind="standard", thread_id="picker"
     )
     request.pull_request = pr
-    user_records.seed("profile", "grace", {"auto_human_review_enabled": False})
+    user_records.seed(
+        "profile",
+        "grace",
+        {"auto_human_review_excluded_repos": ["lc/repo"]}
+        if repository_only
+        else {"auto_human_review_enabled": False},
+    )
     config: dict[str, object] = {
         "thread_id": "picker",
         "source": "slack",
