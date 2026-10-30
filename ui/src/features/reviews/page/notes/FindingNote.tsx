@@ -1,10 +1,11 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import type { ReviewFinding } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { copyText } from "@/lib/clipboard"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@langchain/macaw-components/Button"
@@ -169,6 +170,16 @@ export function FindingNote({
                 >
                   On GitHub
                 </MacawLink>
+              )}
+              {finding.github_review_comment_id !== null && (
+                <CopyIconButton
+                  copy={githubUrls.pullRequest(
+                    pr,
+                    `#discussion_r${finding.github_review_comment_id}`
+                  )}
+                  label="Copy GitHub link"
+                  size="xs"
+                />
               )}
             </div>
           </div>

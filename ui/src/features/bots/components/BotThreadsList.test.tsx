@@ -2,9 +2,10 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useQuery } from "@tanstack/react-query"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { BotThreadsList } from "./BotThreadsList"
+import { BotThreadsList as List } from "./BotThreadsList"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { useSession } from "@/lib/session"
@@ -20,6 +21,14 @@ vi.mock("@/lib/session", () => ({ useSession: vi.fn() }))
 vi.mock("./AllowedSlackBotsSection", () => ({
   AllowedSlackBotsSection: () => <section>Manage allowed bots</section>,
 }))
+
+function BotThreadsList(props: React.ComponentProps<typeof List>) {
+  return (
+    <TooltipProvider>
+      <List {...props} />
+    </TooltipProvider>
+  )
+}
 
 const BOT_KEY = "T123:B123"
 

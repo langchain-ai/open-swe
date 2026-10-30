@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Card } from "@langchain/macaw-components/Card"
 import { useEffect, useState } from "react"
@@ -59,19 +60,23 @@ function IdentityValue({ value }: { value: string | null | undefined }) {
 
 function CommitValue({ value }: { value: string | null }) {
   if (!value) return <IdentityValue value={value} />
+  const href = `https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`
   return (
-    <MacawLink
-      variant="xs"
-      href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn(
-        INHERITED_LINK,
-        "underline underline-offset-2 hover:text-primary"
-      )}
-    >
-      <IdentityValue value={value} />
-    </MacawLink>
+    <span className="inline-flex items-center gap-0.5">
+      <MacawLink
+        variant="xs"
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          INHERITED_LINK,
+          "underline underline-offset-2 hover:text-primary"
+        )}
+      >
+        <IdentityValue value={value} />
+      </MacawLink>
+      <CopyIconButton copy={href} label="Copy commit link" size="xs" />
+    </span>
   )
 }
 

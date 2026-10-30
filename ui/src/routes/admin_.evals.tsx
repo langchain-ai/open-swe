@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
@@ -297,14 +298,21 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
         />
       )}
       {data.experiment_url && (
-        <MacawLink
-          href={data.experiment_url}
-          target="_blank"
-          rel="noreferrer"
-          variant="sm"
-        >
-          View experiment in LangSmith
-        </MacawLink>
+        <span className="flex items-center gap-0.5">
+          <MacawLink
+            href={data.experiment_url}
+            target="_blank"
+            rel="noreferrer"
+            variant="sm"
+          >
+            View experiment in LangSmith
+          </MacawLink>
+          <CopyIconButton
+            copy={data.experiment_url}
+            label="Copy experiment link"
+            size="xs"
+          />
+        </span>
       )}
       {data.error && <span className="text-error-secondary">{data.error}</span>}
     </div>

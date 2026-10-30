@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
@@ -476,18 +477,27 @@ function ChecksRow({
                 />
               )}
               {check.url ? (
-                <MacawLink
-                  variant="xs"
-                  href={check.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={cn(
-                    INHERITED_LINK,
-                    "min-w-0 truncate text-primary hover:underline [&>span]:truncate"
-                  )}
-                >
-                  {check.name}
-                </MacawLink>
+                <>
+                  <MacawLink
+                    variant="xs"
+                    href={check.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(
+                      INHERITED_LINK,
+                      "min-w-0 truncate text-primary hover:underline [&>span]:truncate"
+                    )}
+                  >
+                    {check.name}
+                  </MacawLink>
+                  <CopyIconButton
+                    copy={check.url}
+                    label={`Copy link to ${check.name}`}
+                    copyText="Copy check link"
+                    size="xs"
+                    className="shrink-0"
+                  />
+                </>
               ) : (
                 <span className="min-w-0 truncate">{check.name}</span>
               )}

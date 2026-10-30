@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon, XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
@@ -572,18 +573,21 @@ function CommentCard({
       <div className="rounded-md border border-default bg-surface-level-1 px-space-2 py-space-2 text-xs">
         <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
           {href ? (
-            <MacawLink
-              variant="xs"
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className={cn(
-                INHERITED_LINK,
-                "hover:text-primary hover:underline"
-              )}
-            >
-              {label}
-            </MacawLink>
+            <>
+              <MacawLink
+                variant="xs"
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                  INHERITED_LINK,
+                  "hover:text-primary hover:underline"
+                )}
+              >
+                {label}
+              </MacawLink>
+              <CopyIconButton copy={href} label="Copy GitHub link" size="xs" />
+            </>
           ) : (
             label
           )}

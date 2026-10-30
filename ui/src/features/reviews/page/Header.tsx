@@ -30,7 +30,7 @@ import { cn, INHERITED_LINK } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
-import { copyPageLink, copyText } from "@/features/reviews/lib/copyText"
+import { copyPageLink, copyText } from "@/lib/clipboard"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
@@ -381,6 +381,17 @@ export function Header({
                 </a>
               </DropdownMenuItem>
             )}
+            {detail?.trace_url && (
+              <DropdownMenuItem
+                onSelect={() =>
+                  detail.trace_url &&
+                  copyText(detail.trace_url, "Copied the trace link")
+                }
+              >
+                <LinkIcon aria-hidden size={16} weight="regular" />
+                Copy reviewer trace link
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onSelect={() =>
                 window.open(githubUrl, "_blank", "noopener,noreferrer")
@@ -388,6 +399,12 @@ export function Header({
             >
               <GithubLogoIcon aria-hidden size={16} weight="regular" />
               Open on GitHub
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => copyText(githubUrl, "Copied the GitHub link")}
+            >
+              <LinkIcon aria-hidden size={16} weight="regular" />
+              Copy GitHub link
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={copyPageLink}>
               <LinkIcon aria-hidden size={16} weight="regular" />

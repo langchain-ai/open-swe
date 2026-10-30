@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
@@ -176,14 +177,20 @@ function ReviewLinkCard({
             <div className="font-medium">
               {owner}/{repo} #{number}
             </div>
-            <MacawLink
-              href={githubPrUrl}
-              variant="sm"
-              rightDecorator={ArrowSquareOutIcon}
-              className="mt-space-1"
-            >
-              View on GitHub
-            </MacawLink>
+            <span className="mt-space-1 flex items-center gap-0.5">
+              <MacawLink
+                href={githubPrUrl}
+                variant="sm"
+                rightDecorator={ArrowSquareOutIcon}
+              >
+                View on GitHub
+              </MacawLink>
+              <CopyIconButton
+                copy={githubPrUrl}
+                label="Copy GitHub link"
+                size="xs"
+              />
+            </span>
           </div>
           {loading && <Skeleton className="mt-space-4 h-2 w-full" />}
         </div>

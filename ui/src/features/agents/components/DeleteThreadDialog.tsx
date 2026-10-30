@@ -5,6 +5,7 @@ export function DeleteThreadDialog({
   open,
   onOpenChange,
   threadTitle,
+  count = 1,
   isDeleting,
   onConfirm,
   detail = "This cannot be undone.",
@@ -12,6 +13,8 @@ export function DeleteThreadDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   threadTitle: string
+  /** Threads deleted together; more than one names the count, not a title. */
+  count?: number
   isDeleting: boolean
   onConfirm: () => void
   detail?: string
@@ -19,8 +22,8 @@ export function DeleteThreadDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="Delete thread"
-        description={`Delete "${threadTitle}"? ${detail}`}
+        title={count > 1 ? `Delete ${count} threads` : "Delete thread"}
+        description={`Delete ${count > 1 ? `${count} threads` : `"${threadTitle}"`}? ${detail}`}
         showClose={false}
         className="w-[min(28rem,calc(100vw-2rem))]"
       >

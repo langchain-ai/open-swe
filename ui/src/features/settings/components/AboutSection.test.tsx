@@ -9,10 +9,19 @@ import {
 } from "@testing-library/react"
 import { toast } from "sonner"
 import { renderToString } from "react-dom/server"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, expect, it, vi } from "vitest"
 
 import type { SessionUser } from "@/lib/api"
-import { AboutSection } from "./AboutSection"
+import { AboutSection as Section } from "./AboutSection"
+
+function AboutSection({ user }: { user: SessionUser }) {
+  return (
+    <TooltipProvider>
+      <Section user={user} />
+    </TooltipProvider>
+  )
+}
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },

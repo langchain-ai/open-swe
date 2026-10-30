@@ -14,6 +14,7 @@ import type {
   AgentPullRequest,
   AgentPullRequestHealth,
 } from "@/features/agents/lib/types"
+import { parseGitHubPullRequestUrl } from "@/features/agents/lib/threadPullRequest"
 
 interface PullRequestPreviewContextValue {
   pullRequests: Map<string, AgentPullRequest>
@@ -27,26 +28,6 @@ const PullRequestPreviewContext =
 
 function pullRequestKey(repoFullName: string, number: number): string {
   return `${repoFullName.toLowerCase()}#${number}`
-}
-
-export function parseGitHubPullRequestUrl(
-  href: string | undefined
-): { repoFullName: string; number: number } | null {
-  if (!href) return null
-  try {
-    const url = new URL(href)
-    if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
-      return null
-    }
-    const match = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/.exec(url.pathname)
-    if (!match) return null
-    return {
-      repoFullName: `${match[1]}/${match[2]}`,
-      number: Number(match[3]),
-    }
-  } catch {
-    return null
-  }
 }
 
 export function PullRequestPreviewProvider({

@@ -48,6 +48,7 @@ from openswe.threads.handlers import (
     get_dashboard_thread_state,
     interrupt_transcript_turns,
     move_thread,
+    regenerate_dashboard_thread_title,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -450,6 +451,17 @@ async def api_rename_thread(
         session["sub"],
         title=body.title,
         email=session.get("email"),
+    )
+
+
+@router.post("/threads/{thread_id}/regenerate-title")
+@audit_endpoint
+async def api_regenerate_thread_title(
+    thread_id: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    return await regenerate_dashboard_thread_title(
+        thread_id, session["sub"], email=session.get("email")
     )
 
 

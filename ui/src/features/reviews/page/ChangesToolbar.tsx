@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { cn } from "@/lib/utils"
 import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
@@ -133,6 +134,12 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
           >
             See every file on GitHub
           </MacawLink>
+          <CopyIconButton
+            copy={githubUrls.pullRequest(pr, "/files")}
+            label="Copy GitHub link"
+            size="xs"
+            className="ml-0.5 inline-flex align-middle"
+          />
         </p>
       )}
     </div>

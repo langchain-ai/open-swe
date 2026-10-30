@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
@@ -160,19 +161,22 @@ export function ChangesPanel({
         />
         {extraActions}
         {pr && (
-          <Button
-            as={<a href={pr.url} target="_blank" rel="noreferrer" />}
-            aria-label="View PR"
-            title="View PR"
-            color="secondary"
-            variant="outlined"
-            leftDecorator={GitPullRequestIcon}
-            className="@max-[680px]:w-6 @max-[680px]:px-0"
-          >
-            <span className="whitespace-nowrap @max-[680px]:hidden">
-              View PR
-            </span>
-          </Button>
+          <>
+            <Button
+              as={<a href={pr.url} target="_blank" rel="noreferrer" />}
+              aria-label="View PR"
+              title="View PR"
+              color="secondary"
+              variant="outlined"
+              leftDecorator={GitPullRequestIcon}
+              className="@max-[680px]:w-6 @max-[680px]:px-0"
+            >
+              <span className="whitespace-nowrap @max-[680px]:hidden">
+                View PR
+              </span>
+            </Button>
+            <CopyIconButton copy={pr.url} label="Copy PR link" size="sm" />
+          </>
         )}
       </>
     ),

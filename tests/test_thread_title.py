@@ -15,9 +15,9 @@ from openswe.input_messages import InputMessageContext, human_input
 from openswe.thread_title import (
     MAX_TITLE_INPUT_CHARS,
     _ThreadTitle,
-    _title_input,
     generate_and_store_thread_title,
     schedule_thread_title_generation,
+    thread_title_input,
 )
 
 # Stands in for LangGraph's stream writer, which travels in a contextvar. A title
@@ -73,7 +73,7 @@ def test_breakout_title_prioritizes_new_request_over_inherited_transcript() -> N
     assert isinstance(inherited, str) and isinstance(opening, str)
     messages = [HumanMessage(content=inherited), HumanMessage(content=opening)]
 
-    conversation = _title_input(messages)
+    conversation = thread_title_input(messages)
 
     assert conversation is not None
     assert conversation.startswith(f"{request}\n\nWhich beta APIs should graduate?")

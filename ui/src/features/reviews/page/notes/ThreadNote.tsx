@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CaretRightIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
@@ -298,6 +299,14 @@ export function ThreadCard({
               GitHub
               <ArrowSquareOutIcon className="size-3" weight="regular" />
             </MacawLink>
+          )}
+          {thread.comments[0].html_url && (
+            <CopyIconButton
+              copy={thread.comments[0].html_url}
+              label="Copy GitHub link"
+              size="xs"
+              className="shrink-0"
+            />
           )}
           {isPlaced(thread) ? (
             <Button

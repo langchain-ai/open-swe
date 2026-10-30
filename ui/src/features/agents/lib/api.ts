@@ -401,6 +401,11 @@ export const agentsApi = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
+  regenerateThreadTitle: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/regenerate-title`,
+      { method: "POST" }
+    ),
   resolveAllThreads: () =>
     agentsRequest<{ resolved: number }>("/threads/resolve-all", {
       method: "POST",

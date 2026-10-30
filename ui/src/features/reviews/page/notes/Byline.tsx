@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CheckCircleFillIcon } from "@langchain/macaw-components/icons"
 import { Avatar as MacawAvatar } from "@langchain/macaw-components/Avatar"
@@ -124,26 +125,34 @@ export function Byline({
 }) {
   const when = formatWhen(createdAt)
   return (
-    <span className="flex min-w-0 items-center gap-space-2 text-xs">
+    <span className="group/byline flex min-w-0 items-center gap-space-2 text-xs">
       <span className="truncate font-medium text-primary">
         {displayName(author)}
       </span>
       {author?.bot && <Tag>bot</Tag>}
       {verb && <span className="text-secondary">{verb}</span>}
       {href ? (
-        <MacawLink
-          variant="xs"
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className={cn(
-            INHERITED_LINK,
-            "shrink-0 text-secondary hover:underline"
-          )}
-          title={new Date(createdAt).toLocaleString()}
-        >
-          {when}
-        </MacawLink>
+        <>
+          <MacawLink
+            variant="xs"
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              INHERITED_LINK,
+              "shrink-0 text-secondary hover:underline"
+            )}
+            title={new Date(createdAt).toLocaleString()}
+          >
+            {when}
+          </MacawLink>
+          <CopyIconButton
+            copy={href}
+            label="Copy GitHub link"
+            size="xs"
+            className="-ml-space-1 shrink-0 opacity-0 group-focus-within/byline:opacity-100 group-hover/byline:opacity-100"
+          />
+        </>
       ) : (
         <span className="shrink-0 text-secondary">{when}</span>
       )}

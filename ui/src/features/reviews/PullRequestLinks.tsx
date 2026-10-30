@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -152,6 +153,11 @@ export function PullRequestLinks({
                 rel="noreferrer"
               />
             </IconButton>
+            <CopyIconButton
+              copy={`https://github.com/${repo}/pull/${number}`}
+              label="Copy GitHub link"
+              size="xs"
+            />
           </>
         )}
       </span>

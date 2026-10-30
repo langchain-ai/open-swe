@@ -1,3 +1,4 @@
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Text } from "@langchain/macaw-components/Text"
@@ -129,7 +130,7 @@ export function ProposedReviewCard({
         )}
       </div>
       {outcome?.state === "posted" ? (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-space-1">
           <Button
             size="xs"
             color="secondary"
@@ -140,6 +141,11 @@ export function ProposedReviewCard({
           >
             View on GitHub
           </Button>
+          <CopyIconButton
+            copy={outcome.url}
+            label="Copy GitHub link"
+            size="xs"
+          />
         </div>
       ) : outcome ? null : (
         <div className="flex justify-end gap-space-2">

@@ -10,6 +10,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field, ValidationError
 
+from openswe.dashboard.options import gate_fable_model
+from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
 from openswe.prompts import prompt
 from openswe.slack.blocks import block_payload
@@ -20,6 +22,7 @@ from openswe.slack.http import SlackRequestError
 from openswe.source_context import SourceContext
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.model import ModelKwargs, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +50,7 @@ def _thread_metadata(thread: Any) -> dict[str, Any]:
     return dict(metadata) if isinstance(metadata, Mapping) else {}
 
 
-def _title_input(messages: Sequence[BaseMessage]) -> str | None:
+def thread_title_input(messages: Sequence[BaseMessage]) -> str | None:
     texts: list[str] = []
     for message in reversed(messages):
         if dynamic_context_hash(message.content) is not None:
@@ -65,6 +68,72 @@ def _normalize_title(title: str) -> str:
     if len(normalized) <= MAX_THREAD_TITLE_CHARS:
         return normalized
     return normalized[:MAX_THREAD_TITLE_CHARS].rsplit(" ", 1)[0].rstrip()
+
+
+async def generate_thread_title(conversation: str, model: BaseChatModel) -> str:
+    """A normalized title for ``conversation``, or ``""`` when the model gives none."""
+    title_input = human_input(
+        conversation,
+        {
+            "sender_id": "person:title-subject",
+            "surface": "automation",
+            "kind": "human",
+        },
+    )["content"]
+    if not isinstance(title_input, str):
+        return ""
+    messages = [
+        SystemMessage(content=_TITLE_SYSTEM_PROMPT),
+        HumanMessage(content=title_input),
+    ]
+    # Empty callbacks keep title tokens out of the thread's message stream.
+    config: RunnableConfig = {"callbacks": [], "run_name": "thread-title"}
+    async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
+        try:
+            structured = model.with_structured_output(_ThreadTitle)
+            result = await structured.ainvoke(messages, config=config)
+        except OutputParserException, ValidationError:
+            logger.warning("Thread title extraction failed; retrying as text", exc_info=True)
+            response = await model.ainvoke(
+                [
+                    SystemMessage(
+                        content=_TITLE_SYSTEM_PROMPT + "\n\n" + prompt("thread-title-plain")
+                    ),
+                    HumanMessage(content=title_input),
+                ],
+                config=config,
+            )
+            return _normalize_title(response.text)
+    return _normalize_title(result.title) if isinstance(result, _ThreadTitle) else ""
+
+
+def thread_title_model_spec(settings: WorkspaceSettings) -> tuple[str, str | None]:
+    model_id, effort = settings.default_thread_title_model
+    return gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
+
+
+def thread_title_kwargs(model_id: str, effort: str | None) -> ModelKwargs:
+    anthropic = model_id.startswith("anthropic:")
+    kwargs = provider_model_kwargs(
+        model_id,
+        effort,
+        max_tokens=(
+            ANTHROPIC_TITLE_GENERATION_MAX_TOKENS if anthropic else TITLE_GENERATION_MAX_TOKENS
+        ),
+    )
+    if anthropic:
+        kwargs.pop("thinking", None)
+    return kwargs
+
+
+def thread_title_model(settings: WorkspaceSettings) -> BaseChatModel:
+    """The workspace's title model, built outside a run."""
+    model_id, effort = thread_title_model_spec(settings)
+    return make_model(
+        model_id,
+        use_gateway=settings.effective_gateway_enabled,
+        **thread_title_kwargs(model_id, effort),
+    )
 
 
 async def generate_and_store_thread_title(
@@ -85,46 +154,7 @@ async def generate_and_store_thread_title(
     ):
         return
 
-    title_input = human_input(
-        conversation,
-        {
-            "sender_id": "person:title-subject",
-            "surface": "automation",
-            "kind": "human",
-        },
-    )["content"]
-    if not isinstance(title_input, str):
-        return
-    messages = [
-        SystemMessage(content=_TITLE_SYSTEM_PROMPT),
-        HumanMessage(content=title_input),
-    ]
-    # Empty callbacks keep title tokens out of the thread's message stream.
-    config: RunnableConfig = {"callbacks": [], "run_name": "thread-title"}
-    async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
-        try:
-            structured = model.with_structured_output(_ThreadTitle)
-            result = await structured.ainvoke(messages, config=config)
-        except OutputParserException, ValidationError:
-            logger.warning(
-                "Thread title extraction failed; retrying as text",
-                extra={"thread_id": thread_id},
-                exc_info=True,
-            )
-            response = await model.ainvoke(
-                [
-                    SystemMessage(
-                        content=_TITLE_SYSTEM_PROMPT + "\n\n" + prompt("thread-title-plain")
-                    ),
-                    HumanMessage(content=title_input),
-                ],
-                config=config,
-            )
-            title = _normalize_title(response.text)
-        else:
-            if not isinstance(result, _ThreadTitle):
-                return
-            title = _normalize_title(result.title)
+    title = await generate_thread_title(conversation, model)
     if not title:
         return
 
@@ -184,7 +214,7 @@ def schedule_thread_title_generation(
     model: BaseChatModel,
     client: Any,
 ) -> None:
-    conversation = _title_input(messages)
+    conversation = thread_title_input(messages)
     if conversation is None or thread_id in _inflight_thread_ids:
         return
     _inflight_thread_ids.add(thread_id)
