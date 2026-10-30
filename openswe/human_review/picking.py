@@ -1,8 +1,8 @@
 """Deterministic reviewer picks: code owners and recent authors of the changed files.
 
-Candidates must have at least three commits changing 20 or more relevant lines each
-in the last 30 days. They come from one CODEOWNERS area at a time, the one owning the most changed
-files first. Each scores the changed files they own plus those they changed within
+Candidates must have more than three commits or more than 20% of repository commits
+in the last 30 days, including a change of at least 20 relevant lines. They come
+from one CODEOWNERS area at a time, the one owning the most changed files first. Each scores the changed files they own plus those they changed within
 ``HISTORY_WINDOW``, divided by one more than the open reviews they already have.
 Only people inside their work hours are picked; when nobody is, the pick waits
 for whoever's work day starts first. Anyone already on the request, or rotated
@@ -35,7 +35,8 @@ from openswe.users import User
 logger = logging.getLogger(__name__)
 
 HISTORY_WINDOW = timedelta(days=30)
-_MIN_SUBSTANTIAL_COMMITS = 3
+_COMMIT_THRESHOLD = 3
+_REPO_SHARE_THRESHOLD = 0.2
 _MIN_CHANGED_LINES = 20
 HISTORY_MAX_FILES = 30
 _HISTORY_CONCURRENCY = 8
@@ -252,7 +253,7 @@ class Coverage:
 async def recent_contributors(
     repo: RepoClient, ref: str | None, files: list[ChangedFile]
 ) -> Counter[str]:
-    """Count relevant files touched by authors with at least three substantial recent commits."""
+    """Count relevant files substantially changed by regular recent repository contributors."""
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
     paths = {changed.filename for changed in files}
@@ -270,16 +271,35 @@ async def recent_contributors(
                 )
                 return []
 
+    try:
+        repo_commits = _COMMITS.validate_python(await repo.commits(since=since, ref=ref))
+    except httpx2.HTTPError, ValueError, ValidationError:
+        logger.warning(
+            "Could not read repository contribution history",
+            extra={"repository": repo.full_name},
+            exc_info=True,
+        )
+        return Counter()
+    repo_commits = list({commit.sha: commit for commit in repo_commits}.values())
+    counts = Counter(
+        commit.author.login.lower()
+        for commit in repo_commits
+        if commit.author is not None and commit.author.type == "User"
+    )
+    regular = {
+        login
+        for login, count in counts.items()
+        if count > _COMMIT_THRESHOLD or count > len(repo_commits) * _REPO_SHARE_THRESHOLD
+    }
     commits = {
         commit.sha: commit
         for file_history in await asyncio.gather(*(history(f.filename) for f in busiest))
         for commit in file_history
         if commit.author is not None and commit.author.type == "User"
     }
-    counts = Counter(commit.author.login.lower() for commit in commits.values() if commit.author)
 
     async def contribution(commit: _Commit) -> tuple[str, set[str]] | None:
-        if commit.author is None or counts[commit.author.login.lower()] < _MIN_SUBSTANTIAL_COMMITS:
+        if commit.author is None or commit.author.login.lower() not in regular:
             return None
         async with gate:
             try:
@@ -298,20 +318,12 @@ async def recent_contributors(
             return None
         return commit.author.login.lower(), {file.filename for file in relevant}
 
-    substantial: Counter[str] = Counter()
     touched: dict[str, set[str]] = {}
     for item in await asyncio.gather(*(contribution(commit) for commit in commits.values())):
         if item is not None:
             login, changed_paths = item
-            substantial[login] += 1
             touched.setdefault(login, set()).update(changed_paths)
-    return Counter(
-        {
-            login: len(changed_paths)
-            for login, changed_paths in touched.items()
-            if substantial[login] >= _MIN_SUBSTANTIAL_COMMITS
-        }
-    )
+    return Counter({login: len(changed_paths) for login, changed_paths in touched.items()})
 
 
 async def choose_reviewer(

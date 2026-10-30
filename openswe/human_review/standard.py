@@ -723,7 +723,8 @@ async def assign(
         if github_login.lower() not in contributors:
             return _failure(
                 f"@{github_login} is not a regular contributor to these files in the past 30 days. "
-                "Require at least three commits changing 20 or more relevant lines each; "
+                "Require more than three repository commits or more than 20% of repository commits, "
+                "plus a commit changing at least 20 relevant lines; "
                 "do not fall back to minor contributors or inactive code owners."
             )
         availability = await ReviewerAvailability.for_user(user)
@@ -1220,7 +1221,8 @@ async def _assignment_failed(request: HumanReviewRequest, *, area: Area | None =
     text = (
         f"Automatic reviewer assignment failed{scope} for <{pr.url}|{pr.label}>: "
         "no suitable available regular contributor qualified from the past 30 days "
-        "(at least three commits changing 20 or more relevant lines each). "
+        "(more than three repository commits or more than 20% of repository commits, "
+        "plus a commit changing at least 20 relevant lines). "
         "Please choose a reviewer yourself."
     )
     author = await User.for_login("github", pr.author) if pr.author else None
@@ -1234,8 +1236,9 @@ async def _assignment_failed(request: HumanReviewRequest, *, area: Area | None =
     async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
         await pull.comment(
             f"@{pr.author} Automatic reviewer assignment failed{scope}: no suitable available "
-            "regular contributor qualified from the past 30 days (at least three commits "
-            "changing 20 or more relevant lines each). Please choose a reviewer yourself."
+            "regular contributor qualified from the past 30 days (more than three repository commits "
+            "or more than 20% of repository commits, plus a commit changing at least 20 relevant "
+            "lines). Please choose a reviewer yourself."
         )
 
 

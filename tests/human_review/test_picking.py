@@ -173,7 +173,15 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     assert filtered.skipped == ({"ada": skip_reason} if skip_reason else {})
 
 
-async def test_recent_contributors_require_distinct_substantial_commits_to_relevant_files() -> None:
+@pytest.mark.parametrize(
+    ("count", "total", "qualifies"),
+    [(1, 4, True), (1, 5, False), (3, 15, False), (4, 100, True), (0, 4, False)],
+)
+async def test_recent_contributors_require_volume_or_repo_share_and_substantial_relevant_changes(
+    count: int,
+    total: int,
+    qualifies: bool,
+) -> None:
     from datetime import timedelta
 
     from openswe.expedited_review.eligibility import ChangedFile
@@ -181,11 +189,23 @@ async def test_recent_contributors_require_distinct_substantial_commits_to_relev
 
     commits = [
         {"sha": f"{login}-{index}", "author": {"login": login}}
-        for login, count in (("regular", 3), ("tiny", 4), ("driveby", 1), ("unrelated", 3))
-        for index in range(count)
+        for login, authored in (("regular", count), ("tiny", count), ("unrelated", count))
+        for index in range(authored)
+    ]
+    repo_history = [
+        {"sha": f"{login}-{index}", "author": {"login": login}}
+        for login, authored in (
+            ("regular", count),
+            ("tiny", count),
+            ("unrelated", count),
+            ("other", total - 3 * count),
+        )
+        for index in range(authored)
     ]
     repo = MagicMock()
-    repo.commits = AsyncMock(return_value=commits)
+    repo.commits = AsyncMock(
+        side_effect=lambda **kwargs: commits if "path" in kwargs else repo_history
+    )
 
     async def detail(sha: str) -> dict[str, object]:
         login = sha.split("-")[0]
@@ -202,13 +222,12 @@ async def test_recent_contributors_require_distinct_substantial_commits_to_relev
         repo, "main", [ChangedFile(filename="app.py"), ChangedFile(filename="second.py")]
     )
     after = datetime.now(UTC) - timedelta(days=30)
-    assert result == {"regular": 1}
+    assert result == ({"regular": 1} if qualifies else {})
     assert all(
         before <= datetime.fromisoformat(call.kwargs["since"]) <= after
         and call.kwargs["ref"] == "main"
         for call in repo.commits.await_args_list
     )
-    assert repo.commit.await_count == 10
 
 
 async def test_inactive_code_owner_does_not_qualify_without_recent_contributions(
