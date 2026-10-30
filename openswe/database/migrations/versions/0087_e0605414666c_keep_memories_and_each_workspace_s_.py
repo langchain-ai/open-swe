@@ -30,7 +30,8 @@ def upgrade() -> None:
             body text NOT NULL,
             status text NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending', 'held', 'adopted', 'declined')),
-            decision_note text NOT NULL DEFAULT ''
+            decision_note text NOT NULL DEFAULT '',
+            withdrawal_requested boolean NOT NULL DEFAULT false
         )
     """)
     op.execute(
@@ -53,6 +54,11 @@ def upgrade() -> None:
         "COMMENT ON COLUMN memory.status IS 'The curator''s decision: pending until it decides; "
         "held when saved in a private thread its person did not share, so the curator never "
         "reads or decides it.'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN memory.withdrawal_requested IS 'Its person asked to take a "
+        "workspace memory back; it waits for the curator again, which decides whether what "
+        "it said leaves the prompt.'"
     )
     op.execute("""
         CREATE TABLE workspace_prompt_version (

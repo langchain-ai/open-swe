@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from openswe.database import postgres
 from openswe.memories.store import MEMORIES, Scope
 from openswe.users import User
@@ -42,3 +44,34 @@ async def test_the_curator_never_reads_what_a_private_thread_kept_to_itself(
     assert len({memory.person for memory in [*held, *pending]}) == 1
     # A personal memory applies to its person whether or not the curator may read it.
     assert [memory.body for memory in await MEMORIES.personal(person.id)] == ["my own habit"]
+
+
+async def test_withdrawing_asks_the_curator_unless_it_never_saw_the_memory(
+    registry_db: None,
+) -> None:
+    workspace = WorkspaceRow(slug="platform", name="Platform")
+    person, other = User(display_name="Ada"), User(display_name="Grace")
+    async with postgres.session() as session:
+        session.add_all([workspace, person, other])
+
+    async def save(body: str, *, private: bool) -> UUID:
+        row = await MEMORIES.save(
+            scope="workspace",
+            body=body,
+            person=person.id,
+            workspace=workspace.slug,
+            thread_id=None,
+            from_private_thread=private,
+            shared=False,
+        )
+        return row.id
+
+    adopted, held = await save("adopted", private=False), await save("held", private=True)
+    assert await MEMORIES.decide(workspace.slug, adopted, "adopted", "")
+
+    assert await MEMORIES.withdraw(adopted, other.id) is None
+    assert await MEMORIES.withdraw(adopted, person.id) == "requested"
+    assert await MEMORIES.withdraw(held, person.id) == "deleted"
+    pending = await MEMORIES.for_curator(workspace.slug, "pending")
+    assert [(memory.id, memory.withdrawal_requested) for memory in pending] == [(adopted, True)]
+    assert await MEMORIES.for_curator(workspace.slug, "held") == []

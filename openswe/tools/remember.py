@@ -72,9 +72,12 @@ async def remember(
 
 
 @expose_mcp()
-@audit_tool()
-@access(_PERSONAL)
-async def forget(memory_id: str, scope: Literal["personal"]) -> dict[str, object]:
+# Withdrawing a workspace memory only asks the curator, like remembering one.
+@audit_tool(reads={"workspace"}, read_key="scope")
+@access(
+    _WORKSPACE, per_call=lambda args: _PERSONAL if args.get("scope") == "personal" else _WORKSPACE
+)
+async def forget(memory_id: str, scope: Literal["personal", "workspace"]) -> dict[str, object]:
     """Implement the `forget` tool."""
     login = await resolve_github_login(as_json_object(get_config()))
     person = await User.for_login("github", login) if login else None
@@ -84,6 +87,20 @@ async def forget(memory_id: str, scope: Literal["personal"]) -> dict[str, object
         parsed = UUID(memory_id)
     except ValueError:
         return {"ok": False, "error": "memory_id is not a memory id"}
-    if not await MEMORIES.forget(parsed, person.id, scope):
-        return {"ok": False, "error": "No personal memory of yours has that id."}
-    return {"ok": True, "memory_id": memory_id}
+    if scope == "personal":
+        if not await MEMORIES.forget(parsed, person.id):
+            return {"ok": False, "error": "No personal memory of yours has that id."}
+        return {"ok": True, "memory_id": memory_id, "status": "forgotten"}
+    withdrawal = await MEMORIES.withdraw(parsed, person.id)
+    if withdrawal is None:
+        return {"ok": False, "error": "No workspace memory you saved has that id."}
+    return {
+        "ok": True,
+        "memory_id": memory_id,
+        "status": withdrawal,
+        "applies": (
+            "at once: the curator never saw it"
+            if withdrawal == "deleted"
+            else "once the workspace's curator decides it, even if it already adopted it"
+        ),
+    }

@@ -24,6 +24,7 @@ from openswe.workspaces.rows import WorkspaceRow
 Scope = Literal["personal", "workspace"]
 Status = Literal["pending", "held", "adopted", "declined"]
 Decision = Literal["adopted", "declined"]
+Withdrawal = Literal["deleted", "requested"]
 
 MAX_MEMORY_CHARS: Final = 2_000
 MAX_WORKSPACE_PROMPT_CHARS: Final = 40_000
@@ -44,6 +45,7 @@ class MemoryRow(Base):
     thread_id: Mapped[str | None] = mapped_column(default=None)
     status: Mapped[str] = mapped_column(server_default="pending", default="pending")
     decision_note: Mapped[str] = mapped_column(server_default="", default="")
+    withdrawal_requested: Mapped[bool] = mapped_column(server_default="false", default=False)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime] = mapped_column(server_default=NOW, onupdate=NOW, init=False)
@@ -104,6 +106,8 @@ class CuratedMemory(BaseModel):
     body: str | None
     # Where the curator can look for evidence; None for a private thread.
     thread_id: str | None
+    # Its person asked to take it back, even after it was adopted.
+    withdrawal_requested: bool
 
     @classmethod
     def of(cls, row: MemoryRow) -> Self:
@@ -117,6 +121,7 @@ class CuratedMemory(BaseModel):
                 "from_private_thread": row.from_private_thread,
                 "body": None if row.status == "held" else row.body,
                 "thread_id": None if row.from_private_thread else row.thread_id,
+                "withdrawal_requested": row.withdrawal_requested,
             }
         )
 
@@ -189,22 +194,49 @@ class Memories:
             )
         return [PersonalMemory(id=row.id, body=row.body) for row in rows]
 
-    async def forget(self, memory_id: UUID, person: UUID, scope: Literal["personal"]) -> bool:
-        """Delete one of ``person``'s memories in ``scope``; False when they have no such one.
-
-        Only personal ones: a workspace memory is the curator's to decide.
-        """
+    async def forget(self, memory_id: UUID, person: UUID) -> bool:
+        """Delete one of ``person``'s personal memories; False when they have no such one."""
         async with postgres.session() as session:
             deleted = await session.scalar(
                 delete(MemoryRow)
                 .where(
                     MemoryRow.id == memory_id,
-                    MemoryRow.scope == scope,
+                    MemoryRow.scope == "personal",
                     MemoryRow.created_by == person,
                 )
                 .returning(MemoryRow.id)
             )
         return deleted is not None
+
+    async def withdraw(self, memory_id: UUID, person: UUID) -> Withdrawal | None:
+        """Ask the curator to take back one of ``person``'s workspace memories; None when they
+        saved no such one.
+
+        One the curator never saw, held from a private thread, is simply deleted. Any other
+        goes back to the curator, adopted or not, since only it may change the prompt.
+        """
+        mine = (
+            MemoryRow.id == memory_id,
+            MemoryRow.scope == "workspace",
+            MemoryRow.created_by == person,
+        )
+        async with postgres.session() as session:
+            if await session.scalar(
+                delete(MemoryRow).where(*mine, MemoryRow.status == "held").returning(MemoryRow.id)
+            ):
+                return "deleted"
+            requested = await session.scalar(
+                update(MemoryRow)
+                .where(*mine)
+                .values(
+                    status="pending",
+                    withdrawal_requested=True,
+                    updated_by=person,
+                    updated_at=func.clock_timestamp(),
+                )
+                .returning(MemoryRow.id)
+            )
+        return "requested" if requested else None
 
     async def for_curator(self, workspace: str, status: Status) -> list[CuratedMemory]:
         async with postgres.session() as session:
