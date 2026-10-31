@@ -19,6 +19,7 @@ export type ComposerPromptSegment =
   | { type: "text"; text: string }
   | { type: "mention"; path: string; source: string }
   | { type: "skill"; name: string; source: string }
+  | { type: "user"; userId: string; source: string }
   | { type: "channel"; channelId: string; name: string; source: string }
 
 interface ComposerChannelToken {
@@ -147,6 +148,12 @@ export function splitPromptIntoSegments(
     ...collectComposerMentions(prompt),
     ...skills,
     ...collectChannelTokens(prompt),
+    ...[...prompt.matchAll(/<@([UW][A-Z0-9]+)>/g)].map((match) => ({
+      userId: match[1] ?? "",
+      source: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+    })),
   ].sort((left, right) => left.start - right.start)
 
   for (const token of tokens) {
@@ -154,16 +161,18 @@ export function splitPromptIntoSegments(
     if (token.start > cursor)
       segments.push({ type: "text", text: prompt.slice(cursor, token.start) })
     segments.push(
-      "channelId" in token
-        ? {
-            type: "channel",
-            channelId: token.channelId,
-            name: token.channelName,
-            source: token.source,
-          }
-        : "name" in token
-          ? { type: "skill", name: token.name, source: token.source }
-          : { type: "mention", path: token.path, source: token.source }
+      "userId" in token
+        ? { type: "user", userId: token.userId, source: token.source }
+        : "channelId" in token
+          ? {
+              type: "channel",
+              channelId: token.channelId,
+              name: token.channelName,
+              source: token.source,
+            }
+          : "name" in token
+            ? { type: "skill", name: token.name, source: token.source }
+            : { type: "mention", path: token.path, source: token.source }
     )
     cursor = token.end
   }

@@ -20,10 +20,14 @@ from openswe.threads.access import (
     _readable_thread_metadata,
 )
 from openswe.threads.machine_reads import machine_thread
+from openswe.threads.mentions import ThreadMentions
 from openswe.threads.principals import Principal
 from openswe.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
+    _command_message_content,
+    _command_message_id,
+    _command_prompt_text,
     _enrich_run_start_command,
     _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
@@ -220,6 +224,14 @@ async def proxy_dashboard_thread_commands(
     # The client's queue-or-steer choice rides the run's multitask strategy.
     # LangGraph's commands endpoint does not take it, so it is consumed here.
     enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
+    mentions = ThreadMentions(
+        thread_id,
+        login,
+        _command_message_id(start_params) or str(parsed.get("id") or uuid.uuid7()),
+        _command_prompt_text(_command_message_content(start_params))
+        if method == "run.start" and not principal.machine and not relayed_from
+        else "",
+    )
     offloading = offload_requested(start_params)
     transcribed = metadata.get("transcript") == TRANSCRIPT_VERSION
     if method == "run.start" and thread_busy:
@@ -242,6 +254,7 @@ async def proxy_dashboard_thread_commands(
             if not enqueue and (turn is not None or not transcribed)
             else queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
         )
+        await mentions.notify()
         return 200, json.dumps(handled).encode(), "application/json"
     # Enrichment rewrites the command in place; a start that loses the thread
     # to another run is queued from the command as sent.
@@ -316,6 +329,7 @@ async def proxy_dashboard_thread_commands(
     if requeueable is not None and not run_start_succeeded:
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
+            await mentions.notify()
             return 200, json.dumps(requeued).encode(), "application/json"
     if run_start_refused:
         await _fail_requested_turn(thread_id, enriched)
@@ -326,6 +340,9 @@ async def proxy_dashboard_thread_commands(
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
             )
+
+    if run_start_succeeded:
+        await mentions.notify()
 
     if run_start_succeeded and run_id is not None:
         task = asyncio.create_task(
@@ -549,10 +566,17 @@ async def proxy_dashboard_thread_run_enqueue(
             "metadata": body_dict.get("metadata"),
         },
     }
+    mentions = ThreadMentions(
+        thread_id,
+        login,
+        _command_message_id(command["params"]) or str(uuid.uuid7()),
+        _command_prompt_text(_command_message_content(command["params"])),
+    )
     queued = await queue_follow_up_run(thread_id, login, command, metadata=metadata, email=email)
     run_id = queued.get("result", {}).get("run_id") if isinstance(queued, dict) else None
     if not isinstance(run_id, str) or not run_id:
         raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
+    await mentions.notify()
     # The raw runs REST caller expects a `Run` object back, not the
     # `commands` protocol's `{id, type, result}` envelope `queue_follow_up_run`
     # returns — re-fetch the run it just created to answer in that shape.
