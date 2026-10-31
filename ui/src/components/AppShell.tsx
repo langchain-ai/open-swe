@@ -15,7 +15,10 @@ import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { useAgentWorkspacePreference } from "@/lib/profile"
-import { AgentWorkspaceProvider } from "@/features/agents/lib/agentWorkspace"
+import {
+  AgentWorkspaceProvider,
+  useAgentWorkspace,
+} from "@/features/agents/lib/agentWorkspace"
 
 interface AppShellProps {
   user: SessionUser
@@ -140,7 +143,7 @@ export function SettingsSection({
   action,
   children,
 }: SettingsSectionProps) {
-  const agentWorkspace = useAgentWorkspacePreference()
+  const agentWorkspace = useAgentWorkspace()
   return (
     <section id={id} className="flex flex-col gap-space-3">
       <div className="flex items-start justify-between gap-space-4">
@@ -191,7 +194,7 @@ export function SettingsRow({
   badge,
   badgeClassName,
 }: SettingsRowProps) {
-  const agentWorkspace = useAgentWorkspacePreference()
+  const agentWorkspace = useAgentWorkspace()
   return (
     <div
       className={cn(

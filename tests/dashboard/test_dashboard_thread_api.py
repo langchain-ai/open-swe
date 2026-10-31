@@ -297,7 +297,7 @@ async def test_desktop_experience_keeps_authenticated_identity_on_resume(
         assert config["auth_provider"] == "langsmith"
         assert config["user_id"] == subject.removeprefix("user:")
         assert "github_login" not in config
-        assert config["repo_explicitly_none"] is True
+        assert "repo" not in config
     else:
         assert config["github_login"] == subject
         assert "auth_provider" not in config

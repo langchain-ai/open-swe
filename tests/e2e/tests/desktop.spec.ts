@@ -64,6 +64,11 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     data: { login: "alice", email: "alice@example.com" },
   });
   expect(login.ok()).toBeTruthy();
+  const profile = await request.put("/dashboard/api/profile", {
+    data: { experimental_agent_workspace: false },
+    headers: { Origin: baseURL },
+  });
+  expect(profile.ok(), await profile.text()).toBeTruthy();
   const cookie = sessionCookie(login.headers()["set-cookie"] ?? "");
 
   const electronApp = await electron.launch({
