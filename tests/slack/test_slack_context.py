@@ -298,6 +298,29 @@ def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None
     assert "Mute" not in formatted
 
 
+async def test_cross_posts_skip_links_in_open_swes_own_posts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_resolve(url: str) -> dict[str, Any]:
+        return {"user": "U123", "text": f"linked from {url}"}
+
+    monkeypatch.setattr(slack_utils, "resolve_slack_message_url", fake_resolve)
+    person_link = "https://example.slack.com/archives/C1/p1700000000000100"
+    breakout_link = "https://example.slack.com/archives/C2/p1700000000000200"
+
+    section, _ = await slack_utils.resolve_slack_links_in_context(
+        [
+            {"user": "U123", "text": f"see {person_link}"},
+            {"user": "UBOT", "text": f"Continued in <{breakout_link}|the breakout thread>"},
+        ],
+        {"U123": "Mason"},
+        "UBOT",
+    )
+
+    assert person_link in section
+    assert breakout_link not in section
+
+
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
@@ -327,7 +350,7 @@ def _setup_slack_mention_fakes(
         return {"U123": "Mason", "U456": "Teammate"}
 
     async def fake_resolve_slack_links_in_context(
-        context_messages: list[dict], user_names_by_id: dict[str, str]
+        context_messages: list[dict], user_names_by_id: dict[str, str], bot_user_id: str
     ) -> tuple[str, list[str]]:
         captured["context_messages"] = context_messages
         captured["user_names_by_id"] = user_names_by_id

@@ -1864,14 +1864,22 @@ async def resolve_slack_message_url(url: str) -> dict[str, Any] | None:
 async def resolve_slack_links_in_context(
     context_messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str],
+    bot_user_id: str,
 ) -> tuple[str, list[str]]:
-    """Resolve cross-posted Slack message links found in context messages.
+    """Resolve cross-posted Slack message links found in people's context messages.
+
+    Open SWE's own posts are skipped: their links point at breakouts and source
+    threads, and resolving them hands the model another thread's task.
 
     Returns (resolved_links_section, image_urls) where resolved_links_section
     is a formatted markdown string for the prompt, and image_urls is a list
     of image URLs from resolved message attachments.
     """
-    all_context_text = " ".join(msg.get("text", "") for msg in context_messages)
+    all_context_text = " ".join(
+        msg.get("text", "")
+        for msg in context_messages
+        if not is_own_slack_message(msg, bot_user_id)
+    )
     slack_links = extract_slack_message_urls(all_context_text)
     if not slack_links:
         return "", []
