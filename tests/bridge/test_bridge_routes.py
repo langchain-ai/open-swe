@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
+from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.protocol import JsonObject
 from openswe.bridge.routes import (
     BridgeClaimBody,
@@ -147,3 +148,29 @@ async def test_reopening_a_bridge_nobody_owns_is_not_found(registry_db: None) ->
         )
 
     assert refused.value.status_code == 404
+
+
+async def test_a_stopped_run_tells_the_machine_to_stop_its_command(registry_db: None) -> None:
+    bridge_id = await _open()
+    bridge = await BridgeStore.load(bridge_id)
+    assert bridge is not None
+    waiter = asyncio.create_task(
+        BridgeSandboxBackend(bridge=bridge, thread_id="thread-1").aexecute("sleep 60", timeout=60)
+    )
+    claimed = await api_claim_bridge_requests(
+        bridge_id, BridgeClaimBody(wait=10, limit=8), principal=OWNER
+    )
+    request_id = claimed.requests[0].request_id
+    poll = asyncio.create_task(
+        api_claim_bridge_requests(
+            bridge_id, BridgeClaimBody(wait=10, limit=8, held=[request_id]), principal=OWNER
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    waiter.cancel()
+    answered = await asyncio.wait_for(poll, timeout=5)
+
+    assert answered.cancelled == [request_id]
+    with pytest.raises(asyncio.CancelledError):
+        await waiter

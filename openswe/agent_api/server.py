@@ -20,6 +20,7 @@ from typing import Final
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
+from runtime_api.files import EXECUTE
 from runtime_api.loop import PREPARE
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -39,6 +40,8 @@ logger = logging.getLogger(__name__)
 API_PATH: Final = _API_PATH
 _RUN_STATE_KEY: Final = "remote_run"
 _request_body = TypeAdapter(dict[str, JsonValue])
+# Calls whose work stops with the caller: a stopped run's command must not run on.
+_CANCELLED_ON_HANGUP: Final = frozenset({PREPARE.name, EXECUTE.name})
 
 Api = Callable[[RemoteRun, str, JsonValue], Awaitable[JsonValue]]
 
@@ -141,7 +144,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             call = _answer(principal, endpoint, body)
             result = (
                 await _unless_disconnected(receive, call)
-                if endpoint == PREPARE.name
+                if endpoint in _CANCELLED_ON_HANGUP
                 else await call
             )
     except CallerHungUpError:
