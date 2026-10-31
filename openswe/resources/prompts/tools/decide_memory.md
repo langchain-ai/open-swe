@@ -1,4 +1,4 @@
-Record your decision on one pending memory.
+Record your decision on one pending memory, or change it on a superseded one the prompt no longer fully covers.
 
 `superseded` means a line you wrote in the workspace's prompt fully covers it, now or already: it leaves its person's own memories wherever they read that prompt, and keeps applying where they do not.
 `adopted` means a line draws on it without fully covering it; `declined` means it stays out of the prompt.
