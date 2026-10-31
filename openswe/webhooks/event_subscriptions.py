@@ -169,6 +169,8 @@ class EventSummary(BaseModel):
             return cls._deployment(event, payload)
         if event.source == "workspace":
             return cls._workspace(event, payload)
+        if event.source == "platform_issue":
+            return cls(source=event.source, event_type=event.event_type)
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod
