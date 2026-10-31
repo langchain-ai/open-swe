@@ -150,8 +150,9 @@ mda-test:
 	cd mda && uv run --locked --group test pytest $(PYTEST_ARGS)
 
 # The vendored code (vendor/README.md), checked the way its upstream checks it.
-# Ambient LangSmith settings would leak into tests of how the SDK resolves them.
-VENDOR_TEST_ENV := env -u LANGSMITH_ENDPOINT -u LANGCHAIN_ENDPOINT
+# Ambient LangSmith settings, a developer's real API key included, would leak into
+# tests of how the SDK resolves them, and the tests would call LangSmith with it.
+VENDOR_TEST_ENV := env $(foreach v,$(filter LANGSMITH_% LANGCHAIN_%,$(.VARIABLES)),-u $(v))
 MDA_SDK_PYPI := $(MDA_SDK)/packages/pypi
 QUICKJS := vendor/langchain-quickjs
 vendor-check: vendor-sdk-rust-check vendor-sdk-python-check vendor-quickjs-check
@@ -179,7 +180,7 @@ vendor-quickjs-check:
 	cd $(QUICKJS) && uvx ruff@0.15.20 check .
 	cd mda && uv sync --locked --group test
 	cd $(QUICKJS) && uvx ty@0.0.84 check --python ../../mda/.venv langchain_quickjs
-	cd $(QUICKJS) && uv run --project ../../mda --locked --group test \
+	cd $(QUICKJS) && $(VENDOR_TEST_ENV) uv run --project ../../mda --locked --group test \
 		pytest --disable-socket --allow-unix-socket $(PYTEST_ARGS) tests/unit_tests
 
 ######################
