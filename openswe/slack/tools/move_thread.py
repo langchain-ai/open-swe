@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -14,6 +15,8 @@ from openswe.threads.summary import thread_is_private
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+
+logger = logging.getLogger(__name__)
 
 _MESSAGE_MAX_CHARS = 2800
 _CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
@@ -67,6 +70,11 @@ async def slack_move_thread(
     try:
         metadata = thread_metadata(await client.threads.get(thread_id))
     except Exception:
+        logger.warning(
+            "Could not load the thread to verify its credential scope",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
         return {"success": False, "error": "Cannot verify thread credential scope"}
     if thread_is_private(metadata):
         return {

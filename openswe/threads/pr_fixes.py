@@ -255,6 +255,15 @@ async def find_pr_threads(
         try:
             thread = await client.threads.get(thread_id)
         except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not load a pull request thread; skipping it",
+                extra={
+                    "thread_id": thread_id,
+                    "pr_repo_full_name": f"{owner}/{repo}",
+                    "pr_number": number,
+                },
+                exc_info=True,
+            )
             continue
         metadata = thread_metadata(thread)
         if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
