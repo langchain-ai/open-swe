@@ -707,7 +707,12 @@ class RepoClient:
         return await self.pages(f"rules/branches/{quote(name, safe='')}")
 
     async def commits(
-        self, *, since: str, path: str | None = None, ref: str | None = None
+        self,
+        *,
+        since: str,
+        path: str | None = None,
+        ref: str | None = None,
+        max_pages: int | None = None,
     ) -> object:
         """All commits since ``since`` on ``ref``, optionally limited to one path."""
         params = {"since": since}
@@ -715,7 +720,7 @@ class RepoClient:
             params["path"] = path
         if ref:
             params["sha"] = ref
-        return await self.pages("commits", params=params)
+        return await self.pages("commits", params=params, max_pages=max_pages)
 
     async def commit(self, sha: str) -> dict[str, object]:
         """A commit's changed files and statistics."""

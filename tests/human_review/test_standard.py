@@ -352,7 +352,15 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(standard, "datetime", wraps=datetime) as clock,
         patch.object(standard, "_github_approvers", AsyncMock(return_value=[])),
         patch.object(standard.PullRequestClient, "as_app"),
-        patch.object(standard, "recent_contributors", AsyncMock(return_value={"grace": 1})),
+        patch.object(
+            standard,
+            "choose_reviewer",
+            AsyncMock(
+                return_value=standard.Pick(
+                    "other", "recent contributor", frozenset({"other", "grace"})
+                )
+            ),
+        ),
         patch.object(ChangedFile, "of_pull", AsyncMock(return_value=[])),
         patch.object(Coverage, "load", AsyncMock(return_value=None)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
@@ -1183,7 +1191,7 @@ async def test_no_suitable_reviewer_fails_and_notifies_author_without_fallback(
     with (
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
         patch.object(standard, "_review_author_allowed", AsyncMock(return_value=True)),
-        patch.object(standard, "choose_reviewer", AsyncMock(return_value=None)),
+        patch.object(standard, "choose_reviewer", AsyncMock(return_value=standard.NoCandidate())),
         patch.object(User, "for_login", AsyncMock(return_value=author)),
         patch.object(standard, "send_dm", AsyncMock(return_value=True)) as dm,
         patch.object(standard.PullRequestClient, "as_app") as app,
@@ -1201,3 +1209,27 @@ async def test_no_suitable_reviewer_fails_and_notifies_author_without_fallback(
             comment = app.return_value.__aenter__.return_value.comment
             assert "@ada Automatic reviewer assignment failed" in comment.await_args.args[0]
             dm.assert_not_awaited()
+
+
+@pytest.mark.parametrize("covered", [False, True])
+async def test_incomplete_or_covered_search_does_not_notify_author(covered: bool) -> None:
+    from openswe.human_review import standard
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(standard, "_review_author_allowed", AsyncMock(return_value=True)),
+        patch.object(
+            standard,
+            "choose_reviewer",
+            AsyncMock(return_value=standard.Covered() if covered else None),
+        ),
+        patch.object(standard, "_assignment_failed", AsyncMock()) as notify,
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as retry,
+    ):
+        result = await standard._auto_assign(request, asked=True, trigger=None)
+    assert result.status == ("claimed" if covered else "waiting")
+    notify.assert_not_awaited()
+    assert retry.await_count == (0 if covered else 1)

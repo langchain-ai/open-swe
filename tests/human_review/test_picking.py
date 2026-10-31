@@ -152,7 +152,11 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     )
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=codeowners))
     monkeypatch.setattr(
-        picking, "recent_contributors", AsyncMock(return_value=Counter(ada=10, grace=1))
+        picking,
+        "recent_contributors",
+        AsyncMock(
+            return_value=picking.Contributors(Counter(ada=10, grace=1), Counter(ada=10, grace=1))
+        ),
     )
     monkeypatch.setattr(
         User,
@@ -221,11 +225,8 @@ async def test_recent_contributors_require_volume_or_repo_share_and_substantial_
     result = await recent_contributors(
         repo, "main", [ChangedFile(filename="app.py"), ChangedFile(filename="second.py")]
     )
-    assert result == ({"regular": 1} if qualifies else {})
-    fallback = await recent_contributors(
-        repo, "main", [ChangedFile(filename="app.py")], include_small=True
-    )
-    assert fallback == ({"regular": 1, "tiny": 1, "unrelated": 1} if count else {})
+    assert result.regular == ({"regular": 1} if qualifies else {})
+    assert result.small == ({"regular": 2, "tiny": 2, "unrelated": 2} if count else {})
     after = datetime.now(UTC) - timedelta(days=30)
     assert all(
         before <= datetime.fromisoformat(call.kwargs["since"]) <= after
@@ -247,8 +248,14 @@ async def test_inactive_code_owner_does_not_qualify_without_recent_contributions
         ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
     )
     monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
-    monkeypatch.setattr(picking, "recent_contributors", AsyncMock(return_value=Counter()))
-    assert await picking._choose_reviewer(request, MagicMock(), None, {}) is None
+    monkeypatch.setattr(
+        picking,
+        "recent_contributors",
+        AsyncMock(return_value=picking.Contributors(Counter(), Counter())),
+    )
+    assert isinstance(
+        await picking._choose_reviewer(request, MagicMock(), None, {}), picking.NoCandidate
+    )
 
 
 @pytest.mark.parametrize("regular_eligible", [True, False])
@@ -273,9 +280,7 @@ async def test_small_contributor_is_picked_only_without_a_suitable_regular_contr
         picking,
         "recent_contributors",
         AsyncMock(
-            side_effect=lambda *args, include_small=False: (
-                Counter(regular=1, small=10) if include_small else Counter(regular=1)
-            )
+            return_value=picking.Contributors(Counter(regular=1), Counter(regular=1, small=10))
         ),
     )
     monkeypatch.setattr(
@@ -296,3 +301,27 @@ async def test_small_contributor_is_picked_only_without_a_suitable_regular_contr
     choice = await picking._choose_reviewer(request, pull, None, {})
     assert isinstance(choice, picking.Pick)
     assert choice.login == ("regular" if regular_eligible else "small")
+
+
+async def test_commit_detail_reads_are_bounded_and_small_tier_reuses_history() -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review.picking import recent_contributors
+
+    commits = [{"sha": str(index), "author": {"login": "ada"}} for index in range(200)]
+    repo = MagicMock()
+    repo.commits = AsyncMock(return_value=commits)
+    repo.commit = AsyncMock(return_value={"files": [{"filename": "app.py", "additions": 20}]})
+    result = await recent_contributors(repo, "main", [ChangedFile(filename="app.py")])
+    assert result.regular == result.small == {"ada": 1}
+    assert repo.commit.await_count == 100
+    assert repo.commits.await_count == 2
+
+
+async def test_unreadable_history_is_not_an_empty_candidate_pool() -> None:
+    from openswe.expedited_review.eligibility import ChangedFile
+    from openswe.human_review.picking import recent_contributors
+
+    repo = MagicMock()
+    repo.commits = AsyncMock(side_effect=ValueError("unreadable history"))
+    with pytest.raises(ValueError, match="unreadable history"):
+        await recent_contributors(repo, "main", [ChangedFile(filename="app.py")])

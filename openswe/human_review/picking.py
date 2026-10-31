@@ -41,6 +41,8 @@ _COMMIT_THRESHOLD = 3
 _REPO_SHARE_THRESHOLD = 0.2
 _MIN_CHANGED_LINES = 20
 HISTORY_MAX_FILES = 30
+_HISTORY_MAX_COMMITS = 100
+_REPO_HISTORY_MAX_PAGES = 10
 _HISTORY_CONCURRENCY = 8
 WORK_START = time(9)
 WORK_END = time(18)
@@ -161,6 +163,17 @@ class Candidate:
 class Pick:
     login: str
     reason: str
+    eligible: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
+class NoCandidate:
+    """A complete candidate search found nobody eligible."""
+
+
+@dataclass(frozen=True, slots=True)
+class Covered:
+    """Every code-owner area already has a reviewer."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,10 +265,16 @@ class Coverage:
         return await cls.build(codeowners, [changed.filename for changed in files])
 
 
+@dataclass(frozen=True, slots=True)
+class Contributors:
+    regular: Counter[str]
+    small: Counter[str]
+
+
 async def recent_contributors(
-    repo: RepoClient, ref: str | None, files: list[ChangedFile], *, include_small: bool = False
-) -> Counter[str]:
-    """Count recently changed files, normally limited to substantial regular contributors."""
+    repo: RepoClient, ref: str | None, files: list[ChangedFile]
+) -> Contributors:
+    """Build both contributor tiers once with bounded history and commit-detail reads."""
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
     paths = {changed.filename for changed in files}
@@ -263,83 +282,67 @@ async def recent_contributors(
 
     async def history(path: str) -> list[_Commit]:
         async with gate:
-            try:
-                return _COMMITS.validate_python(await repo.commits(path=path, since=since, ref=ref))
-            except httpx2.HTTPError, ValueError, ValidationError:
-                logger.warning(
-                    "Could not read a changed file's history",
-                    extra={"repository": repo.full_name, "path": path},
-                    exc_info=True,
-                )
-                return []
+            return _COMMITS.validate_python(
+                await repo.commits(path=path, since=since, ref=ref, max_pages=1)
+            )
 
-    try:
-        repo_commits = _COMMITS.validate_python(await repo.commits(since=since, ref=ref))
-    except httpx2.HTTPError, ValueError, ValidationError:
-        logger.warning(
-            "Could not read repository contribution history",
-            extra={"repository": repo.full_name},
-            exc_info=True,
-        )
-        return Counter()
+    repo_commits = _COMMITS.validate_python(
+        await repo.commits(since=since, ref=ref, max_pages=_REPO_HISTORY_MAX_PAGES)
+    )
     repo_commits = list({commit.sha: commit for commit in repo_commits}.values())
     counts = Counter(
         commit.author.login.lower()
         for commit in repo_commits
         if commit.author is not None and commit.author.type == "User"
     )
+    complete = len(repo_commits) < _REPO_HISTORY_MAX_PAGES * 100
     regular = {
         login
         for login, count in counts.items()
-        if count > _COMMIT_THRESHOLD or count > len(repo_commits) * _REPO_SHARE_THRESHOLD
+        if count > _COMMIT_THRESHOLD
+        or (complete and count > len(repo_commits) * _REPO_SHARE_THRESHOLD)
     }
-    commits = {
-        commit.sha: commit
-        for file_history in await asyncio.gather(*(history(f.filename) for f in busiest))
-        for commit in file_history
-        if commit.author is not None and commit.author.type == "User"
-    }
+    histories = await asyncio.gather(*(history(f.filename) for f in busiest))
+    small: dict[str, set[str]] = {}
+    commits: dict[str, _Commit] = {}
+    for file, history_items in zip(busiest, histories, strict=True):
+        for commit in history_items:
+            if commit.author is not None and commit.author.type == "User":
+                small.setdefault(commit.author.login.lower(), set()).add(file.filename)
+                commits.setdefault(commit.sha, commit)
 
     async def contribution(commit: _Commit) -> tuple[str, set[str]] | None:
-        if commit.author is None or (
-            not include_small and commit.author.login.lower() not in regular
-        ):
+        if commit.author is None or commit.author.login.lower() not in regular:
             return None
         async with gate:
-            try:
-                changed = TypeAdapter(list[ChangedFile]).validate_python(
-                    (await repo.commit(commit.sha)).get("files", [])
-                )
-            except httpx2.HTTPError, ValueError, ValidationError:
-                logger.warning(
-                    "Could not read a commit's contribution",
-                    extra={"repository": repo.full_name, "sha": commit.sha},
-                    exc_info=True,
-                )
-                return None
+            changed = TypeAdapter(list[ChangedFile]).validate_python(
+                (await repo.commit(commit.sha)).get("files", [])
+            )
         relevant = [file for file in changed if file.filename in paths]
-        if not relevant or (
-            not include_small and sum(file.changed_lines for file in relevant) < _MIN_CHANGED_LINES
-        ):
+        if sum(file.changed_lines for file in relevant) < _MIN_CHANGED_LINES:
             return None
         return commit.author.login.lower(), {file.filename for file in relevant}
 
     touched: dict[str, set[str]] = {}
-    for item in await asyncio.gather(*(contribution(commit) for commit in commits.values())):
+    inspected = [
+        commit
+        for commit in commits.values()
+        if commit.author and commit.author.login.lower() in regular
+    ][:_HISTORY_MAX_COMMITS]
+    for item in await asyncio.gather(*(contribution(commit) for commit in inspected)):
         if item is not None:
             login, changed_paths = item
             touched.setdefault(login, set()).update(changed_paths)
-    return Counter({login: len(changed_paths) for login, changed_paths in touched.items()})
+    return Contributors(
+        Counter({login: len(changed_paths) for login, changed_paths in touched.items()}),
+        Counter({login: len(changed_paths) for login, changed_paths in small.items()}),
+    )
 
 
 async def choose_reviewer(
     request: HumanReviewRequest, *, area: Area | None = None
-) -> Pick | Wait | None:
-    """The best on-shift owner of ``area``, when to try again, or ``None`` when nobody qualifies.
-
-    Without ``area`` it is the first area nobody on the request owns, the largest first, falling
-    back to anyone who changed the files; ``None`` once every area has someone.
-    """
+) -> Pick | Wait | NoCandidate | Covered | None:
+    """Pick or wait, distinguish exhausted and covered searches, and return None on read failure."""
     pr = request.pull_request
     extra = {
         "request_id": str(request.id),
@@ -352,8 +355,8 @@ async def choose_reviewer(
             return await _choose_reviewer(
                 request, github.repo(pr.owner, pr.repo).pull_request(pr.number), area, extra
             )
-    except GitHubAppUnavailable:
-        logger.warning("No GitHub App token to pick a reviewer", extra=extra)
+    except GitHubAppUnavailable, httpx2.HTTPError, ValueError, ValidationError:
+        logger.warning("Could not complete reviewer search", extra=extra, exc_info=True)
         return None
 
 
@@ -362,24 +365,23 @@ async def _choose_reviewer(
     pull: PullRequestClient,
     area: Area | None,
     extra: dict[str, object],
-    *,
-    include_small: bool = False,
-) -> Pick | Wait | None:
+) -> Pick | Wait | NoCandidate | Covered | None:
     pr = request.pull_request
     files = await ChangedFile.of_pull(pull)
     if not files:
         logger.warning("Could not read the changed files to pick a reviewer", extra=extra)
         return None
     ref = pr.base_ref or None
-    codeowners, touched = await asyncio.gather(
+    codeowners, contributors = await asyncio.gather(
         CodeOwners.fetch(pull.repo, ref),
-        recent_contributors(pull.repo, ref, files, include_small=include_small),
+        recent_contributors(pull.repo, ref, files),
     )
     coverage = (
         await Coverage.build(codeowners, [changed.filename for changed in files])
         if codeowners is not None
         else Coverage(())
     )
+    touched = contributors.small
     owned = coverage.owned()
     logger.info(
         "Gathered reviewer candidates",
@@ -436,13 +438,12 @@ async def _choose_reviewer(
         "Filtered reviewer candidates",
         extra={**extra, "eligible": sorted(people), "skipped": skipped},
     )
-    requested_area = area
     fallback = False
     if area is None and coverage.areas:
         on_request = [p.github_login for p in request.participants if p.decision != "expired"]
         if not (open_areas := coverage.uncovered(on_request)):
             logger.info("Every code owner area already has a reviewer", extra=extra)
-            return None
+            return Covered()
         area, fallback = open_areas[0], True
     if area is not None:
         owners = {login: user for login, user in people.items() if login in area.owners}
@@ -454,9 +455,21 @@ async def _choose_reviewer(
             people = owners
     if not people:
         logger.info("No Open SWE user owns or recently changed these files", extra=extra)
-        if not include_small:
-            return await _choose_reviewer(request, pull, requested_area, extra, include_small=True)
-        return None
+        return NoCandidate()
+    writable = await asyncio.gather(*(pull.repo.can_write(login) for login in people))
+    people = {
+        login: user
+        for (login, user), allowed in zip(people.items(), writable, strict=True)
+        if allowed
+    }
+    regular_people = {
+        login: user for login, user in people.items() if login in contributors.regular
+    }
+    if regular_people:
+        people = regular_people
+        touched = contributors.regular
+    if not people:
+        return NoCandidate()
     loads = await HumanReviewRequest.open_review_counts(
         [user.id for user in people.values()], excluding=request.id
     )
@@ -488,12 +501,6 @@ async def _choose_reviewer(
     )
     by_start = sorted(ranked, key=lambda c: hours[c.login].next_start(now))
     for candidate in by_start:
-        if not await pull.repo.can_write(candidate.login):
-            logger.info(
-                "Skipped a reviewer candidate without write access",
-                extra={**extra, "github_login": candidate.login},
-            )
-            continue
         start = hours[candidate.login].next_start(now)
         if start > now:
             logger.info(
@@ -513,8 +520,10 @@ async def _choose_reviewer(
                 "open_reviews": candidate.open_reviews,
             },
         )
-        return Pick(people[candidate.login].login_for("github") or candidate.login, reason)
+        return Pick(
+            people[candidate.login].login_for("github") or candidate.login,
+            reason,
+            frozenset(people),
+        )
     logger.info("No candidate reviewer has write access", extra=extra)
-    if not include_small:
-        return await _choose_reviewer(request, pull, requested_area, extra, include_small=True)
-    return None
+    return NoCandidate()
