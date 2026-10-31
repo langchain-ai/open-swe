@@ -7,11 +7,13 @@ each new head with the plan, so it stays reviewed across pushes and across
 channels. Having a chunk on screen, or skipping it, never counts.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Self
 
 from pydantic import BaseModel
 
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.walkthrough.diff import Carry
 from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import Hunks, Plan, PlanChunk
@@ -31,6 +33,43 @@ class OnScreen(BaseModel):
     message_ts: str = ""
     message_text: str = ""
     run_id: str = ""
+    code: str = ""
+    diff_file_id: str = ""
+
+    @property
+    def explanation(self) -> str:
+        return (
+            self.message_text.removesuffix(self.code).rstrip() if self.code else self.message_text
+        )
+
+    def diff_files(self) -> list[ChangedFile]:
+        """Adapt the sandbox's fenced snippets to the shared diff renderer."""
+        files: list[ChangedFile] = []
+        pattern = r"^`([^`\n]+)`(?: L(\d+)(?:–\d+)?)?\n(`{3,})([^\n]*)\n(.*?)\n\3(?=\n|$)"
+        end = 0
+        for match in re.finditer(pattern, self.code, re.MULTILINE | re.DOTALL):
+            if self.code[end : match.start()].strip():
+                return []
+            end = match.end()
+            path, start, _, language, body = match.groups()
+            if start is not None:
+                lines = body.split("\n")
+                patch = f"@@ -0,0 +{start},{len(lines)} @@\n" + "\n".join(
+                    "+" + line for line in lines
+                )
+            elif language == "diff":
+                patch = body
+            else:
+                return []
+            files.append(
+                ChangedFile(
+                    filename=path,
+                    additions=sum(line.startswith("+") for line in patch.split("\n")),
+                    deletions=sum(line.startswith("-") for line in patch.split("\n")),
+                    patch=patch,
+                )
+            )
+        return files if not self.code[end:].strip() else []
 
 
 class Approval(BaseModel):
@@ -207,6 +246,7 @@ class Reader:
             title=title,
             lines=self.remaining(lines),
             message_text=f"*{title}*\n{explanation}\n\n{code}".strip(),
+            code=code.strip(),
         )
 
     @property
@@ -235,6 +275,7 @@ class Reader:
             title=chunk.title,
             lines=lines,
             message_text=f"{header}\n{chunk.explanation}\n\n{chunk.code}".strip(),
+            code=chunk.code.strip(),
         )
 
     def show_other(self) -> OnScreen:
