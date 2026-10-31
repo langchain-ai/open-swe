@@ -245,9 +245,7 @@ class SupplementaryReview:
         org, team = self.policy.team.split("/", 1)
         members = await team_members(org, team)
         owners = DesignOwners.load(self.policy)
-        if owners and self.state.area in owners.areas:
-            owner = owners.areas[self.state.area].github_login.lower()
-            members = [login for login in members or [] if login.lower() == owner]
+        owner = owners.areas.get(self.state.area) if owners else None
         users = await asyncio.gather(*(User.for_login("github", login) for login in members or []))
         reviews = await latest_review_states(pull, self.request.pull_request.author)
         if reviews is None:
@@ -264,11 +262,56 @@ class SupplementaryReview:
                 or not await PROFILES.allows_auto_human_review(user.github_login)
             ):
                 continue
-            hours = await ReviewerAvailability.for_user(user)
-            if hours.out_of_office is not False or not await pull.repo.can_write(user.github_login):
+            if not await pull.repo.can_write(user.github_login):
                 continue
-            eligible.append((user, hours))
+            hours = await ReviewerAvailability.for_user(user)
+            if owner and user.github_login.lower() == owner.github_login.lower():
+                return [(user, hours)] if hours.out_of_office is False else []
+            if hours.out_of_office is False:
+                eligible.append((user, hours))
+        if owner:
+            logger.warning(
+                "Mapped design owner is ineligible; falling back to team rotation",
+                extra={"request_id": str(self.request.id), "owner_login": owner.github_login},
+            )
         return eligible
+
+    async def _post_ping(self, row: HumanReviewRequest, note: str, images: ReviewImages) -> bool:
+        blocks: list[dict[str, object]] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": note}},
+            *images.blocks(),
+        ]
+        try:
+            try:
+                return bool(
+                    await post_slack_thread_reply_with_ts(
+                        row.slack_channel_id,
+                        row.slack_thread_ts or row.slack_message_ts,
+                        note,
+                        unfurl_links=False,
+                        unfurl_media=False,
+                        blocks=blocks,
+                    )
+                )
+            except SlackRequestError as exc:
+                if exc.code not in {"invalid_blocks", "invalid_arguments"} or len(blocks) == 1:
+                    raise
+                logger.warning("Slack rejected review screenshots; sending text only")
+                return bool(
+                    await post_slack_thread_reply_with_ts(
+                        row.slack_channel_id,
+                        row.slack_thread_ts or row.slack_message_ts,
+                        note,
+                        unfurl_links=False,
+                        unfurl_media=False,
+                    )
+                )
+        except SlackRequestError:
+            logger.exception(
+                "Could not post supplementary review ping; falling back to DM",
+                extra={"request_id": str(row.id), "policy": self.policy.id},
+            )
+            return False
 
     async def _assign(self, pull: PullRequestClient) -> str:
         if not self.state.github_login:
@@ -310,51 +353,27 @@ class SupplementaryReview:
             pr = row.pull_request
             owners = DesignOwners.load(self.policy)
             owner = owners.areas.get(state.area) if owners else None
-            why = owner.label if owner else f"{self.policy.team} specialist"
+            why = (
+                owner.label
+                if owner and state.github_login.lower() == owner.github_login.lower()
+                else f"{self.policy.team} specialist (team rotation)"
+            )
             note = (
                 f"*{label}* · {slack_mention(user, state.github_login)} · "
                 f"<{pr.url}|{pr.repo}#{pr.number}>\n"
-                f"*Impact:* {escape(' '.join(state.reason.split())[:320])}\n"
+                f"*Impact:* {escape(' '.join(state.reason.split())[:320], quote=False)}\n"
                 f"*Scope:* {pr.changed_files} files · +{pr.additions}/−{pr.deletions}\n"
                 f"*Why you:* {why}"
             )
-            blocks: list[dict[str, object]] = [
-                {"type": "section", "text": {"type": "mrkdwn", "text": note}},
-                *ReviewImages(pr.body or "").blocks(),
-            ]
             failed = False
             try:
                 if not state.github_requested:
                     await pull.request_reviewers([state.github_login])
                     state.github_requested = True
                 if not state.slack_notified and not state.dm_notified:
-                    try:
-                        state.slack_notified = bool(
-                            await post_slack_thread_reply_with_ts(
-                                row.slack_channel_id,
-                                row.slack_thread_ts or row.slack_message_ts,
-                                note,
-                                unfurl_links=False,
-                                unfurl_media=False,
-                                blocks=blocks,
-                            )
-                        )
-                    except SlackRequestError as exc:
-                        if (
-                            exc.code not in {"invalid_blocks", "invalid_arguments"}
-                            or len(blocks) == 1
-                        ):
-                            raise
-                        logger.warning("Slack rejected review screenshots; sending text only")
-                        state.slack_notified = bool(
-                            await post_slack_thread_reply_with_ts(
-                                row.slack_channel_id,
-                                row.slack_thread_ts or row.slack_message_ts,
-                                note,
-                                unfurl_links=False,
-                                unfurl_media=False,
-                            )
-                        )
+                    state.slack_notified = await self._post_ping(
+                        row, note, ReviewImages(pr.body or "")
+                    )
                 if (
                     not state.slack_notified
                     and not state.dm_notified
