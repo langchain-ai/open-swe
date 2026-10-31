@@ -107,9 +107,16 @@ class _State:
         """Put ``shown`` on screen with its "Next" button, replacing what was there."""
         chunk = ChunkMessage(shown)
         await chunk.prepare()
-        posted = await send_slack_reply(
-            shown.message_text, "progress", blocks=chunk.blocks(buttons=[NEXT])
-        )
+        try:
+            blocks = chunk.blocks(buttons=[NEXT])
+        except SlackRequestError as exc:
+            return {
+                "success": False,
+                "error": exc.code,
+                "retry": True,
+                "hint": "Shorten or split the chunk before showing it again.",
+            }
+        posted = await send_slack_reply(shown.message_text, "progress", blocks=blocks)
         if posted["success"] is not True:
             return posted
         replaced = self.walk.withdraw()

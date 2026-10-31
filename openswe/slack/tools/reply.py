@@ -180,9 +180,19 @@ async def send_slack_reply(
             conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
             if conflict is not None:
                 return conflict
-        if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+        has_options = bool(options) or bool(
+            blocks and any(block.get("type") == "actions" for block in blocks)
+        )
+        if has_options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             return _oversized_options_error(message)
         feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
+        if blocks is not None and len(blocks) + _WEB_LINK_BLOCKS + feedback > MESSAGE_MAX_BLOCKS:
+            return {
+                "success": False,
+                "error": "Message exceeds Slack's block budget",
+                "retry": True,
+                "hint": "Retry with fewer blocks, leaving room for the dashboard link and feedback.",
+            }
         slack_blocks = blocks
         if blocks is None:
             slack_blocks = _reply_blocks(

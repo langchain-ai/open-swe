@@ -38,7 +38,9 @@ _HEADINGS: dict[Stage, str] = {
 def _text_blocks(
     text: str, *, note: str = "", buttons: list[str] | None = None
 ) -> list[JsonObject]:
-    body = markdown_blocks(text) or []
+    body = markdown_blocks(text)
+    if body is None:
+        raise SlackRequestError("msg_too_long")
     extra = [context(note)] if note else []
     return [*block_payload([*body, *extra]), *option_actions(buttons)]
 
@@ -60,7 +62,9 @@ class ChunkMessage:
         shown = self.shown
         if not shown.diff_file_id:
             return _text_blocks(shown.message_text, note=note, buttons=buttons)
-        body = markdown_blocks(shown.explanation) or []
+        body = markdown_blocks(shown.explanation)
+        if body is None:
+            raise SlackRequestError("msg_too_long")
         ranges = "; ".join(shown.lines.spans())
         extra = [context(note)] if note else []
         return [
@@ -121,8 +125,8 @@ async def post_with_buttons(
     chunk = ChunkMessage(shown) if shown is not None else None
     if chunk is not None:
         await chunk.prepare()
-    blocks = chunk.blocks(buttons=buttons) if chunk else _text_blocks(text, buttons=buttons)
     try:
+        blocks = chunk.blocks(buttons=buttons) if chunk else _text_blocks(text, buttons=buttons)
         return await post_slack_top_level_message_with_ts(
             session.slack_channel_id, text, blocks=blocks
         )

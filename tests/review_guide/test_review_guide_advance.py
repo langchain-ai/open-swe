@@ -139,6 +139,19 @@ async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
     assert dispatch.await_args.kwargs["approve_ts"] == "1.0"
 
 
+async def test_unrenderable_chunk_body_is_not_posted_as_an_empty_next_button(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = ReviewGuideSession(
+        thread_id="thread-1", pull_request_id=uuid7(), user_id=uuid7(), slack_channel_id="C1"
+    )
+    post = AsyncMock()
+    monkeypatch.setattr(messages, "post_slack_top_level_message_with_ts", post)
+    text = "x" * 160_000
+    assert await messages.post_with_buttons(session, text, [NEXT]) == ""
+    post.assert_not_awaited()
+
+
 @pytest.mark.parametrize("failure", ["", "render", "upload", "processing"])
 async def test_chunk_images_survive_retirement_and_fall_back_to_accessible_text(
     monkeypatch: pytest.MonkeyPatch, failure: str
