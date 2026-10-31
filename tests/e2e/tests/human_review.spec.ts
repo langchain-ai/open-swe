@@ -719,8 +719,24 @@ test.describe("Human review in Slack", () => {
       "Requested by",
     );
 
-    // 2. The auto-assignment timeout passes with nobody signed up: the agent owning
-    //    the card's thread is woken and picks Bob, who has yet to accept.
+    await control(request, "/control/human-review-deadline", {
+      request_id: posted.id,
+      step: "unclaimed",
+      hours: 2,
+    });
+    expect((await latestRequest(request)).picks).toEqual([]);
+    expect((await pull(request, seeded.number)).requested_reviewers).toEqual(
+      [],
+    );
+    expect(
+      (await channelMessages(request, "D_BOB")).some((message) =>
+        message.text.includes("Open SWE picked you to review"),
+      ),
+    ).toBe(false);
+    await control(request, "/control/walkthrough", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      number: seeded.number,
+    });
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
@@ -856,6 +872,10 @@ test.describe("Human review in Slack", () => {
       files: { "greeting/hello.py": 'print("Bonjour")\n' },
       check_runs: GREEN,
     });
+    await control(request, "/control/walkthrough", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      number: seeded.number,
+    });
     await page.goto("/agents/reviews");
     await page
       .getByRole("listitem")
@@ -953,6 +973,10 @@ test.describe("Human review in Slack", () => {
       body: "Says hola.",
       files: { "greeting/hello.py": 'print("Hola")\n' },
       check_runs: GREEN,
+    });
+    await control(request, "/control/walkthrough", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      number: seeded.number,
     });
     await page.goto("/agents/reviews");
     await page

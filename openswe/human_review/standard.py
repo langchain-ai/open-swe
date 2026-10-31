@@ -68,6 +68,7 @@ from openswe.human_review.supplementary import (
     SupplementaryReviews,
 )
 from openswe.prompts import prompt
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
@@ -756,6 +757,14 @@ async def assign(
                 f"their next work day starts at {availability.next_start(now).isoformat()}. "
                 "Pick someone who is on shift instead."
             )
+    if not replace and not await _ensure_assignment_walkthrough(
+        request,
+        retry_step="auto_merge" if approvers else "pick_expiry" if request.picks else "unclaimed",
+    ):
+        return _failure(
+            "The current PR head has no complete walkthrough yet. Automatic assignment is "
+            "waiting for it; do not pick anyone until the walkthrough is ready."
+        )
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
@@ -1180,6 +1189,52 @@ async def settle_repository(owner: str, repo: str) -> None:
         await settle(request)
 
 
+async def _ensure_assignment_walkthrough(
+    request: HumanReviewRequest, *, retry_step: DeadlineStep = "unclaimed"
+) -> bool:
+    """Require a complete walkthrough of the live head before picking a reviewer."""
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            details = PullRequestPayload.model_validate(await pull.pull())
+        if details.state != "open" or details.merged or details.draft:
+            return False
+        if details.base_sha and details.head_sha:
+            workspace = await resolve_workspace(
+                thread_workspace=RunConfig.parse(request.run_config).workspace_slug,
+                slack_channel_id=request.slack_channel_id,
+                repo=(pr.owner, pr.repo),
+            )
+            target = ReviewScoutTarget(
+                owner=pr.owner,
+                repo=pr.repo,
+                pr_number=pr.number,
+                pr_title=details.title,
+                base_sha=details.base_sha,
+                head_sha=details.head_sha,
+                workspace_slug=workspace.slug,
+            )
+            if await target.walkthrough() is not None:
+                return True
+            await target.start()
+    except Exception:
+        logger.warning(
+            "Could not prepare a walkthrough before automatic reviewer assignment",
+            extra={"request_id": str(request.id)},
+            exc_info=True,
+        )
+    if retry_step == "auto_merge":
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            if row is not None:
+                row.run_config = {
+                    key: value
+                    for key, value in row.run_config.items()
+                    if key != _REMAINING_OWNERS_ASKED
+                }
+    await _schedule(request, retry_step, _DEADLINE_RETRY)
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class AutoAssignResult:
     status: Literal["picked", "waiting", "woken", "failed", "disabled", "claimed"]
@@ -1250,6 +1305,8 @@ async def _auto_assign(
     if not author_allowed:
         await ReviewCard(request).retire("cancelled", "PR author is not allowed for review")
         return AutoAssignResult("disabled")
+    if not await _ensure_assignment_walkthrough(request):
+        return AutoAssignResult("waiting")
     choice = await choose_reviewer(request)
     if isinstance(choice, Wait):
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
@@ -1289,6 +1346,8 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
     if not (open_areas := coverage.uncovered([*approvers, *assigned])):
         return
     if await _auto_assign_hold(request, "unclaimed"):
+        return
+    if not await _ensure_assignment_walkthrough(request, retry_step="auto_merge"):
         return
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open" or _REMAINING_OWNERS_ASKED in row.run_config:
@@ -1508,6 +1567,8 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     idle = [p for p in stale if p.github_login.lower() not in reviewed]
     if not idle:
         return "accepted"
+    if not await _ensure_assignment_walkthrough(request, retry_step="pick_expiry"):
+        return "waiting"
     area = await _area_left_by(request, {p.github_login.lower() for p in idle})
     choice = await choose_reviewer(request, area=area)
     if choice is None:

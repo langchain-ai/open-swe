@@ -230,10 +230,55 @@ async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) 
             "openswe.human_review.standard.assign",
             AsyncMock(return_value=RequestResult(success=False, claimed=True)),
         ),
+        patch(
+            "openswe.human_review.standard._ensure_assignment_walkthrough",
+            AsyncMock(return_value=True),
+        ),
         patch("openswe.human_review.standard._wake_picker", AsyncMock()) as wake,
     ):
         assert (await _auto_assign(request, asked=True, trigger=None)).status == "claimed"
     wake.assert_not_awaited()
+
+
+@pytest.mark.parametrize("ready", [True, False, None])
+@pytest.mark.usefixtures("github_app")
+async def test_assignment_waits_for_live_heads_walkthrough(ready: bool | None) -> None:
+    from openswe.human_review import standard
+    from openswe.review_scout.launch import ReviewScoutTarget
+    from openswe.walkthrough.record import WalkthroughView
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="old", kind="standard")
+    request.pull_request = pr
+    with (
+        patch.object(
+            standard.PullRequestClient,
+            "pull",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "base": {"sha": "base"},
+                    "head": {"sha": "live"},
+                }
+            ),
+        ),
+        patch.object(standard, "resolve_workspace", AsyncMock(return_value=MagicMock(slug="ws"))),
+        patch.object(
+            WalkthroughView,
+            "for_head",
+            AsyncMock(
+                return_value=object() if ready else None,
+                side_effect=RuntimeError("unavailable") if ready is None else None,
+            ),
+        ) as lookup,
+        patch.object(ReviewScoutTarget, "start", AsyncMock(return_value="run")) as start,
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
+    ):
+        assert await standard._ensure_assignment_walkthrough(request) is bool(ready)
+    lookup.assert_awaited_once_with("lc", "repo", 7, "live")
+    assert start.await_count == (1 if ready is False else 0)
+    assert schedule.await_count == (0 if ready else 1)
+    assert not request.participants
 
 
 @pytest.mark.parametrize("source", ["automatic", "named", "forged", "mcp", "unauthorized_mcp"])
@@ -317,16 +362,17 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
 
 
 @pytest.mark.parametrize(
-    ("local_time", "out_of_office", "named", "allowed"),
+    ("local_time", "out_of_office", "named", "walkthrough_ready", "allowed"),
     [
-        ("2026-10-22T03:00:00", False, False, False),
-        ("2026-10-22T09:00:00", False, False, True),
-        ("2026-10-22T12:00:00", True, False, False),
-        ("2026-10-22T03:00:00", False, True, True),
+        ("2026-10-22T03:00:00", False, False, True, False),
+        ("2026-10-22T09:00:00", False, False, True, True),
+        ("2026-10-22T12:00:00", True, False, True, False),
+        ("2026-10-22T03:00:00", False, True, False, True),
+        ("2026-10-22T09:00:00", False, False, False, False),
     ],
 )
 async def test_assignment_enforces_availability_before_contacting_reviewer(
-    local_time: str, out_of_office: bool, named: bool, allowed: bool
+    local_time: str, out_of_office: bool, named: bool, walkthrough_ready: bool, allowed: bool
 ) -> None:
     from openswe.human_review import standard
     from openswe.human_review.people import Participant
@@ -370,6 +416,11 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
         patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(
+            standard,
+            "_ensure_assignment_walkthrough",
+            AsyncMock(return_value=walkthrough_ready),
+        ),
     ):
         clock.now.return_value = now
         result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
@@ -380,7 +431,14 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         github_review.assert_awaited_once()
         dm.assert_awaited_once()
     else:
-        assert ("out of office" if out_of_office else "outside working hours") in result.error
+        expected = (
+            "out of office"
+            if out_of_office
+            else "outside working hours"
+            if walkthrough_ready
+            else "no complete walkthrough"
+        )
+        assert expected in result.error
         github_review.assert_not_awaited()
         dm.assert_not_awaited()
         schedule.assert_not_awaited()
