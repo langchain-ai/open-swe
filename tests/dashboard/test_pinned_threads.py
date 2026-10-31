@@ -11,7 +11,6 @@ from langgraph_sdk.client import LangGraphClient
 from openswe.dashboard import oauth
 from openswe.threads import listing, pins, summary
 from openswe.users.models import User
-from tests.support.sessions import signed_in
 
 
 class ThreadAPI:
@@ -112,15 +111,11 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
         ("bob", None, ["shared"]),
         ("admin", "admin@test", ["shared", "private"]),
     ):
-        result = await listing.list_dashboard_pinned_threads(
-            signed_in(login, email=email, user_id=ids[login]),
-        )
+        result = await listing.list_dashboard_pinned_threads(login, email=email)
         assert [item["id"] for item in result] == expected
     thread_api.add("shared", visibility="private", owner_login="someone-else")
     del thread_api.threads["private"]
-    assert (
-        await listing.list_dashboard_pinned_threads(signed_in("alice", user_id=ids["alice"])) == []
-    )
+    assert await listing.list_dashboard_pinned_threads("alice") == []
     assert await pins.list_thread_pin_ids("alice") == ["shared", "private", "internal", "deleted"]
 
 
@@ -130,7 +125,7 @@ async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(
     await pins.pin_thread("alice", "pin")
     thread_api.fail_search = True
     with pytest.raises(httpx.HTTPStatusError):
-        await listing.list_dashboard_pinned_threads(signed_in("alice"))
+        await listing.list_dashboard_pinned_threads("alice")
     assert await pins.list_thread_pin_ids("alice") == ["pin"]
 
 
@@ -141,7 +136,7 @@ async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refresh
         thread_id = str(index)
         thread_api.add(thread_id, latest_run_status=None)
         await pins.pin_thread("alice", thread_id)
-    result = await listing.list_dashboard_pinned_threads(signed_in("alice"))
+    result = await listing.list_dashboard_pinned_threads("alice")
     assert all(item["status"] == "running" for item in result)
     assert thread_api.count("POST", "/search") == 1
     assert thread_api.count("GET", "/runs") == 20

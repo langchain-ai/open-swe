@@ -188,9 +188,7 @@ async def api_list_thread_repos(
 async def api_list_pinned_threads(
     session: DashboardSession = SESSION_DEP,
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_pinned_threads(
-        session,
-    )
+    return await list_dashboard_pinned_threads(session.login, email=session.email)
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)

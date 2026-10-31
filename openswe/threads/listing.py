@@ -43,6 +43,7 @@ from openswe.threads.summary import (
     thread_updated_ms,
 )
 from openswe.transcript.subagents import attach_subagents
+from openswe.users import User
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
@@ -754,9 +755,14 @@ async def list_dashboard_threads(
 
 async def _pinned_thread_summaries(
     client: LangGraphClient,
-    session: Viewer,
+    login: str,
+    email: str | None,
 ) -> list[JsonObject]:
-    pin_ids = await list_thread_pin_ids(session.login)
+    viewer = await User.for_login("github", login)
+    if viewer is None:
+        return []
+    session = DashboardSession.of(viewer, email=email)
+    pin_ids = await list_thread_pin_ids(login)
     threads_by_id: dict[str, ThreadLike] = {}
     # Search by ID independently of sidebar filters/pages, selecting no conversation
     # state. Refresh idle metadata too: external runs and visibility can change.
@@ -782,9 +788,12 @@ async def _pinned_thread_summaries(
 
 
 async def list_dashboard_pinned_threads(
-    session: Viewer,
+    login: str,
+    *,
+    email: str | None = None,
 ) -> list[dict[str, Any]]:
-    return await _pinned_thread_summaries(langgraph_client(), session)
+    """``login``'s pinned threads; the route passes the login its session holds now."""
+    return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
 async def list_dashboard_thread_repos(
