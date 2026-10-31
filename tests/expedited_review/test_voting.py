@@ -293,7 +293,8 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     monkeypatch.setattr("openswe.slack.client.post_slack_ephemeral_message", ephemeral)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
     monkeypatch.setattr(
-        lifecycle, "upload_slack_thread_file", AsyncMock(side_effect=SlackRequestError("down"))
+        "openswe.slack.diff_image.upload_slack_thread_file",
+        AsyncMock(side_effect=SlackRequestError("down")),
     )
     monkeypatch.setattr(
         ChangedFile,

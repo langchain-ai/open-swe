@@ -2,6 +2,9 @@ List every distinct inbound event type Open SWE received in the last 14 days, ac
 
 Admin threads also see `workspace` events: Open SWE's own workspace activity, such as `refresh.success` and `refresh.failed` when a workspace snapshot refresh settles, whose payload carries the refresh's steps, error, and log tail.
 
+Admin threads also see `human_review` events for request creation and changes, assignment and agent wakes, GitHub review requests, notification delivery outcomes, snoozes and declines, supplementary reviews, and scheduled/fired deadlines.
+Payloads include the request ID and PR URL; run configuration and DM bodies are excluded.
+
 Each entry has `source`, `event_type`, `count`, and `last_received_at`.
 An event whose payload has an `action` is named `<event>.<action>`, e.g. `pull_request.opened` or `check_suite.completed`; one without keeps the bare name, e.g. `push`.
 Use it to pick `event_types` and `payload_match` for `listen_events`.

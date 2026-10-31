@@ -114,3 +114,19 @@ def test_a_push_keeps_an_unchanged_chunk_on_screen_and_takes_down_a_changed_one(
     assert kept.on_screen.lines == _added("a.py", 3)
     assert dropped.on_screen is None
     assert taken_down is not None and taken_down.title == "One"
+
+
+def test_chunk_images_keep_selected_line_numbers_and_do_not_drop_unparsed_code() -> None:
+    reader = Reader.of(Walk(head_sha="head-1"), _plan(), LineSet())
+    code = (
+        "`a.py` L2–3\n```python\ndef one():\ndef two():\n```\n"
+        "`old.py`\n```diff\n@@ -41,2 +41,1 @@\n-old\n+new\n context\n```"
+    )
+    shown = reader.custom("Changes", "Explanation", _added("a.py", 2, 3), code)
+    files = shown.diff_files()
+    assert [file.filename for file in files] == ["a.py", "old.py"]
+    assert files[0].patch == "@@ -0,0 +2,2 @@\n+def one():\n+def two():"
+    assert files[1].patch == "@@ -41,2 +41,1 @@\n-old\n+new\n context"
+    assert shown.explanation == "*Changes*\nExplanation"
+    shown.code += "\nUnexpected text"
+    assert shown.diff_files() == []

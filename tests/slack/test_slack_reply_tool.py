@@ -422,19 +422,46 @@ async def test_slack_reply_keeps_code_highlighted_over_native_limit(
     assert blocks[-1]["text"]["text"] == "after"
 
 
+@pytest.mark.parametrize("custom", [False, True])
 async def test_slack_reply_rejects_oversized_message_with_options(
     monkeypatch: pytest.MonkeyPatch,
+    custom: bool,
 ) -> None:
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    result = await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes"])
+    result = await slack_reply_tool.slack_reply(
+        "x" * 12001,
+        "final",
+        options=None if custom else ["Yes"],
+        blocks=[{"type": "actions", "elements": []}] if custom else None,
+    )
 
+    assert isinstance(result, dict)
     assert result["success"] is False
     assert result["retry"] is True
     assert "options" in result["error"]
     post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("count,accepted", [(49, True), (50, False)])
+async def test_custom_blocks_reserve_room_for_the_dashboard_link(
+    monkeypatch: pytest.MonkeyPatch,
+    count: int,
+    accepted: bool,
+) -> None:
+    post = AsyncMock(return_value="2.0")
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    result = await slack_reply_tool.slack_reply(
+        "Chunk", "progress", blocks=[{"type": "markdown", "text": "code"}] * count
+    )
+    assert isinstance(result, dict)
+    assert result["success"] is accepted
+    if not accepted:
+        assert result["retry"] is True
+        post.assert_not_awaited()
 
 
 async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(
