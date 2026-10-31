@@ -34,6 +34,7 @@ from openswe.transcript.events import (
     TurnCompleted,
     TurnStarted,
 )
+from tests.support.sessions import user_id_of
 
 THREAD = str(uuid.uuid4())
 RUN = str(uuid.uuid4())
@@ -173,7 +174,11 @@ async def test_echoed_ids_continue_only_threads_this_sandbox_started(
         side_effect=lambda thread_id: {"metadata": {SANDBOX_HOST_THREAD_KEY: hosts[thread_id]}}
     )
     monkeypatch.setattr(conversations, "langgraph_client", lambda: client)
-    caller = SandboxCaller("host-thread", "sandbox-a", {"owner_login": "octocat"})
+    caller = SandboxCaller(
+        "host-thread",
+        "sandbox-a",
+        {"owner_login": "octocat", "owner_user_id": str(user_id_of("octocat"))},
+    )
 
     def request(thread_id: str) -> CreateResponseRequest:
         return CreateResponseRequest.model_validate(

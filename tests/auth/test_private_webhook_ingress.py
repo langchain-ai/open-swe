@@ -9,6 +9,7 @@ from openswe.slack import move as slack_move
 from openswe.slack import webhook
 from openswe.slack.request import SlackRequest
 from openswe.slack.tools import move_thread
+from tests.support.sessions import user_id_of
 
 
 @pytest.mark.asyncio
@@ -147,7 +148,13 @@ async def test_private_slack_edit_rejects_non_owner(monkeypatch):
     client = SimpleNamespace(
         threads=SimpleNamespace(
             get=AsyncMock(
-                return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}
+                return_value={
+                    "metadata": {
+                        "visibility": "private",
+                        "owner_login": "alice",
+                        "owner_user_id": str(user_id_of("alice")),
+                    }
+                }
             )
         )
     )
@@ -190,7 +197,13 @@ async def test_private_slack_move_cannot_publish_to_channel(monkeypatch):
         lambda: SimpleNamespace(
             threads=SimpleNamespace(
                 get=AsyncMock(
-                    return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}
+                    return_value={
+                        "metadata": {
+                            "visibility": "private",
+                            "owner_login": "alice",
+                            "owner_user_id": str(user_id_of("alice")),
+                        }
+                    }
                 )
             )
         ),

@@ -131,6 +131,7 @@ afterEach(() => cleanup())
 const RENDER_BUDGET = 25
 const USER: SessionUser = {
   login: "alice",
+  user_id: "user-alice",
   email: null,
   avatar_url: null,
   is_admin: false,

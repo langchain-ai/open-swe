@@ -8,6 +8,7 @@ import httpx
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
+from openswe.dashboard import oauth
 from openswe.threads import listing, pins, summary
 from openswe.users.models import User
 
@@ -81,7 +82,7 @@ async def thread_api(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[ThreadAPI
         client = LangGraphClient(http)
         monkeypatch.setattr(listing, "langgraph_client", lambda: client)
         monkeypatch.setattr(summary, "get_langsmith_trace_url", AsyncMock(return_value=None))
-        monkeypatch.setattr(summary, "is_admin", lambda email, *, login: email == "admin@test")
+        monkeypatch.setattr(oauth, "is_admin", lambda email, *, login: email == "admin@test")
         yield api
 
 
@@ -96,8 +97,11 @@ async def people(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_and_refresh(
     thread_api: ThreadAPI, people: None
 ) -> None:
+    ids = {login: (await User.for_login("github", login)).id for login in ("alice", "bob", "admin")}
     thread_api.add("shared", source="slack", github_login="someone-else")
-    thread_api.add("private", visibility="private", owner_login="alice")
+    thread_api.add(
+        "private", visibility="private", owner_login="alice", owner_user_id=str(ids["alice"])
+    )
     thread_api.add("internal", source="reviewer")
     for login in ("alice", "bob", "admin"):
         for thread_id in ("shared", "private", "internal", "deleted"):

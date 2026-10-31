@@ -7,7 +7,7 @@ import langgraph_sdk
 from openswe.dashboard import profiles
 from openswe.run_config import RunConfig
 from openswe.threads import plan_api, workflow_approval_api
-from tests.support.sessions import signed_in
+from tests.support.sessions import signed_in, user_id_of
 
 
 async def test_approval_run_uses_authenticated_actor(monkeypatch):
@@ -15,6 +15,7 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch):
         "visibility": "public",
         "owner_type": "user",
         "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
         "github_login": "alice",
         "triggering_user_email": "alice@example.com",
         "source": "dashboard",

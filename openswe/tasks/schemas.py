@@ -12,14 +12,6 @@ from openswe.users import User
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
 
-async def user_for_login(login: str) -> User | None:
-    user = await User.for_login("github", login)
-    if user is None:
-        return None
-    identity = next((item for item in user.identities if item.provider == "github"), None)
-    return await User.for_identity("github", identity.external_id) if identity is not None else None
-
-
 class ThreadMetadata(BaseModel):
     model_config = ConfigDict(extra="allow")
     __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
@@ -62,10 +54,7 @@ class ThreadMetadata(BaseModel):
     async def owner(self) -> User:
         if self.owner_type != "user":
             raise PermissionError("Task operations require a user-owned thread")
-        if self.owner_user_id is not None:
-            user = await User.get(self.owner_user_id)
-        else:
-            user = await user_for_login(self.owner_login or "")
+        user = await User.get(self.owner_user_id) if self.owner_user_id is not None else None
         if user is None:
             raise PermissionError("The thread owner needs an Open SWE account")
         return user

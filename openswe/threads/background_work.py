@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Self
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.monitors.sandbox import ID_PREFIX, MonitorError, MonitorState, SandboxMonitors
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import connect_sandbox
@@ -57,10 +58,14 @@ class ThreadBackgroundWork:
         self._monitors_running = _tracked(metadata, RUNNING_MONITORS_KEY)
 
     @classmethod
-    async def for_reader(cls, thread_id: str, login: str, *, email: str | None) -> Self:
-        metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    async def for_reader(
+        cls,
+        thread_id: str,
+        session: DashboardSession,
+    ) -> Self:
+        metadata = await _readable_thread_metadata(thread_id, session)
         # Commands and their output are shell-equivalent, as in the terminal and files.
-        _assert_thread_promptable(metadata, login)
+        _assert_thread_promptable(metadata, session)
         return cls(thread_id, metadata)
 
     async def listing(self) -> BackgroundWork:
@@ -129,14 +134,23 @@ class ThreadBackgroundWork:
 
 
 async def get_dashboard_thread_background_work(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> BackgroundWork:
-    work = await ThreadBackgroundWork.for_reader(thread_id, login, email=email)
+    work = await ThreadBackgroundWork.for_reader(
+        thread_id,
+        session,
+    )
     return await work.listing()
 
 
 async def get_dashboard_thread_background_output(
-    thread_id: str, task_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    task_id: str,
+    session: DashboardSession,
 ) -> BackgroundOutput:
-    work = await ThreadBackgroundWork.for_reader(thread_id, login, email=email)
+    work = await ThreadBackgroundWork.for_reader(
+        thread_id,
+        session,
+    )
     return await work.output(task_id)

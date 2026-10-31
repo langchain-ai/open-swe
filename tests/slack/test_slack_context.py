@@ -5,6 +5,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
@@ -18,10 +19,12 @@ from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
 from openswe.slack.request import SlackRequest
 from openswe.source_context import SourceContext
 from openswe.users import User
+from openswe.users.models import UserIdentity
 from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.sessions import SessionUsers, signed_in, user_id_of
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -96,8 +99,9 @@ def test_source_context_does_not_reuse_permalink_for_different_slack_thread(
 
 
 def test_upsert_stamps_visibility_and_owner_only_on_creation(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, session_users: SessionUsers
 ) -> None:
+    alice, bob = session_users.add("Alice"), session_users.add("bob")
     threads = _FakeThreadsClient(raise_not_found=True)
     created: dict = {}
 
@@ -111,20 +115,21 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     assert asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="Alice", title="Thread"
+            "thread-id", source="slack", visibility="private", owner=alice, title="Thread"
         )
     )
     assert created["visibility"] == "private"
     assert created["owner_login"] == "Alice"
+    assert created["owner_user_id"] == str(alice.id)
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="public", owner_login="bob", title="Thread"
+            "thread-id", source="slack", visibility="public", owner=bob, title="Thread"
         )
     )
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
-    assert metadata["owner_login"] == "Alice"
+    assert metadata["owner_user_id"] == str(alice.id)
 
 
 @pytest.mark.asyncio
@@ -352,15 +357,33 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common.User, "login_for_slack", fake_login_for_slack_id)
     monkeypatch.setattr(webhook_common.User, "login_for_email", fake_login_for_email)
 
-    async def fake_slack_accounts(user_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    async def fake_slack_accounts(
+        user_ids: list[str],
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, DashboardSession]]:
         # Follows whatever login_for_slack the test installs, as the per-user lookup did.
         logins: dict[str, str] = {}
         for user_id in {value for value in user_ids if value}:
             if login := await webhook_common.User.login_for_slack(user_id):
                 logins[user_id] = login
-        return logins, {}
+        return logins, {}, {user_id: signed_in(login) for user_id, login in logins.items()}
+
+    async def fake_slack_person(user_id: str, user_email: str | None = None) -> User | None:
+        # Follows whatever login lookups the test installs, by Slack id then by email.
+        if user_email is None:
+            profile = (await webhook_common.get_slack_user_info(user_id)).get("profile") or {}
+            user_email = profile.get("email")
+        login = await webhook_common.User.login_for_slack(user_id) or (
+            await webhook_common.User.login_for_email(user_email) if user_email else None
+        )
+        if not login:
+            return None
+        return User(
+            id=user_id_of(login),
+            identities=[UserIdentity(provider="github", external_id=login, login=login)],
+        )
 
     monkeypatch.setattr(slack_webhooks, "_slack_accounts_by_user_id", fake_slack_accounts)
+    monkeypatch.setattr(slack_webhooks, "slack_person", fake_slack_person)
     monkeypatch.setattr(webhook_common, "get_valid_access_token", fake_get_valid_access_token)
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
@@ -494,6 +517,7 @@ async def test_slack_files_wait_for_the_box_mda_opens_for_the_run(
         threads.metadata = {
             "visibility": "private" if private else "public",
             "owner_login": "mason-gh",
+            "owner_user_id": str(user_id_of("mason-gh")),
             "environment": "staging",
             "created_at_ms": 1,
         }
@@ -562,7 +586,12 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     client = slack_webhooks.get_langgraph_client()
-    saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
+    saved_metadata = {
+        "visibility": "public",
+        "owner_type": "user",
+        "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
+    }
     client.threads = _FakeThreadsClient(thread={"metadata": saved_metadata})
     monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
     monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
@@ -802,7 +831,12 @@ async def test_bot_authorization_is_checked_before_execution(monkeypatch, bot_ru
     if block == "removed":
         await AllowedSlackBot.remove("T123", "B123")
     elif block == "other-owner":
-        threads.metadata = {"owner_type": "user", "owner_login": "alice", "visibility": "public"}
+        threads.metadata = {
+            "owner_type": "user",
+            "owner_login": "alice",
+            "owner_user_id": str(user_id_of("alice")),
+            "visibility": "public",
+        }
     elif block in {"private", "other-bot"}:
         await slack_webhooks._process_slack_mention_impl(request, None)
         captured.pop("run_create")
@@ -819,7 +853,12 @@ async def test_bot_authorization_is_checked_before_execution(monkeypatch, bot_ru
 @pytest.mark.parametrize("race", ["before-upsert", "during-create"])
 async def test_bot_cannot_take_over_a_concurrently_created_thread(monkeypatch, bot_run, race):
     request, threads, captured = bot_run
-    human = {"owner_type": "user", "owner_login": "alice", "visibility": "public"}
+    human = {
+        "owner_type": "user",
+        "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
+        "visibility": "public",
+    }
     if race == "before-upsert":
         upsert = webhook_common.upsert_agent_thread_metadata
 

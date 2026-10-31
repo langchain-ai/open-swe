@@ -7,8 +7,8 @@ from openswe.slack import breakout, breakout_links
 from openswe.slack.channels import SlackChannel
 from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.request import SlackRequest
-from openswe.users import User
 from openswe.workspaces import routing
+from tests.support.sessions import SessionUsers, user_id_of
 
 Command = breakout.BreakoutCommand
 
@@ -28,14 +28,14 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
 
 
 @pytest.fixture(autouse=True)
-def public_channels(monkeypatch):
+def public_channels(monkeypatch, session_users: SessionUsers):
     load = AsyncMock(side_effect=lambda channel_id, **_: _channel(channel_id, private=False))
     monkeypatch.setattr(SlackChannel, "load", load)
     monkeypatch.setattr(
         breakout.common, "get_thread_workspace", AsyncMock(return_value="engineering")
     )
     monkeypatch.setattr(breakout.common, "thread_exists", AsyncMock(return_value=False))
-    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="alice"))
+    session_users.add("alice", slack_id="U_ALICE", email="alice@example.com")
     return load
 
 
@@ -127,16 +127,11 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     if email_only:
         request = request.model_copy(update={"thread_id": None})
         command = Command("fix it", channel_id=explicit)
-        monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
+        SessionUsers(monkeypatch).add("alice", email="alice@example.com")
         monkeypatch.setattr(
             breakout.common,
             "get_slack_user_info",
             AsyncMock(return_value={"profile": {"email": "alice@example.com"}}),
-        )
-        monkeypatch.setattr(
-            User,
-            "login_for_email",
-            AsyncMock(side_effect=lambda email: "alice" if email == "alice@example.com" else None),
         )
         monkeypatch.setattr(
             routing.WORKSPACES, "owner_of_slack_channel", AsyncMock(return_value=None)
@@ -287,7 +282,13 @@ async def test_bare_breakout_refuses_private_threads(monkeypatch):
     client = SimpleNamespace(
         threads=SimpleNamespace(
             get=AsyncMock(
-                return_value={"metadata": {"visibility": "private", "owner_login": "alice"}}
+                return_value={
+                    "metadata": {
+                        "visibility": "private",
+                        "owner_login": "alice",
+                        "owner_user_id": str(user_id_of("alice")),
+                    }
+                }
             )
         )
     )

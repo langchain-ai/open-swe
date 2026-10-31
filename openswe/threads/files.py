@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.sandboxes import scripts as sandbox_scripts
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import _response_output, connect_sandbox
@@ -64,17 +65,16 @@ def _workspace_path_command(root: str, mode: Literal["path", "index"], path: str
 
 async def _run_workspace_script(
     thread_id: str,
-    login: str,
-    email: str | None,
+    session: DashboardSession,
     mode: Literal["path", "index"],
     path: str,
 ) -> dict[str, object]:
     from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, session)
     # Reading the live sandbox is shell-equivalent access, so it follows the
     # terminal's rule: admins who may view a private thread still cannot.
-    _assert_thread_promptable(metadata, login)
+    _assert_thread_promptable(metadata, session)
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
         raise HTTPException(404, "thread has no workspace")
@@ -101,16 +101,19 @@ async def _run_workspace_script(
 
 
 async def get_dashboard_thread_path(
-    thread_id: str, login: str, path: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
+    path: str,
 ) -> WorkspaceDirectory | WorkspaceFile:
     """List a directory or read a file relative to the thread's repository."""
-    payload = await _run_workspace_script(thread_id, login, email, "path", path)
+    payload = await _run_workspace_script(thread_id, session, "path", path)
     return _WORKSPACE_PATH_ADAPTER.validate_python(payload)
 
 
 async def get_dashboard_thread_file_index(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> WorkspaceFileIndex:
     """List every non-ignored file in the thread's repository."""
-    payload = await _run_workspace_script(thread_id, login, email, "index", "")
+    payload = await _run_workspace_script(thread_id, session, "index", "")
     return WorkspaceFileIndex.model_validate(payload)

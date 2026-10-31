@@ -24,6 +24,7 @@ from openswe.transcript.events import (
     TurnRequested,
 )
 from openswe.transcript.snapshot import load_snapshot
+from tests.support.sessions import user_id_of
 
 
 def _created(title: str = "A thread") -> ThreadCreated:
@@ -31,7 +32,11 @@ def _created(title: str = "A thread") -> ThreadCreated:
         title=title,
         source="dashboard",
         owner_login="test-user",
-        metadata={"owner_login": "test-user", "visibility": "public"},
+        metadata={
+            "owner_login": "test-user",
+            "owner_user_id": str(user_id_of("test-user")),
+            "visibility": "public",
+        },
     )
 
 

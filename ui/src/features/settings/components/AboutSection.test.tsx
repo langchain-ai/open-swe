@@ -20,6 +20,7 @@ vi.mock("sonner", () => ({
 
 const user: SessionUser = {
   login: "reader",
+  user_id: "user-reader",
   email: null,
   avatar_url: null,
   is_admin: false,

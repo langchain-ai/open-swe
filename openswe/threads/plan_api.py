@@ -87,7 +87,7 @@ async def fetch_thread_metadata(thread_id: str) -> dict[str, Any]:
 @plan_router.get("/{thread_id}")
 async def get_plan(thread_id: str, session: DashboardSession = _SESSION_DEP) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata, session.login, session.email):
+    if not thread_is_readable(metadata, session):
         raise HTTPException(404, "thread not found")
     login = session.login
     email = session.email
@@ -126,7 +126,7 @@ async def update_plan(
 ) -> dict[str, Any]:
     """Save an edited HTML artifact while preserving review comments."""
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session.login)
+    _assert_thread_promptable(metadata, session)
     content = await get_plan_content(thread_id) or {}
     if body.dismissed:
         if not content:
@@ -168,7 +168,7 @@ async def get_plan_comments(
     thread_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata, session.login, session.email):
+    if not thread_is_readable(metadata, session):
         raise HTTPException(404, "thread not found")
     return {"comments": await list_plan_comments(thread_id)}
 
@@ -179,7 +179,7 @@ async def post_plan_comment(
     thread_id: str, body: CommentBody, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session.login)
+    _assert_thread_promptable(metadata, session)
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
@@ -208,7 +208,7 @@ async def submit_plan_comments(
 ) -> dict[str, str]:
     metadata = await fetch_thread_metadata(thread_id)
     login = session.login
-    _assert_thread_postable(metadata, login, session.email)
+    _assert_thread_postable(metadata, session)
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     if not any(comment.get("author_login") == login for comment in comments):
         raise HTTPException(422, "no comments to submit")
@@ -232,7 +232,7 @@ async def remove_plan_comment(
     thread_id: str, comment_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session.login)
+    _assert_thread_promptable(metadata, session)
     comments = await list_plan_comments(thread_id)
     target = next((c for c in comments if c.get("id") == comment_id), None)
     if target is None:

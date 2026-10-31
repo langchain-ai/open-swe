@@ -758,6 +758,7 @@ describe("WorkspaceSettingsPanel", () => {
     // The repository list loads for a signed-in user.
     vi.spyOn(api, "me").mockResolvedValue({
       login: "alice",
+      user_id: "user-alice",
       email: null,
       avatar_url: null,
       is_admin: true,

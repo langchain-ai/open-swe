@@ -11,6 +11,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from openswe.config import ENV
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dispatch import dispatch_agent_run, thread_workspace
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
@@ -268,8 +269,7 @@ async def _process_agent_session_stopped(
         try:
             await cancel_dashboard_thread(
                 thread_id,
-                user.github_login,
-                email=user.email,
+                DashboardSession.of(user, email=user.email or None),
                 on_interrupted=partial(release_slack_location_status, channel_id, thread_ts),
             )
         except Exception as exc:

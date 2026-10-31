@@ -288,7 +288,7 @@ async def reserve_session_upload(
         "source": DASHBOARD_SOURCE,
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
-        "owner_login": login.strip(),
+        "owner_login": login,
         "owner_user_id": str(user_id),
         "visibility": "private" if header.visibility == "private" else "public",
         "thread_category": "interactive",

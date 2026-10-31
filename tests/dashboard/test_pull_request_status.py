@@ -5,10 +5,12 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard import profiles
+from openswe.dashboard.oauth import DashboardSession
 from openswe.github import http as github_http
 from openswe.github import pull_request_status
 from openswe.threads import handlers
 from tests.conftest import patch_thread_module
+from tests.support.sessions import signed_in
 
 
 def _response(status: int, payload: object) -> httpx2.Response:
@@ -353,9 +355,12 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
         {"repo_full_name": "o/two", "number": 2},
     ]
 
-    async def readable(thread_id: str, *, login: str | None = None, email: str | None = None):
+    async def readable(thread_id: str, session: DashboardSession):
         order.append("readable")
-        assert (thread_id, login, email) == ("thread-1", "teammate", "teammate@example.com")
+        assert (thread_id, session) == (
+            "thread-1",
+            signed_in("teammate", email="teammate@example.com"),
+        )
         return {"pull_requests": records}
 
     async def token(login: str):
@@ -369,7 +374,8 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
     patch_thread_module(monkeypatch, "get_pull_request_statuses", statuses)
 
     result = await handlers.get_dashboard_thread_pull_request_status(
-        "thread-1", "teammate", email="teammate@example.com"
+        "thread-1",
+        signed_in("teammate", email="teammate@example.com"),
     )
 
     assert order == ["readable", "token"]
@@ -390,7 +396,7 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
     monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await handlers.get_dashboard_thread_pull_request_status("thread-1", "intruder")
+        await handlers.get_dashboard_thread_pull_request_status("thread-1", signed_in("intruder"))
 
     assert exc_info.value.status_code == 403
     token.assert_not_awaited()

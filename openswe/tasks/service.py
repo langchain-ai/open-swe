@@ -13,7 +13,7 @@ from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import text, update
 
 from openswe.agent_api.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
-from openswe.dashboard.oauth import enforce_github_login_gate
+from openswe.dashboard.oauth import DashboardSession, enforce_github_login_gate
 from openswe.dashboard.options import available_requested_models, normalize_model_choice
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.workspace_settings import get_workspace_settings
@@ -26,7 +26,7 @@ from openswe.source_context import SourceContext
 from openswe.tasks import presentation, store
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
-from openswe.tasks.schemas import LaunchedThread, Run, Thread, ThreadMetadata, user_for_login
+from openswe.tasks.schemas import LaunchedThread, Run, Thread, ThreadMetadata
 from openswe.threads.access import resolve_run_email
 from openswe.threads.creation import create_thread
 from openswe.threads.handlers import interrupt_transcript_turns
@@ -52,12 +52,15 @@ ASYNC_WORKER_SUBAGENT = "general-purpose"
 class Actor:
     """A run operating on its own thread, which the backend-signed run token binds it to.
 
-    ``login`` is the person the run acts for; a system-owned thread's run may have none.
+    ``session`` is the person the run acts for; a system-owned thread's run may have none.
     """
 
     thread_id: str
-    login: str | None = None
-    email: str | None = None
+    session: DashboardSession | None = None
+
+    @property
+    def login(self) -> str | None:
+        return self.session.login if self.session is not None else None
 
     @classmethod
     async def resolve(cls, state: Actor | dict[str, object]) -> Actor:
@@ -67,33 +70,23 @@ class Actor:
         if not isinstance(thread_id, str) or not thread_id:
             raise PermissionError("Task operations require the run's thread")
         person = await resolve_thread_actor(state)
-        if person is None:
+        if person is None or person.user_id is None:
             return cls(thread_id=thread_id)
-        return cls(thread_id=thread_id, login=person.login, email=person.email)
+        return cls(thread_id=thread_id, session=person.session)
 
-    async def authorize_owner(self, thread_id: str, metadata: ThreadMetadata) -> None:
+    async def authorize_owner(self, metadata: ThreadMetadata) -> None:
         """A user-owned thread acts only for its owner, so nobody uses another's credentials."""
-        if not self.login:
+        if self.session is None:
             raise PermissionError("Task operations on a user-owned thread require its owner")
-        await enforce_github_login_gate(self.login)
-        user = await user_for_login(self.login)
-        if user is None:
-            raise PermissionError(
-                "Task operations require the thread owner to have an Open SWE account"
-            )
+        await enforce_github_login_gate(self.session.login)
         owner = await metadata.owner()
-        if owner.id != user.id:
+        if owner.id != self.session.user_id:
             raise PermissionError(
                 "Task operations require the thread owner; another user's credentials cannot be used"
             )
-        access_metadata = metadata.json_metadata() | {"owner_login": self.login}
-        assert_thread_readable(access_metadata, self.login, self.email)
-        assert_thread_postable(access_metadata, self.login, self.email)
-        if metadata.owner_user_id is None:
-            await langgraph_client().threads.update(
-                thread_id, metadata={"owner_user_id": str(owner.id)}
-            )
-            metadata.owner_user_id = owner.id
+        access_metadata = metadata.json_metadata()
+        assert_thread_readable(access_metadata, self.session)
+        assert_thread_postable(access_metadata, self.session)
 
 
 async def thread_metadata(thread_id: str) -> ThreadMetadata:
@@ -113,7 +106,7 @@ async def authorized_metadata(actor: Actor, thread_id: str | None = None) -> Thr
         if own.visibility != "public":
             raise PermissionError("A system-owned thread cannot be private")
     else:
-        await actor.authorize_owner(actor.thread_id, own)
+        await actor.authorize_owner(own)
     if thread_id is None or thread_id == actor.thread_id:
         return own
     metadata = await thread_metadata(thread_id)
@@ -125,7 +118,7 @@ async def authorized_metadata(actor: Actor, thread_id: str | None = None) -> Thr
         if mine is None or theirs is None or mine.task.id != theirs.task.id:
             raise PermissionError("A system-owned thread operates only its own task's threads")
     else:
-        await actor.authorize_owner(thread_id, metadata)
+        await actor.authorize_owner(metadata)
     return metadata
 
 
@@ -194,12 +187,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         await enforce_github_login_gate(login)
         profile = await get_profile(login) or {}
         email = await resolve_run_email(login, profile)
-        values |= {"owner_login": login}
-        assert_thread_postable(values, login, email)
-        if metadata.owner_user_id is None:
-            await langgraph_client().threads.update(
-                thread_id, metadata={"owner_user_id": str(owner.id)}
-            )
+        assert_thread_postable(values, DashboardSession.of(owner, email=email))
         config |= {"github_login": login, "user_email": email}
     config.update(_JSON_OBJECT.validate_python(SourceContext.from_metadata(values).dump()))
     if metadata.repo_owner and metadata.repo_name:
@@ -361,8 +349,6 @@ async def index_worker(
         raise ValueError("This worker was cancelled; create a new worker for further work")
     if not metadata.sandbox_id:
         raise ValueError("The coordinator needs an attached sandbox before delegation")
-    if metadata.owner_type == "user" and metadata.owner_user_id is None:
-        metadata.owner_user_id = (await metadata.owner()).id
     worker_metadata = {**_worker_metadata(task, delegation, metadata), **(extra or {})}
     client = langgraph_client()
     await create_thread(

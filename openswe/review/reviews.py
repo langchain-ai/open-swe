@@ -20,6 +20,7 @@ from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
@@ -1224,11 +1225,11 @@ class ReviewScoutTrigger(BaseModel):
 
 
 async def trigger_review_scout(
-    owner: str, repo: str, pr_number: int, login: str
+    owner: str, repo: str, pr_number: int, session: DashboardSession
 ) -> ReviewScoutTrigger:
     """Start the review scout for the PR's current head, or join the one already running.
 
-    Also lists the review in ``login``'s sidebar, where it shows the build's progress.
+    Also lists the review in ``session``'s sidebar, where it shows the build's progress.
     """
     async with GitHubClient.as_app() as github:
         pr_payload = await github.repo(owner, repo).pull_request(pr_number).pull()
@@ -1243,7 +1244,13 @@ async def trigger_review_scout(
         trigger = ReviewScoutTrigger(started=True, run_id=await target.start())
     pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
     try:
-        await ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=login).open(
+        await ReviewSession(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            login=session.login,
+            user_id=session.user_id,
+        ).open(
             title=pull.title,
             url=pull.html_url,
             state=pull.lifecycle,

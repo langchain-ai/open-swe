@@ -7,9 +7,16 @@ import pytest
 from openswe.run_config import RunConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
+from tests.support.sessions import SessionUsers, owned_by
 
 _OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
+
+
+@pytest.fixture(autouse=True)
+def _people(session_users: SessionUsers) -> None:
+    session_users.add("alice")
+    session_users.add("bob")
 
 
 @pytest.fixture
@@ -98,7 +105,7 @@ async def test_slack_thread_counts_every_human_poster(metadata: dict, slack: lis
 async def test_private_owner_gets_full_results_and_unknown_scope_fails_closed(
     metadata: dict[str, object], scope: dict[str, object], expected: tool_access.Mode | None
 ) -> None:
-    metadata.update(owner_login="alice", **scope)
+    metadata.update(**owned_by("alice"), **scope)
     resolved = await resolve_access(_cfg(admin_thread=True))
     assert resolved.mode(_OWN) == expected
     if expected is None:

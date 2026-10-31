@@ -34,6 +34,7 @@ from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.status import refresh_thread_status
+from openswe.threads.summary import thread_owner
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -461,9 +462,10 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
     client = langgraph_client()
     try:
         metadata = thread_metadata(await client.threads.get(thread_id))
-        login = metadata.get("owner_login")
-        if not isinstance(login, str) or not login:
+        owner = await thread_owner(metadata)
+        if owner is None:
             return
+        login = owner.github_login
         # A queued follow-up is about to start and its first model call picks
         # the leftovers up; nothing to dispatch.
         if await client.runs.list(thread_id, status="pending", limit=1):

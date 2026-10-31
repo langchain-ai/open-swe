@@ -10,8 +10,9 @@ from fastapi.testclient import TestClient
 from openswe import incidents
 from openswe.dashboard import oauth, routes
 from openswe.threads import handlers, listing, proxy
+from openswe.threads.principals import Principal
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
-from tests.support.sessions import SessionUsers
+from tests.support.sessions import SessionUsers, signed_in
 
 
 @pytest.fixture
@@ -190,7 +191,9 @@ async def test_thread_stream_preflight_rejects_incidents_before_opening_stream(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=threads))
 
     with pytest.raises(HTTPException) as exc:
-        await proxy.proxy_dashboard_thread_stream_events("i1", "admin", b"{}")
+        await proxy.proxy_dashboard_thread_stream_events(
+            "i1", Principal.of_person(signed_in("admin")), b"{}"
+        )
 
     assert exc.value.status_code == 404
     threads.join_stream.assert_not_awaited()
@@ -216,8 +219,8 @@ async def test_generic_thread_lists_exclude_incidents_for_owners_and_admins(
     client = SimpleNamespace(threads=SimpleNamespace(search=AsyncMock(return_value=[thread])))
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
-    page = await listing.list_dashboard_threads_page("admin", include_all=include_all)
-    repos = await listing.list_dashboard_thread_repos("admin", include_all=include_all)
+    page = await listing.list_dashboard_threads_page(signed_in("admin"), include_all=include_all)
+    repos = await listing.list_dashboard_thread_repos(signed_in("admin"), include_all=include_all)
 
     assert page["items"] == []
     assert repos == []

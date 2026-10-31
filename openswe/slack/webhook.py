@@ -12,6 +12,7 @@ from typing import Any, cast
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
@@ -249,12 +250,15 @@ def _slack_files_section(staged: list[StagedSlackFile]) -> str:
 
 async def _slack_accounts_by_user_id(
     user_ids: list[str],
-) -> tuple[dict[str, str], dict[str, str]]:
-    """GitHub logins and person entity ids of the linked Open SWE accounts behind Slack users."""
+) -> tuple[dict[str, str], dict[str, str], dict[str, DashboardSession]]:
+    """GitHub logins, person entity ids and sessions of the Open SWE accounts behind Slack users."""
     users = await User.for_identities("slack", user_ids)
     logins = {user_id: user.github_login for user_id, user in users.items() if user.github_login}
     person_ids = {user_id: f"user:{user.id}" for user_id, user in users.items()}
-    return logins, person_ids
+    sessions = {
+        user_id: DashboardSession.of(user) for user_id, user in users.items() if user.github_login
+    }
+    return logins, person_ids, sessions
 
 
 def _slack_person(
@@ -644,15 +648,22 @@ async def _valid_access_token(login: str | None) -> str | None:
         return None
 
 
+async def slack_person(user_id: str, user_email: str | None = None) -> User | None:
+    """The person behind a Slack user with a GitHub login: by Slack id first, then by email."""
+    user = await User.for_identity("slack", user_id.strip()) if user_id.strip() else None
+    if user is None or not user.github_login:
+        if user_email is None and user_id:
+            slack_user = await common.get_slack_user_info(user_id)
+            profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
+            user_email = profile.get("email") if isinstance(profile, dict) else None
+        user = await User.for_email(user_email) if user_email else None
+    return user if user is not None and user.github_login else None
+
+
 async def slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
-    if login := await User.login_for_slack(user_id):
-        return login
-    if user_email is None and user_id:
-        slack_user = await common.get_slack_user_info(user_id)
-        profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
-        user_email = profile.get("email") if isinstance(profile, dict) else None
-    return await User.login_for_email(user_email) if user_email else None
+    user = await slack_person(user_id, user_email)
+    return user.github_login if user is not None else None
 
 
 def _slack_thread_title(request_text: str, concierge_mode: bool, name: str) -> str:
@@ -671,14 +682,14 @@ async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
     try:
-        owner_login = await slack_login(request.user_id)
+        owner = await slack_person(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
         concierge_mode = request.concierge_mode or is_concierge_thread(
             request.channel_context, request.thread_ts
         )
         # An unlinked sender is turned away at the account gate; a private thread
         # nobody owns would be unreachable, so persist nothing for them.
-        if not request.triggering_bot_id and (visibility == "public" or owner_login):
+        if not request.triggering_bot_id and (visibility == "public" or owner is not None):
             clean_text = (
                 common.strip_bot_mention(
                     request.text, request.bot_user_id, bot_username=common.SLACK_BOT_USERNAME
@@ -700,7 +711,7 @@ async def _mark_slack_thread_errored(
                     )
                 ),
                 visibility=visibility,
-                owner_login=owner_login or "",
+                owner=owner,
             )
     except Exception:  # noqa: BLE001
         common.logger.warning(
@@ -834,8 +845,8 @@ async def _process_slack_mention_impl(
                 user_timezone = timezone_value.strip()
 
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
-    mapped_login, thread_record, thread_messages, _ = await asyncio.gather(
-        slack_login(user_id, user_email) if allowed_bot is None else _resolved(None),
+    mapped_person, thread_record, thread_messages, _ = await asyncio.gather(
+        slack_person(user_id, user_email) if allowed_bot is None else _resolved(None),
         common.ThreadRecord.read(thread_id),
         _resolved([])
         if message_update
@@ -844,7 +855,10 @@ async def _process_slack_mention_impl(
         ),
         persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
     )
-    thread_metadata = thread_record.authorize(mapped_login or "")
+    mapped_login = mapped_person.github_login if mapped_person is not None else None
+    thread_metadata = thread_record.authorize(
+        DashboardSession.of(mapped_person) if mapped_person is not None else None
+    )
     # The thread's state only matters once dispatching, but reading it is one of
     # the slowest lookups here and nothing below changes it before the run.
     dispatched_context = asyncio.ensure_future(
@@ -906,7 +920,7 @@ async def _process_slack_mention_impl(
     (
         user_names_by_id,
         channel_names_by_id,
-        (logins_by_user_id, person_ids_by_user_id),
+        (logins_by_user_id, person_ids_by_user_id, sessions_by_user_id),
         user_token,
     ) = await asyncio.gather(
         common.get_slack_user_names([*context_user_ids, *mentioned_user_ids]),
@@ -927,7 +941,7 @@ async def _process_slack_mention_impl(
             message
             for message in context_messages
             if common.thread_is_promptable(
-                thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
+                thread_metadata, sessions_by_user_id.get(str(message.get("user") or ""))
             )
         ]
         if not message_update:
@@ -1252,7 +1266,7 @@ async def _process_slack_mention_impl(
         if not is_first_mention
         else [],
         visibility=visibility,
-        owner_login=mapped_login or "",
+        owner=mapped_person,
         owner_type="system" if allowed_bot else "user",
     )
     if (visibility == "private" or allowed_bot is not None) and not persisted:

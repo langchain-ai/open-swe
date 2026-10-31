@@ -30,6 +30,7 @@ MIRRORED_KEYS: frozenset[str] = frozenset(
         "source",
         "visibility",
         "owner_login",
+        "owner_user_id",
         "admin_thread",
         "thread_category",
         "schedule_id",

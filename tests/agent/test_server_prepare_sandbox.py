@@ -8,6 +8,7 @@ from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.tasks.store import Task, TaskContext, TaskDelegation, TaskMembership
 from openswe.utils import thread_reads
 from openswe.workspaces.rows import WorkspaceRow
+from tests.support.sessions import user_id_of
 
 
 async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
@@ -29,7 +30,13 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     )
     client = MagicMock()
     client.threads.get = AsyncMock(
-        return_value={"metadata": {"owner_type": "user", "owner_login": "owner"}}
+        return_value={
+            "metadata": {
+                "owner_type": "user",
+                "owner_login": "owner",
+                "owner_user_id": str(user_id_of("owner")),
+            }
+        }
     )
     monkeypatch.setattr(thread_reads.langgraph_sdk, "get_client", lambda: client)
     monkeypatch.setattr(

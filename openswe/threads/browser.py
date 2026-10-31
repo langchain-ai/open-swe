@@ -58,8 +58,8 @@ def _langsmith_errors() -> Iterator[None]:
         raise HTTPException(503, str(exc)) from exc
 
 
-async def _record(thread_id: str, login: str) -> ThreadBrowser:
-    record = ThreadBrowser.of(await get_promptable_thread_metadata(thread_id, login))
+async def _record(thread_id: str, session: DashboardSession) -> ThreadBrowser:
+    record = ThreadBrowser.of(await get_promptable_thread_metadata(thread_id, session))
     if record is None:
         raise HTTPException(404, "this thread's agent hasn't started, so it has no browser yet")
     return record
@@ -77,7 +77,7 @@ async def _view(
 async def api_thread_browser(
     thread_id: str, response: Response, session: DashboardSession = SESSION_DEP
 ) -> ThreadBrowserView:
-    record = await _record(thread_id, session.login)
+    record = await _record(thread_id, session)
     if not record.opened:
         raise HTTPException(404, "this thread's browser isn't open")
     with _langsmith_errors():
@@ -89,7 +89,7 @@ async def api_open_thread_browser(
     thread_id: str, response: Response, session: DashboardSession = SESSION_DEP
 ) -> ThreadBrowserView:
     """Open the thread's browser for a person, before or after the agent has."""
-    record = await _record(thread_id, session.login)
+    record = await _record(thread_id, session)
     with _langsmith_errors():
         window = await record.open(thread_id)
         view = await _view(record, window, response)

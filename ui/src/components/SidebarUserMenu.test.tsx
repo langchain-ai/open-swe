@@ -33,6 +33,7 @@ function renderMenu(isAdmin = false) {
       <SidebarUserMenu
         user={{
           login: "octocat",
+          user_id: "user-octocat",
           email: "octocat@example.com",
           avatar_url: null,
           is_admin: isAdmin,

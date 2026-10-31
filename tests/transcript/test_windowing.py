@@ -24,6 +24,7 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.routes import api_get_thread_transcript_turns
 from openswe.transcript.snapshot import load_snapshot, load_turn_page
+from tests.support.sessions import user_id_of
 
 OWNER = "test-user"
 SESSION = {"sub": OWNER, "email": f"{OWNER}@example.com"}
@@ -42,6 +43,7 @@ async def _create(thread_id: str) -> None:
                     visibility="public",
                     metadata={
                         "owner_login": OWNER,
+                        "owner_user_id": str(user_id_of(OWNER)),
                         "visibility": "public",
                         "source": "dashboard",
                     },

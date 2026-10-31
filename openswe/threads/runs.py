@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
+from openswe.dashboard.oauth import DashboardSession
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
@@ -251,8 +252,7 @@ async def _resolve_requested_workspace(
 async def create_dashboard_thread_record(
     thread_id: str,
     *,
-    login: str,
-    email: str | None = None,
+    session: DashboardSession,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
     prompt: str,
@@ -266,7 +266,7 @@ async def create_dashboard_thread_record(
     extra_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a dashboard thread with immutable ownership and visibility."""
-    profile = await get_profile(login) or {}
+    profile = await get_profile(session.login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
@@ -290,11 +290,12 @@ async def create_dashboard_thread_record(
         "source": DASHBOARD_SOURCE,
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
-        "owner_login": login.strip(),
+        "owner_login": session.login,
+        "owner_user_id": str(session.user_id),
         "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
-        **await participant_metadata({}, login=login, email=email),
+        **await participant_metadata({}, login=session.login, email=session.email),
         "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
@@ -306,7 +307,7 @@ async def create_dashboard_thread_record(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    if visibility == "private" and is_admin(email, login=login):
+    if visibility == "private" and is_admin(session.email, login=session.login):
         metadata["admin_thread"] = True
     if workspace:
         metadata["workspace"] = workspace
@@ -345,7 +346,7 @@ async def create_dashboard_thread_record(
                 event=ThreadCreated(
                     title=initial_title,
                     source=DASHBOARD_SOURCE,
-                    owner_login=login.strip(),
+                    owner_login=session.login,
                     visibility=visibility,
                     repo_owner=repo_config["owner"] if has_repo else None,
                     repo_name=repo_config["name"] if has_repo else None,
@@ -418,14 +419,19 @@ class SessionCreateBody(BaseModel):
 
 
 async def create_dashboard_session(
-    body: SessionCreateBody, login: str, *, email: str | None = None
+    body: SessionCreateBody,
+    session: DashboardSession,
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
-    profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
+    profile = RepositoryDefaults.model_validate(await get_profile(session.login) or {})
     repo = body.repo if body.repo is not None else profile.repository()
-    workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
+    workspace = await _resolve_requested_workspace(
+        body.workspace, _parse_repo(repo), login=session.login
+    )
     if body.repo is None:
-        preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
+        preferred_workspace = await _resolve_requested_workspace(
+            body.workspace, None, login=session.login
+        )
         if profile.workspace_default_repos.get(preferred_workspace):
             workspace = preferred_workspace
         repo = profile.repository(workspace)
@@ -433,23 +439,25 @@ async def create_dashboard_session(
     if repo:
         if not repo_config:
             raise HTTPException(422, "repo must be owner/name")
-        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
-    await _ensure_dashboard_github_token(login)
+        await require_repo_access_for_user(
+            session.login, f"{repo_config['owner']}/{repo_config['name']}"
+        )
+    await _ensure_dashboard_github_token(session.login)
     thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
-        login=login,
-        email=email,
+        session=session,
         repo_config=repo_config,
         prompt=body.prompt,
-        visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
+        visibility=await _requested_visibility(
+            {"visibility": body.visibility}, login=session.login
+        ),
         workspace=workspace,
     )
     return str(thread["thread_id"])
 
 
 async def start_dashboard_thread(
-    login: str,
-    email: str | None,
+    session: DashboardSession,
     *,
     title: str,
     prompt: str,
@@ -462,26 +470,27 @@ async def start_dashboard_thread(
         repo_config = _parse_repo(repo)
         if not repo_config:
             raise HTTPException(422, "repos must be owner/name")
-        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
+        await require_repo_access_for_user(
+            session.login, f"{repo_config['owner']}/{repo_config['name']}"
+        )
         repo_configs.append(repo_config)
-    await _ensure_dashboard_github_token(login)
+    await _ensure_dashboard_github_token(session.login)
     primary = repo_configs[0] if repo_configs else {}
     thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
-        login=login,
-        email=email,
+        session=session,
         repo_config=primary,
         prompt=prompt,
         title=title,
         visibility=visibility,
-        workspace=await _resolve_requested_workspace(None, primary, login=login),
+        workspace=await _resolve_requested_workspace(None, primary, login=session.login),
     )
     thread_id = str(thread["thread_id"])
     client = langgraph_client()
     await dispatch_agent_run(
         thread_id,
         prompt,
-        await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
+        await _build_dashboard_configurable(thread_id, session.login, thread_metadata(thread)),
         source=DASHBOARD_SOURCE,
         thread_title=None,
         client=client,
@@ -735,12 +744,11 @@ async def _requested_visibility(
 
 async def _attributed_run_messages(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     *,
     metadata: Mapping[str, Any],
     content: Any,
     creating: bool,
-    email: str | None,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
     replies: Sequence[PassageReply] = (),
@@ -752,7 +760,7 @@ async def _attributed_run_messages(
     """
     if content is None:
         content = ""
-    sender_id = f"github:{login}"
+    sender_id = f"github:{session.login}"
     injected = injected_dynamic_context_hashes_from_metadata(metadata)
     persisted_message_ids: set[str] = set()
     history_read = False
@@ -773,9 +781,9 @@ async def _attributed_run_messages(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {"id": sender_id, "github_login": login}
-    if email:
-        person["email"] = email
+    person: PersonIdentity = {"id": sender_id, "github_login": session.login}
+    if session.email:
+        person["email"] = session.email
     sender_id = (await User.canonical_person(person))["id"]
     notices: list[tuple[SystemIdentity, str]] = []
     if metadata.get("source") == "slack" and relayed_from is None:
@@ -824,12 +832,11 @@ async def _attributed_run_messages(
 
 async def _enrich_run_start_command(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
     creating: bool = False,
-    email: str | None = None,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
@@ -839,7 +846,7 @@ async def _enrich_run_start_command(
         params = {}
         command["params"] = params
 
-    await _ensure_dashboard_github_token(login)
+    await _ensure_dashboard_github_token(session.login)
 
     client_config = params.get("config")
     if not isinstance(client_config, dict):
@@ -861,7 +868,7 @@ async def _enrich_run_start_command(
     offloading = offload_requested(params)
     sandbox_bridge = await _resolve_sandbox_bridge(
         client_configurable.get("sandbox_bridge_id"),
-        owner_id=Principal.of_login(login, email).sender_id,
+        owner_id=Principal.of_person(session).sender_id,
     )
     move = (
         None
@@ -869,7 +876,7 @@ async def _enrich_run_start_command(
         else await SandboxMove.requested(
             thread_id,
             metadata,
-            login=login,
+            session=session,
             bridge=sandbox_bridge,
             target=client_configurable.get("sandbox_target"),
         )
@@ -902,7 +909,7 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
-        visibility = await _requested_visibility(client_configurable, login=login)
+        visibility = await _requested_visibility(client_configurable, login=session.login)
         if sandbox_bridge is not None:
             # Whoever can prompt a thread runs commands on its machine.
             visibility = "private"
@@ -910,12 +917,11 @@ async def _enrich_run_start_command(
         workspace = await _resolve_requested_workspace(
             client_configurable.get("workspace") or client_configurable.get("environment"),
             repo_config,
-            login=login,
+            login=session.login,
         )
         thread = await create_dashboard_thread_record(
             thread_id,
-            login=login,
-            email=email,
+            session=session,
             repo_config=repo_config,
             repo_explicitly_none=client_configurable.get("repo_explicitly_none") is True,
             visibility=visibility,
@@ -948,11 +954,10 @@ async def _enrich_run_start_command(
 
     structured, injected, persisted_message_ids = await _attributed_run_messages(
         thread_id,
-        login,
+        session,
         metadata=metadata,
         content=content,
         creating=creating,
-        email=email,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
         replies=replies,
@@ -979,7 +984,7 @@ async def _enrich_run_start_command(
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "model_selection": model_selection,
-        **await participant_metadata(metadata, login=login, email=email),
+        **await participant_metadata(metadata, login=session.login, email=session.email),
         "injected_dynamic_context_hashes": sorted(injected),
         # The agent is told about a move once, with the message after it.
         **({SANDBOX_MOVED_KEY: None} if metadata.get(SANDBOX_MOVED_KEY) else {}),
@@ -1044,7 +1049,7 @@ async def _enrich_run_start_command(
                             # carries the sender and surface a reader attributes
                             # the message by.
                             text=_command_prompt_text(structured[-1].get("content")),
-                            sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                            sender=MessageSender(login=session.login, kind=DASHBOARD_SOURCE),
                             attachments=attachments,
                             model_id=run_model,
                             effort=run_effort,
@@ -1068,7 +1073,7 @@ async def _enrich_run_start_command(
     )
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
-        login,
+        session.login,
         metadata,
         overrides=overrides,
     )
@@ -1082,7 +1087,14 @@ async def _enrich_run_start_command(
                 key: value
                 for key, value in run_metadata.items()
                 if key not in TURN_ATTRIBUTION_FIELDS
-                and key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
+                and key
+                not in {
+                    "visibility",
+                    "owner_type",
+                    "owner_login",
+                    "owner_user_id",
+                    "system_authorization",
+                }
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -1121,6 +1133,7 @@ async def _enrich_run_start_command(
     return command
 
 
+# The user id of whoever queued a follow-up run.
 QUEUED_BY_KEY = "queued_by"
 # The model a dashboard run was started with; thread metadata moves on as soon
 # as a follow-up is queued with another one.
@@ -1139,12 +1152,11 @@ def offload_requested(params: dict[str, Any]) -> bool:
 
 async def steer_running_thread(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
     turn: OpenTurn | None,
-    email: str | None = None,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
@@ -1179,11 +1191,10 @@ async def steer_running_thread(
 
     structured, _, persisted_message_ids = await _attributed_run_messages(
         thread_id,
-        login,
+        session,
         metadata=metadata,
         content=content,
         creating=False,
-        email=email,
         relayed_from=relayed_from,
         replies=replies,
     )
@@ -1208,7 +1219,7 @@ async def steer_running_thread(
                         message_id=message_id,
                         role="human",
                         text=_command_prompt_text(structured[-1].get("content")),
-                        sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                        sender=MessageSender(login=session.login, kind=DASHBOARD_SOURCE),
                         attachments=attachments or None,
                         created_at=datetime.now(UTC),
                     ),
@@ -1223,10 +1234,10 @@ async def steer_running_thread(
         "text": _command_prompt_text(content),
         "images": list(image_blocks),
         "sender": {
-            "id": f"github:{login}",
+            "id": f"github:{session.login}",
             "platform": "github",
-            "github_login": login,
-            **({"email": email} if email else {}),
+            "github_login": session.login,
+            **({"email": session.email} if session.email else {}),
         },
         "queue_id": message_id,
         REPLIES_KEY: [reply.model_dump() for reply in replies],
@@ -1245,7 +1256,7 @@ async def steer_running_thread(
     if not await _run_is_live(client, thread_id, live_run_id):
         try:
             dispatched = await dispatch_pending_follow_ups(
-                thread_id, login, metadata, client=client, multitask_strategy="reject"
+                thread_id, session.login, metadata, client=client, multitask_strategy="reject"
             )
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -1261,7 +1272,7 @@ async def steer_running_thread(
         thread_id=thread_id,
         metadata={
             "updated_at_ms": now_ms,
-            **await participant_metadata(metadata, login=login, email=email),
+            **await participant_metadata(metadata, login=session.login, email=session.email),
         },
     )
     if not relayed_from:
@@ -1309,11 +1320,10 @@ async def _run_metadata(client: Any, thread_id: str, run_id: str | None) -> Mapp
 
 async def queue_follow_up_run(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
-    email: str | None = None,
 ) -> dict[str, Any]:
     """Hold a ``run.start`` sent while a run is live until that run ends.
 
@@ -1323,7 +1333,10 @@ async def queue_follow_up_run(
     right away and learns the run id so it can be cancelled before it starts.
     """
     enriched = await _enrich_run_start_command(
-        thread_id, login, command, metadata=metadata, email=email
+        thread_id,
+        session,
+        command,
+        metadata=metadata,
     )
     enriched_params: dict[str, Any] = enriched["params"]
     configurable: dict[str, Any] = enriched_params["config"]["configurable"]
@@ -1342,7 +1355,7 @@ async def queue_follow_up_run(
             input=run_input if isinstance(run_input, dict) else {},
             config={"configurable": configurable},
             # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
-            metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
+            metadata={**enriched_params["metadata"], QUEUED_BY_KEY: str(session.user_id)},
             source=DASHBOARD_SOURCE,
             thread_title=None,
             client=langgraph_client(),

@@ -12,6 +12,7 @@ from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.threads import runs
 from openswe.threads.principals import Principal
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.sessions import signed_in
 
 
 class _FakeThreads:
@@ -178,12 +179,12 @@ async def test_the_thread_kind_has_to_be_named(machine: _FakeClient) -> None:
 def test_only_an_admin_may_ask_for_a_system_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
 
-    Principal.of_login("admin").authorize("system")
-    Principal.of_login("intern").authorize("workspace")
-    Principal.of_login("intern").authorize("private")
+    Principal.of_person(signed_in("admin")).authorize("system")
+    Principal.of_person(signed_in("intern")).authorize("workspace")
+    Principal.of_person(signed_in("intern")).authorize("private")
 
     with pytest.raises(HTTPException) as refused:
-        Principal.of_login("intern").authorize("system")
+        Principal.of_person(signed_in("intern")).authorize("system")
     assert refused.value.status_code == 403
 
 

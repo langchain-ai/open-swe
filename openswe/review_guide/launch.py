@@ -155,7 +155,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             source_context=SourceContext(slack_thread=location),
             workspace=origin.workspace_slug,
             visibility="private" if origin.is_private else "public",
-            owner_login=login,
+            owner=user,
         ):
             raise GuideStartError("could not create the review thread")
         await bind_slack_thread_id(channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
@@ -226,6 +226,9 @@ async def _fork(
     Slack location, title and run bookkeeping belong to the conversation it came
     from. It joins the source's sandbox as a guest, the way other threads borrow one.
     """
+    owner = await User.for_login("github", login)
+    if owner is None:
+        raise GuideStartError("the requester has no GitHub account linked to Open SWE")
     try:
         source = _SourceMetadata.model_validate(
             thread_metadata(await client.threads.get(source_thread_id))
@@ -239,6 +242,7 @@ async def _fork(
                 "visibility": "private" if is_private else "public",
                 "owner_type": "user",
                 "owner_login": login,
+                "owner_user_id": str(owner.id),
                 "created_at_ms": int(time.time() * 1000),
                 **(
                     {

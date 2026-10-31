@@ -36,6 +36,7 @@ from openswe.threads.handlers import (
 )
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
+from openswe.threads.principals import Principal
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.summary import thread_is_owner
@@ -99,15 +100,16 @@ class _Actor:
     login: str
     email: str | None
     name: str
+    user_id: uuid.UUID | None = None
     # An automation reading threads on its own run; it has no participant threads.
     automation: bool = False
 
-    async def session(self) -> DashboardSession:
+    @property
+    def session(self) -> DashboardSession:
         """The actor acting as a dashboard user would; 401 without an Open SWE account."""
-        user = await User.for_login("github", self.login)
-        if user is None:
+        if self.user_id is None:
             raise HTTPException(401, f"{self.login} has no Open SWE account")
-        return DashboardSession.of(user, email=self.email)
+        return DashboardSession(user_id=self.user_id, login=self.login, email=self.email)
 
     @property
     def admin(self) -> bool:
@@ -141,7 +143,8 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
         await enforce_github_login_gate(login)
     except HTTPException:
         return None
-    return _Actor(login=login, email=email, name=login)
+    user = await User.for_login("github", login)
+    return _Actor(login=login, email=email, name=login, user_id=user.id if user else None)
 
 
 async def _reader(state: Mapping[str, Any] | None = None) -> _Actor | None:
@@ -324,8 +327,7 @@ async def list_threads(
     )
     try:
         page = await list_dashboard_threads_page(
-            actor.login,
-            email=actor.email,
+            actor,
             limit=limit,
             offset=offset,
             include_all=all_users
@@ -659,7 +661,7 @@ async def _private_thread_context(actor: _Actor) -> bool:
     except Exception:
         return False
     metadata = thread_metadata(thread)
-    return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor.login)
+    return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor)
 
 
 async def _authorized_locator(
@@ -688,8 +690,7 @@ async def _authorized_locator(
     try:
         summary = await get_dashboard_thread(
             thread_id,
-            actor.login,
-            email=actor.email,
+            actor,
             mark_viewed=False,
         )
     except HTTPException as exc:
@@ -701,8 +702,7 @@ async def _authorized_locator(
         thread_id = resolved
         summary = await get_dashboard_thread(
             thread_id,
-            actor.login,
-            email=actor.email,
+            actor,
             mark_viewed=False,
         )
     if (
@@ -906,9 +906,8 @@ async def _send_message(
     caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
-        actor.login,
+        Principal.of_person(actor.session),
         json.dumps(command).encode(),
-        email=actor.email,
         relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
     )
     try:
@@ -1047,10 +1046,16 @@ async def manage_thread(
                 effort=effort,
             )
         if action == "cancel":
-            thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
+            thread = await cancel_dashboard_thread(
+                thread_id,
+                actor.session,
+            )
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
-            thread = await admin_cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
+            thread = await admin_cancel_dashboard_thread(
+                thread_id,
+                actor.session,
+            )
             if summary.get("visibility") == "private":
                 return {
                     "success": True,
@@ -1060,9 +1065,8 @@ async def manage_thread(
         if action in {"resolve", "unresolve"}:
             thread = await resolve_dashboard_thread(
                 thread_id,
-                actor.login,
+                actor.session,
                 resolved=action == "resolve",
-                email=actor.email,
             )
             return {"success": True, "thread": _list_item(thread)}
         if action == "add_plan_comment":
@@ -1073,7 +1077,7 @@ async def manage_thread(
             result = await plan_api.post_plan_comment(
                 thread_id,
                 plan_api.CommentBody(body=comment or ""),
-                session=await actor.session(),
+                session=actor.session,
             )
             return {"success": True, "comment": result}
         if action == "delete_plan_comment":
@@ -1082,7 +1086,7 @@ async def manage_thread(
             result = await plan_api.remove_plan_comment(
                 thread_id,
                 comment_id or "",
-                session=await actor.session(),
+                session=actor.session,
             )
             return {"success": True, **result}
         if action == "update_plan":
@@ -1099,7 +1103,7 @@ async def manage_thread(
             if content_format != existing_format:
                 return _failure(f"existing plan format is {existing_format}")
             update = plan_api.PlanUpdate(**{content_format: content})
-            result = await plan_api.update_plan(thread_id, update, session=await actor.session())
+            result = await plan_api.update_plan(thread_id, update, session=actor.session)
             return {
                 "success": True,
                 "status": result.get("status"),
@@ -1115,7 +1119,7 @@ async def manage_thread(
                 if action == "approve_workflow_push"
                 else workflow_approval_api.reject_workflow_push
             )
-            result = await handler(thread_id, fingerprint or "", session=await actor.session())
+            result = await handler(thread_id, fingerprint or "", session=actor.session)
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:
@@ -1149,8 +1153,7 @@ async def start_thread(
     clean_repos = list(dict.fromkeys(repo.strip() for repo in repos or () if repo.strip()))
     try:
         thread_id = await start_dashboard_thread(
-            actor.login,
-            actor.email,
+            actor.session,
             title=title[:_MAX_TITLE_CHARS],
             prompt=prompt(
                 "runs/started-thread", instructions=instructions, other_repos=clean_repos[1:]

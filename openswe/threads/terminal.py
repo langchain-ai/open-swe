@@ -57,7 +57,10 @@ async def api_thread_terminal_connection(
     response: Response,
     session: DashboardSession = SESSION_DEP,
 ) -> dict[str, str]:
-    await get_dashboard_terminal_sandbox(thread_id, session.login, email=session.email)
+    await get_dashboard_terminal_sandbox(
+        thread_id,
+        session,
+    )
     response.headers["Cache-Control"] = "no-store"
     return {
         "url": _cloud_terminal_websocket_url(thread_id),
@@ -69,7 +72,8 @@ async def api_thread_terminal_connection(
 async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: DashboardSession) -> None:
     try:
         sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
-            thread_id, session.login, email=session.email
+            thread_id,
+            session,
         )
     except HTTPException as exc:
         await websocket.close(code=1008, reason=str(exc.detail)[:123])

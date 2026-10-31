@@ -12,6 +12,7 @@ from langgraph.constants import END
 from langgraph_sdk.errors import NotFoundError
 
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
+from openswe.dashboard.oauth import DashboardSession
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
@@ -41,6 +42,7 @@ from openswe.threads.runs import (
 from openswe.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
     DASHBOARD_SOURCE,
+    Viewer,
     _assert_thread_postable,
     _assert_thread_promptable,
     _now_ms,
@@ -100,7 +102,7 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
         return
     metadata = thread_metadata(thread)
     session = ReviewSessionMetadata.parse(metadata)
-    if session is None or not session.owned_by(review.login):
+    if session is None or not session.owned_by(review.user_id):
         return
     # Settled first so a walkthrough the user is looking at is not recorded as newer than the view.
     thread = await settle_review_walkthrough(client, thread)
@@ -110,8 +112,10 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[str, object]:
-    """The metadata of a thread ``login`` may prompt, for opening its live capabilities.
+async def get_promptable_thread_metadata(
+    thread_id: str, session: DashboardSession
+) -> Mapping[str, object]:
+    """The metadata of a thread ``session`` may prompt, for opening its live capabilities.
 
     A shell or a browser is a live capability into the owner's sandbox, so admins
     who may view a private thread still cannot open one.
@@ -122,14 +126,15 @@ async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_promptable(metadata, login)
+    _assert_thread_promptable(metadata, session)
     return metadata
 
 
 async def get_dashboard_terminal_sandbox(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> tuple[str, str | None]:
-    metadata = await get_promptable_thread_metadata(thread_id, login)
+    metadata = await get_promptable_thread_metadata(thread_id, session)
     sandbox_id = metadata.get("sandbox_id")
     if (
         not isinstance(sandbox_id, str)
@@ -145,9 +150,8 @@ async def get_dashboard_terminal_sandbox(
 
 async def get_dashboard_thread(
     thread_id: str,
-    login: str,
+    session: Viewer,
     *,
-    email: str | None = None,
     mark_viewed: bool = True,
     timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
@@ -161,7 +165,7 @@ async def get_dashboard_thread(
             raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, session)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
@@ -197,15 +201,16 @@ async def get_dashboard_thread(
         )
     with phase(record, "subagents"):
         await attach_subagents([summary])
-    await attach_task_workers(client, [summary], login, email)
+    await attach_task_workers(client, [summary], session)
     return summary
 
 
 async def get_dashboard_thread_queued_messages(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> list[QueuedPreview]:
     """Messages waiting in the thread's queue for its agent's next model call."""
-    await _authorized_thread(thread_id, login, email=email)
+    await _authorized_thread(thread_id, session)
     return [await message.preview() for message in await QueuedMessage.for_thread(thread_id)]
 
 
@@ -273,9 +278,8 @@ async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> 
 
 async def cancel_dashboard_thread(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     *,
-    email: str | None = None,
     on_interrupted: Callable[[], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Interrupt every live run on a thread on behalf of its owner.
@@ -295,13 +299,13 @@ async def cancel_dashboard_thread(
     metadata = thread_metadata(thread)
     bot_triggered = thread_is_bot_triggered(metadata)
     if bot_triggered:
-        assert_thread_readable(metadata, login, email)
+        assert_thread_readable(metadata, session)
     else:
-        _assert_thread_postable(metadata, login, email)
+        _assert_thread_postable(metadata, session)
 
     try:
         cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
-            client, thread_id, stopped_by=login
+            client, thread_id, stopped_by=str(session.user_id)
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
@@ -317,7 +321,9 @@ async def cancel_dashboard_thread(
         run_id = (
             None
             if kept_queued or bot_triggered
-            else await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
+            else await dispatch_pending_follow_ups(
+                thread_id, session.login, metadata, client=client
+            )
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
@@ -353,7 +359,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
 
 
 async def admin_cancel_dashboard_thread(
-    thread_id: str, login: str | None = None, *, email: str | None = None
+    thread_id: str, session: DashboardSession | None = None
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -365,7 +371,7 @@ async def admin_cancel_dashboard_thread(
         raise HTTPException(404, "thread not found")
 
     if thread_metadata(thread).get("visibility", "public") != "public":
-        assert_thread_readable(thread_metadata(thread), login, email)
+        assert_thread_readable(thread_metadata(thread), session)
 
     try:
         cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
@@ -382,7 +388,10 @@ async def admin_cancel_dashboard_thread(
     return await _thread_summary(updated_thread)
 
 
-async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
+async def delete_dashboard_thread(
+    thread_id: str,
+    session: DashboardSession,
+) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -390,7 +399,7 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
+    _assert_thread_postable(metadata, session)
 
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:
@@ -413,10 +422,13 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
 
 
 async def rename_dashboard_thread(
-    thread_id: str, login: str, *, title: str, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
+    *,
+    title: str,
 ) -> dict[str, Any]:
     client = langgraph_client()
-    thread = await _authorized_thread(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, session)
     metadata_update = {"title": title, "title_seed": None, TITLE_LOCKED_KEY: True}
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
@@ -458,13 +470,13 @@ def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
 
 
 async def share_thread_with_workspace(
-    thread_id: str, requester_login: str, *, email: str | None = None
+    thread_id: str, session: DashboardSession
 ) -> dict[str, object]:
     """Publish a private thread only at its owner's explicit request."""
     client = langgraph_client()
-    thread = await _authorized_thread(thread_id, requester_login, email=email)
+    thread = await _authorized_thread(thread_id, session)
     metadata = thread_metadata(thread)
-    if not thread_is_owner(metadata, requester_login):
+    if not thread_is_owner(metadata, session):
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
@@ -511,23 +523,22 @@ async def share_thread_with_workspace(
 
 async def move_thread(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     *,
-    email: str | None = None,
     bridge_id: str | None,
     target: Literal["cloud"] | None,
 ) -> dict[str, object]:
     """Move a thread onto its owner's machine or off it to the cloud, before its next message."""
-    thread = await _authorized_thread(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, session)
     bridge = (
         None
         if bridge_id is None
         else await BridgeStore.require_open(
-            bridge_id, owner_id=Principal.of_login(login, email).sender_id
+            bridge_id, owner_id=Principal.of_person(session).sender_id
         )
     )
     move = await SandboxMove.requested(
-        thread_id, thread_metadata(thread), login=login, bridge=bridge, target=target
+        thread_id, thread_metadata(thread), session=session, bridge=bridge, target=target
     )
     if move is None:
         raise HTTPException(409, "this thread already runs there")
@@ -539,11 +550,12 @@ async def move_thread(
 
 
 async def continue_thread_privately(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> dict[str, Any]:
     """Copy a collaborative transcript into a new private thread owned by the caller."""
     client = langgraph_client()
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, session)
     if metadata.get("visibility", "public") != "public":
         raise HTTPException(409, "thread is already private")
     state = as_json_object(await client.threads.get_state(thread_id))
@@ -576,12 +588,13 @@ async def continue_thread_privately(
             "source": DASHBOARD_SOURCE,
             "origin": DASHBOARD_SOURCE,
             "owner_type": "user",
-            "owner_login": login.strip(),
+            "owner_login": session.login,
+            "owner_user_id": str(session.user_id),
             "visibility": "private",
             "continued_from_thread_id": thread_id,
             "thread_category": "interactive",
             "trigger_kind": "user",
-            **await participant_metadata({}, login=login, email=email),
+            **await participant_metadata({}, login=session.login, email=session.email),
             "title": new_metadata.get("title") or "Private continuation",
             "created_at_ms": now_ms,
             "updated_at_ms": now_ms,
@@ -618,10 +631,14 @@ async def continue_thread_privately(
     return await _thread_summary(await client.threads.get(new_thread_id))
 
 
-async def resolve_all_dashboard_threads(login: str, *, email: str | None = None) -> int:
+async def resolve_all_dashboard_threads(
+    session: DashboardSession,
+) -> int:
     """Resolve every thread the caller has participated in."""
     client = langgraph_client()
-    threads = await list_unresolved_dashboard_threads(login, email=email)
+    threads = await list_unresolved_dashboard_threads(
+        session,
+    )
     now_ms = _now_ms()
 
     async def resolve(thread_id: str) -> None:
@@ -641,14 +658,17 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
 
 
 async def resolve_dashboard_thread(
-    thread_id: str, login: str, *, resolved: bool, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
+    *,
+    resolved: bool,
 ) -> dict[str, Any]:
     """Mark a thread resolved/unresolved via thread metadata."""
     client = langgraph_client()
-    await _authorized_thread(thread_id, login, email=email)
+    await _authorized_thread(thread_id, session)
     try:
         async with agent_thread_pr_state_lock(thread_id):
-            thread = await _authorized_thread(thread_id, login, email=email)
+            thread = await _authorized_thread(thread_id, session)
             metadata = thread_metadata(thread)
             metadata_update: dict[str, Any] = {
                 "resolved": resolved,
@@ -661,7 +681,7 @@ async def resolve_dashboard_thread(
                 from openswe.analytics.emitter import task_accepted, task_marked_complete
 
                 await task_marked_complete(thread_id, source="dashboard")
-                await task_accepted(thread_id, source="dashboard", actor_key=login)
+                await task_accepted(thread_id, source="dashboard", actor_key=session.login)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -689,14 +709,15 @@ def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:
 
 
 async def get_dashboard_thread_pull_request_status(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, session)
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
         return {"pullRequests": []}
-    async with GitHubClient.as_user(login) as github:
+    async with GitHubClient.as_user(session.login) as github:
         return {"pullRequests": await get_pull_request_statuses(github, tracked)}
 
 
@@ -712,15 +733,14 @@ async def get_dashboard_pull_request_checks(
 
 async def get_dashboard_thread_pull_request_context(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     *,
     repo_full_name: str,
     number: int,
     scope: PullRequestFixScope,
-    email: str | None = None,
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, session)
     record = next(
         (
             candidate
@@ -733,7 +753,7 @@ async def get_dashboard_thread_pull_request_context(
     )
     if record is None:
         raise HTTPException(404, "pull request is not tracked by this thread")
-    async with GitHubClient.as_user(login) as github:
+    async with GitHubClient.as_user(session.login) as github:
         result = await get_pull_request_context(github, record, scope)
     if result is None:
         raise HTTPException(502, "could not scan pull request")
@@ -742,9 +762,8 @@ async def get_dashboard_thread_pull_request_context(
 
 async def get_dashboard_thread_state(
     thread_id: str,
-    login: str,
+    session: DashboardSession,
     *,
-    email: str | None = None,
     timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     record = timings if timings is not None else {}
@@ -755,7 +774,7 @@ async def get_dashboard_thread_state(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, session)
     thread, latest_run_status, _ = await _refresh_latest_run_metadata(
         client, thread, timings=record
     )

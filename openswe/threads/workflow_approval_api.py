@@ -39,7 +39,7 @@ async def list_workflow_push_approvals(
     thread_id: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_readable(metadata, session.login, session.email):
+    if not thread_is_readable(metadata, session):
         raise HTTPException(404, "thread not found")
     approvals = await get_workflow_push_approvals(thread_id)
     return {
@@ -54,7 +54,7 @@ async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session.login)
+    _assert_thread_promptable(metadata, session)
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session.login
     )
@@ -76,7 +76,7 @@ async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: DashboardSession = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    _assert_thread_promptable(metadata, session.login)
+    _assert_thread_promptable(metadata, session)
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session.login
     )

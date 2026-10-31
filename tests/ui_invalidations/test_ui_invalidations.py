@@ -12,7 +12,7 @@ from openswe.ui_invalidations import Topic, outbox
 from openswe.ui_invalidations.hub import HUB
 from openswe.ui_invalidations.routes import _stream
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
-from tests.support.sessions import signed_in
+from tests.support.sessions import signed_in, user_id_of
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:
@@ -55,7 +55,12 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
 async def test_only_readers_of_a_private_thread_hear_its_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    private = {"source": "dashboard", "visibility": "private", "owner_login": "alice"}
+    private = {
+        "source": "dashboard",
+        "visibility": "private",
+        "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
+    }
     threads = {"t-private": private, "t-shared": {"source": "dashboard"}}
 
     async def get(thread_id: str) -> dict[str, object]:

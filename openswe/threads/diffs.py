@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 
+from openswe.dashboard.oauth import DashboardSession
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
 from openswe.sandboxes import scripts as sandbox_scripts
@@ -93,9 +94,10 @@ def _recovery_patch_command(metadata: dict[str, Any], thread_id: str) -> str:
 
 
 async def get_dashboard_thread_recovery_patch(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> tuple[bytes, str]:
-    thread = await _authorized_thread(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, session)
     metadata = thread_metadata(thread)
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
@@ -163,13 +165,14 @@ def _missing_diff() -> dict[str, Any]:
 
 
 async def get_dashboard_thread_working_tree_diff(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
     from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
     from openswe.utils.turn_checkpoint import read_turn_diff
 
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, session)
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
         return _missing_diff()
@@ -198,7 +201,8 @@ def _safe_git_ref(value: Any) -> str | None:
 
 
 async def get_dashboard_thread_branch_diff(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    session: DashboardSession,
 ) -> dict[str, Any]:
     """Everything the thread's branch changes against its base.
 
@@ -207,7 +211,7 @@ async def get_dashboard_thread_branch_diff(
     to the base it was cut from, which is the same three-dot range the PR would
     eventually show.
     """
-    metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    metadata = await _readable_thread_metadata(thread_id, session)
     pr_number = metadata.get("pr_number")
     pr_ref = parse_github_pr_url(str(metadata.get("pr_url") or ""))
     owner, name, _ = _metadata_repo(metadata)
@@ -222,7 +226,7 @@ async def get_dashboard_thread_branch_diff(
     if pull_request is None and head_ref == base_ref:
         raise HTTPException(404, "thread never branched off its base")
 
-    async with GitHubClient.as_user(login, timeout=_PROXY_REQUEST_TIMEOUT) as github:
+    async with GitHubClient.as_user(session.login, timeout=_PROXY_REQUEST_TIMEOUT) as github:
         repository = github.repo(owner, name)
         if pull_request is not None:
             diff = await build_pr_diff_files(repository.pull_request(pull_request))

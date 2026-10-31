@@ -9,11 +9,23 @@ from openswe import credential_scope
 from openswe.dashboard import profiles
 from openswe.github import thread_token
 from openswe.github import token as auth
+from tests.support.sessions import SessionUsers, user_id_of
+
+
+@pytest.fixture(autouse=True)
+def _people(session_users: SessionUsers) -> None:
+    session_users.add("alice")
+    session_users.add("bob")
 
 
 @pytest.fixture
 def thread_metadata(monkeypatch):
-    metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
+    metadata = {
+        "visibility": "public",
+        "owner_type": "user",
+        "owner_login": "alice",
+        "owner_user_id": str(user_id_of("alice")),
+    }
     get_thread = AsyncMock(side_effect=lambda _id: {"metadata": metadata})
     monkeypatch.setattr(
         langgraph_sdk,
@@ -155,10 +167,12 @@ async def test_background_completion_cannot_publish_with_saved_user_identity(
     elif scope == "system":
         thread_metadata.update(owner_type="system")
         thread_metadata.pop("owner_login")
+        thread_metadata.pop("owner_user_id")
     elif scope in ("legacy", "unowned"):
         thread_metadata.pop("owner_type")
         if scope == "unowned":
             thread_metadata.pop("owner_login")
+            thread_metadata.pop("owner_user_id")
     run_config = config()
     run_config["configurable"]["background_task_completion"] = True
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
@@ -223,6 +237,7 @@ async def test_user_owned_pr_requires_saved_initiator(monkeypatch, thread_metada
     opr = importlib.import_module("openswe.tools.open_pull_request")
     thread_metadata.update(owner_type="user")
     thread_metadata.pop("owner_login")
+    thread_metadata.pop("owner_user_id")
     monkeypatch.setattr("openswe.run_config.get_config", config)
     with pytest.raises(RuntimeError, match="owner"):
         await opr._resolve_pr_author_token()
@@ -289,7 +304,9 @@ async def test_private_thread_rejects_missing_or_different_owner(
     thread_metadata,
     credentials,
 ):
-    thread_metadata.update(visibility="private", owner_login=owner)
+    thread_metadata.update(
+        visibility="private", owner_user_id=str(user_id_of(owner)) if owner else owner
+    )
     with pytest.raises(RuntimeError, match="owner"):
         await auth.resolve_github_token(config(), "thread-1")
     credentials.assert_not_awaited()
@@ -398,5 +415,6 @@ async def test_a_named_author_cannot_borrow_a_pinned_thread(
     else:
         thread_metadata.update(owner_type="system")
         thread_metadata.pop("owner_login")
+        thread_metadata.pop("owner_user_id")
         monkeypatch.setattr("openswe.run_config.get_config", lambda: config(login="alice"))
         assert await opr._resolve_pr_author_token("bob") == ("bot-token", "bot")

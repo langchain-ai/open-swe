@@ -10,6 +10,7 @@ import pytest
 
 import openswe.tools.open_pull_request  # noqa: F401
 from openswe.agent_api.git_metadata import GitTarget, collect_pr_targets
+from tests.support.sessions import SessionUsers, owned_by, user_id_of
 
 opr = sys.modules["openswe.tools.open_pull_request"]
 
@@ -116,13 +117,16 @@ def _set_config(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     configurable.setdefault("thread_id", "pr-thread")
+    login = configurable.get("github_login")
+    if login:
+        SessionUsers(monkeypatch).add(login)
     metadata = (
         metadata
         if metadata is not None
         else (
             {"visibility": "public"}
             if configurable.get("source") == "github"
-            else {"visibility": "private", "owner_login": configurable.get("github_login")}
+            else {"visibility": "private", **(owned_by(login) if login else {})}
         )
     )
     monkeypatch.setattr(
@@ -160,7 +164,12 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
     _set_config(
         monkeypatch,
         {"source": "slack", "github_login": "bob"},
-        metadata={"visibility": "public", "owner_type": "user", "owner_login": "Alice"},
+        metadata={
+            "visibility": "public",
+            "owner_type": "user",
+            "owner_login": "Alice",
+            "owner_user_id": str(user_id_of("Alice")),
+        },
     )
     monkeypatch.setattr(
         "openswe.dashboard.profiles.get_valid_access_token",
@@ -259,7 +268,12 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
         {"source": "slack", "github_login": "bob"},
-        metadata={"visibility": "public", "owner_type": "user", "owner_login": "alice"},
+        metadata={
+            "visibility": "public",
+            "owner_type": "user",
+            "owner_login": "alice",
+            "owner_user_id": str(user_id_of("alice")),
+        },
     )
 
     from openswe.dashboard import profiles

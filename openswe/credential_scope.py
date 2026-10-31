@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from openswe.run_config import RunConfig
+from openswe.users import User
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread
@@ -51,22 +52,23 @@ def _requested_participant(requested: str | None, metadata: Mapping[str, Any]) -
     return login
 
 
-def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | None:
+async def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | None:
     """The run's actor when this is a private thread they own, else None."""
     if metadata.get("visibility", "public") == "public":
         return None
-    owner = metadata.get("owner_login")
+    owner = metadata.get("owner_user_id")
     login = (cfg.github_login or "").strip()
-    if not isinstance(owner, str) or not login or owner.strip().lower() != login.lower():
+    actor = await User.for_login("github", login) if login and isinstance(owner, str) else None
+    if actor is None or str(actor.id) != owner:
         return None
     return login
 
 
-def _private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str:
-    owner = metadata.get("owner_login")
+async def _private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str:
+    owner = metadata.get("owner_user_id")
     if not isinstance(owner, str) or not owner.strip():
         raise RuntimeError("Private thread has no credential owner")
-    login = private_owner_login(cfg, metadata)
+    login = await private_owner_login(cfg, metadata)
     if login is None:
         raise RuntimeError("Personal credentials require the private thread owner to start the run")
     return login
@@ -79,7 +81,7 @@ async def private_credential_login(
     cfg, metadata = await _thread_scope(config, thread_id=thread_id)
     if metadata.get("visibility", "public") == "public":
         return None
-    return _private_owner_login(cfg, metadata)
+    return await _private_owner_login(cfg, metadata)
 
 
 async def pr_author_login(requested: str | None = None) -> str | None:
@@ -90,7 +92,7 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
-    owner = metadata.get("owner_login")
+    owner = metadata.get("owner_user_id")
     has_owner = isinstance(owner, str) and bool(owner.strip())
     shared_user_thread = (
         metadata.get("visibility", "public") != "private"
@@ -113,7 +115,7 @@ async def pr_author_login(requested: str | None = None) -> str | None:
             "thread participant"
         )
     if metadata.get("visibility", "public") == "private":
-        return _private_owner_login(cfg, metadata)
+        return await _private_owner_login(cfg, metadata)
     if metadata.get("owner_type") == "system":
         return None
     if has_owner:

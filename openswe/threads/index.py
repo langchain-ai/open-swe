@@ -80,6 +80,16 @@ _RANK: Final = f"""CAST((CASE
         / {_RECENCY_HALF_LIFE.total_seconds()}, 64))) AS float8)"""
 
 
+# A thread the Agent Server kept names its owner by login only; indexing it gives
+# it the account holding that login then, as migration ``0086`` did for the rest.
+_OWNED_METADATA: Final = """(CAST(:metadata AS jsonb) || coalesce((
+    SELECT jsonb_build_object('owner_user_id', user_id::text) FROM user_identity
+    WHERE provider = 'github' AND login <> ''
+        AND lower(login) = lower(CAST(:metadata AS jsonb)->>'owner_login')
+        AND CAST(:metadata AS jsonb)->>'owner_user_id' IS NULL
+), '{}'::jsonb))"""
+
+
 _status = TypeAdapter(ThreadStatus)
 
 
@@ -279,10 +289,10 @@ async def import_newer(threads: Sequence[IndexedThread]) -> None:
     async with transaction() as conn:
         await conn.execute(
             text(
-                """
+                f"""
                 INSERT INTO thread_index
                     (id, thread_id, runtime, metadata, status, created_at, updated_at)
-                VALUES (:id, :thread_id, :runtime, CAST(:metadata AS jsonb), :status,
+                VALUES (:id, :thread_id, :runtime, {_OWNED_METADATA}, :status,
                         :created_at, :updated_at)
                 ON CONFLICT (thread_id) DO UPDATE SET
                     runtime = EXCLUDED.runtime, metadata = EXCLUDED.metadata,
@@ -323,10 +333,10 @@ async def sync(thread_id: str, read: Callable[[], Awaitable[IndexedThread | None
             return
         await conn.execute(
             text(
-                """
+                f"""
                 INSERT INTO thread_index
                     (id, thread_id, runtime, metadata, status, created_at, updated_at)
-                VALUES (:id, :thread_id, :runtime, CAST(:metadata AS jsonb), :status,
+                VALUES (:id, :thread_id, :runtime, {_OWNED_METADATA}, :status,
                         :created_at, :updated_at)
                 ON CONFLICT (thread_id) DO UPDATE SET
                     runtime = EXCLUDED.runtime, metadata = EXCLUDED.metadata,

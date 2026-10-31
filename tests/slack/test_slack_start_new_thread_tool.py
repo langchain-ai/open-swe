@@ -17,6 +17,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.http import SlackRequestError
 from openswe.users.models import User, UserIdentity
 from tests.slack.test_slack_solo_threads import _Harness
+from tests.support.sessions import user_id_of
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
 
@@ -130,7 +131,14 @@ class _FakeThreadsClient:
         self.captured = captured
 
     async def get(self, thread_id: str) -> dict[str, object]:
-        return {"metadata": {"visibility": "public", "owner_type": "user", "owner_login": "alice"}}
+        return {
+            "metadata": {
+                "visibility": "public",
+                "owner_type": "user",
+                "owner_login": "alice",
+                "owner_user_id": str(user_id_of("alice")),
+            }
+        }
 
     async def create(self, *, thread_id: str, if_exists: str, metadata: dict[str, Any]) -> None:
         self.captured["thread_create"] = {
@@ -529,10 +537,18 @@ async def test_breakout_preserves_requester_and_credential_scope(
         "for_login",
         AsyncMock(
             return_value=User(
+                id=user_id_of(actor),
                 display_name=actor,
-                identities=[UserIdentity(provider="slack", external_id=linked_slack_id)],
+                identities=[
+                    UserIdentity(provider="github", external_id=actor, login=actor),
+                    *(
+                        [UserIdentity(provider="slack", external_id=linked_slack_id)]
+                        if linked_slack_id
+                        else []
+                    ),
+                ],
             )
-            if linked_slack_id
+            if actor
             else None
         ),
     )
@@ -540,6 +556,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
         "visibility": visibility,
         "owner_type": owner_type,
         "owner_login": "Alice",
+        "owner_user_id": str(user_id_of("Alice")),
         "source_context": {"slack_thread": saved_slack},
     }
     get_thread = AsyncMock(return_value={"metadata": metadata})

@@ -8,6 +8,7 @@ import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
 
@@ -32,7 +33,7 @@ class ReviewSessionMetadata(BaseModel):
     """The review-specific fields of a review chat thread's metadata."""
 
     source: str = ""
-    github_login: str = ""
+    owner_user_id: UUID | None = None
     repo_owner: str = ""
     repo_name: str = ""
     pr_number: int = 0
@@ -55,8 +56,8 @@ class ReviewSessionMetadata(BaseModel):
             return None
         return parsed
 
-    def owned_by(self, login: str | None) -> bool:
-        return bool(login) and self.github_login.lower() == (login or "").lower()
+    def owned_by(self, user_id: UUID | None) -> bool:
+        return user_id is not None and self.owner_user_id == user_id
 
     @property
     def scout_thread_id(self) -> str:
@@ -75,6 +76,7 @@ class ReviewSession(BaseModel):
     repo: str
     pr_number: int
     login: str
+    user_id: UUID
 
     @property
     def thread_id(self) -> str:
@@ -104,6 +106,7 @@ class ReviewSession(BaseModel):
                 "kind": REVIEW_CHAT_SOURCE,
                 "source": REVIEW_CHAT_SOURCE,
                 "github_login": self.login,
+                "owner_user_id": str(self.user_id),
                 "repo_owner": self.owner,
                 "repo_name": self.repo,
                 "pr_number": self.pr_number,

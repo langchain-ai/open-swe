@@ -335,7 +335,7 @@ async def api_run_review_scout(
     session: DashboardSession = SESSION_DEP,
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session.login, f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number, session.login)
+    return await trigger_review_scout(owner, repo, pr_number, session)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)
@@ -346,7 +346,13 @@ async def api_mark_review_viewed(
     session: DashboardSession = SESSION_DEP,
 ) -> Response:
     await mark_review_session_viewed(
-        ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session.login)
+        ReviewSession(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            login=session.login,
+            user_id=session.user_id,
+        )
     )
     return Response(status_code=204)
 
@@ -501,7 +507,7 @@ async def api_get_review_chat(
     session: DashboardSession = SESSION_DEP,
 ) -> ReviewChat:
     await require_repo_access_for_user(session.login, f"{owner}/{repo}")
-    return await get_review_chat(owner, repo, pr_number, session.login, session.email)
+    return await get_review_chat(owner, repo, pr_number, session)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")
@@ -520,7 +526,7 @@ async def api_review_chat_commands(
         owner,
         repo,
         pr_number,
-        session.login,
+        session,
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
@@ -543,7 +549,7 @@ async def api_review_chat_stream_events(
         owner,
         repo,
         pr_number,
-        session.login,
+        session,
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),
@@ -565,7 +571,7 @@ async def api_review_chat_state(
 ) -> Response:
     await require_repo_access_for_user(session.login, f"{owner}/{repo}")
     status_code, content, media_type = await proxy_review_chat_state(
-        owner, repo, pr_number, session.login, thread_id
+        owner, repo, pr_number, session, thread_id
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
 
@@ -585,7 +591,7 @@ async def api_review_chat_history(
         owner,
         repo,
         pr_number,
-        session.login,
+        session,
         thread_id,
         body,
         content_type=request.headers.get("content-type", "application/json"),

@@ -18,6 +18,7 @@ from openswe.transcript.events import (
     TurnStarted,
 )
 from openswe.transcript.snapshot import load_events, load_snapshot
+from tests.support.sessions import user_id_of
 
 
 async def _create(thread_id: str) -> None:
@@ -30,7 +31,11 @@ async def _create(thread_id: str) -> None:
                     title="A thread",
                     source="dashboard",
                     owner_login="test-user",
-                    metadata={"owner_login": "test-user", "visibility": "public"},
+                    metadata={
+                        "owner_login": "test-user",
+                        "owner_user_id": str(user_id_of("test-user")),
+                        "visibility": "public",
+                    },
                 ),
                 actor_kind="user",
             )

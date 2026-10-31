@@ -3,14 +3,14 @@
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 from urllib.parse import urlencode
+from uuid import UUID
 
 from fastapi import HTTPException
 
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -23,6 +23,7 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
 from openswe.source_context import SourceContext
+from openswe.users import User
 from openswe.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -32,6 +33,23 @@ from openswe.utils.json_types import (
 )
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.timing import phase
+
+
+class Viewer(Protocol):
+    """Whoever is looking at a thread: a person, or an automation that is nobody."""
+
+    @property
+    def user_id(self) -> UUID | None: ...
+
+    @property
+    def login(self) -> str: ...
+
+    @property
+    def email(self) -> str | None: ...
+
+    @property
+    def admin(self) -> bool: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,14 +121,24 @@ def thread_source(metadata: Mapping[str, Any]) -> str:
     return source if isinstance(source, str) and source else DASHBOARD_SOURCE
 
 
-def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
-    owner = metadata.get("owner_login")
-    return bool(
-        isinstance(owner, str)
-        and owner.strip()
-        and login
-        and owner.strip().lower() == login.strip().lower()
+def thread_is_owner(metadata: Mapping[str, Any], viewer: Viewer | None) -> bool:
+    owner = metadata.get("owner_user_id")
+    return (
+        viewer is not None
+        and viewer.user_id is not None
+        and isinstance(owner, str)
+        and owner == str(viewer.user_id)
     )
+
+
+async def thread_owner(metadata: Mapping[str, Any]) -> User | None:
+    """The person a thread belongs to, if they still have a GitHub login."""
+    try:
+        owner_id = UUID(str(metadata.get("owner_user_id")))
+    except ValueError:
+        return None
+    owner = await User.get(owner_id)
+    return owner if owner is not None and owner.github_login else None
 
 
 def thread_is_private(metadata: Mapping[str, Any]) -> bool:
@@ -122,24 +150,22 @@ def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("unlisted") is True or metadata.get("review_chat") is True
 
 
-def thread_is_readable(
-    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
-) -> bool:
+def thread_is_readable(metadata: Mapping[str, Any], viewer: Viewer | None) -> bool:
     """Private threads are visible to their immutable owner and to workspace admins.
 
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
     """
     if (review := ReviewSessionMetadata.parse(metadata)) is not None:
-        return review.owned_by(login)
+        return review.owned_by(viewer.user_id if viewer is not None else None)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
-        or thread_is_owner(metadata, login)
-        or is_admin(email, login=login)
+        or thread_is_owner(metadata, viewer)
+        or (viewer is not None and viewer.admin)
     )
 
 
-def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
+def thread_is_promptable(metadata: Mapping[str, Any], viewer: Viewer | None) -> bool:
     """Only the owner may prompt, approve, or open a shell into a private thread.
 
     Nor may anyone else drive a thread that runs on its owner's machine, even one
@@ -152,7 +178,7 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
         and source != CLAUDE_CODE_SOURCE
         and (
             not (thread_is_private(metadata) or SandboxBridgeBinding.reaches_a_machine(metadata))
-            or thread_is_owner(metadata, login)
+            or thread_is_owner(metadata, viewer)
         )
     )
 
@@ -161,45 +187,39 @@ def thread_is_bot_triggered(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("trigger_kind") == SLACK_BOT_TRIGGER_KIND
 
 
-def assert_thread_readable(
-    metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
-) -> None:
-    if not thread_is_readable(metadata, login, email):
+def assert_thread_readable(metadata: Mapping[str, Any], viewer: Viewer | None) -> None:
+    if not thread_is_readable(metadata, viewer):
         raise HTTPException(404, "thread not found")
 
 
-def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
+def _assert_thread_promptable(metadata: Mapping[str, Any], viewer: Viewer) -> None:
     """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
 
     A thread a Slack bot started is steered from its Slack thread only, so the
     dashboard keeps it read-only for everyone, admins included, and so does a
     mirrored Claude Code session.
     """
-    if thread_source(metadata) == CLAUDE_CODE_SOURCE and thread_is_readable(metadata, login):
+    if thread_source(metadata) == CLAUDE_CODE_SOURCE and thread_is_readable(metadata, viewer):
         raise HTTPException(403, MIRRORED_SESSION_READ_ONLY)
-    if not thread_is_promptable(metadata, login):
+    if not thread_is_promptable(metadata, viewer):
         raise HTTPException(404, "thread not found")
     if thread_is_bot_triggered(metadata):
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
 
 
-def _assert_thread_postable(
-    metadata: Mapping[str, Any], login: str, email: str | None = None
-) -> None:
-    _assert_thread_promptable(metadata, login)
+def _assert_thread_postable(metadata: Mapping[str, Any], viewer: Viewer) -> None:
+    _assert_thread_promptable(metadata, viewer)
     # A run here would start without the history the upload is about to seed.
     if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
         raise HTTPException(409, "this thread is waiting for its session upload")
-    if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
-        email, login=login
-    ):
+    if (
+        metadata.get("admin_thread") is True or _is_automation_thread(metadata)
+    ) and not viewer.admin:
         raise HTTPException(403, "only admins can send messages in this thread")
 
 
-def assert_thread_postable(
-    metadata: Mapping[str, object], login: str, email: str | None = None
-) -> None:
-    _assert_thread_postable(metadata, login, email)
+def assert_thread_postable(metadata: Mapping[str, object], viewer: Viewer) -> None:
+    _assert_thread_postable(metadata, viewer)
 
 
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -534,7 +554,7 @@ async def _thread_summary(
         "transcript": (
             TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
         ),
-        "ownerLogin": metadata.get("owner_login"),
+        "ownerUserId": metadata.get("owner_user_id"),
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
         "workspace": metadata.get("workspace") or metadata.get("environment"),
