@@ -240,8 +240,10 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
         return None
     try:
         run_id = await start_refresh_run(record.slug, kind="update")
+        if run_id is None:
+            raise RefreshStartError("could not start the workspace update job")
     except Exception:
-        logger.warning(
+        logger.error(
             "Could not start workspace update", extra={"workspace": record.slug}, exc_info=True
         )
         return None
@@ -259,21 +261,7 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
 async def refresh_workspace(
     slug: str, kind: RefreshKind = "full", *, run_id: str | None = None
 ) -> dict[str, Any]:
-    """Refresh ``slug``'s snapshot on a throwaway builder.
-
-    ``full`` boots from the base snapshot and runs setup then update; ``update``
-    boots from the current snapshot and runs only the update script. Either way
-    the capture happens only if every script exited 0.
-
-    ``run_id`` is the job this runs in. A retry of a job cut short mid-refresh
-    finds its own marker on the record and starts the refresh over, rather than
-    waiting out ``STALE_REFRESH_SECONDS`` behind itself.
-
-    Returns a status dict rather than raising, carrying the combined log: this is
-    awaited by an admin thread iterating on a script, by a cron tick, and by a
-    background run, and none of them should surface a traceback. The same detail
-    lands on the workspace record.
-    """
+    """Refresh a snapshot, falling back to one full rebuild after a failed update."""
     from openswe.sandboxes.paths import declared_work_dir
 
     record = await WORKSPACES.get(slug)
@@ -325,6 +313,7 @@ async def refresh_workspace(
     sandbox_id: str | None = None
     log = ""
     step = "boot"
+    failure: dict[str, object] | None = None
     try:
         await attempt.start_step("boot")
         backend = await _create_builder_sandbox(record, base)
@@ -345,8 +334,11 @@ async def refresh_workspace(
             if result.exit_code != 0:
                 await attempt.finish_step(label, "failed", exit_code=result.exit_code)
                 error = f"{label} script exited {result.exit_code}"
-                await attempt.settle("failed", log=log, error=error)
-                return {
+                logger.error(
+                    "Refresh script failed",
+                    extra={**context, "step": label, "exit_code": result.exit_code},
+                )
+                failure = {
                     "status": "failed",
                     "slug": slug,
                     "script": label,
@@ -354,11 +346,13 @@ async def refresh_workspace(
                     "error": error,
                     "log": log,
                 }
+                break
             await attempt.finish_step(label, "success", exit_code=0)
-        step = "capture"
-        await attempt.start_step("capture")
-        await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
-        await attempt.finish_step("capture", "success")
+        if failure is None:
+            step = "capture"
+            await attempt.start_step("capture")
+            await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
+            await attempt.finish_step("capture", "success")
     except asyncio.CancelledError:
         # A shutdown cancels the job mid-refresh, past ``except Exception``. Settled here
         # so the record stops claiming a refresh nobody runs; a hard kill skips this,
@@ -370,13 +364,29 @@ async def refresh_workspace(
         await attempt.settle("failed", log=log, error="interrupted")
         raise
     except Exception as exc:
-        logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
+        logger.error("Refresh failed", extra={**context, "step": step}, exc_info=True)
         error = str(exc) or type(exc).__name__
-        await attempt.settle("failed", log=log, error=error)
-        return {"status": "failed", "slug": slug, "error": error, "log": log}
+        failure = {"status": "failed", "slug": slug, "error": error, "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
+
+    if failure is not None:
+        await attempt.settle("failed", log=log, error=str(failure["error"]))
+        if kind == "update":
+            try:
+                current = await WORKSPACES.get(slug)
+                if current is None or not attempt.holds(current):
+                    raise RefreshStartError("failed update no longer owns the refresh")
+                fallback_run_id = await start_refresh(current, "full")
+            except Exception:
+                logger.exception("Could not queue full refresh after failed update", extra=context)
+            else:
+                logger.info(
+                    "Queued full refresh after failed update",
+                    extra={**context, "fallback_run_id": fallback_run_id},
+                )
+        return failure
 
     elapsed = int((datetime.now(UTC) - started).total_seconds())
     await attempt.settle("success", log=log)
