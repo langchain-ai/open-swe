@@ -7,7 +7,7 @@ with the plan, so a rebase or force-push never asks them to reread it.
 """
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
@@ -19,7 +19,11 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.jobs import queue
+from openswe.review_guide.github import fetch_head
 from openswe.review_guide.walk import Reader, Walk
+from openswe.slack.code_channels import archive_code_channel, set_session_status
+from openswe.slack.http import SlackRequestError
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 from openswe.walkthrough.diff import Carry
@@ -28,6 +32,7 @@ from openswe.walkthrough.record import Walkthrough
 
 # A reviewer ends by approving; the author, who cannot approve their own PR, ends by readying it.
 GuideMode = Literal["reviewer", "author"]
+ARCHIVE_JOB = "review_guide_archive"
 
 
 class ReviewGuideSeen(Base):
@@ -140,7 +145,9 @@ class ReviewGuideSession(Base):
             return None
         return Reader.of(walk, stored.plan, await self.seen_at(walk.head_sha))
 
-    async def save_walk(self, walk: Walk | None) -> None:
+    async def save_walk(self, walk: Walk | None, *, finished: bool = False) -> None:
+        key = f"{ARCHIVE_JOB}:{self.thread_id}"
+        await queue.cancel_key(key)
         self.walk_json = walk.model_dump(mode="json") if walk else None
         async with postgres.session() as session:
             await session.execute(
@@ -149,6 +156,45 @@ class ReviewGuideSession(Base):
                 .values(walk_json=self.walk_json)
             )
             await session.commit()
+        if finished and walk is not None:
+            await queue.schedule(
+                ARCHIVE_JOB,
+                {"thread_id": self.thread_id, "head_sha": walk.head_sha},
+                due_at=datetime.now(UTC) + timedelta(days=1),
+                key=key,
+                by=self.user_id,
+            )
+
+    async def archive_finished(self, head_sha: str) -> None:
+        """Archive a completed walkthrough only if it is still at the reviewed head."""
+        walk = self.walk
+        if self.closed or self.paused_message_ts or walk is None or walk.head_sha != head_sha:
+            return
+        head = await fetch_head(
+            self.pull_request.owner, self.pull_request.repo, self.pull_request.number
+        )
+        if head is None:
+            raise RuntimeError("Could not verify the review guide head before archiving")
+        stored = await Walkthrough.get(self.pull_request_id)
+        if (
+            head.head.sha != head_sha
+            or stored is None
+            or stored.head_sha != head_sha
+            or not stored.complete
+        ):
+            return
+        reader = Reader.of(walk, stored.plan, await self.seen_at(head_sha))
+        if reader.unfinished(LineSet()):
+            return
+        try:
+            await archive_code_channel(
+                self.slack_channel_id, summary_message_ts=self.summary_message_ts
+            )
+        except SlackRequestError as exc:
+            if exc.code != "already_archived":
+                raise
+        await self.set_closed(True)
+        await set_session_status(self.slack_channel_id, "closed")
 
     @classmethod
     async def get(cls, thread_id: str) -> Self | None:
