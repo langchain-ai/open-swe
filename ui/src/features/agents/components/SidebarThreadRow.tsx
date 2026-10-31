@@ -16,6 +16,9 @@ import {
 } from "@langchain/macaw-components/HoverCard"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Input } from "@langchain/macaw-components/Input"
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
+import { ContextMenuItem } from "@/components/MenuItem"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
@@ -53,6 +56,7 @@ import {
   markAgentThreadViewed,
   markReviewViewed,
   useDeleteAgentThread,
+  useRenameAgentThread,
 } from "@/features/agents/lib/queries"
 import {
   noteReviewOpenedFromSidebar,
@@ -277,56 +281,141 @@ export function SidebarConversationRow({
   onArchive: () => void
 }) {
   const marquee = useTitleMarquee()
+  const renameThread = useRenameAgentThread()
+  const [draft, setDraft] = useState<string | null>(null)
+  const editing = useRef(false)
+  const titleInput = useRef<HTMLInputElement>(null)
+  const isEditing = draft !== null
+  useEffect(() => {
+    if (!isEditing) return
+    const frame = requestAnimationFrame(() => titleInput.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [isEditing])
+  const busy = pending || renameThread.isPending
+  const saveTitle = () => {
+    if (!editing.current || draft === null) return
+    editing.current = false
+    setDraft(null)
+    const next = draft.trim()
+    if (next && next !== title) {
+      renameThread.mutate({ threadId, title: next })
+    }
+  }
   return (
-    <div
-      className="group/row relative mb-0.5"
-      onMouseEnter={marquee.measure}
-      onMouseLeave={marquee.reset}
-    >
-      <Link
-        to="/agents/$threadId"
-        params={{ threadId }}
-        aria-current={active ? "page" : undefined}
-        onClick={onNavigate}
-        className={cn(
-          "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
-          compact ? "h-7" : "h-8",
-          active && "bg-surface-level-3"
-        )}
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={draft !== null}>
+        <div
+          className="group/row relative mb-0.5"
+          onMouseEnter={marquee.measure}
+          onMouseLeave={marquee.reset}
+        >
+          {draft !== null ? (
+            <Input
+              ref={titleInput}
+              size="sm"
+              debounceMs={0}
+              autoFocus
+              aria-label="Thread title"
+              value={draft}
+              onChange={setDraft}
+              onFocus={(event) => event.currentTarget.select()}
+              onBlur={saveTitle}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  saveTitle()
+                } else if (event.key === "Escape") {
+                  event.preventDefault()
+                  editing.current = false
+                  setDraft(null)
+                }
+              }}
+            />
+          ) : (
+            <Link
+              to="/agents/$threadId"
+              params={{ threadId }}
+              onKeyDown={openContextMenuFromKeyboard}
+              aria-current={active ? "page" : undefined}
+              onClick={onNavigate}
+              className={cn(
+                "flex items-center rounded-xl px-space-2 text-secondary transition-colors group-focus-within/row:bg-surface-level-3 group-focus-within/row:pr-14 group-hover/row:bg-surface-level-3 group-hover/row:pr-14 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+                compact ? "h-7" : "h-8",
+                active && "bg-surface-level-3"
+              )}
+            >
+              <SidebarRowTitle title={title} marquee={marquee} />
+            </Link>
+          )}
+          {draft === null && (
+            <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
+              <IconButton
+                icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
+                label={pinned ? "Unpin chat" : "Pin chat"}
+                className="text-tertiary hover:text-secondary"
+                size="xs"
+                color="secondary"
+                variant="plain"
+                disabled={busy}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onPin()
+                }}
+              />
+              <IconButton
+                icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
+                label={archived ? "Unarchive chat" : "Archive chat"}
+                className="text-tertiary hover:text-secondary"
+                size="xs"
+                color="secondary"
+                variant="plain"
+                disabled={busy}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onArchive()
+                }}
+              />
+            </span>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        className="min-w-40"
+        onCloseAutoFocus={(event) => {
+          if (editing.current) event.preventDefault()
+        }}
       >
-        <SidebarRowTitle title={title} marquee={marquee} />
-      </Link>
-      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-xl bg-surface-level-3 opacity-0 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100">
-        <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
-          label={pinned ? "Unpin chat" : "Pin chat"}
-          className="text-tertiary hover:text-secondary"
-          size="xs"
-          color="secondary"
-          variant="plain"
-          disabled={pending}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onPin()
+        <ContextMenuItem
+          disabled={busy}
+          onSelect={() => {
+            editing.current = true
+            setDraft(title)
           }}
-        />
-        <IconButton
-          icon={archived ? ArrowCounterClockwiseIcon : ArchiveIcon}
-          label={archived ? "Unarchive chat" : "Archive chat"}
-          className="text-tertiary hover:text-secondary"
-          size="xs"
-          color="secondary"
-          variant="plain"
-          disabled={pending}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            onArchive()
-          }}
-        />
-      </span>
-    </div>
+        >
+          <PencilSimpleIcon size={14} weight="regular" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem disabled={busy} onSelect={onPin}>
+          {pinned ? (
+            <PushPinSlashIcon size={14} weight="regular" />
+          ) : (
+            <PushPinRegularIcon size={14} />
+          )}
+          {pinned ? "Unpin" : "Pin"}
+        </ContextMenuItem>
+        <ContextMenuItem disabled={busy} onSelect={onArchive}>
+          {archived ? (
+            <ArrowCounterClockwiseIcon size={14} weight="regular" />
+          ) : (
+            <ArchiveIcon size={14} weight="regular" />
+          )}
+          {archived ? "Unarchive" : "Archive"}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

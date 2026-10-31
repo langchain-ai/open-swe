@@ -4981,17 +4981,6 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_fleet": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Fleet"
-          },
           "experimental_memory": {
             "anyOf": [
               {

@@ -22,6 +22,37 @@ const {
   validateBackendUrl,
 } = require("../build/config.cjs");
 
+test("native login follows the clicked provider with a fresh PKCE handoff", () => {
+  const flow = { challenge: "pkce-challenge", port: 4567 };
+  const backend = "https://configured.example/";
+  for (const pathname of [
+    "/dashboard/api/auth/login",
+    "/dashboard/api/auth/langsmith/login",
+  ]) {
+    const target = new URL(
+      desktopLoginUrl(
+        backend,
+        flow,
+        `${APP_URL}${pathname.slice(1)}?desktop_handoff=untrusted&desktop_port=1`,
+      ),
+    );
+    assert.equal(target.origin, "https://configured.example");
+    assert.equal(target.pathname, pathname);
+    assert.equal(target.searchParams.get("desktop_handoff"), flow.challenge);
+    assert.equal(target.searchParams.get("desktop_port"), String(flow.port));
+    assert.equal(target.searchParams.get("desktop"), "true");
+  }
+  for (const url of [
+    "https://untrusted.example/dashboard/api/auth/langsmith/login",
+    `${APP_URL}dashboard/api/auth/callback`,
+  ]) {
+    assert.throws(
+      () => desktopLoginUrl(backend, flow, url),
+      /Invalid desktop login URL/,
+    );
+  }
+});
+
 test("uses the local backend for development", () => {
   assert.equal(
     resolveBackendUrl({ argv: [], env: {}, isPackaged: false }),
@@ -29,7 +60,7 @@ test("uses the local backend for development", () => {
   );
 });
 
-test("uses an isolated app profile for development runs", () => {
+test("renamed app retains original production and isolated development profiles", () => {
   const appDataPath = path.join("/tmp", "open-swe-app-data");
   const expected = {
     isDevelopment: true,
@@ -51,7 +82,7 @@ test("uses an isolated app profile for development runs", () => {
       isDevelopment: false,
       name: "Open SWE",
       appUserModelId: "com.langchain.openswe",
-      userDataPath: null,
+      userDataPath: path.join(appDataPath, "Open SWE"),
     },
   );
 });

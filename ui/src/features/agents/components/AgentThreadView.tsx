@@ -1,4 +1,5 @@
 import { LogoMark } from "@/components/Branding"
+import { useAgentWorkspace } from "@/features/agents/lib/agentWorkspace"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
@@ -137,6 +138,7 @@ export function AgentThreadView({
   thread,
   composerDraft,
 }: AgentThreadViewProps) {
+  const agentWorkspace = useAgentWorkspace()
   const reviewChat = useContext(ReviewChatActionsContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
@@ -235,6 +237,8 @@ export function AgentThreadView({
       : null
   const runsHere: RunTarget = runsOnAMac(thread) ? "local" : "cloud"
   const canMove =
+    !agentWorkspace &&
+    session.data?.auth_provider !== "langsmith" &&
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
     Boolean(thread.repoFullName) &&

@@ -340,11 +340,6 @@ async function cleanupFixtures(request: APIRequestContext) {
   if (createdThreadIds.size > 0) {
     const login = await request.post("/control/login", { data: USER });
     expect(login.ok(), await login.text()).toBeTruthy();
-    const profile = await request.put("/dashboard/api/profile", {
-      data: { experimental_fleet: false },
-      headers: SAME_ORIGIN_HEADERS,
-    });
-    expect(profile.ok(), await profile.text()).toBeTruthy();
   }
   for (const threadId of createdThreadIds) {
     const pinResponse = await request.delete(
@@ -401,11 +396,22 @@ test.describe("threads workspace", () => {
   }) => {
     await seedThreads(request, workspaceThreads());
     await loginAs(page);
-    const profile = await page.request.put("/dashboard/api/profile", {
-      data: { experimental_fleet: true },
-      headers: SAME_ORIGIN_HEADERS,
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "openSweDesktop", {
+        value: {
+          isDesktop: true,
+          setAppearance: () => Promise.resolve(),
+          onCommand: () => () => {},
+          setCommands: () => Promise.resolve(),
+          getUpdateState: () => Promise.resolve({ status: "idle" }),
+          onUpdateState: () => () => {},
+          listProjects: () => Promise.resolve([]),
+          onProjectsChanged: () => () => {},
+          listLocalThreads: () => Promise.resolve([]),
+          onLocalThreadsChanged: () => () => {},
+        },
+      });
     });
-    expect(profile.ok(), await profile.text()).toBeTruthy();
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
     const sidebar = page.locator("[data-sidebar-frame]");
