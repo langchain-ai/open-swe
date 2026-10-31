@@ -79,6 +79,8 @@ export function ReviewButton({
   onOpenChange: setOpen,
   defaultVerdict,
   onOpenReview,
+  approveLabel = "Approve",
+  onApproved,
 }: {
   owner: string
   repo: string
@@ -89,6 +91,10 @@ export function ReviewButton({
   defaultVerdict: PullRequestReviewEvent
   /** Opens the form on a verdict, e.g. to show why a one-click approval failed. */
   onOpenReview: (verdict: PullRequestReviewEvent) => void
+  /** Names what an approval also does, e.g. "Approve & next" while working through a queue. */
+  approveLabel?: string
+  /** Runs once GitHub accepts an approval, e.g. to open the next pull request. */
+  onApproved?: () => void
 }) {
   const queryClient = useQueryClient()
   const session = useSession()
@@ -145,6 +151,7 @@ export function ReviewButton({
       )
       refresh.reviewed()
       void pending.invalidate()
+      if (review.event === "APPROVE") onApproved?.()
     },
   })
   const submitForm = () =>
@@ -204,7 +211,9 @@ export function ReviewButton({
             leftDecorator={approved ? CheckIcon : undefined}
             tagText={approved ? undefined : pendingTag}
             disabled={approved || submit.isPending}
-            aria-label={approved ? "Approved" : `Approve${pendingLabel}`}
+            aria-label={
+              approved ? "Approved" : `${approveLabel}${pendingLabel}`
+            }
             aria-live="polite"
             onClick={approve}
             className={cn(
@@ -213,7 +222,7 @@ export function ReviewButton({
                 : approveColors
             )}
           >
-            {approved ? "Approved" : "Approve"}
+            {approved ? "Approved" : approveLabel}
           </Button>
           <PopoverTrigger asChild>
             <IconButton
