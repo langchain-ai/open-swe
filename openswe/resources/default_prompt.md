@@ -12,7 +12,7 @@ A thread can override its own model, for example by asking the agent to switch t
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.
-- **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
+- **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment opt-out and personal routing instructions; use `save_user_settings` to edit `review_assignment_instructions` when asked.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
   The agent saves personal memories with `remember` and drops them with `forget`; they are not shown here yet.

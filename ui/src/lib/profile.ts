@@ -173,6 +173,8 @@ export function buildProfileUpdate(
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
+    review_assignment_instructions:
+      current?.review_assignment_instructions ?? "",
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_background_callbacks:

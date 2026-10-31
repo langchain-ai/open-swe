@@ -116,6 +116,14 @@ This affects reviewer assignment, not the two-hour auto-merge deadline.
 - **Allow automatic review picks** in dashboard Settings controls whether Open SWE can automatically assign you, including fallback agent picks.
   It defaults to on and can also be changed with `save_user_settings` using `auto_human_review_enabled`.
   Turning it off does not prevent someone explicitly naming you as a reviewer or you signing up yourself.
+- Ask Open SWE to set your **Review Assignment Instructions**, for example: “Prefer backend and database reviews in langchainplus, but not smith-frontend changes.”
+  The authorized `save_user_settings` tool accepts `review_assignment_instructions` (up to 4,000 characters; an empty string clears it), using the same validation as `PUT /dashboard/api/profile`.
+  You can also edit it under **Settings → Agent**.
+  The automatic picker interprets these preferences alongside PR topic, changed-file paths and CODEOWNERS context; the same check applies to fallback agent assignments, replacements and remaining ownership areas.
+  Uncertain or unavailable classification falls back to normal ranking.
+  These are advisory preferences, not guaranteed hard exclusions: use the global opt-out above for that.
+  Preferences never override opt-out, availability, access, author exclusion or other eligibility checks.
+  Explicitly named reviewers and volunteers are unchanged.
 - **I'll review** adds the clicker as a reviewer and requests their review on GitHub.
   Any number of people may sign up; they need write access and cannot be the author.
 - **Dismiss** closes the card; anyone may click it.

@@ -5014,6 +5014,12 @@
             ],
             "title": "Pr Failure Reactions"
           },
+          "review_assignment_instructions": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Review Assignment Instructions",
+            "type": "string"
+          },
           "review_draft_prs": {
             "anyOf": [
               {

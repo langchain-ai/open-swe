@@ -94,6 +94,7 @@ def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:
     assert hours.next_start(friday_evening) == datetime(2026, 10, 5, 13, tzinfo=UTC)
 
 
+@pytest.mark.parametrize("routing", [None, "consider", "prefer_someone_else"])
 @pytest.mark.parametrize("codeowners", [CodeOwners.parse("* @ada @grace"), None])
 @pytest.mark.parametrize(
     ("profile", "classification", "skip_reason"),
@@ -124,6 +125,7 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     profile: dict[str, object] | None,
     classification: str | None,
     skip_reason: str | None,
+    routing: str | None,
 ) -> None:
     from openswe.expedited_review.eligibility import ChangedFile
     from openswe.human_review import picking
@@ -137,8 +139,16 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
         ]
     )
     grace = User(identities=[UserIdentity(provider="github", external_id="2", login="grace")])
-    if skip_reason == "opted_out":
-        user_records.seed("profile", "ada", {"auto_human_review_enabled": False})
+    user_records.seed(
+        "profile",
+        "ada",
+        {
+            "auto_human_review_enabled": skip_reason != "opted_out",
+            "review_assignment_instructions": "Backend reviews, not frontend changes.",
+        },
+    )
+    routing_classifier = AsyncMock(return_value=routing)
+    monkeypatch.setattr(picking, "select_jev_choice", routing_classifier)
     monkeypatch.setattr(
         picking,
         "get_slack_user_info",
@@ -164,7 +174,18 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
     pull.repo.can_write = AsyncMock(return_value=True)
     with caplog.at_level("INFO", logger=picking.__name__):
         choice = await picking._choose_reviewer(request, pull, None, {})
-    assert isinstance(choice, picking.Pick) and choice.login == ("grace" if skip_reason else "ada")
+    expected = "grace" if skip_reason or routing == "prefer_someone_else" else "ada"
+    assert isinstance(choice, picking.Pick) and choice.login == expected
+    if skip_reason:
+        routing_classifier.assert_not_awaited()
+    else:
+        import json
+
+        assert routing_classifier.await_args is not None
+        context = json.loads(routing_classifier.await_args.args[0])
+        assert context["changed_files"] == ["app.py"]
+        assert context["candidate"] == "ada"
+        assert bool(context["ownership"]) == (codeowners is not None)
     filtered = next(
         record for record in caplog.records if record.message == "Filtered reviewer candidates"
     )

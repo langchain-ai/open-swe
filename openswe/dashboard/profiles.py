@@ -87,6 +87,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
+    review_assignment_instructions: str = Field(default="", max_length=4000)
     concierge_mode: bool | None = None
     pr_failure_reactions: bool | None = None
     experimental_fleet: bool | None = None
@@ -156,6 +157,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.auto_human_review_enabled
             if "auto_human_review_enabled" in update.model_fields_set
             else existing.get("auto_human_review_enabled", True)
+        ),
+        "review_assignment_instructions": (
+            update.review_assignment_instructions
+            if "review_assignment_instructions" in update.model_fields_set
+            else existing.get("review_assignment_instructions", "")
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)

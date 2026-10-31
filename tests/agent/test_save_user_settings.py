@@ -73,6 +73,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "draft_prs": False,
         "review_draft_prs": True,
         "email": "alice@example.com",
+        "review_assignment_instructions": "Backend reviews, not frontend.",
     }
     prefs = {
         "default_visibility": "public",
@@ -252,6 +253,29 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
         assert save.await_args.args[0] == "Alice"
         assert save.await_args.args[1].pr_failure_reactions is True
     assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
+
+
+async def test_review_routing_instructions_can_be_saved_cleared_and_validate_atomically(
+    user_records: FakeUserRecords,
+    requester: dict[str, object],
+    saved_scope: dict[str, object],
+) -> None:
+    from openswe.dashboard.profiles import ProfileUpdate, upsert_profile
+
+    text = "Prefer backend reviews in the monorepo, not frontend."
+    result = await save_user_settings({"review_assignment_instructions": text})
+    assert result["ok"] is True
+    await upsert_profile("Alice", "", ProfileUpdate(default_repo="org/repo"))
+    assert user_records.get("profile", "Alice")["review_assignment_instructions"] == text
+    before = deepcopy(user_records.items)
+    result = await save_user_settings(
+        {"review_assignment_instructions": "x" * 4001, "auto_human_review_enabled": False}
+    )
+    assert result["ok"] is False
+    assert user_records.items == before
+    result = await save_user_settings({"review_assignment_instructions": ""})
+    assert result["ok"] is True
+    assert user_records.get("profile", "Alice")["review_assignment_instructions"] == ""
 
 
 async def test_first_setting_does_not_pin_inherited_model_defaults(
