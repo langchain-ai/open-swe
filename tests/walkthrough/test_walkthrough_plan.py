@@ -191,6 +191,19 @@ async def test_scattered_added_lines_render_as_one_diff_with_the_lines_between(
     )
 
 
+async def test_a_deletion_the_chunk_lacks_stays_in_the_diff_between_its_runs(
+    repo: Path, checkout: PinnedCheckout
+) -> None:
+    base = _commit(repo, {"g.txt": "a\nb\nc\ne\n"}, "g")
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"g.txt": "a\nX\nb\nY\ne\n"}, "replace c")
+    await _pin(checkout, base, head)
+
+    code = await checkout.render(_added("g.txt", (2, 2), (4, 4)))
+
+    assert code == "`g.txt`\n```diff\n@@ -1,4 +1,5 @@\n a\n+X\n b\n-c\n+Y\n e\n```"
+
+
 async def test_a_chunk_too_large_for_a_command_line_still_renders(
     repo: Path, checkout: PinnedCheckout
 ) -> None:

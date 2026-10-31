@@ -316,16 +316,23 @@ def grouped(runs_in_file):
     return out
 
 
-def render_diff(text, changed, group):
-    """A group of runs as one diff, with the unchanged lines around and between its runs."""
+def render_diff(text, changed, lost, group):
+    """A group of runs as one diff, with the lines around and between its runs.
+
+    ``lost`` holds the deletions the chunk does not, by the head line each follows, so a
+    replacement between two runs is not shown as a plain insertion.
+    """
     before = context(text, changed, span(group[0])[0] - 1, -1)
     after = context(text, changed, span(group[-1])[1] + 1, 1)
     rows = [" " + text[n - 1] for n in before]
     for run, following in zip(group, [*group[1:], None]):
         rows += [line[0] + line[2] for line in run]
         if following:
-            between = range(span(run)[1] + 1, span(following)[0])
-            rows += [("+" if n in changed else " ") + text[n - 1] for n in between]
+            first, stop = span(run)[1] + 1, span(following)[0]
+            for n in range(first - 1, stop):
+                if n >= first:
+                    rows.append(("+" if n in changed else " ") + text[n - 1])
+                rows += ["-" + deleted for deleted in lost.get(n, [])]
     rows += [" " + text[n - 1] for n in after]
     old_count = sum(row[0] != "+" for row in rows)
     new_count = sum(row[0] != "-" for row in rows)
@@ -342,6 +349,11 @@ def render_one(chosen, lines_by_path, files):
     for path, path_lines in chosen.items():
         text = head_file(path, files)
         changed = {line[1] for line in lines_by_path.get(path, []) if line[0] == "+"}
+        chosen_deletions = {line[1] for line in path_lines if line[0] == "-"}
+        lost = {}
+        for line in lines_by_path.get(path, []):
+            if line[0] == "-" and line[1] not in chosen_deletions:
+                lost.setdefault(line[4], []).append(line[2])
         for group in grouped(runs(path_lines)):
             run = group[0]
             if len(group) == 1 and all(line[0] == "+" for line in run):
@@ -350,7 +362,7 @@ def render_one(chosen, lines_by_path, files):
                 source = "\n".join(line[2] for line in run)
                 blocks.append(f"`{path}` {where}\n{fenced(source, language_for(path))}")
             else:
-                blocks.append(f"`{path}`\n{render_diff(text, changed, group)}")
+                blocks.append(f"`{path}`\n{render_diff(text, changed, lost, group)}")
     return "\n".join(blocks)
 
 
