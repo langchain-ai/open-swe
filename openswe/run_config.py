@@ -187,13 +187,10 @@ class RunConfig(BaseModel):
     @model_validator(mode="after")
     def authenticated_experience(self) -> Self:
         if self.auth_provider == "langsmith":
-            self.experience = "agent_workspace"
             self.github_login = None
             self.github_user_id = None
             self.repo = None
             self.repo_explicitly_none = True
-        elif self.experience != "coding":
-            self.experience = "coding"
         return self
 
     @classmethod

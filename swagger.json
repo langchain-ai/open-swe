@@ -4980,6 +4980,18 @@
             ],
             "title": "Experimental Act As Approval"
           },
+          "experimental_agent_workspace": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Agent Workspace"
+          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [

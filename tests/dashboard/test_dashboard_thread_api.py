@@ -226,9 +226,38 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         await history_finished.wait()
 
 
+@pytest.mark.parametrize(
+    ("subject", "experience"),
+    [
+        ("octocat", "agent_workspace"),
+        ("user:019abcde-0000-7000-8000-000000000001", "coding"),
+        ("user:019abcde-0000-7000-8000-000000000001", "agent_workspace"),
+    ],
+)
+async def test_desktop_experience_cannot_fall_back_to_cloud(
+    monkeypatch: pytest.MonkeyPatch, subject: str, experience: str
+) -> None:
+    _patch_new_thread_deps(monkeypatch, profile={})
+    monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="private"))
+    with pytest.raises(HTTPException) as rejected:
+        await thread_runs._enrich_run_start_command(
+            "new-tid",
+            subject,
+            {
+                "method": "run.start",
+                "params": {"config": {"configurable": {"experience": experience}}},
+            },
+            metadata={},
+            creating=True,
+        )
+    assert rejected.value.status_code == 422
+    assert "connected local machine" in rejected.value.detail
+
+
 @pytest.mark.parametrize("langsmith", [False, True])
-async def test_agent_workspace_requires_langsmith_and_keeps_identity_on_resume(
-    monkeypatch: pytest.MonkeyPatch, registry_db: None, langsmith: bool
+@pytest.mark.parametrize("experience", ["coding", "agent_workspace"])
+async def test_desktop_experience_keeps_authenticated_identity_on_resume(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, langsmith: bool, experience: str
 ) -> None:
     monkeypatch.setattr(
         thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
@@ -253,33 +282,30 @@ async def test_agent_workspace_requires_langsmith_and_keeps_identity_on_resume(
             "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
             "config": {
                 "configurable": {
-                    "experience": "agent_workspace",
+                    "experience": experience,
                     "sandbox_bridge_id": bridge.bridge_id,
                 }
             },
         },
     }
-    if not langsmith:
-        with pytest.raises(HTTPException) as rejected:
-            await thread_runs._enrich_run_start_command(
-                "new-tid", subject, command, metadata={}, creating=True
-            )
-        assert rejected.value.status_code == 403
-        assert "metadata" not in created
-        return
     first = await thread_runs._enrich_run_start_command(
         "new-tid", subject, command, metadata={}, creating=True
     )
     config = first["params"]["config"]["configurable"]
-    assert config["experience"] == "agent_workspace"
-    assert config["auth_provider"] == "langsmith"
-    assert config["user_id"] == subject.removeprefix("user:")
-    assert "github_login" not in config
-    assert config["repo_explicitly_none"] is True
+    assert config["experience"] == experience
+    if langsmith:
+        assert config["auth_provider"] == "langsmith"
+        assert config["user_id"] == subject.removeprefix("user:")
+        assert "github_login" not in config
+        assert config["repo_explicitly_none"] is True
+    else:
+        assert config["github_login"] == subject
+        assert "auth_provider" not in config
     metadata = created["metadata"]
     assert isinstance(metadata, dict)
     assert metadata["owner_login"] == subject
-    assert metadata["owner_user_id"] == subject.removeprefix("user:")
+    if langsmith:
+        assert metadata["owner_user_id"] == subject.removeprefix("user:")
     assert metadata["visibility"] == "private"
     assert metadata["sandbox_id"] == bridge.sandbox_id
     followup = {
@@ -300,10 +326,14 @@ async def test_agent_workspace_requires_langsmith_and_keeps_identity_on_resume(
         "new-tid", subject, followup, metadata=metadata
     )
     resumed = next_run["params"]["config"]["configurable"]
-    assert resumed["experience"] == "agent_workspace"
-    assert resumed["auth_provider"] == "langsmith"
-    assert resumed["user_id"] == subject.removeprefix("user:")
-    assert "github_login" not in resumed
+    assert resumed["experience"] == experience
+    if langsmith:
+        assert resumed["auth_provider"] == "langsmith"
+        assert resumed["user_id"] == subject.removeprefix("user:")
+        assert "github_login" not in resumed
+    else:
+        assert resumed["github_login"] == subject
+        assert "auth_provider" not in resumed
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
@@ -751,7 +781,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
         {"owner_login", "owner_type", "visibility", "system_authorization"}
         & enriched["params"]["metadata"].keys()
     )
-    assert "experience" not in configurable
+    assert configurable["experience"] == "coding"
     assert configurable["repo"] == {"owner": "octo", "name": "repo"}
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"

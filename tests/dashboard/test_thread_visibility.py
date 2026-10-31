@@ -77,7 +77,8 @@ async def test_langsmith_identity_is_private_owner_only_and_cannot_inherit_admin
     assert summary.thread_is_promptable(metadata, subject)
     assert not summary.thread_is_readable(metadata, f"user:{uuid7()}", "admin@example.com")
     assert not summary.thread_is_readable({**metadata, "visibility": "public"}, subject)
-    assert not summary.thread_is_readable({**metadata, "experience": "coding"}, subject)
+    assert summary.thread_is_readable({**metadata, "experience": "coding"}, subject)
+    assert not summary.thread_is_readable({**metadata, "experience": "unknown"}, subject)
     assert not Principal.of_login(subject, "admin@example.com").admin
     assert not await actor_is_admin(
         RunConfig(auth_provider="langsmith", user_email="admin@example.com")

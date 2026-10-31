@@ -132,13 +132,14 @@ export function AgentsHome({
   const [runTargetOverride, setRunTargetOverride] = useState<RunTarget | null>(
     initialLocalRepo ? "local" : initialRepo || initialNoRepo ? "cloud" : null
   )
-  const runTarget: RunTarget = agentWorkspace
-    ? "local"
-    : isDesktop
-      ? cloudEnabled
-        ? (runTargetOverride ?? desktopThreadSource)
-        : "local"
-      : "cloud"
+  const runTarget: RunTarget =
+    agentWorkspace || session.data?.auth_provider === "langsmith"
+      ? "local"
+      : isDesktop
+        ? cloudEnabled
+          ? (runTargetOverride ?? desktopThreadSource)
+          : "local"
+        : "cloud"
   const [localRepoPath, setLocalRepoPath] = useState<string | null>(
     initialLocalRepo ?? null
   )
@@ -518,7 +519,8 @@ export function AgentsHome({
 
     const configurable: Record<string, unknown> =
       modelConfigurable(activeSelection)
-    if (agentWorkspace) configurable.experience = "agent_workspace"
+    if (isDesktop)
+      configurable.experience = agentWorkspace ? "agent_workspace" : "coding"
     if (localRun) {
       if (localCheckout)
         window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
@@ -555,7 +557,12 @@ export function AgentsHome({
           // Awaited so the thread route already knows it is This Mac's.
           await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
-          if (local.repo && !agentWorkspace) configurable.repo = local.repo
+          if (
+            local.repo &&
+            !agentWorkspace &&
+            session.data?.auth_provider !== "langsmith"
+          )
+            configurable.repo = local.repo
           else configurable.repo_explicitly_none = true
         }
         await startRun(
@@ -690,6 +697,7 @@ export function AgentsHome({
                 !optimisticDraftThread &&
                 isDesktop &&
                 cloudEnabled &&
+                session.data?.auth_provider !== "langsmith" &&
                 !agentWorkspace
                   ? handleRunTargetChange
                   : undefined

@@ -90,6 +90,9 @@ class ProfileUpdate(BaseModel):
     concierge_mode: bool | None = None
     pr_failure_reactions: bool | None = None
     experimental_memory: bool | None = None
+    experimental_agent_workspace: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -118,6 +121,8 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.setdefault("auto_human_review_enabled", True)
     value.setdefault("workspace_default_repos", {})
+    if value.get("experimental_agent_workspace") is None:
+        value["experimental_agent_workspace"] = True
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
@@ -161,6 +166,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_agent_workspace": (
+            update.experimental_agent_workspace
+            if "experimental_agent_workspace" in update.model_fields_set
+            else existing.get("experimental_agent_workspace", True)
+        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None

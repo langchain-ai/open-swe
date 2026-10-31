@@ -67,18 +67,30 @@ function Login() {
             {`Sign in to ${appDistribution.name}`}
           </Text>
         </div>
+        {appDistribution.isDesktop && (
+          <Button
+            as={<a href={loginUrl(intendedPath, "langsmith")} />}
+            size="md"
+            className="w-full"
+          >
+            Continue with LangSmith
+          </Button>
+        )}
         <Button
-          as={<a href={loginUrl(intendedPath)} />}
+          as={<a href={loginUrl(intendedPath, "github")} />}
           size="md"
-          leftDecorator={
-            appDistribution.agentWorkspace ? undefined : GithubLogoIcon
-          }
+          color={appDistribution.isDesktop ? "secondary" : "primary"}
+          leftDecorator={GithubLogoIcon}
           className="w-full"
         >
-          {appDistribution.agentWorkspace
-            ? "Sign in with LangSmith"
-            : "Continue with GitHub"}
+          Continue with GitHub
         </Button>
+        {appDistribution.isDesktop && (
+          <Text as="p" variant="sm" color="secondary">
+            LangSmith and GitHub sign-ins use separate accounts. Use the same
+            provider to return to your existing chats.
+          </Text>
+        )}
       </Card>
     </main>
   )

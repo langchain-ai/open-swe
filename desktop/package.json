@@ -2,7 +2,7 @@
   "name": "open-swe-desktop",
   "version": "0.3.10",
   "private": true,
-  "description": "Experimental Open SWE desktop client",
+  "description": "Experimental Agent Workspace desktop client",
   "main": "build/main.cjs",
   "scripts": {
     "build": "node scripts/build-main.cjs",
@@ -15,15 +15,11 @@
     "check": "pnpm run typecheck && pnpm run test",
     "pack": "pnpm run build && pnpm run build:cli && electron-builder --dir",
     "dist": "pnpm run build && pnpm run build:cli && electron-builder",
-    "build:cli": "pnpm --filter open-swe-cli run build",
-    "build:agent-workspace": "OPEN_SWE_DESKTOP_APP_VARIANT=agent-workspace pnpm run build",
-    "start:agent-workspace": "pnpm run build:agent-workspace && electron .",
-    "pack:agent-workspace": "pnpm run build:agent-workspace && electron-builder --config electron-builder.agent-workspace.cjs --dir",
-    "dist:agent-workspace": "pnpm run build:agent-workspace && electron-builder --config electron-builder.agent-workspace.cjs --mac zip dmg"
+    "build:cli": "pnpm --filter open-swe-cli run build"
   },
   "build": {
     "appId": "com.langchain.openswe",
-    "productName": "Open SWE",
+    "productName": "Agent Workspace",
     "publish": {
       "provider": "github",
       "owner": "langchain-ai",

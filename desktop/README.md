@@ -1,6 +1,4 @@
-# Open SWE Desktop
-
-For the separate fixed-backend LangSmith app, see [Agent Workspace](#agent-workspace).
+# Agent Workspace Desktop
 
 > [!IMPORTANT]
 > This desktop client is experimental.
@@ -58,19 +56,20 @@ Backend images select that exact commit through their stamped build identity.
 To run a local UI instead, build `ui/` (`pnpm --filter open-swe-dashboard run build`) and launch the app with `OPEN_SWE_DESKTOP_UI_ARCHIVE=<repo>/ui/.output/desktop/ui.json.gz`; it installs that archive on every load instead of contacting the backend's descriptor.
 
 Electron proxies `/dashboard/api/*` requests to the selected backend, so the browser never receives a LangSmith API key and never calls the raw LangGraph API directly.
-GitHub login creates the same signed dashboard session used by the web UI.
+Choose LangSmith or GitHub sign-in from the desktop login screen.
+Native navigation opens the selected provider in your browser with a fresh PKCE loopback handoff; both providers create a signed dashboard session.
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's local user data.
 They have no maintainer-hosted default.
-Use **Open SWE → Backend URL…** to switch deployments; switching clears the previous deployment's local session data.
+Use **Agent Workspace → Backend URL…** to switch deployments; switching clears the previous deployment's local session data.
 
-When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview:https://...,staging:https://..."`, **Open SWE → Environment** lists those backends next to it.
+When the backend the app is connected to sets `OPENSWE_ALTERNATIVE_ENVS="preview:https://...,staging:https://..."`, **Agent Workspace → Environment** lists those backends next to it.
 Choosing one switches only until the app restarts; the stored backend URL stays the same.
 Nothing is configured on the desktop side.
 
 On macOS, Universal Links open agent and review pages in the app only when the URL's origin matches the configured backend.
 Links for other deployments open in the default browser instead.
-Associated domains are fixed in the signed app, so macOS may still launch Open SWE before it hands a mismatched link back to the browser.
+Associated domains are fixed in the signed app, so macOS may still launch Agent Workspace before it hands a mismatched link back to the browser.
 
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
 Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which GitHub users can create dashboard sessions, including the ones "This Mac" threads run under.
@@ -93,7 +92,7 @@ To build and install from source, install Git, Node.js 22, and [Bun](https://bun
 make install-desktop
 ```
 
-The command fast-forwards to the latest `main`, builds Open SWE Desktop, and installs it in `/Applications` (or `~/Applications` when needed).
+The command fast-forwards to the latest `main`, builds Agent Workspace, and installs it in `/Applications` (or `~/Applications` when needed).
 Run it again to update and replace the app; saved backend settings, login sessions, and projects are preserved.
 
 ## Local development
@@ -116,8 +115,10 @@ make web
 `pnpm run dev:desktop` is equivalent to `make desktop`.
 The desktop app connects to the backend at `http://localhost:2024`, which runs "This Mac" threads too; the bridge needs that backend's PostgreSQL.
 
-Source launches use an isolated `Open SWE Development` Electron profile, so the dev app can run beside an installed `Open SWE` app without sharing its login session, backend configuration, projects, or single-instance lock.
-The dev window is labeled **Open SWE Development**; its first launch may require signing in and adding projects again.
+The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile, preserving installed users’ sessions, projects, task folders, caches, and instance locks.
+Packaged apps continue to share backend configuration and sessions with `oswe` through `~/.open-swe/config.json`.
+Source launches retain the isolated `Open SWE Development` profile and do not share CLI configuration.
+The dev window is labeled **Agent Workspace Development**; existing development sessions and projects are preserved.
 
 Development defaults to `http://localhost:2024`.
 Point to another backend with:
@@ -138,7 +139,11 @@ pnpm --dir desktop run dist # installer for the current platform
 ```
 
 Neither command builds or embeds the dashboard.
-Build outputs are written to `desktop/dist/`.
+Build outputs are written to `desktop/dist/`; the bundle is `Agent Workspace.app`.
+Release assets retain the `Open-SWE-*` names, `desktop-v*` tags, original stable update feed and `open-swe-desktop` Homebrew cask for compatibility.
+There is one desktop product and version, not separate coding and general-purpose distributions.
+Before publishing the renamed stable app, update the `langchain-ai/homebrew-tap` cask to install `Agent Workspace.app` and link its `Contents/Resources/bin/oswe`; the existing cask still expects `Open SWE.app`.
+An update from an installed Open SWE app and a Homebrew reinstall still need macOS smoke tests to verify bundle replacement, preserved sessions/projects, and the CLI link.
 
 ## macOS releases
 
@@ -167,44 +172,15 @@ Local packaging remains available without those credentials; signing and notariz
 ## Deployment security
 
 The backend URL is public configuration, not a credential.
-Dashboard routes require an `osw_session` cookie issued after GitHub login, and `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` controls who may complete that login.
+Dashboard routes require an `osw_session` cookie issued after GitHub or LangSmith login.
+`ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` controls GitHub login; `LANGSMITH_LOGIN_ORG_ID` controls LangSmith organization authorization.
 CORS alone is not access control.
 
 Raw LangGraph routes are a separate boundary.
 A deployment using `LANGGRAPH_AUTH_TYPE=noop` must keep those routes behind a private network, authenticated gateway, or custom LangGraph auth.
 An external user does not need the deployment's server-side `LANGSMITH_API_KEY` to call an exposed, unauthenticated LangGraph route.
 
-## Agent Workspace
-
-Agent Workspace is a separate macOS app with a fixed `https://openswe.langchain.dev` backend and LangSmith login.
-No backend prompt, Homebrew cask, or bundled CLI.
-Browser and regular Open SWE stay coding-only; there is no experience toggle.
-
-The bundle ID is `com.langchain.agentworkspace`.
-Its Electron profiles (`Agent Workspace` and `Agent Workspace Development`) isolate cookies, task folders, projects, UI caches, and instance locks.
-It never reads or migrates `~/.open-swe/config.json` or shares CLI sessions.
-Both apps consume the same desktop UI archive; the build-stamped preload `appVariant` selects the UI.
-
-### Build and release
-
-```sh
-pnpm --dir desktop run start:agent-workspace
-pnpm --dir desktop run pack:agent-workspace
-pnpm --dir desktop run dist:agent-workspace
-```
-
-Outputs go to `desktop/dist-agent-workspace/`.
-Bump `desktop/agent-workspace.json`, merge, and manually run **Release Desktop** on `main` with distribution **agent-workspace**.
-The packager rejects Open SWE output.
-Signed/notarized DMG and zip assets publish under `agent-workspace-v<version>`; zip/blockmap updates use `agent-workspace-updates/latest-mac.yml`.
-Both tags are prereleases, never GitHub's latest release, so Open SWE's updater is unaffected.
-DMGs are excluded from updater metadata because stapling changes their bytes.
-
-Register the Apple bundle ID and reuse the existing signing/notarization secrets.
-Optional `AGENT_WORKSPACE_APPLE_PROVISIONING_PROFILE` must target this bundle and team `H253X88X9F`; Universal Links also need an AASA entry for `H253X88X9F.com.langchain.agentworkspace`.
-Without the profile, login still uses browser loopback handoff. macOS decides which app receives overlapping Universal Links.
-
-### LangSmith deployment
+## LangSmith deployment
 
 Register a confidential OAuth client (dynamic registration only permits MCP access) with callback `<DASHBOARD_API_BASE_URL>/dashboard/api/auth/langsmith/callback`.
 Configure `LANGSMITH_CONNECTION_URL` (normally `https://api.smith.langchain.com`), `LANGSMITH_OAUTH_CLIENT_ID`, and `LANGSMITH_OAUTH_CLIENT_SECRET` on the backend, alongside its existing dashboard URLs, JWT/encryption secrets and PostgreSQL configuration.
@@ -235,5 +211,5 @@ Sign out rather than disconnecting the login grant.
 
 Tasks and workers use private local bridges, with automatic task folders or an optional existing folder.
 Cloud moves, GitHub operations, and borrowed deployment bot/App credentials are unavailable.
-Deploy the login routes and variant-aware desktop UI before distributing installers.
+Deploy the login routes and desktop UI with both sign-in providers before distributing installers.
 Real confidential-client OAuth, macOS signing/install and update installation still need production smoke tests; Linux packaging and mocked integration tests do not establish deployment readiness.

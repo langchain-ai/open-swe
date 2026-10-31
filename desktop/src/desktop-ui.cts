@@ -34,16 +34,16 @@ class IncompatibleUiError extends Error {}
 
 function firstLoadFailure(error: unknown): string {
   if (error instanceof IncompatibleUiError)
-    return "This version of Open SWE cannot run the UI your backend selected. Update the Open SWE desktop app, then use View → Reload.";
+    return "This version of Agent Workspace cannot run the UI your backend selected. Update the Agent Workspace desktop app, then use View → Reload.";
   const unreachable =
     error instanceof TypeError ||
     (error instanceof Error &&
       ["TimeoutError", "AbortError"].includes(error.name));
   return unreachable
-    ? "Connect to the internet to download the Open SWE UI, then use View → Reload. " +
-        "Check Open SWE → Backend URL… if the server is unavailable."
-    : `Could not load the Open SWE UI: ${error instanceof Error ? error.message : String(error)}. ` +
-        "The backend may not have published its desktop UI yet, or it needs a newer Open SWE desktop app.";
+    ? "Connect to the internet to download the Agent Workspace UI, then use View → Reload. " +
+        "Check Agent Workspace → Backend URL… if the server is unavailable."
+    : `Could not load the Agent Workspace UI: ${error instanceof Error ? error.message : String(error)}. ` +
+        "The backend may not have published its desktop UI yet, or it needs a newer Agent Workspace desktop app.";
 }
 
 class DesktopUi {

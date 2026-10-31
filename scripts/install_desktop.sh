@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "Open SWE Desktop can only be installed with this command on macOS." >&2
+  echo "Agent Workspace Desktop can only be installed with this command on macOS." >&2
   exit 1
 fi
 
@@ -35,14 +35,14 @@ cd "$repo_root"
 rm -rf desktop/dist
 "${pnpm[@]}" --dir desktop run pack
 
-apps=(desktop/dist/mac*/"Open SWE.app")
+apps=(desktop/dist/mac*/"Agent Workspace.app")
 if [[ ${#apps[@]} -ne 1 || ! -d "${apps[0]}" ]]; then
-  echo "Could not find the packaged Open SWE application." >&2
+  echo "Could not find the packaged Agent Workspace application." >&2
   exit 1
 fi
 
-system_app="/Applications/Open SWE.app"
-user_app="$HOME/Applications/Open SWE.app"
+system_app="/Applications/Agent Workspace.app"
+user_app="$HOME/Applications/Agent Workspace.app"
 if [[ -w /Applications ]]; then
   target="$system_app"
 else
@@ -58,4 +58,4 @@ rm -rf "$target"
 mv "$staged" "$target"
 trap - EXIT
 open "$target"
-echo "Open SWE Desktop installed at $target"
+echo "Agent Workspace Desktop installed at $target"

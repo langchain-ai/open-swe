@@ -22,77 +22,35 @@ const {
   validateBackendUrl,
 } = require("../build/config.cjs");
 
-const { DesktopDistribution } = require("../build/config.cjs");
-
-test("Agent Workspace cannot be redirected by Open SWE backend settings", () => {
-  const workspace = new DesktopDistribution("agent-workspace");
-  assert.equal(
-    workspace.backendUrl({
-      argv: ["--backend-url=https://other.example"],
-      env: { OPEN_SWE_BACKEND_URL: "https://env.example" },
-      isPackaged: true,
-      storedUrl: "https://stored.example",
-    }),
-    "https://openswe.langchain.dev/",
-  );
-  assert.equal(
-    workspace.backendUrl({ argv: [], env: {}, isPackaged: false }),
-    "https://openswe.langchain.dev/",
-  );
-  assert.equal(workspace.usesSharedConfig(false), false);
-  assert.equal(workspace.usesSharedConfig(true), false);
-});
-
-test("Agent Workspace isolates packaged and development Electron storage", () => {
-  const workspace = new DesktopDistribution("agent-workspace");
-  const appDataPath = path.join("/tmp", "app-data");
-  const packaged = workspace.runtime({
-    argv: [],
-    isPackaged: true,
-    appDataPath,
-  });
-  const development = workspace.runtime({
-    argv: [],
-    isPackaged: false,
-    appDataPath,
-  });
-  assert.equal(packaged.name, "Agent Workspace");
-  assert.equal(
-    packaged.userDataPath,
-    path.join(appDataPath, "Agent Workspace"),
-  );
-  assert.notEqual(packaged.userDataPath, development.userDataPath);
-  assert.notEqual(packaged.appUserModelId, development.appUserModelId);
-  assert.equal(
-    new DesktopDistribution("open-swe").usesSharedConfig(false),
-    true,
-  );
-});
-
-test("Agent Workspace starts LangSmith login with the same PKCE loopback handoff", () => {
+test("native login follows the clicked provider with a fresh PKCE handoff", () => {
   const flow = { challenge: "pkce-challenge", port: 4567 };
-  const backend = "https://openswe.langchain.dev/";
-  const workspaceUrl = new URL(
-    new DesktopDistribution("agent-workspace").loginUrl(backend, flow),
-  );
-  const codingUrl = new URL(
-    new DesktopDistribution("open-swe").loginUrl(backend, flow),
-  );
-  assert.equal(workspaceUrl.pathname, "/dashboard/api/auth/langsmith/login");
-  assert.equal(codingUrl.pathname, "/dashboard/api/auth/login");
-  assert.equal(
-    workspaceUrl.searchParams.get("desktop_handoff"),
-    flow.challenge,
-  );
-  assert.equal(
-    workspaceUrl.searchParams.get("desktop_port"),
-    String(flow.port),
-  );
-  assert.equal(workspaceUrl.searchParams.get("desktop"), "true");
-  assert.equal(
-    isAppLoginUrl(`${APP_URL}dashboard/api/auth/langsmith/login`),
-    true,
-  );
+  const backend = "https://configured.example/";
+  for (const pathname of [
+    "/dashboard/api/auth/login",
+    "/dashboard/api/auth/langsmith/login",
+  ]) {
+    const target = new URL(
+      desktopLoginUrl(
+        backend,
+        flow,
+        `${APP_URL}${pathname.slice(1)}?desktop_handoff=untrusted&desktop_port=1`,
+      ),
+    );
+    assert.equal(target.origin, "https://configured.example");
+    assert.equal(target.pathname, pathname);
+    assert.equal(target.searchParams.get("desktop_handoff"), flow.challenge);
+    assert.equal(target.searchParams.get("desktop_port"), String(flow.port));
+    assert.equal(target.searchParams.get("desktop"), "true");
+  }
+  for (const url of [
+    "https://untrusted.example/dashboard/api/auth/langsmith/login",
+    `${APP_URL}dashboard/api/auth/callback`,
+  ]) {
+    assert.throws(
+      () => desktopLoginUrl(backend, flow, url),
+      /Invalid desktop login URL/,
+    );
+  }
 });
 
 test("uses the local backend for development", () => {
@@ -102,11 +60,11 @@ test("uses the local backend for development", () => {
   );
 });
 
-test("uses an isolated app profile for development runs", () => {
+test("renamed app retains original production and isolated development profiles", () => {
   const appDataPath = path.join("/tmp", "open-swe-app-data");
   const expected = {
     isDevelopment: true,
-    name: "Open SWE Development",
+    name: "Agent Workspace Development",
     appUserModelId: "com.langchain.openswe.dev",
     userDataPath: path.join(appDataPath, "Open SWE Development"),
   };
@@ -122,9 +80,9 @@ test("uses an isolated app profile for development runs", () => {
     resolveAppRuntime({ argv: [], isPackaged: true, appDataPath }),
     {
       isDevelopment: false,
-      name: "Open SWE",
+      name: "Agent Workspace",
       appUserModelId: "com.langchain.openswe",
-      userDataPath: null,
+      userDataPath: path.join(appDataPath, "Open SWE"),
     },
   );
 });

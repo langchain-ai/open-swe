@@ -6,7 +6,6 @@
  */
 
 import { dashboardApiBase } from "./api-base"
-import { appDistribution } from "./pageTitle"
 import {
   DashboardRequestError,
   REQUEST_ID_HEADER,
@@ -317,6 +316,7 @@ export interface OptionsPayload {
 
 export interface Profile {
   agent_workspace_tasks_supported?: boolean
+  experimental_agent_workspace?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -338,6 +338,7 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
+  experimental_agent_workspace?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
   workspace_default_repos?: Record<string, string>
@@ -2101,14 +2102,19 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
-export function loginUrl(redirectTo?: string): string {
+export function loginUrl(
+  redirectTo?: string,
+  provider: "github" | "langsmith" = "github"
+): string {
   const target =
     redirectTo ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "")
   const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  return `${API_BASE}/dashboard/api${appDistribution.loginPath}${qs}`
+  const path =
+    provider === "langsmith" ? "/auth/langsmith/login" : "/auth/login"
+  return `${API_BASE}/dashboard/api${path}${qs}`
 }
 
 /**

@@ -75,6 +75,9 @@ const {
   backendRequestUrl,
   desktopEnvironmentsUrl,
   desktopExchangeUrl,
+  desktopLoginUrl,
+  resolveAppRuntime,
+  resolveBackendUrl,
   connectExchangeUrl,
   connectLoginUrl,
   isAppLoginUrl,
@@ -95,9 +98,7 @@ const {
   updateSharedConfig,
 } = require("./shared-config.js");
 
-const { DesktopDistribution } = require("./config.cjs");
-const distribution = new DesktopDistribution(require("./app-variant.cjs"));
-const appRuntime = distribution.runtime({
+const appRuntime = resolveAppRuntime({
   argv: process.argv,
   isPackaged: app.isPackaged,
   appDataPath: app.getPath("appData"),
@@ -207,7 +208,7 @@ function failDesktopUpdate(error: unknown) {
   dialog.showErrorBox(
     "Could not install the update",
     `The update did not complete. Quit and reopen ${appRuntime.name} before continuing. ` +
-      `If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases${distribution.isAgentWorkspace ? "/tag/agent-workspace-updates" : "/latest"}.\n\n` +
+      `If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases/latest.\n\n` +
       String(error),
   );
 }
@@ -415,7 +416,8 @@ async function diffThread(threadId) {
 
 /** Whether the backend has a run in flight on this thread. */
 async function threadRunning(threadId) {
-  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl)
+    throw new Error("Agent Workspace is not connected to a backend");
   const response = await backendFetch(
     new URL(
       `/dashboard/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
@@ -435,7 +437,8 @@ async function threadRunning(threadId) {
  * brings its own abort signal; anything else gives up rather than hold a quit.
  */
 async function sendBridgeRequest(method, apiPath, { body, signal }) {
-  if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+  if (!backendUrl)
+    throw new Error("Agent Workspace is not connected to a backend");
   const response = await backendFetch(
     new URL(`/dashboard/api${apiPath}`, backendUrl).toString(),
     {
@@ -523,7 +526,7 @@ async function followCheckedOutBranch(thread, repo, ref) {
   const target = ref.worktreePath ? managedWorktree(ref.worktreePath) : null;
   if (ref.worktreePath && !target)
     throw new Error(
-      `“${ref.name}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+      `“${ref.name}” is checked out in ${ref.worktreePath}, which Agent Workspace does not manage.`,
     );
   await moveThreadWorkspace(thread, target);
   sendLocalThreadsChanged();
@@ -618,7 +621,8 @@ function configureDesktopIpc() {
   });
   ipcMain.handle("desktop:copy-page-link", (event) => {
     requireTrustedDesktopIpc(event);
-    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    if (!backendUrl)
+      throw new Error("Agent Workspace is not connected to a backend");
     const source = new URL(event.sender.getURL());
     const target = new URL(backendUrl);
     target.pathname = source.pathname;
@@ -738,7 +742,7 @@ function configureDesktopIpc() {
     const options = {
       type: "warning",
       title: "Remove project",
-      message: `Remove “${project.name}” from Open SWE?`,
+      message: `Remove “${project.name}” from Agent Workspace?`,
       detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
       buttons: ["Cancel", "Remove"],
       defaultId: 0,
@@ -843,7 +847,9 @@ function configureDesktopIpc() {
     }
     const cwd = await projectForRepo(input?.repo);
     if (!cwd)
-      throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
+      throw new Error(
+        `Add a checkout of ${input?.repo} to Agent Workspace first`,
+      );
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
     try {
       thread = await createThreadWorktree(thread, null);
@@ -914,7 +920,7 @@ function configureDesktopIpc() {
     if (ref?.worktreePath) {
       if (!managedWorktree(ref.worktreePath))
         throw new Error(
-          `“${branch}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+          `“${branch}” is checked out in ${ref.worktreePath}, which Agent Workspace does not manage.`,
         );
       return moveThreadWorkspace(thread, ref.worktreePath);
     }
@@ -1016,15 +1022,15 @@ function profileConfigPath() {
   return path.join(app.getPath("userData"), "desktop-config.json");
 }
 
-/** Only packaged Open SWE shares configuration with the CLI. */
+/** Only packaged apps share configuration with the CLI. */
 function configPath() {
-  return distribution.usesSharedConfig(isDevelopment)
+  return !isDevelopment
     ? sharedConfigPath(require("node:os").homedir())
     : profileConfigPath();
 }
 
 function migrateStoredConfig() {
-  if (!distribution.usesSharedConfig(isDevelopment)) return;
+  if (isDevelopment) return;
   try {
     migrateDesktopConfig({
       home: require("node:os").homedir(),
@@ -1046,7 +1052,7 @@ function isBackendSessionCookie(cookie) {
 
 /** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
 async function shareBackendSession() {
-  if (!distribution.usesSharedConfig(isDevelopment)) return;
+  if (isDevelopment) return;
   session.defaultSession.cookies.on(
     "changed",
     (_event, cookie, cause, removed) => {
@@ -1093,7 +1099,6 @@ function storeBackendUrl(value) {
 
 /** Ask the backend the app started on which others it offers to switch to. */
 async function loadAlternativeEnvironments() {
-  if (distribution.isAgentWorkspace) return;
   const url = primaryBackendUrl;
   if (!url) return;
   let environments = [];
@@ -1347,11 +1352,9 @@ function createMenu() {
     click: () => createSetupWindow(),
   };
   const environmentItem = environmentMenuItem();
-  const backendItems = distribution.isAgentWorkspace
-    ? []
-    : environmentItem
-      ? [backendSettingsItem, environmentItem]
-      : [backendSettingsItem];
+  const backendItems = environmentItem
+    ? [backendSettingsItem, environmentItem]
+    : [backendSettingsItem];
   const settingsItem = {
     id: "open-settings",
     label: "Settings…",
@@ -1484,7 +1487,7 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-async function startExternalLogin() {
+async function startExternalLogin(navigationUrl: string) {
   if (!backendUrl) return;
   loginFlow?.cancel();
   loginFlow = null;
@@ -1500,7 +1503,7 @@ async function startExternalLogin() {
     return;
   }
   loginFlow = flow;
-  void shell.openExternal(distribution.loginUrl(backendUrl, flow));
+  void shell.openExternal(desktopLoginUrl(backendUrl, flow, navigationUrl));
 
   const code = await flow.code;
   if (loginFlow !== flow) return;
@@ -1629,7 +1632,7 @@ async function completeExternalLogin(verifier, code) {
 function handleNavigation(window, event, url) {
   if (isAppLoginUrl(url)) {
     event.preventDefault();
-    void startExternalLogin();
+    void startExternalLogin(url);
     return;
   }
   const callback = backendUrl ? localCallbackUrl(url, backendUrl) : null;
@@ -1668,7 +1671,6 @@ function createWindow(initialUrl = APP_URL) {
       navigateOnDragDrop: false,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
-      additionalArguments: [`--open-swe-app-variant=${distribution.variant}`],
       sandbox: true,
     },
   });
@@ -1680,7 +1682,7 @@ function createWindow(initialUrl = APP_URL) {
   window.webContents.setWindowOpenHandler(({ url }) => {
     const scheme = new URL(url).protocol;
     if (isAppLoginUrl(url)) {
-      void startExternalLogin();
+      void startExternalLogin(url);
     } else if (["http:", "https:", "mailto:"].includes(scheme)) {
       void shell.openExternal(url);
     }
@@ -1881,13 +1883,11 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     migrateStoredConfig();
     try {
-      backendUrl = distribution.backendUrl({
+      backendUrl = resolveBackendUrl({
         argv: process.argv.slice(1),
         env: process.env,
         isPackaged: app.isPackaged,
-        storedUrl: distribution.isAgentWorkspace
-          ? undefined
-          : readStoredBackendUrl(),
+        storedUrl: readStoredBackendUrl(),
       });
     } catch (error) {
       dialog.showErrorBox(

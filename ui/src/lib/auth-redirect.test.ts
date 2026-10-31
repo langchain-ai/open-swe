@@ -25,20 +25,15 @@ afterEach(() => {
 })
 
 describe("auth redirect helpers", () => {
-  it("only selects LangSmith login for the Agent Workspace desktop distribution", () => {
-    window.history.pushState({}, "", "/login?agent_workspace=true")
+  it("keeps the selected login provider and redirect independent of desktop branding", () => {
     expect(loginUrl("/agents")).toContain("/auth/login?")
+    expect(loginUrl("/agents", "langsmith")).toContain("/auth/langsmith/login?")
     Object.defineProperty(window, "openSweDesktop", {
       configurable: true,
-      value: { isDesktop: true, appVariant: "agent-workspace" },
+      value: { isDesktop: true },
     })
-    expect(loginUrl("/agents")).toContain("/auth/langsmith/login?")
-    expect(loginUrl("/agents")).toContain("redirect_to=%2Fagents")
-    Object.defineProperty(window, "openSweDesktop", {
-      configurable: true,
-      value: { isDesktop: true, appVariant: "open-swe" },
-    })
-    expect(loginUrl("/agents")).toContain("/auth/login?")
+    expect(loginUrl("/agents", "github")).toContain("/auth/login?")
+    expect(loginUrl("/agents", "langsmith")).toContain("redirect_to=%2Fagents")
   })
 
   it("captures protected route targets as relative paths", () => {

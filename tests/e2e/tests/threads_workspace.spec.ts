@@ -400,7 +400,6 @@ test.describe("threads workspace", () => {
       Object.defineProperty(window, "openSweDesktop", {
         value: {
           isDesktop: true,
-          appVariant: "agent-workspace",
           setAppearance: () => Promise.resolve(),
           onCommand: () => () => {},
           setCommands: () => Promise.resolve(),

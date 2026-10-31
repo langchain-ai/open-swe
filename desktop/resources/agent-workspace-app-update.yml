@@ -1,4 +1,0 @@
-provider: generic
-url: https://github.com/langchain-ai/open-swe/releases/download/agent-workspace-updates
-channel: latest
-updaterCacheDirName: agent-workspace-desktop-updater

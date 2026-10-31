@@ -134,7 +134,7 @@ def thread_is_readable(
     """
     if login and ThreadIdentity(login).user_id is not None:
         return (
-            metadata.get("experience") == "agent_workspace"
+            metadata.get("experience", "coding") in ("coding", "agent_workspace")
             and thread_is_private(metadata)
             and thread_is_owner(metadata, login)
         )

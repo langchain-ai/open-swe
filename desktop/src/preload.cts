@@ -13,9 +13,6 @@ function isDesktopCommandId(value) {
 
 contextBridge.exposeInMainWorld("openSweDesktop", {
   isDesktop: true,
-  appVariant: process.argv.includes("--open-swe-app-variant=agent-workspace")
-    ? "agent-workspace"
-    : "open-swe",
   onCommand: (callback) => {
     const listener = (_event, commandId) => {
       if (isDesktopCommandId(commandId)) callback(commandId);

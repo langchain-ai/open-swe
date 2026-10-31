@@ -4,7 +4,7 @@ import { SettingsPage, SettingsSection } from "@/components/AppShell"
 import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
-import { pageTitle } from "@/lib/pageTitle"
+import { appDistribution, pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/my-settings_/experiments")({
   component: ExperimentsPage,
@@ -19,6 +19,14 @@ function ExperimentsPage() {
       description="Features under test. They may change or go away."
     >
       <SettingsSection title="Interface">
+        {appDistribution.isDesktop && (
+          <ProfileSwitchRow
+            field="experimental_agent_workspace"
+            label="General-purpose interface"
+            description="Use the chat-focused interface for any kind of work. Turn off to use the coding interface. This only changes the desktop app; existing chats keep their agent experience."
+            fallback={true}
+          />
+        )}
         <StreamPreference />
       </SettingsSection>
       <SettingsSection title="Slack">

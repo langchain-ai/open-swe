@@ -1,17 +1,10 @@
 class AppDistribution {
-  get agentWorkspace(): boolean {
-    return (
-      typeof window !== "undefined" &&
-      window.openSweDesktop?.appVariant === "agent-workspace"
-    )
+  get isDesktop(): boolean {
+    return typeof window !== "undefined" && Boolean(window.openSweDesktop)
   }
 
   get name(): string {
-    return this.agentWorkspace ? "Agent Workspace" : "Open SWE"
-  }
-
-  get loginPath(): string {
-    return this.agentWorkspace ? "/auth/langsmith/login" : "/auth/login"
+    return this.isDesktop ? "Agent Workspace" : "Open SWE"
   }
 }
 
