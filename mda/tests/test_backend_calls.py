@@ -1653,7 +1653,10 @@ async def test_execute_searches_through_the_shell_where_grep_and_glob_are_exclud
             assert "Use glob tool instead" not in description
             assert "Use grep tool instead" not in description
         else:
-            assert description == original
+            assert description.startswith(original)
+        assert "pkill -f and pgrep -f can match the shell" in description
+        assert "PID or port" in description
+        assert "pkill alone with nothing chained after it" in description
 
 
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(

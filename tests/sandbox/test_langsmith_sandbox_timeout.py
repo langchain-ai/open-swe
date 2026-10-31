@@ -106,12 +106,38 @@ async def test_cancelling_aexecute_kills_the_running_command() -> None:
     assert handle.killed_while_streaming
 
 
-async def test_aexecute_success_combines_streams() -> None:
-    handle = _FakeHandle(result=SimpleNamespace(stdout="out", stderr="err", exit_code=0))
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "exit_code", "output"),
+    [
+        ("out", "err", 0, "out\nerr"),
+        ("", "", 0, ""),
+        ("", "err", 1, "err"),
+        ("", "", 1, ""),
+        ("out", "", -1, "out"),
+        ("", "err", -1, "err"),
+    ],
+)
+async def test_aexecute_preserves_command_results(
+    stdout: str, stderr: str, exit_code: int, output: str
+) -> None:
+    handle = _FakeHandle(result=SimpleNamespace(stdout=stdout, stderr=stderr, exit_code=exit_code))
     sb = _backend(handle)
     resp = await sb.aexecute("echo hi", timeout=5)
-    assert resp.exit_code == 0
-    assert resp.output == "out\nerr"
+    assert resp.exit_code == exit_code
+    assert resp.output == output
+    assert resp.truncated is False
+    assert not handle.killed
+
+
+async def test_aexecute_explains_empty_abnormal_exit() -> None:
+    handle = _FakeHandle(result=SimpleNamespace(stdout="", stderr="", exit_code=-1))
+    resp = await _backend(handle).aexecute("pkill -f server; make start", timeout=5)
+
+    assert resp.exit_code == -1
+    assert resp.truncated is False
+    assert "ended abnormally and may have been killed" in resp.output
+    assert "Chained commands may not have run" in resp.output
+    assert "Check the command's effects before retrying" in resp.output
     assert not handle.killed
 
 

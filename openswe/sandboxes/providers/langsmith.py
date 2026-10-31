@@ -699,6 +699,15 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         output = result.stdout or ""
         if result.stderr:
             output += "\n" + result.stderr if output else result.stderr
+        if result.exit_code == -1 and not output:
+            output = (
+                "Command ended abnormally and may have been killed. "
+                "pkill -f can match the shell running the command; pgrep -f can include "
+                "that shell among its matches. Chained commands may not have run. "
+                "Check the command's effects before retrying: this result does not establish "
+                "how much completed. Stop verified processes by PID or port, or run pkill "
+                "alone with nothing chained after it."
+            )
         return ExecuteResponse(output=output, exit_code=result.exit_code, truncated=False)
 
     @staticmethod

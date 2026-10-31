@@ -135,16 +135,22 @@ class FileToolsMiddleware(AgentMiddleware):
         return {"grep", "glob"} <= {*self._backend.run.catalog.excluded}
 
     def _described_tool(self, tool: BaseTool) -> BaseTool:
-        if tool.name != "execute" or not self._shell_search:
+        if tool.name != "execute":
             return tool
-        description = tool.description.replace(
-            "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
-            "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
-            "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
-            "- Search repository contents through execute with `git grep -n` or `grep -rn`; "
-            "search file names with shell commands. There are no separate grep/glob tools. "
-            "Follow repository-specific search instructions, including restrictions on ripgrep. "
-            "Use read_file rather than cat/head/tail.",
+        description = tool.description
+        if self._shell_search:
+            description = description.replace(
+                "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
+                "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
+                "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
+                "- Search repository contents through execute with `git grep -n` or `grep -rn`; "
+                "search file names with shell commands. There are no separate grep/glob tools. "
+                "Follow repository-specific search instructions, including restrictions on ripgrep. "
+                "Use read_file rather than cat/head/tail.",
+            )
+        description += (
+            "\n- pkill -f and pgrep -f can match the shell running the command. "
+            "Stop verified processes by PID or port, or run pkill alone with nothing chained after it."
         )
         return tool.model_copy(update={"description": description})
 
@@ -178,13 +184,12 @@ class FileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        if self._shell_search:
-            request = request.override(
-                tools=[
-                    self._described_tool(tool) if isinstance(tool, BaseTool) else tool
-                    for tool in request.tools
-                ]
-            )
+        request = request.override(
+            tools=[
+                self._described_tool(tool) if isinstance(tool, BaseTool) else tool
+                for tool in request.tools
+            ]
+        )
         self._sandbox_tools.update(
             (tool.name, tool)
             for tool in request.tools
