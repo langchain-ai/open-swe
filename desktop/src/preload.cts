@@ -54,12 +54,15 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
+  taskWorkspaces: true,
   prepareLocalThread: (input) =>
     ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
   takeOverThread: (input) =>
     ipcRenderer.invoke("desktop:take-over-thread", { ...input }),
   ensureLocalBridge: (threadId) =>
     ipcRenderer.invoke("desktop:ensure-local-bridge", threadId),
+  openTaskFolder: (threadId) =>
+    ipcRenderer.invoke("desktop:open-task-folder", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
   setAppearance: (appearance) =>

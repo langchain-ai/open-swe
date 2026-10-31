@@ -28,6 +28,7 @@ export interface DesktopLocalThread {
   id: string
   cwd: string
   worktreePath: string | null
+  managedTaskFolder?: boolean
   /** Worktrees this app created for the thread, removed when it is discarded. */
   ownedWorktrees: Array<string>
   bridgeId: string | null
@@ -156,6 +157,7 @@ declare global {
     __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
     openSweDesktop?: {
       isDesktop: true
+      taskWorkspaces?: boolean
       writeClipboard: (value: string) => Promise<void>
       copyPageLink: () => Promise<void>
       /** Missing from desktop builds that predate it. */
@@ -200,7 +202,8 @@ declare global {
        */
       prepareLocalThread: (input: {
         threadId: string
-        cwd: string
+        cwd?: string
+        taskWorkspace?: boolean
         workspaceMode?: DesktopWorkspaceMode
         baseBranch?: string | null
       }) => Promise<{ bridgeId: string; repo: string | null }>
@@ -211,6 +214,7 @@ declare global {
       }) => Promise<string>
       /** Serve the thread's checkout again before its next run. */
       ensureLocalBridge: (threadId: string) => Promise<boolean>
+      openTaskFolder?: (threadId: string) => Promise<boolean>
       getLocalThread: (threadId: string) => Promise<DesktopLocalThread | null>
       listLocalThreads: () => Promise<Array<DesktopLocalThread>>
       /** Forget a deleted thread and remove the worktrees this app made for it. */

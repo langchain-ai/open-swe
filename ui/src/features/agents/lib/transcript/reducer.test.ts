@@ -81,6 +81,7 @@ function toolCall(
     status: "completed",
     output_preview: null,
     has_output: false,
+    attachments: null,
     namespace: [],
     ...row,
   }
@@ -889,6 +890,45 @@ describe("tool output", () => {
     expect(after).toBe(before)
     expect(await Promise.all([before?.(), after?.()])).toEqual(["full", "full"])
     expect(fetchToolOutput).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("tool images", () => {
+  it("puts a tool result's images on its chunk, reloaded or live", () => {
+    const shot = attachment({
+      file_name: null,
+      attachment_id: "11111111-2222-3333-4444-555555555555",
+    })
+    const reloaded = fromSnapshot(
+      twoTurnSnapshot({
+        tool_calls: [
+          toolCall({
+            tool_call_id: "read-1",
+            turn_id: "turn-1",
+            name: "screenshot",
+            started_at: "2026-01-01T00:00:02Z",
+            attachments: [shot],
+          }),
+        ],
+      })
+    )
+    const live = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { attachments: [shot] })
+    )
+
+    const expected = [
+      {
+        kind: "image",
+        url: expect.stringContaining(
+          "/threads/thread-1/transcript/attachments/11111111-2222-3333-4444-555555555555"
+        ) as unknown as string,
+        credentials: "session",
+        mimeType: "image/png",
+      },
+    ]
+    expect(readChunk(reloaded)?.images).toEqual(expected)
+    expect(readChunk(live)?.images).toEqual(expected)
   })
 })
 
