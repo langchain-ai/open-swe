@@ -12,19 +12,13 @@ The agent must tell the requester review is in progress, not cancel the card to 
 
 ## Admin event log
 
-Human-review activity is retained for 14 days in `event_log` under the admin-only
-`human_review` source. Admin threads can discover it with `list_event_types` and
-subscribe with `listen_events(sources=["human_review"], ...)`; wildcard subscriptions
-and non-admin threads cannot see it.
+Human-review activity is retained for 14 days in `event_log` under the admin-only `human_review` source.
+Admin threads can discover it with `list_event_types` and subscribe with `listen_events(sources=["human_review"], ...)`; wildcard subscriptions and non-admin threads cannot see it.
 
-Events cover request creation and committed state changes (including expedited votes,
-reviewer picks, acceptance, expiry, release, card delivery and supplementary review
-progress), request outcomes, assignment decisions and agent wakes, GitHub review
-request outcomes, pick/reminder delivery, snoozes and declines, and deadline scheduling
-and execution. Payloads carry the request ID and PR URL, with repository/workspace/PR
-links resolved on insert. Run configuration and DM bodies are not logged. Only
-successful transactions emit state-change events; event-log failures do not prevent
-review operations.
+Events cover request creation and committed state changes (including expedited votes, reviewer picks, acceptance, expiry, release, card delivery and supplementary review progress), request outcomes, assignment decisions and agent wakes, GitHub review request outcomes, pick/reminder delivery, snoozes and declines, and deadline scheduling and execution.
+Payloads carry the request ID and PR URL, with repository/workspace/PR links resolved on insert.
+Run configuration and DM bodies are not logged.
+Only successful transactions emit state-change events; event-log failures do not prevent review operations.
 
 ## Configuration
 
