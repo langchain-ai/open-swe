@@ -1,6 +1,5 @@
 # Files
 
-- [Authentication, Authorization, and Secret Boundaries](auth-and-security.md) - How Open SWE authenticates dashboard and automation users, resolves GitHub authority, verifies inbound requests, encrypts stored credentials, and keeps secrets out of sandboxes.
-- [Models, Profiles, and Instructions](models-profiles-instructions.md) - Model and reasoning selection, fallback, gateway construction, and the team, profile, and thread layers that govern agent runs. Explains how repository, environment, and sender instructions are persisted and placed into prompts.
-- [Threads, Durable Runs, and State](threads-and-state.md) - How Open SWE identifies durable LangGraph conversations, constructs follow-up inputs, owns thread metadata and Store records, and preserves sandbox continuity across product surfaces.
-- [Tool Catalog and Authorization](tools.md) - How Open SWE exports curated tools, wires graph-specific and deferred tool surfaces, and enforces authorization and plan-mode controls. Use this page when safely adding or changing an agent capability.
+- [Durable state, messages, and events](durable-state-and-events.md) - How Open SWE persists thread-facing state and delivers reports, inbox items, transcript updates, webhook events, and UI refresh signals across retries, processes, and reconnects.
+- [Identity, authorization, and credentials](identity-authorization-and-credentials.md) - How Open SWE distinguishes attribution, acting principals, channel principals, and deployment credentials; carries run authority to MDA; and limits OAuth, connection, MCP, and sandbox capabilities.
+- [Workspaces, models, and prompts](workspaces-models-and-prompts.md) - How Open SWE resolves a workspace, layers workspace and thread model policy, assembles prompts and skills, and freezes turn settings into signed runtime tokens.

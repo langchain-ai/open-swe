@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
+- [Open SWE change guide](quickstart.md) - Set up the local backend, Managed Deep Agents runtime, and dashboard, then use the ownership map to make and validate a focused Open SWE change. This guide explains the current backend-to-runtime boundary, thread and run routing, and safe operational constraints.
 
 # Directories
 

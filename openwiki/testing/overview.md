@@ -1,11 +1,11 @@
 ---
 type: testing strategy
-title: Focused Validation Strategy
-description: Select the narrowest Python, frontend, or Playwright validation that owns an Open SWE change. This guide explains shared fakes, production-boundary coverage, and focused commands.
-tags: [testing, pytest, vitest, playwright, sandbox, webhooks, reviewer]
+title: Testing and validation strategy
+description: Choose the narrowest behavioral test for backend, Managed Deep Agents runtime, dashboard, desktop, and end-to-end changes. This guide covers isolation fixtures and focused validation at the backend/runtime boundary.
+tags: [testing, pytest, managed-deep-agents, vitest, playwright, isolation]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-31T08:08:21.705Z
 sources:
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
@@ -13,26 +13,20 @@ sources:
     resource: repo://desktop/package.json
   - id: openwiki-source-012f2c78e3b1446dfc35803f
     resource: repo://Makefile
+  - id: openwiki-source-5cd2390b551b634ef547ebee
+    resource: repo://mda/pyproject.toml
   - id: openwiki-source-5b54a58d1b51cd490b0e7162
     resource: repo://package.json
   - id: openwiki-source-05ccef8d4cf1698187f20464
     resource: repo://pyproject.toml
-  - id: openwiki-source-a7a923eb42c2ccc6f4c875de
-    resource: repo://tests/agent/test_agent_assembly_context.py
   - id: openwiki-source-f0a6e7dc03522b2682f88655
     resource: repo://tests/conftest.py
-  - id: openwiki-source-069ae2b497200c26ef2dc134
-    resource: repo://tests/e2e/fake_llm.py
-  - id: openwiki-source-8317f526f4e30c2659c8614e
-    resource: repo://tests/e2e/fakes.py
   - id: openwiki-source-c484c171a84d342028bf0794
     resource: repo://tests/e2e/global-setup.ts
   - id: openwiki-source-aefe409f90608437573cbad3
     resource: repo://tests/e2e/harness.py
   - id: openwiki-source-16e94b1dfd40df68fa54c87f
     resource: repo://tests/e2e/package.json
-  - id: openwiki-source-28a3fe2bdb4cd54e328962f0
-    resource: repo://tests/e2e/patches.py
   - id: openwiki-source-859f98720585f4648f0f7b2e
     resource: repo://tests/e2e/playwright.config.ts
   - id: openwiki-source-4b944ec14a3d793a6f771403
@@ -43,115 +37,128 @@ sources:
     resource: repo://tests/e2e/tests/desktop.spec.ts
   - id: openwiki-source-4cedab06aadc98083b348ddb
     resource: repo://tests/e2e/tests/full_flow.spec.ts
-  - id: openwiki-source-ec3fbe14e1e05123704c4f28
-    resource: repo://tests/reviewer/test_reviewer_outcomes.py
   - id: openwiki-source-f05d7497d4c60c3b322628eb
     resource: repo://tests/sandbox/test_sandbox_state.py
+  - id: openwiki-source-6a41092459c828ea5a6893e1
+    resource: repo://tests/threads/test_mda_runtime_auth.py
   - id: openwiki-source-a9842c19fa28878dfa7fcd61
     resource: repo://tests/webhooks/test_completion_webhook.py
-  - id: openwiki-source-440ae1e215cb02721dda855c
-    resource: repo://turbo.json
   - id: openwiki-source-436f4179fe22abf615d2f7d0
     resource: repo://ui/package.json
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-31T08:08:21.705Z" }
 ---
 
-# Focused Validation Strategy
+# Testing and validation strategy
 
-Validate at the lowest layer that owns the changed observable contract. Use focused pytest tests for agent assembly, reviewer, sandbox, webhook, API, and tool behavior; use dashboard Vitest tests for React rendering and client state; use desktop Node tests for Electron main-process code. Escalate to Playwright only when the contract crosses the real webhook, authenticated dashboard, local git/sandbox, or Electron boundary. Never run the full local suite: target the owning file or one test first.
+Validate at the lowest layer that owns the observable contract. Extend a focused behavioral test for authorization, durable data, or a difficult state transition; do not add a structural snapshot or a mock assertion that only proves a call occurred. Never run the full suite locally. Start with the owning test file or node, then add only the relevant static gate or a cross-boundary proof when the changed behavior needs it.
 
 ```mermaid
 flowchart TD
-    Change["Changed behavior"] --> Owner{"Boundary that owns it"}
-    Owner -->|"Agent reviewer sandbox webhook"| Pytest["Focused pytest"]
-    Owner -->|"Dashboard rendering or client state"| Vitest["Dashboard Vitest"]
-    Owner -->|"Electron main process"| Node["Desktop Node test"]
-    Owner -->|"Real service crossing"| Playwright["Focused Playwright spec"]
-    Pytest --> Gates["Relevant quality gate"]
-    Vitest --> Gates
-    Node --> Gates
-    Playwright --> Gates
+  Change["Changed behavior"] --> Owner{"Owning boundary"}
+  Owner -->|"Backend API, policy, persistence"| Backend["Focused pytest under tests"]
+  Owner -->|"MDA loop, middleware, callback behavior"| Runtime["Focused pytest under mda/tests"]
+  Owner -->|"Dashboard component or client state"| UI["Dashboard Vitest"]
+  Owner -->|"Electron main process"| Desktop["Desktop Node test"]
+  Owner -->|"Webhook, session, sandbox, git, or desktop crossing"| E2E["Focused Playwright spec"]
 ```
 
-This routing keeps feedback narrow while still requiring an end-to-end proof where independently deployed or stateful pieces meet.
+This is a selection rule, not a requirement to duplicate a scenario at each layer. A bug fix merits a focused regression only when it demonstrates a concrete behavior current coverage misses. Behavior-preserving refactors generally should not require mechanical test changes.
 
-## Python tests: contracts, not prompt snapshots
+## Python backend tests
 
-Pytest collects `tests/` and uses asyncio auto mode, so asynchronous tests and fixtures need no per-test asyncio marker. Tests are grouped by system owner, including `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/github/`, `tests/slack/`, `tests/middleware/`, and `tests/tools/`.
+The backend pytest project collects from `tests/` and runs in asyncio auto mode, so async tests and fixtures do not need a per-test asyncio marker. Test families follow product ownership: `tests/agent/` and `tests/threads/` cover run setup and thread routing; `tests/dashboard/` covers authorized dashboard APIs; `tests/github/` and `tests/slack/` cover ingress and integration semantics; `tests/mcp/` covers managed connections; and `tests/sandbox/` covers the backend's sandbox-facing behavior.
 
-Do not add tests that merely restate static prompt text. For agent instructions, test rendered output, configuration precedence, tool composition, or a behavioral result instead. For example, the assembly tests capture the `create_deep_agent` arguments: they protect an initialized sandbox-backed composite backend required for deepagents context eviction and summarization, source-dependent skill routing, and the separation between parent and subagent tools. This is the appropriate focused location for server graph wiring, middleware, skill, backend, or authorization changes.
+Use the family that owns the invariant rather than a broad integration test:
 
-### Shared isolation and fakes
-
-`tests/conftest.py` intentionally makes ordinary unit tests independent of a running LangGraph Store and of a locally built dashboard:
-
-- `fake_store` redirects `agent.store` to an in-memory store, while retaining the production serialization round trip. Seed it only when persisted state is part of the contract.
-- An autouse dashboard fixture points `DASHBOARD_STATIC_DIR` at a missing temporary directory, so a local `ui/.output` cannot change a Python test's behavior.
-- The autouse TTL-cache reset runs before and after every case, preventing cached team settings from leaking.
-- The autouse auto-review stub enables every repository because no live Store means the dashboard opt-in list is empty. A test of the opt-in gate must replace this stub with its intended policy.
-
-### System-boundary test locations
-
-Use the narrow test family that carries the failure semantics being changed:
-
-| Change | Focused location and protected behavior |
+| Change | Focused behavioral coverage |
 | --- | --- |
-| Main agent construction, source-specific tools, backend, skills, or middleware | `tests/agent/test_agent_assembly_context.py`; it verifies the initialized `CompositeBackend`/`SandboxBackendProxy` arrangement, read-only skills, dynamic browser-tool exposure, and parent-only tool boundaries. |
-| Reviewer findings, published reviews, reconciliation, check runs, or learning outcomes | `tests/reviewer/`; for example `test_reviewer_outcomes.py` maps resolution and feedback into true/false-positive outcomes and treats absent credentials or repository data as a no-op. |
-| Lazy sandbox reconnection, capture offload, or sandbox identity recovery | `tests/sandbox/test_sandbox_state.py`; it requires `BaseSandbox` compatibility, safe offload fallback, one shared reconnect, cancellation-safe waiting, retry after failed startup, and live-thread metadata fallback. Provider-specific behavior has companion tests in the same directory. |
-| Completion notification and reviewer error cleanup | `tests/webhooks/test_completion_webhook.py`; errors on Slack-originated work send a thread reply and record the run, while reviewer failures settle a tracked check when its metadata and token exist. |
+| Signed runtime requests, named backend operations, run preparation, or callback error behavior | `tests/reviewer/test_agent_api.py`; it exercises token middleware and token-scoped API work, including the rule that named calls around a model call do not plan a run. |
+| Backend access to an MDA thread | `tests/threads/test_mda_runtime_auth.py`; it distinguishes Studio-style authenticated reads from backend writes and verifies the separate clients are used. |
+| Lazy sandbox reconnection and thread rebinding | `tests/sandbox/test_sandbox_state.py`; it covers one reconnect for concurrent callers, cancellation-safe waiting, retry after startup failure, and current metadata rather than stale run configuration. |
+| Slack or GitHub ingress, deduplication, authorization, and delivery semantics | the corresponding `tests/slack/test_*.py` or `tests/github/test_*.py` file; preserve a real contract assertion such as a signed webhook outcome or scoped action. |
+| Completion error handling | `tests/webhooks/test_completion_webhook.py`; it protects requester-scoped retry output and ensures reviewer cleanup failure cannot suppress the Slack failure reply. |
+
+### Shared isolation is part of the contract
+
+`tests/conftest.py` makes ordinary backend tests hermetic. Its autouse network guard rejects external requests and connections to a developer's LangGraph server, while `MockTransport`, `ASGITransport`, and local fakes remain usable. The same fixture layer points `DASHBOARD_STATIC_DIR` to a missing temporary location, sets a controlled GitHub login allowlist, supplies a local Slack API stand-in, closes the per-event-loop HTTP pool, and clears process-global caches and sandbox registries before and after a test. These guards prevent local UI builds, pooled handles, cached settings, and a previous thread's sandbox from silently changing a result.
+
+The default auto-review fixture treats repositories as enabled because the dashboard-backed opt-in list is empty in ordinary tests. A test of that gate must replace the stub with the intended policy. Use `registry_db` only when a PostgreSQL regression is essential: it creates an isolated migrated database when `TEST_ANALYTICS_POSTGRES_URI` is configured and otherwise skips; `registry_db_if_available` supports code that deliberately degrades without PostgreSQL.
+
+## Backend and MDA are separate test projects
+
+Every `agent`, `reviewer`, and `review-scout` run executes in the `mda/` project. MDA owns the model loop, checkpoints, sandbox, tool calls, and runtime middleware; the backend exposes typed, token-authenticated `/agent-api/{endpoint}` callbacks. Consequently, test the side that owns the change in its own environment—never make an MDA test import `openswe`.
+
+```mermaid
+sequenceDiagram
+  participant Backend
+  participant API as Agent API
+  participant Runtime as MDA runtime
+  Backend->>Runtime: start with signed run context
+  Runtime->>API: typed callback with bearer token
+  API->>Backend: token-scoped backend operation
+  Backend-->>Runtime: typed result
+```
+
+The diagram identifies the boundary that requires two focused perspectives: backend tests verify authentication and backend effects, while MDA tests verify runtime lifecycle, callback delivery, and graph isolation. `mda/tests/test_backend_calls.py` is the concentrated runtime-side location for callback failures, report/recovery behavior, and worker-grant adoption; `mda/tests/test_shared_graph.py` covers preventing per-run catalogs, grants, and sandbox configuration from leaking through a shared compiled graph.
+
+Run MDA checks from its own locked environment:
+
+```bash
+make mda-test PYTEST_ARGS=mda/tests/test_backend_calls.py
+make mda-typecheck
+```
+
+`make mda-test` changes into `mda/` and runs `uv run --locked --group test pytest`; `make mda-typecheck` synchronizes that project and checks it against its own virtual environment. This separation intentionally makes a backend import or backend database-driver dependency fail in MDA validation.
 
 ## Focused commands and independent gates
 
-Install Python development dependencies with `make install`, which runs `uv sync --extra dev`. The dev group contains pytest, pytest-asyncio, Ruff, ty, and Pygments. Target a path with `TEST_FILE`; use direct pytest for a single node id because the Makefile's existence guard accepts paths, not a `file.py::test_name` node id.
+Install backend development dependencies with `make install`, which runs `uv sync --extra dev`. `make test` (also `make tests`) runs `uv run pytest -vvv $(PYTEST_ARGS) $(TEST_FILE)` when `TEST_FILE` is an existing file or directory; otherwise it prints a skip message. Since that existence check cannot accept a node id, invoke pytest directly for one test.
 
 ```bash
-make install
 make test TEST_FILE=tests/sandbox/test_sandbox_state.py
 uv run pytest -vvv tests/sandbox/test_sandbox_state.py::test_sandbox_proxy_retries_failed_startup
-make lint
-make typecheck
+uv run pytest -vvv tests/threads/test_mda_runtime_auth.py
 ```
 
-`make test` and `make tests` execute `uv run pytest -vvv $(TEST_FILE)` when the target path exists, otherwise they print a skip message. Quality gates are separate: `make lint` runs Ruff checking and a format diff, `make format` applies Ruff formatting and fixes, and `make typecheck` runs `ty check agent tests`.
+Pytest is not a substitute for static validation. `make lint` runs Ruff checking and a formatting diff; `make format` applies both formatter and safe fixes; `make typecheck` checks `openswe`, `packages`, and `tests`, plus sandbox scripts with Python 3.8 compatibility. Apply the narrow relevant gate rather than treating every command as required for every edit.
 
-For frontend changes, target the relevant workspace rather than root `pnpm test`, which delegates all workspace test tasks to Turbo:
+For frontend behavior, do not use root `pnpm test`: it delegates workspace tests to Turbo. The dashboard runs `vitest run`; desktop builds its main bundle then executes Node tests in `test/*.test.cjs` and `test/*.test.ts`.
 
 ```bash
 pnpm --filter open-swe-dashboard run test
 pnpm --dir desktop run test
 ```
 
-The dashboard command is `vitest run`; its tests cover components and client-side utilities under `ui/src/`. The desktop command first builds the main bundle and then runs `node --test test/*.test.cjs`. Use a component/client test for rendering, optimistic state, stream transformation, terminal state, or API-client behavior before considering browser e2e.
+Use dashboard Vitest first for rendering, browser-independent client state, and API-client transformations. Use the desktop Node tests for Electron main-process behavior. Move to Playwright when the contract depends on the browser/session/server proxy, real webhook dispatch, MDA run, local sandbox/git, or Electron bridge.
 
-## Playwright: real paths with controlled external seams
+## Playwright end-to-end validation
 
-The E2E harness proves production integration without relying on live SaaS. It runs the real agent through `langgraph dev`, real webhook routes, tools, middleware, local sandbox provider, and real git against a seeded local bare remote. It substitutes a scripted `BaseChatModel`, external GitHub and Slack HTTP endpoints, credential/token paths, and the snapshot service. Fake Slack and GitHub stores are the source rendered by their mock UIs, so browser assertions observe what the real agent wrote.
+The E2E harness deliberately runs production paths with controlled outer seams. A scripted `BaseChatModel` supplies the LLM response; fake GitHub and Slack HTTP endpoints and their in-memory stores replace SaaS. The real backend webhook routes, MDA server, agent tools and middleware, local sandbox behavior, and git path run normally. The seeded local bare remote is pushed like GitHub, and the fake stores are the source of truth rendered by mock Slack and GitHub UIs.
 
 ```mermaid
 sequenceDiagram
-    participant PW as Playwright
-    participant Slack as Fake Slack UI
-    participant Harness as E2E harness
-    participant API as Real webhook API
-    participant Agent as Real agent graph
-    participant Git as Local sandbox and git
-    participant Hub as Fake GitHub API
-    PW->>Slack: Submit request
-    Slack->>Harness: Simulate signed event
-    Harness->>API: POST Slack webhook
-    API->>Agent: Dispatch run
-    Agent->>Git: Edit commit and push branch
-    Agent->>Hub: Create pull request
-    Agent->>Slack: Post thread reply
-    PW->>Slack: Assert reply and pull request link
+  participant Browser
+  participant Slack as Mock Slack
+  participant Harness
+  participant Backend
+  participant MDA as MDA runtime
+  participant Git as Local git
+  participant Hub as Fake GitHub
+  Browser->>Slack: send request
+  Slack->>Harness: signed Slack event
+  Harness->>Backend: real webhook route
+  Backend->>MDA: dispatch run
+  MDA->>Git: edit, commit, push
+  MDA->>Hub: open pull request
+  MDA->>Slack: reply in thread
+  Browser->>Slack: assert reply and PR link
 ```
 
-The diagram shows the browser happy path while preserving the real webhook, graph, sandbox, and git execution paths.
+`full_flow.spec.ts` proves the central Slack request-to-implementation-to-PR-to-same-thread-reply path. The browser configuration is serial, excludes `desktop.spec.ts`, uses a 90-second test timeout, and starts both the real MDA dev server and `langgraph dev` harness. The real built dashboard runs as its own Nitro server on a separate origin: browser requests exercise SSR, the signed session gate, hydration, and the same-origin `/dashboard/api/*` proxy. Set `E2E_FORCE_UI_BUILD=1` after a dashboard or port change to rebuild it.
 
-The browser suite drives the real built `ui/` application, not a mock. Global setup builds it with the harness as the server-side API and E2E proxy target, starts its Nitro server, and the browser drives that UI-server origin. This exercises SSR, session gate and redirects, hydration, and the same-origin dashboard API proxy. `E2E_FORCE_UI_BUILD=1` rebuilds after UI or port changes; otherwise the built server is reused.
+The desktop configuration selects only `desktop.spec.ts`, uses longer timeouts, and tests a different boundary. Its primary scenario resets harness state, clones the seeded remote into a temporary local project, injects a harness-issued `osw_session` cookie, drives a local-agent request through Electron, and checks both the edited checkout and fake-GitHub pull request.
 
-Use Playwright for the flow most directly related to the change. `full_flow.spec.ts` proves the Slack request to implementation, PR, and same-thread reply path. The browser directory also separates dashboard/thread behavior, environment and plan approval, Slack redelivery/debouncing, SSR, output iframe, sandbox identity, and workspace scenarios. The desktop spec separately resets harness state, clones the seeded remote into an isolated temporary project, installs a harness-issued `osw_session` cookie, and verifies both the local edit and fake-GitHub PR result.
+Prepare the browser once, then select a spec rather than launching all E2E tests:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -160,24 +167,11 @@ pnpm exec playwright test tests/full_flow.spec.ts
 pnpm run test:e2e:desktop
 ```
 
-Install Chromium before the first browser run. The browser configuration is serial with one worker, ignores `desktop.spec.ts`, uses a 90-second test timeout, and reuses a warm server outside CI. Desktop selects only `desktop.spec.ts` with longer test and expectation timeouts and separate output directories.
-
-## Failures and diagnostics
-
-Browser runs retain screenshots on failure and retain trace/video on failure locally or on the first retry in CI. Set `E2E_ARTIFACTS=1` when a passing scenario needs inspection; artifacts are written below `test-results/` and `playwright-report/`. The desktop configuration turns off automatic Playwright media because its spec explicitly records an Electron trace and attaches screenshots; temporary desktop state is removed unless `E2E_KEEP_TMP` is set.
-
-```bash
-pnpm exec playwright show-report
-pnpm exec playwright show-trace test-results/<test>/trace.zip
-SLOW_MO=700 pnpm exec playwright test --headed
-```
-
-Inspect the trace, screenshot, and fake-boundary state before raising a timeout or weakening an assertion.
+The suite needs `POSTGRES_URI` for the backend. Outside CI it can reuse warm servers, making a single-spec rerun the intended iteration loop. Browser failures retain screenshots and retain trace/video on failure locally or on the first CI retry; `E2E_ARTIFACTS=1` records trace and video for every attempt under `test-results/` and `playwright-report/`. The Electron spec records its own context trace and screenshots and removes temporary state unless `E2E_KEEP_TMP` is set.
 
 ## Related pages
 
-- [Agent graph](/openwiki/architecture/agent-graph.md)
-- [Sandbox lifecycle](/openwiki/architecture/sandbox-lifecycle.md)
-- [Dashboard UI](/openwiki/integrations/dashboard-ui.md)
+- [Backend–Managed Deep Agents boundary](/openwiki/architecture/backend-runtime-boundary.md)
+- [Development and deployment](/openwiki/operations/development-and-deployment.md)
 - [Quickstart](/openwiki/quickstart.md)
-- [PR review workflow](/openwiki/workflows/pr-review.md)
+- [Turn execution](/openwiki/workflows/turn-execution.md)

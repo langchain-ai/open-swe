@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:75920d28bad5b192afd797dfb84208215370aa54fa04f783dbddc72b010939e9",
+  "pageVersion": "sha256:c84d4f7d5cf8e83d346e15db9079cc9e91722a0a811313187f10012d5486229c",
   "claims": [
     {
       "id": "claim_9a77e9c5301a46b8bbd02832b9de5a90",
@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:f29a925fe6e5eb8617f6e7ec6325070cfe18335a116376aaf448bc6479292e87"
         }
       ]
     },
@@ -18,31 +18,7 @@
       "evidence": [
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
-        }
-      ]
-    },
-    {
-      "id": "claim_51ddbe6a89c1461d9c078e3e373030cf",
-      "statement": "Test tooling (pytest, pytest-asyncio, Ruff, ty, Pygments) is declared in the dev optional-dependency group and installed via `make install` which runs `uv sync --extra dev`.",
-      "evidence": [
-        {
-          "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
-        },
-        {
-          "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
-        }
-      ]
-    },
-    {
-      "id": "claim_eea0ef759dcc4bd6970fa63b41d2b78b",
-      "statement": "tests/conftest.py provides a fake_store fixture that routes every agent.store access to an in-memory FakeStore, which round-trips values through the real agent.store code path (model_dump/model_validate) the way production does.",
-      "evidence": [
-        {
-          "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:f29a925fe6e5eb8617f6e7ec6325070cfe18335a116376aaf448bc6479292e87"
         }
       ]
     },
@@ -52,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:9bd4603dae3033c2cf5147c07f7d4dfcbbb5b20fa0777733a996ff007ff4dcf8"
         }
       ]
     },
@@ -62,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:9bd4603dae3033c2cf5147c07f7d4dfcbbb5b20fa0777733a996ff007ff4dcf8"
         }
       ]
     },
@@ -72,11 +48,11 @@
       "evidence": [
         {
           "resource": "repo://AGENTS.md",
-          "version": "repo-file-v1:sha256:1d76197da0a0227d4bf93caeff444a5075a90a63c87f5019fbf89c50f164f83d"
+          "version": "repo-file-v1:sha256:16aa976e805d888acb1348627757e99ee5f0571818544f40c39d37b5a9334288"
         },
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
+          "version": "repo-file-v1:sha256:159a91e3e929ffd93ef947753950483a169888fdf2385f8edb3fb9d0de73cd55"
         }
       ]
     },
@@ -86,21 +62,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
-        }
-      ]
-    },
-    {
-      "id": "claim_fe7eb017df4c4e74975555cce254dd5a",
-      "statement": "Lint, format, and type checks are separate gates from tests: `make lint` runs Ruff check plus a Ruff format diff, `make format` fixes in place, and `make typecheck` runs `ty check agent tests`.",
-      "evidence": [
-        {
-          "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
-        },
-        {
-          "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:159a91e3e929ffd93ef947753950483a169888fdf2385f8edb3fb9d0de73cd55"
         }
       ]
     },
@@ -110,51 +72,15 @@
       "evidence": [
         {
           "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
+          "version": "repo-file-v1:sha256:aea836bb10fcc947065b5afdb0b746dab15c7b003fd344025e99162949843d7b"
         },
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:57f1f3350065adce7355ec0273c705593331d57a16288e7ca202d1e2535f17e2"
         },
         {
           "resource": "repo://tests/e2e/package.json",
-          "version": "repo-file-v1:sha256:981b65f11401a69f73d6a16aa41f841d66e909351724e7f8235c53c6e2443117"
-        }
-      ]
-    },
-    {
-      "id": "claim_41cc3c94c4b94849bdfd3ae4807c80d8",
-      "statement": "The e2e suite drives the whole happy path end to end: a user mentions Open SWE in a mock Slack thread, the real agent runs via langgraph dev, implements the change in a local temp-dir sandbox, pushes a branch, opens a PR on a fake GitHub, and posts the PR link back to the same Slack thread.",
-      "evidence": [
-        {
-          "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
-        },
-        {
-          "resource": "repo://tests/e2e/tests/full_flow.spec.ts",
-          "version": "repo-file-v1:sha256:aa6448ee98680d23e193fcf8d705ceb07e8b43564f2f4372f67741b87a7f248f"
-        }
-      ]
-    },
-    {
-      "id": "claim_9a961340720242d694878470ee8a37a1",
-      "statement": "In the e2e suite only the LLM and external SaaS HTTP boundaries are faked while all agent code runs for real: fake_llm.py is a scripted BaseChatModel, patches.py monkeypatches the boundaries, and fakes.py holds in-memory PR/Slack stores plus git seeding of a local bare remote that the mock UIs render as the single source of truth.",
-      "evidence": [
-        {
-          "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
-        },
-        {
-          "resource": "repo://tests/e2e/fake_llm.py",
-          "version": "repo-file-v1:sha256:8a386531e01339f5eabebb20046d277fa65463800b4c86156ee627064b8a7bb5"
-        },
-        {
-          "resource": "repo://tests/e2e/fakes.py",
-          "version": "repo-file-v1:sha256:c4b8854658a210e1bc99007fa635555ccec52327e36876782a9d2ea466ad1185"
-        },
-        {
-          "resource": "repo://tests/e2e/patches.py",
-          "version": "repo-file-v1:sha256:4435a4f3db5704112880f22751e8b6db788a4816c3ca45d10626295e6e63eb72"
+          "version": "repo-file-v1:sha256:b6fcf09e4a622ea718913233d4df125b3d90cb88da99ae83975e73d37234e6af"
         }
       ]
     },
@@ -164,7 +90,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:57f1f3350065adce7355ec0273c705593331d57a16288e7ca202d1e2535f17e2"
         }
       ]
     },
@@ -174,33 +100,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:57f1f3350065adce7355ec0273c705593331d57a16288e7ca202d1e2535f17e2"
         },
         {
           "resource": "repo://tests/e2e/playwright.config.ts",
-          "version": "repo-file-v1:sha256:a141ed1837003e8633b25762bd1bd59c6a006d2046ac3de40804a0526b7e0a4c"
-        }
-      ]
-    },
-    {
-      "id": "claim_c88a49d6957044aebdbe73d64c16eb79",
-      "statement": "The dashboard package runs its component and client unit suite with `vitest run`; the desktop package builds its main bundle and runs Node tests via `node --test test/*.test.cjs`, while root `pnpm test` delegates to Turbo's workspace test task.",
-      "evidence": [
-        {
-          "resource": "repo://desktop/package.json",
-          "version": "repo-file-v1:sha256:9e32829ce8dbe938b0183b27f62da576f1a6103de152a69997ff1f87027a9c38"
-        },
-        {
-          "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
-        },
-        {
-          "resource": "repo://turbo.json",
-          "version": "repo-file-v1:sha256:2baddedda518d07ffac1f38d843cdb9bf2cb068b0cd2a241a571a718f8462878"
-        },
-        {
-          "resource": "repo://ui/package.json",
-          "version": "repo-file-v1:sha256:255dd35a1c97c11cb6df943917f4253f40ebb564e1bd7158e71195b45676b082"
+          "version": "repo-file-v1:sha256:99c357a5d6acd3764068a44f082d03ed4e39a4238a0717fce6c453baa0f01ee7"
         }
       ]
     },
@@ -210,7 +114,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/playwright.config.ts",
-          "version": "repo-file-v1:sha256:a141ed1837003e8633b25762bd1bd59c6a006d2046ac3de40804a0526b7e0a4c"
+          "version": "repo-file-v1:sha256:99c357a5d6acd3764068a44f082d03ed4e39a4238a0717fce6c453baa0f01ee7"
         },
         {
           "resource": "repo://tests/e2e/playwright.desktop.config.ts",
@@ -224,7 +128,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/tests/desktop.spec.ts",
-          "version": "repo-file-v1:sha256:b88e21c2a84ae15f268e2763f93ec98e4e5683e90ddc54c2e18f3106b95995e4"
+          "version": "repo-file-v1:sha256:df9b010b01eceb4b67fa403f5179719cbd1b506a05e15d468ff388e51e45575d"
         }
       ]
     },
@@ -239,22 +143,12 @@
       ]
     },
     {
-      "id": "claim_cc1f933447044386b147e2bee6f077d8",
-      "statement": "Sandbox-state tests require the backend proxy to remain BaseSandbox-compatible for capture offload, delegate or safely fall back from offload, share one concurrent reconnect, survive waiter cancellation, retry failed startup, and recover a sandbox ID from live thread metadata.",
-      "evidence": [
-        {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py",
-          "version": "repo-file-v1:sha256:704700326ac575264e748a198dc1aef627d6cfc9fbe3e51d0728548a44e1e46e"
-        }
-      ]
-    },
-    {
       "id": "claim_d20a9582f71e4507a52c6b6067a58410",
       "statement": "The Electron e2e spec explicitly traces its Electron context, attaches screenshots for unified and completed local-agent views, and removes temporary desktop state unless E2E_KEEP_TMP is set.",
       "evidence": [
         {
           "resource": "repo://tests/e2e/tests/desktop.spec.ts",
-          "version": "repo-file-v1:sha256:b88e21c2a84ae15f268e2763f93ec98e4e5683e90ddc54c2e18f3106b95995e4"
+          "version": "repo-file-v1:sha256:df9b010b01eceb4b67fa403f5179719cbd1b506a05e15d468ff388e51e45575d"
         }
       ]
     },
@@ -264,21 +158,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:57f1f3350065adce7355ec0273c705593331d57a16288e7ca202d1e2535f17e2"
         },
         {
           "resource": "repo://tests/e2e/harness.py",
-          "version": "repo-file-v1:sha256:32e58b95ad959129b17559790d370ed5903c54bd4fe2717df949ac1d113d2e05"
-        }
-      ]
-    },
-    {
-      "id": "claim_5dd32176cf5a4ecd974b47511cded35a",
-      "statement": "Agent assembly tests require the main agent to receive an initialized sandbox-backed composite backend, preserving deepagents context eviction and summarization support, and verify source-sensitive skills/tools plus middleware and parent-tool boundaries.",
-      "evidence": [
-        {
-          "resource": "repo://tests/agent/test_agent_assembly_context.py",
-          "version": "repo-file-v1:sha256:a99b1f9f5092164c751fa8d1cf746f30dd34ef569416761073f724d74d87c4df"
+          "version": "repo-file-v1:sha256:9fc1f82f04363f14d53f853fa30dbf73a411a445285801c4f75796f8675de075"
         }
       ]
     },
@@ -288,33 +172,105 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:9bd4603dae3033c2cf5147c07f7d4dfcbbb5b20fa0777733a996ff007ff4dcf8"
         }
       ]
     },
     {
-      "id": "claim_042824ee41904e208b9cfaf17c6bd077",
-      "statement": "Reviewer outcome tests map resolved and dismissed finding states and GitHub or Slack feedback to true- or false-positive outcomes; outcome storage is a no-op without the required credentials or repository configuration.",
+      "id": "claim_d811b310a40c454b8ec27ad27515faf3",
+      "statement": "The backend test fixture layer blocks external network access and connections to a developer's configured LangGraph server while allowing mocked transports and local fakes, so focused tests must fake the boundary they reach.",
       "evidence": [
         {
-          "resource": "repo://tests/reviewer/test_reviewer_outcomes.py",
-          "version": "repo-file-v1:sha256:31422a5720b56432896df04361eb9b2b47b879ac1fe48dd302ff31d54f85b1ca"
+          "resource": "repo://tests/conftest.py#L271-L321",
+          "version": "repo-lines-v1:sha256:f155da7a0995d378f26740eb7d093368819deef6862fcd63cc41b1ab628a9423:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0N2IxY2UyODc3YmQxN2QzYTk4YTg2MzM2YWJjNDM2NjNhNWQ2MWJkYmM1MjEyMzI2YTRlNWQ3YzNhMmM3MGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwOWI4ZmRjYWQ3OThhNDYyYjBjYzcyMjcwMWUzNzZiMDU0OTYyNmY4OTVlMjVkZWFhNmJhZWVkZmZjNWQ1NzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhlNjI1N2QwMGFlNzQyNjY5MjllMDNiZmUzMWM4MzVhZDk0MzY2MTZkZjkwMWNkNTExZjI4Y2UzNDViYzdkODIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFlZjExYzliNzE2N2MwYWRjNDJmZWE4NTRhYjYzNDk5NzcwODE0YjBlNzE4MTAzYTllYzBmOWJlN2FmNjk5NzkifQ"
         }
       ]
     },
     {
-      "id": "claim_30043a07130c417f82758e7da110be67",
-      "statement": "Completion-webhook tests protect error handling across system boundaries: Slack-originated errors post a failure reply and record the run, reviewer errors settle a tracked GitHub check when metadata and token exist, and reviewer cleanup failure does not suppress a Slack failure reply.",
+      "id": "claim_5cb6470eff294d40b562ee5fb22c1881",
+      "statement": "The shared pytest fixtures clear both process-global sandbox registries before and after every test, preventing a leaked sandbox handle from serving a later test's thread.",
       "evidence": [
         {
-          "resource": "repo://tests/webhooks/test_completion_webhook.py",
-          "version": "repo-file-v1:sha256:70779e22596916b0bfbd9b3415925b57bb2060c9825030ad46e3bb46d5c5bee4"
+          "resource": "repo://tests/conftest.py#L361-L369",
+          "version": "repo-lines-v1:sha256:41573a94f2bbfa169cd0df4270f6b0d533d16225cf7dce723c0abe0a8d753072:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmYwODY2ZjQwMTFlNTg1ZmZjMDkwOTJlZGYwODMyZTE3YjUyZjRjOTBjNGNhMGI0MmRjZmEwNTBmYTM3NWI1YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTYyNDMxYzI0NzNhZGRiMTkzNjg2ZjdhYzM0MmQzNzk0Mjc0ZGY1MmE0MDMzYTBiYWUwNzkxMzU4ZTUxYzJmOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmEyOTkyZjg4Njk1NGQ0ZWE1YjM2YzdiMGE2MDlmYTI5YmNkNGRkZDgzODQxNGViMGJmZDg5NjZhMTlmNTRmZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMWVmMTFjOWI3MTY3YzBhZGM0MmZlYTg1NGFiNjM0OTk3NzA4MTRiMGU3MTgxMDNhOWVjMGY5YmU3YWY2OTk3OSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_1a6b6425ee5b40a2bc2e66016673c125",
+      "statement": "MDA is a separately tested and type-checked project: `make mda-test` runs its locked test dependency group from `mda/`, and its own type-check root is designed so imports of `openswe` or database drivers fail to resolve.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L91-L106",
+          "version": "repo-lines-v1:sha256:c1afb8072a2de6fd769bb051174170c22cf165d5441dbe3324359ff6c3ffa4a5:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1ZTg2ZjY4N2VhMWVhMDRiYTk2Y2M4NzlmMmZmOTI5MjgwNDU4NWVmYTU4NmU3NjA3ODYwNzg4NWVjOTMwMjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2MGZlZDMzMTM1YjAwNzczYzAzMjQ5NmI4N2Y5NjdmMTZjMTdjODM0MjU0MTJkZTljOTQ2Y2JjMDcyZmEzYWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA2YmY2ZjEzOWE0NWJkZDYxZDY4NWJmMzM1Nzc4ZjcxNGVkOTk2ZDkyZDNiZGQxMzk5MmQ0YzNiNDY1MTcyMTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQyZDdmYzljNjE4OTI5OWEzZjE5MTIwOWQzNjA4YzE4MTNkMmY0MTIwZjZiZGNkZWE3ZmQ1MTRkOTM4ZWRiNWEifQ"
+        },
+        {
+          "resource": "repo://Makefile#L144-L150",
+          "version": "repo-lines-v1:sha256:6e55a0a0272175f0812b31a834125378c8a481b91091dec3b7a19804611b4e9e:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODVjZjdjMTFiNmE3YTJlNDBiYWRjODMyYTU3MmNjMjg2NDUwYzJkYWQ0Y2ExMzg3ODE2YTFiOGVmMjc0MzFhNiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjNmM2Y1ZjY0MDJlOWM0YWJjYjRlMmJhZTg3YWY2MmQyYmEwZGIzM2NiMDQzZDQxM2ViMDI5ZTJhN2EzZTU1ZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOWQwMjJkNDBhMGY3MzBmODIyYTI1NWU2ZjA1ZWFmYmQ3OGYwNDJlMmNjMjc0OWMxNjI5M2RhMmZkODk4ZTk2ZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmFhYjljNDczNDY0YjZkZDdhOGYzMGUxM2VjNjMzOWQ3OTkxYWY0M2Q2Nzk1NmUzY2JiZDg1MTg2MDlmMmFlYSJ9"
+        },
+        {
+          "resource": "repo://mda/pyproject.toml#L45-L56",
+          "version": "repo-lines-v1:sha256:2b483c1410bfff45e187d61bf12df58cf04c329ff8616bd70de87bb181f7db0d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0YjBhZDRhOWY1YjU1M2Q4NzA5Mzk0ZGIwZmYzNjdmZGNjYTRiYTI3MWI5ZWY2MjVkM2YyN2Y4ZjA0Mjc3YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwMzFkY2U5MzcxNTg5NmE3YTJhMzRlMTAzNWFjN2YxYTBmOTcwYzc4ZTdjZGFiNWU5OGExZmViYzI0Y2ZhMmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmMGNmNDE1NzRkYmU2MWU5M2M1YTRhYTlkMmNmZTI2Mzc0N2Y4YmEzYTJmYzJjODFiMDk4ZWZiYWE0NjFiNzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_21105967ebd04ecab59e0fae42b4afdc",
+      "statement": "The backend's focused runtime-boundary tests verify that MDA thread reads use Studio-style authentication while writes use backend credentials, including distinct read and write clients for thread operations.",
+      "evidence": [
+        {
+          "resource": "repo://tests/threads/test_mda_runtime_auth.py#L1-L67",
+          "version": "repo-lines-v1:sha256:50d9d324ede775ea687a095b283013909651ccc45bab08c56b133792900e70f6:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEyOTRmMzZlMjU1YWM4YjNmNjI0NmJjMjVlMjY3MjE1NmQwMTRhZDFkNDRmMmVmN2Q4MTQ3ZWFkNWEyNDdkN2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjZTQ4OTczMzcxYjI5YjZiN2ZmOGJmZDYxMjE4OWEwMmY2OGVhZmEwOWY3N2VkMzY3ODQ1MzQ5ODIzMTA3YjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f81378cc2a34d9ea1024c77a1ed4ca9",
+      "statement": "`tests/sandbox/test_sandbox_state.py` protects lazy sandbox reconnection invariants: concurrent callers share one reconnect, cancellation of a waiter does not cancel startup, failed startup is retried, and current thread metadata wins over stale run configuration.",
+      "evidence": [
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_state.py#L35-L141",
+          "version": "repo-lines-v1:sha256:b55a491a4f02162eec2057b70bd0c8e517b603e5a984b56563ad82ee05040104:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiZDk5NDJkZWI3ZGJhYmMxMTRiMWM0OGQwMmRhNDYzODZlOWFjYTUxNWE1MmZiN2IzYzQxMmRjNjI3OTIxYjA4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyMjg0ZDQ1NjYxMWJhNjk4MGQ3YjRmYjNlMjk5OTFkNjAwZmE0YWU4Nzg1ZWZmMTgxMWU4MjAxNWZjMjI1YjZhIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI2NzAyY2QyNmEzYjI4Y2Q0MDQ0OTgxN2E2MjNiM2E1ZGMyMzYwZmI5OTZlNDU2YzFmNTNjYTI5YmVhYmY4MTNiIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1YWI3YjI3MmFiNGUyNTE3NWI1ZmQyNGMxM2NmZTU2MzQyNTE0YzAyNzk0NmYwM2I1MzA1ZGYyMDMzNzg3OWY5In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_c8c18d03c5374a2e8c41431c90963586",
+      "statement": "The dashboard package's test script is `vitest run`, while the desktop test script builds the main bundle and then runs Node tests matching both `test/*.test.cjs` and `test/*.test.ts`.",
+      "evidence": [
+        {
+          "resource": "repo://desktop/package.json#L7-L15",
+          "version": "repo-lines-v1:sha256:4e342980c5d616532cabc2a85dc0f7ac2151c17a82d4ca6bfde1585426000a4c:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ4MzNkNTk0OWMwM2E0MGNhOTUyNDkxNjEwYTY2NTk2NDRiM2FhNDY2MzYyZjc5OTAyMGRiZjE5ODE1NDdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmE1MTRlOTlhNTIzNWY2ZDk3NzhkMDg2MjcyMTc2YjhmZjZjNzRjMTlkYmM3OWNmM2JlZWNkMTNmMzRhMThiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjI5Mzk4N2NlZTM5M2QzYTdlNzY2NWJkYjRlNTllMDBjYmI2YzQ2NmQzNTgxMmJiYjlmZmU2NzZlMzk1NzhiYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMTU5MmYwNDdkZWM2NjQ5ZmU0MmQwMmRiODBhNWM1NDAyNWYzYzFhNGU3NmFjMzlmNjUxYmNmNTRmMTQ5NjZmZCJ9"
+        },
+        {
+          "resource": "repo://ui/package.json#L5-L10",
+          "version": "repo-lines-v1:sha256:6c4dc0f7a482af7697202e30d95a4a4afd6b627e2c56abf7301ffb9aae52efba:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMzQ4MzNkNTk0OWMwM2E0MGNhOTUyNDkxNjEwYTY2NTk2NDRiM2FhNDY2MzYyZjc5OTAyMGRiZjE5ODE1NDdkYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNWI2YjI0YTYyMzk0YWUyNmFiNjU1YjdiNmY1NGQ2YTRmM2UyYWNlY2MwNzNjN2E2ZmU5YjRhZjRiYjY0ODIyMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZGI3OWU4NTBhOGIwMzZkZWY3NGFhMjAyYjU5YWU2YmZlOTIxZDNmMjRhM2RmZjEwODg5ZWI5N2VhNzk1YTdmOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODEyZmM0Mzg1Y2M2ZmQ0YmVkNjY4NmVmNDE1OGY4NjY3NzJjMjA1OTEwNDA0Yjg4ZDhjOTlhOWQ4OWNlMmE3MCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_544b4af35b454e53a601627ad5994cb5",
+      "statement": "The E2E happy-path spec submits a mock Slack request, waits for the real agent's same-thread PR reply, and verifies the created pull request title, state, branch, and changed file through the fake GitHub UI.",
+      "evidence": [
+        {
+          "resource": "repo://tests/e2e/tests/full_flow.spec.ts#L5-L62",
+          "version": "repo-lines-v1:sha256:18cb6ca90dc24f6ab6727238c57740448d13371cfebfe2b5cf83628f152c37a5:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUwYjgwMDVmOGMyNzIwMmUzNWU2ZWU5MWEyZjI2YzBiOWVhN2VjZjg4NTU2NjQ2OThjMDExOTg3MDE0ODk3NGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhM2U0NmY5NDI3NmI2ZjZmNGVkMWYwMmFmNzhiZWY2YTJlZTFjNDM5ZGQ1NTg0Yjk3Mzk0ODMxMzIxNGQyYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEyOGJjMGM5YjE1ZDMxMThhMmI0NmU4MjcwNWYyOTVmZDc5Njk2ODAwYjdmMTc3NTI1YTBjMjI0NjZjYzgxZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU5NTRjZjQzODc4MGMzMjdiZWUxNGVlODU3MTUxYjY0YTZiMTBjYzgxOGMwMGUzMDg1Zjg5ZWI4Mzg0YWY1YWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_bde1fd8c849d4918a4d33516c5d7484c",
+      "statement": "Completion-webhook tests ensure a requester-scoped Slack retry token is produced for failed Slack work, preserve a reviewer check's pending result on an error, and continue posting the Slack failure reply if reviewer cleanup fails.",
+      "evidence": [
+        {
+          "resource": "repo://tests/webhooks/test_completion_webhook.py#L47-L134",
+          "version": "repo-lines-v1:sha256:9004154bcf7cdd64175355a6f0c3508ef6f92c96484c8bcc17ef1f15c2d9dacf:eyJzZWxlY3RlZExpbmVDb3VudCI6ODgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmZmYwMzZjYTViMGMzYTUyOTM3NTc4MWNlN2M4MjlkOGY3YjcxMTVkMjE5M2ViZjNkYjFlNDU1ZWY1Y2RjMDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkYTBlZjU1ODdhZDIyYTZlYjQ2Y2IxNjFlNGE4MmNmZDNjYTdjOTFlZDJjZDU5Nzk2ZTVlMDUzZmI0MzBkMWUifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-08T08:15:30.533Z"
+    "at": "2026-10-31T08:08:21.705Z"
   }
 }
