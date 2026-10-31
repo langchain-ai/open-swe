@@ -142,7 +142,7 @@ def test_an_idea_hides_everything_but_paths_that_must_be_read() -> None:
     gone = ChangedFile(filename="src/legacy.py", status="removed", deletions=900, patch=None)
     lock = ChangedFile(filename="uv.lock", deletions=1, patch="@@ -1,1 +0,0 @@\n-x")
     files = [app, gone, lock]
-    covered = Idea("Rename a to b and remove legacy", "f" * 40).cover(files)
+    covered = Idea("Rename a to b and remove legacy", "Nothing else", "f" * 40).cover(files)
 
     assert isinstance(assess_eligibility(files), Ineligible)
     assert [file.filename for file in ExpeditedDiff(files, covered).shown] == ["uv.lock"]

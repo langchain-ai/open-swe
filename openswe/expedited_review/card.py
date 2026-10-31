@@ -46,6 +46,9 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
     if approval.idea:
         blocks.append(section(f"*Approving this idea:* {escape(approval.idea)}"))
+        blocks.append(
+            context(f"Already covered by auto-approval: {escape(approval.auto_approved)}")
+        )
     if approval.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
     return [*blocks, context(f"Author {author}")]

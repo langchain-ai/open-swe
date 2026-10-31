@@ -266,9 +266,11 @@ class Idea:
 
     It comes from the reviewer's conditional assessment of ``head_sha``, never from the
     agent asking for the card, so the agent cannot widen what the card hides.
+    ``auto_approved`` is the reviewer's account of what the approval criteria already cover.
     """
 
     text: str
+    auto_approved: str
     head_sha: str
 
     def _entry(self, file: ChangedFile, hunk: Hunk | None) -> ExcludedHunk:
@@ -279,7 +281,7 @@ class Idea:
             additions=file.additions if hunk is None else hunk.additions,
             deletions=file.deletions if hunk is None else hunk.deletions,
             guideline=self.text,
-            reason=f"Open SWE review of {self.head_sha}",
+            reason=self.auto_approved,
             idea=True,
         )
 

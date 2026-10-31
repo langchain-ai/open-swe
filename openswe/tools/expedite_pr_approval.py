@@ -251,12 +251,12 @@ async def expedite_pr_approval(
             return _failure(str(exc))
     assessment = await PublishedAssessment.latest(pr_ref.owner, pr_ref.repo, pr_ref.number)
     idea = (
-        assessment.conditional_idea
-        if assessment is not None and assessment.head_sha == head_sha
+        Idea(assessment.idea or "", assessment.auto_approved or "", head_sha)
+        if assessment is not None and assessment.conditional_on_idea(head_sha)
         else None
     )
-    if idea:
-        exclusions = [*exclusions, *Idea(idea, head_sha).cover(files, exclusions)]
+    if idea is not None:
+        exclusions = [*exclusions, *idea.cover(files, exclusions)]
     verdict = assess_eligibility(files, exclusions)
     if isinstance(verdict, Ineligible):
         return _failure(
@@ -295,7 +295,7 @@ async def expedite_pr_approval(
         and fingerprint_matches(files, active.diff_fingerprint)
         and {(e["path"], e["digest"]) for e in active.excluded_hunks}
         == {(e["path"], e["digest"]) for e in exclusions}
-        and active.idea == (idea or "")
+        and active.idea == (idea.text if idea is not None else "")
     ):
         _audit_pull_request(active.pull_request_id)
         if active.awaiting_ready and not payload.draft:

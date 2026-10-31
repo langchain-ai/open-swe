@@ -2152,7 +2152,7 @@
       },
       "ExcludedHunk": {
         "additionalProperties": false,
-        "description": "A hunk left off the card.",
+        "description": "A hunk left off the card; an empty ``header`` stands for a whole file without a text diff.",
         "properties": {
           "additions": {
             "title": "Additions",
@@ -2173,6 +2173,10 @@
           "header": {
             "title": "Header",
             "type": "string"
+          },
+          "idea": {
+            "title": "Idea",
+            "type": "boolean"
           },
           "path": {
             "title": "Path",

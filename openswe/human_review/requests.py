@@ -209,6 +209,11 @@ class HumanReviewRequest(Base):
         """What an expedited card asks voters to okay in place of the hunks it hides."""
         return next((e["guideline"] for e in self.excluded_hunks if e.get("idea")), "")
 
+    @property
+    def auto_approved(self) -> str:
+        """What Open SWE's review judged the approval criteria already cover besides the idea."""
+        return next((e["reason"] for e in self.excluded_hunks if e.get("idea")), "")
+
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
 

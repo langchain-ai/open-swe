@@ -274,6 +274,7 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
 
 
 IDEA_MAX_CHARS = 200
+AUTO_APPROVED_MAX_CHARS = 500
 
 
 class ReviewAssessment(BaseModel):
@@ -281,21 +282,28 @@ class ReviewAssessment(BaseModel):
 
     head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     risk_score: int = Field(ge=1, le=5, strict=True)
-    decision: Literal["would_approve", "would_approve_if_idea_ok", "needs_human_review"]
+    decision: Literal["would_approve", "would_approve_conditionally", "needs_human_review"]
     explanation: str = Field(min_length=1, max_length=1500)
     idea: str | None = Field(default=None, min_length=1, max_length=IDEA_MAX_CHARS)
+    auto_approved: str | None = Field(
+        default=None, min_length=1, max_length=AUTO_APPROVED_MAX_CHARS
+    )
 
     @model_validator(mode="after")
     def _idea_only_when_conditional(self) -> ReviewAssessment:
-        if (self.decision == "would_approve_if_idea_ok") != bool(self.idea):
-            raise ValueError("Give an `idea` exactly when the decision is would_approve_if_idea_ok")
+        conditional = self.decision == "would_approve_conditionally"
+        if conditional != bool(self.idea) or conditional != bool(self.auto_approved):
+            raise ValueError(
+                "Give an `idea` and `auto_approved` exactly when the decision is "
+                "would_approve_conditionally"
+            )
         return self
 
     @property
     def verdict(self) -> str:
         if self.decision == "would_approve":
             return "Would approve"
-        if self.decision == "would_approve_if_idea_ok":
+        if self.decision == "would_approve_conditionally":
             return "Would approve once a person okays the idea"
         return "Needs human review"
 
@@ -345,6 +353,10 @@ def render_review_body(
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
         if assessment.idea:
             parts.append(f"**Idea to okay:** {escape(assessment.idea)}")
+        if assessment.auto_approved:
+            parts.append(
+                f"**Already covered by auto-approval:** {escape(assessment.auto_approved)}"
+            )
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
