@@ -27,6 +27,8 @@ import { Fragment } from "react"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import type { SessionUser } from "@/lib/api"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { LogoMark } from "@/components/Branding"
+import { useAgentWorkspacePreference } from "@/lib/profile"
 import {
   SidebarCollapseButton,
   SidebarFrame,
@@ -165,6 +167,7 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
 }
 
 export function AppSidebar({ user }: { user: SessionUser }) {
+  const agentWorkspace = useAgentWorkspacePreference()
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -174,7 +177,10 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   return (
     <SidebarFrame
       {...layout}
-      className="border-r border-default bg-surface-level-2 text-primary"
+      className={cn(
+        "border-r border-default bg-surface-level-2 text-primary",
+        agentWorkspace && "border-transparent"
+      )}
     >
       <div
         className={cn(
@@ -193,11 +199,26 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
+      {agentWorkspace && (
+        <div className="flex items-center gap-space-3 px-space-4 pt-space-2 pb-space-6">
+          <LogoMark className="size-8 shrink-0" alt="" />
+          <div className="flex flex-col gap-space-1">
+            <span className="text-sm font-medium">Agent Workspace</span>
+            <span className="text-xs text-tertiary">Settings</span>
+          </div>
+        </div>
+      )}
       <nav className="flex flex-1 flex-col gap-space-5 overflow-y-auto px-space-2">
         {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
           (group) => (
             <div key={group.heading} className="flex flex-col gap-0.5">
-              <span className="px-space-2 pb-space-1 text-xxs font-medium tracking-wide text-tertiary uppercase">
+              <span
+                className={cn(
+                  "px-space-2 pb-space-1 text-xxs font-medium tracking-wide text-tertiary uppercase",
+                  agentWorkspace &&
+                    "px-space-3 text-xs font-normal tracking-normal normal-case"
+                )}
+              >
                 {group.heading}
               </span>
               {group.items.map((item) => {
@@ -209,7 +230,12 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                       onClick={layout.closeOnMobile}
                       className={cn(
                         LINK_CLASS,
-                        isActive(item, pathname) && ACTIVE_LINK_PROPS.className
+                        agentWorkspace &&
+                          "gap-space-2 rounded-xl px-space-3 py-space-2 text-sm hover:bg-surface-level-3",
+                        isActive(item, pathname) && ACTIVE_LINK_PROPS.className,
+                        agentWorkspace &&
+                          isActive(item, pathname) &&
+                          "bg-surface-level-3 font-normal"
                       )}
                     >
                       <Icon size={16} weight="regular" />
