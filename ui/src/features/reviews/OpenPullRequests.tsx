@@ -39,6 +39,7 @@ import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
 import {
   parsePullRequestSelection,
+  REVIEW_QUEUE_LIMIT,
   reviewStatuses,
   type ReviewsSearch,
   type ReviewSort,
@@ -223,7 +224,9 @@ export function OpenPullRequests({
   }, [queryClient, nextRow])
 
   // Everything the filters leave, in list order, not just the rows scrolled into view.
-  const queue = (filter?.length ? filtered : matchingRows).map(pullRequestKey)
+  const queue = (filter?.length ? filtered : matchingRows)
+    .map(pullRequestKey)
+    .slice(0, REVIEW_QUEUE_LIMIT)
   const firstInQueue = parsePullRequestSelection(queue[0])
   const reviewOneByOne = () =>
     firstInQueue &&

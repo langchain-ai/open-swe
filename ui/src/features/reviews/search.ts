@@ -31,6 +31,9 @@ export interface ReviewsSearch {
 
 const prSelectionPattern = /^[\w.-]+\/[\w.-]+#\d+$/
 
+/** The most pull requests one review queue carries, so its URL stays bounded. */
+export const REVIEW_QUEUE_LIMIT = 100
+
 export interface ReviewQueueSearch {
   /** The pull requests being worked through one by one, as `pullRequestKey`s, in order. */
   queue?: string[]
@@ -46,7 +49,7 @@ export function validateReviewQueueSearch(
           typeof value === "string" && prSelectionPattern.test(value)
       )
     ),
-  ].slice(0, 100)
+  ].slice(0, REVIEW_QUEUE_LIMIT)
   return { queue: queue.length ? queue : undefined }
 }
 
