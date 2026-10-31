@@ -2286,3 +2286,38 @@ def test_the_backend_hears_where_summarization_cut_the_conversation() -> None:
     }
 
     assert held_state(state) == {"reply_surface": "slack", "visible_from": 4}
+
+
+class TestSilentClosureState:
+    async def answer(self, name: str, body: dict[str, JsonValue]) -> BaseModel:
+        return OperationResult(content=json.dumps(body.get("state")))
+
+    async def test_backend_tools_receive_the_current_async_tasks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+        monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+        backend = _run_backend()
+        _answering(monkeypatch, backend, self.answer)
+        served = operation_tool(
+            ToolSpec(
+                name="slack_no_reply_needed",
+                description="Close",
+                parameters={"type": "object"},
+                reads_all=True,
+            ),
+            backend,
+        )
+        tasks = {"worker": {"status": "running"}}
+        runtime = ToolRuntime(
+            state={"messages": [], "async_tasks": tasks},
+            context=None,
+            config={},
+            stream_writer=lambda event: None,
+            tool_call_id="close",
+            store=None,
+        )
+        assert served.coroutine is not None
+        result = await served.coroutine(runtime=runtime)
+        assert isinstance(result, ToolMessage)
+        assert json.loads(result.text)["async_tasks"] == tasks

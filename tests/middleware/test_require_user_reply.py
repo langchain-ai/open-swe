@@ -15,6 +15,7 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
     ToolMessage,
+    add_notification_metadata,
     messages_from_dict,
     messages_to_dict,
 )
@@ -73,6 +74,122 @@ def _assert_nudged(result: dict[str, Any] | None, attempt: int) -> list[HumanMes
 
 
 class TestRequireUserReplyMiddleware:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "work",
+        [
+            "none",
+            "process",
+            "monitor",
+            "running",
+            "pending",
+            "success",
+            "final",
+            "approval",
+            "private",
+            "card",
+            "breakout",
+        ],
+    )
+    async def test_worker_completion_cannot_abandon_accepted_work(
+        self, monkeypatch: pytest.MonkeyPatch, work: str
+    ) -> None:
+        from openswe.slack.tools import no_reply_needed
+
+        monkeypatch.setattr(
+            no_reply_needed, "get_config", lambda: {"configurable": {"thread_id": "coordinator"}}
+        )
+        metadata = {
+            "running_monitors": ["monitor-1"] if work == "monitor" else [],
+            "running_background_tasks": ["process-1"] if work == "process" else [],
+        }
+        monkeypatch.setattr(
+            no_reply_needed.THREADS, "get", AsyncMock(return_value=MagicMock(metadata=metadata))
+        )
+        messages: list[BaseMessage] = [
+            HumanMessage(content="Fix and deliver this"),
+            _reply("ack", "progress"),
+            _result("ack"),
+            _call(NO_REPLY_TOOL, "waiting"),
+            _result("waiting"),
+            HumanMessage(
+                content='<input-message sender="system:event-subscription" surface="automation" kind="system">Worker completed</input-message>'
+            ),
+        ]
+        if work == "running":
+            messages[-1] = add_notification_metadata(
+                HumanMessage(content="Worker completed"), source="async-task"
+            )
+        if work == "final":
+            messages.extend([_reply("final"), _result("final")])
+        elif work == "card":
+            messages.extend([_call("connect_managed_tools", "card"), _result("card")])
+        elif work in {"approval", "private"}:
+            messages.extend(
+                [
+                    _call("expedite_pr_approval", "approval"),
+                    ToolMessage(
+                        content=json.dumps(
+                            {"success": True, "completion_reply_required": work == "private"}
+                        ),
+                        tool_call_id="approval",
+                    ),
+                ]
+            )
+        elif work == "breakout":
+            messages.extend(
+                [
+                    _call("slack_breakout_thread", "breakout"),
+                    ToolMessage(
+                        content='{"success": true, "slack_url": "https://slack.com/thread"}',
+                        tool_call_id="breakout",
+                    ),
+                ]
+            )
+        result = await no_reply_needed.slack_no_reply_needed(
+            "Waiting for delivery",
+            no_reply_needed.REQUIRED_CONFIRMATION,
+            state={"messages": messages, "async_tasks": {"worker": {"status": work}}},
+        )
+        allowed = work in {"monitor", "running", "pending", "final", "approval", "card", "breakout"}
+        assert result["success"] is allowed
+        if not allowed:
+            assert result["error"] == "requester_still_owed"
+            assert 'response_type="final"' in str(result["hint"])
+            assert "monitor" in str(result["hint"])
+        messages.extend(
+            [
+                _call(NO_REPLY_TOOL, "close"),
+                ToolMessage(content=json.dumps(result), tool_call_id="close"),
+                AIMessage(content=""),
+            ]
+        )
+        guarded = await _middleware().aafter_model(_state(*messages), _runtime())
+        if allowed:
+            assert guarded == {"reply_nudges": 0}
+        else:
+            _assert_nudged(guarded, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_worker_wake_reopens_a_silent_wait_but_preserves_final_delivery(self) -> None:
+        for delivered in (False, True):
+            messages = [
+                HumanMessage(content="Fix this"),
+                _reply("reply", "final" if delivered else "progress"),
+                _result("reply"),
+                _call(NO_REPLY_TOOL, "waiting"),
+                _result("waiting"),
+                HumanMessage(
+                    content='<input-message sender="system:event-subscription" surface="automation" kind="system">Worker completed</input-message>'
+                ),
+                AIMessage(content=""),
+            ]
+            result = await _middleware().aafter_model(_state(*messages), _runtime())
+            if delivered:
+                assert result == {"reply_nudges": 0}
+            else:
+                _assert_nudged(result, 1)
+
     @pytest.mark.asyncio
     async def test_reinvokes_when_the_turn_ends_with_undelivered_text(self) -> None:
         result = await _middleware().aafter_model(
@@ -186,7 +303,8 @@ class TestRequireUserReplyMiddleware:
                     confirmation="incorrect" if call_id == "failed" else REQUIRED_CONFIRMATION,
                 )
                 for call_id in (
-                    ("failed", "first", "repeat") if failed_first else ("first", "repeat")
+                    (("failed",) if failed_first else ())
+                    + (("first",) if completion_required else ("first", "repeat"))
                 )
             ]
             + ([_reply("final"), AIMessage(content="")] if completion_required else [])

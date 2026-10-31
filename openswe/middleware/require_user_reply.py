@@ -13,7 +13,13 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+    get_notification_metadata,
+)
 from langgraph.runtime import Runtime
 
 from openswe.input_messages import (
@@ -61,9 +67,12 @@ def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
 def _starts_turn(message: BaseMessage) -> bool:
     if not isinstance(message, HumanMessage):
         return False
-    if dynamic_context_hash(message.content) is not None:
+    if (
+        get_notification_metadata(message) is not None
+        or dynamic_context_hash(message.content) is not None
+    ):
         return False
-    return message_sender_id(message.content, kind="system") != REPLY_GUARD["id"]
+    return message_sender_id(message.content, kind="system") is None
 
 
 def turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
@@ -177,21 +186,84 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             if isinstance(message, ToolMessage) and not reported_failure(message)
         }
 
-    def _satisfied(self, messages: Sequence[BaseMessage]) -> bool:
+    def _satisfied(self, messages: Sequence[BaseMessage], *, include_no_reply: bool = True) -> bool:
         tail = turn_tail(messages)
         completion_reply_required = any(
             isinstance(message, ToolMessage) and self._requires_completion_reply(message)
             for message in tail
         )
+        last_event = max(
+            (
+                index
+                for index, message in enumerate(tail)
+                if isinstance(message, HumanMessage)
+                and dynamic_context_hash(message.content) is None
+                and message_sender_id(message.content, kind="system") != REPLY_GUARD["id"]
+            ),
+            default=-1,
+        )
         call_ids = {
             call.get("id")
-            for message in tail
+            for index, message in enumerate(tail)
             if isinstance(message, AIMessage)
             for call in message.tool_calls
             if self._discharges_turn(call)
-            and not (completion_reply_required and call.get("name") == self._no_reply_tool_name)
+            and not (
+                call.get("name") == self._no_reply_tool_name
+                and (completion_reply_required or not include_no_reply or index < last_event)
+            )
         }
-        return bool(call_ids & self._successful_call_ids(tail))
+        delivered = {
+            message.tool_call_id
+            for message in tail
+            if isinstance(message, ToolMessage)
+            and not reported_failure(message)
+            and self._delivered_by_tool(message, tail)
+        }
+        return bool(delivered or call_ids & self._successful_call_ids(tail))
+
+    @staticmethod
+    def _delivered_by_tool(message: ToolMessage, messages: Sequence[BaseMessage]) -> bool:
+        try:
+            payload = json.loads(content_to_text(message.content))
+        except ValueError:
+            return False
+        if not isinstance(payload, dict) or payload.get("success") is not True:
+            return False
+        if payload.get("completion_reply_required") is False:
+            return True
+        return bool(payload.get("slack_url")) and any(
+            call.get("name") == "slack_breakout_thread" and call.get("id") == message.tool_call_id
+            for entry in messages
+            if isinstance(entry, AIMessage)
+            for call in entry.tool_calls
+        )
+
+    def requester_still_owed(self, messages: Sequence[BaseMessage]) -> bool:
+        """Whether accepted work still needs a user-visible completion."""
+        if self._satisfied(messages, include_no_reply=False):
+            return False
+        tail = turn_tail(messages)
+        successful = self._successful_call_ids(tail)
+        if any(
+            isinstance(message, ToolMessage) and self._requires_completion_reply(message)
+            for message in tail
+        ):
+            return True
+        return any(
+            call.get("id") in successful
+            and (
+                call.get("name") == "start_async_task"
+                or (
+                    call.get("name") == self._tool_name
+                    and isinstance(args := call.get("args"), Mapping)
+                    and args.get("response_type") == "progress"
+                )
+            )
+            for message in tail
+            if isinstance(message, AIMessage)
+            for call in message.tool_calls
+        )
 
     async def _post_on_behalf(self, state: Mapping[str, Any]) -> None:
         text = _last_answer(state.get("messages") or [])
@@ -231,7 +303,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
                 for call in message.tool_calls
                 if call["name"] == self._no_reply_tool_name
             }
-            if not no_reply_ids & self._successful_call_ids(tail):
+            if not no_reply_ids & self._successful_call_ids(tail) or not self._satisfied(tail):
                 return None
             suppressed = [
                 last.model_copy(

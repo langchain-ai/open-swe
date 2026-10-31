@@ -28,6 +28,7 @@ from langchain_core.messages import (
     HumanMessage,
     ToolMessage,
     add_notification_metadata,
+    get_notification_metadata,
     messages_to_dict,
 )
 from langgraph.config import get_stream_writer
@@ -236,13 +237,15 @@ class _Turn:
     """What happened since the last thing a person said."""
 
     def __init__(self, messages: Sequence[AnyMessage], guard: str) -> None:
+        self.guard = guard
         self.messages = list(messages)
         for index in range(len(self.messages) - 1, -1, -1):
             message = self.messages[index]
             if (
                 isinstance(message, HumanMessage)
                 and not _dynamic_context(message)
-                and _system_sender(message) != guard
+                and get_notification_metadata(message) is None
+                and _system_sender(message) is None
             ):
                 self.messages = self.messages[index + 1 :]
                 break
@@ -656,7 +659,45 @@ class RunLoop:
                 and args.get("response_type") == "final"
             )
         }
-        return turn.succeeded(call_ids)
+        no_reply_ids = {
+            str(tool_call.get("id"))
+            for tool_call in turn.calls()
+            if tool_call.get("name") == rules.no_reply_tool
+        }
+        last_event = max(
+            (
+                index
+                for index, message in enumerate(turn.messages)
+                if isinstance(message, HumanMessage)
+                and not _dynamic_context(message)
+                and _system_sender(message) != turn.guard
+            ),
+            default=-1,
+        )
+        delivered = any(
+            isinstance(payload := _json_payload(result), dict)
+            and payload.get("success") is True
+            and (
+                payload.get("completion_reply_required") is False
+                or (
+                    payload.get("slack_url")
+                    and any(
+                        tool_call.get("name") == "slack_breakout_thread"
+                        and tool_call.get("id") == result.tool_call_id
+                        for tool_call in turn.calls()
+                    )
+                )
+            )
+            for result in turn.results()
+            if not _reported_failure(result)
+        )
+        return delivered or any(
+            isinstance(message, ToolMessage)
+            and message.tool_call_id in call_ids
+            and not _reported_failure(message)
+            and (message.tool_call_id not in no_reply_ids or index > last_event)
+            for index, message in enumerate(turn.messages)
+        )
 
     def after_agent(self, state: Mapping[str, object]) -> None:
         """Ask for the graph's own end-of-run work, then report the run's end.
