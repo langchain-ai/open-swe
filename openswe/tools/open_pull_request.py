@@ -875,6 +875,14 @@ async def _record_pr_telemetry(
                     extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
                     exc_info=True,
                 )
+            from openswe.github.webhook import process_github_pr_walkthrough
+
+            await process_github_pr_walkthrough(
+                {
+                    "repository": {"full_name": f"{owner}/{repo}"},
+                    "pull_request": details or pr,
+                }
+            )
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,

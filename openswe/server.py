@@ -269,6 +269,7 @@ from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
 )
+from openswe.tools.implementation_walkthrough import build_pr_walkthrough
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
@@ -813,6 +814,7 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
     every run stays out of reach here too.
     """
     tools = [
+        build_pr_walkthrough,
         *(
             tool
             for tool in AGENT_TOOLS
@@ -1542,6 +1544,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 "slack_follow_up_suggestions"
             )
             is True,
+            implementation_walkthrough_enabled=(
+                await cached_workspace_settings(workspace_slug(cfg))
+            ).get("implementation_walkthrough_enabled")
+            is True,
             sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
             local_checkout=bridged,
             local_checkout_client=self._bridge_client or "cli",
@@ -2009,6 +2015,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         ]
+    if settings.get("implementation_walkthrough_enabled") is True:
+        static_tools.append(build_pr_walkthrough)
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())

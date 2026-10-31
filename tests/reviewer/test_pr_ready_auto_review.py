@@ -265,3 +265,37 @@ async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
     await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
     fake_client.runs.create.assert_awaited_once()
+
+
+@pytest.mark.parametrize("draft", [False, True])
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("agent_created", [False, True])
+async def test_walkthrough_generation_includes_drafts_without_starting_an_assessment(
+    monkeypatch: pytest.MonkeyPatch, draft: bool, inline: bool, agent_created: bool
+) -> None:
+    from openswe.dashboard import workspace_settings_cache
+    from openswe.review_scout.launch import ReviewScoutTarget
+
+    payload = _pr_payload(action="opened", draft=draft)
+    payload["repository"]["full_name"] = "lc/repo"
+    payload["pull_request"]["body"] = (
+        "Made by [Open SWE](https://example.com)" if agent_created else "Human-authored change"
+    )
+    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: True)
+    monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="default"))
+    monkeypatch.setattr(
+        workspace_settings_cache,
+        "cached_workspace_settings",
+        AsyncMock(return_value={"implementation_walkthrough_enabled": inline}),
+    )
+    monkeypatch.setattr(github_webhooks.PullRequest, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(ReviewScoutTarget, "walkthrough", AsyncMock(return_value=None))
+    start = AsyncMock(return_value="run")
+    monkeypatch.setattr(ReviewScoutTarget, "start", start)
+    assessment = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "_dispatch_first_review_from_pr_payload", assessment)
+
+    await github_webhooks.process_github_pr_walkthrough(payload)
+
+    assert start.await_count == (0 if inline and agent_created else 1)
+    assessment.assert_not_awaited()

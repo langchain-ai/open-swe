@@ -17,6 +17,7 @@ Use only for an explicit request to change shared flags; if personal versus shar
 
 Supported flags are the agent-manageable boolean fields in the shared workspace settings schema; use `read` on a private admin surface to discover their names and values.
 “Allow Fable models” is `fable_enabled`.
+`implementation_walkthrough_enabled` is off by default. When enabled, implementation threads build shared walkthroughs themselves after pushing and opening/updating a PR, including drafts, before delivering the PR; automatic background scouts are suppressed.
 Unknown fields, including credentials, model defaults, and approval automation, are rejected.
 Fable's model safety policy applies when disabling its flag.
 Approval modes are managed per repository by `manage_review_approval_mode`; set `approve` only when explicitly requested.
