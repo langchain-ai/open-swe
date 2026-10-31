@@ -403,7 +403,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     @property
     def _in_sandbox(self) -> bool:
         """Whether the run's files are in MDA's sandbox, which it asks for before preparing."""
-        return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
+        return self._open_sandbox is not None and self._backend.run.catalog.sandbox is not None
 
     async def _before_agent(
         self, state: RunState, runtime: Runtime

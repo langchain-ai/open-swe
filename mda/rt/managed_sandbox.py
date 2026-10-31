@@ -135,7 +135,7 @@ def _planned(runtime: object) -> tuple[Run, SandboxSpec] | None:
     """The run in ``runtime``, and the sandbox its catalog names; None without one of MDA's."""
     try:
         run = _run_of(runtime)
-        spec = run.planned.sandbox
+        spec = run.catalog.sandbox
     except BackendCallError:
         # Not started yet, or not an Open SWE run, so nothing may open a sandbox for it.
         return None
@@ -462,7 +462,7 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         result = await handler(request)
         if request.tool_call["name"] != "recreate_sandbox" or not isinstance(result, ToolMessage):
             return result
-        spec = self._backend.run.planned.sandbox
+        spec = self._backend.run.catalog.sandbox
         if spec is None:
             return result
         try:
