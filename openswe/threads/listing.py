@@ -42,6 +42,7 @@ from openswe.threads.summary import (
     thread_source,
     thread_updated_ms,
 )
+from openswe.transcript.edits import attach_edit_evidence
 from openswe.transcript.subagents import attach_subagents
 from openswe.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from openswe.utils.thread_ops import langgraph_client
@@ -356,6 +357,7 @@ async def _summarize_threads(
 
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
     await attach_subagents(summaries)
+    await attach_edit_evidence(summaries)
     return summaries
 
 

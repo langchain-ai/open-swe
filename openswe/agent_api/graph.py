@@ -122,6 +122,7 @@ from runtime_api.loop import (
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
+    THREAD_EDITED,
     TOOL_RESULT,
     TOOL_STARTED,
     BeforeModel,
@@ -1291,6 +1292,12 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
+    async def thread_edited(self, _request: RunRequest) -> Done:
+        from openswe.threads.store import THREADS
+
+        await THREADS.update(self.run.thread_id, {"has_edits": True})
+        return Done()
+
     async def run_ended(self, request: RunEnded) -> Done:
         """Record the run's end: its transcript turn and its usage."""
         self._as_invocation(request.invocation_id)
@@ -1655,6 +1662,7 @@ RUN_CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
 RUN_CALLS.serve(RUN_STARTED, TokenRun.run_started)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
+RUN_CALLS.serve(THREAD_EDITED, TokenRun.thread_edited)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)

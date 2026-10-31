@@ -21,7 +21,9 @@ from typing import Final, Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, JsonValue
-from runtime_api.operations import PullRequestHead
+from runtime_api.endpoint import call
+from runtime_api.loop import THREAD_EDITED
+from runtime_api.operations import PullRequestHead, RunRequest
 
 from rt.backend import Run, RunLocal
 from rt.sandbox_script import SandboxScript
@@ -79,6 +81,11 @@ class TurnGit:
         # When the first change no fingerprint has seen yet was made.
         self._changed_at: int | None = None
         self._observed: list[_Observed] = []
+        self._run: Run | None = None
+        self._edits_reported = False
+
+    def bind(self, run: Run) -> None:
+        self._run = run
 
     def start(
         self,
@@ -154,7 +161,14 @@ class TurnGit:
         before = await asyncio.shield(self._baseline) if self._baseline is not None else None
         after = await self._fingerprint()
         if before is not None and after is not None:
-            self._observed.append(_Observed(at, tuple(after.changes_since(before))))
+            targets = tuple(after.changes_since(before))
+            self._observed.append(_Observed(at, targets))
+            if targets and not self._edits_reported and self._run is not None:
+                try:
+                    await call(self._run.backend, THREAD_EDITED, RunRequest())
+                    self._edits_reported = True
+                except Exception:
+                    logger.warning("Could not record thread edit evidence", exc_info=True)
 
     async def _first_fingerprint(
         self, ready: Callable[[], Awaitable[None]] | None
@@ -191,4 +205,6 @@ _TURNS: Final = RunLocal(TurnGit)
 
 def turn_git(run: Run) -> TurnGit:
     """The git evidence of the turn ``run`` is playing."""
-    return _TURNS.get(run)
+    evidence = _TURNS.get(run)
+    evidence.bind(run)
+    return evidence

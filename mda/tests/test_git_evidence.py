@@ -2,9 +2,11 @@ import asyncio
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.backends.local_shell import LocalShellBackend
+from rt.backend import Run, RunContext
 from rt.git_evidence import GitCheckout, GitSnapshot, TurnGit
 from rt.sandbox_script import SandboxScript, SandboxScriptError
 from runtime_api.operations import PullRequestHead
@@ -32,11 +34,16 @@ def sandbox() -> LocalShellBackend:
 
 
 async def test_the_work_order_names_the_turns_repository_and_a_pull_request_its_branch(
-    tmp_path: Path, sandbox: LocalShellBackend
+    tmp_path: Path, sandbox: LocalShellBackend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "http://backend")
+    run = Run(RunContext())
+    posted = AsyncMock(return_value={})
+    monkeypatch.setattr(run.backend, "post", posted)
     actual = _checkout(tmp_path, "actual", "git@github.com:org/actual.git", "local")
     later = _checkout(tmp_path, "later", "https://github.com/org/later.git")
     git = TurnGit()
+    git.bind(run)
     git.start(sandbox, str(tmp_path))
 
     # A tool changes one checkout; the next model call fingerprints it.
@@ -59,6 +66,9 @@ async def test_the_work_order_names_the_turns_repository_and_a_pull_request_its_
         "ls_git_repo": "org/actual",
         "ls_git_branch": "Exact/PR-head",
     }
+    assert posted.await_count == 1
+    assert posted.await_args is not None
+    assert posted.await_args.args[0] == "/agent-api/thread_edited"
 
 
 async def test_a_turn_that_changed_nothing_waits_for_no_fingerprint(

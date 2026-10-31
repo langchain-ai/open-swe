@@ -597,7 +597,17 @@ test.describe("threads workspace", () => {
     await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
+    await expect(
+      sidebar.getByText(TITLES.running, { exact: true }),
+    ).toHaveCount(0);
     await sidebar.getByRole("button", { name: "Repositories options" }).click();
+    const slackQuestions = page.getByRole("menuitemcheckbox", {
+      name: "Show Slack questions",
+      exact: true,
+    });
+    await expect(slackQuestions).toHaveAttribute("aria-checked", "false");
+    await slackQuestions.click();
+    await expect(slackQuestions).toHaveAttribute("aria-checked", "true");
     await page
       .getByRole("menuitemradio", { name: "Last updated", exact: true })
       .click();

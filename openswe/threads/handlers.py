@@ -54,6 +54,7 @@ from openswe.threads.summary import (
     thread_is_owner,
     thread_source,
 )
+from openswe.transcript.edits import attach_edit_evidence
 from openswe.transcript.engine import delete_transcript
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.transcript.subagents import attach_subagents
@@ -197,6 +198,7 @@ async def get_dashboard_thread(
         )
     with phase(record, "subagents"):
         await attach_subagents([summary])
+        await attach_edit_evidence([summary])
     await attach_task_workers(client, [summary], login, email)
     return summary
 

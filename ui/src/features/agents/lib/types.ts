@@ -624,6 +624,7 @@ export interface AgentThread {
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>
+  hasEdits?: boolean | null
   diffStats?: {
     files: number
     additions: number

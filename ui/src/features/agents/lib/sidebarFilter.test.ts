@@ -7,6 +7,8 @@ import {
 } from "./sidebarFilter"
 import type { SidebarFilters } from "./sidebarFilter"
 import type { AgentThread } from "./types"
+import { cloudSidebarThread } from "./sidebarThreads"
+import type { SidebarThreadItem } from "./sidebarThreads"
 
 function makeThread(overrides: Partial<AgentThread> = {}): AgentThread {
   return {
@@ -31,6 +33,39 @@ function filters(overrides: Partial<SidebarFilters> = {}): SidebarFilters {
 }
 
 describe("filterThreads", () => {
+  it("hides Slack questions by default without hiding edits or PRs", () => {
+    const question = makeThread({ source: "slack", hasEdits: false })
+    const edited = makeThread({ source: "slack", hasEdits: true })
+    const pr = makeThread({
+      source: "slack",
+      hasEdits: false,
+      pr: {
+        number: 1,
+        title: "Fix",
+        state: "closed",
+        headRef: "fix",
+        baseRef: "main",
+        url: "https://github.com/acme/repo/pull/1",
+      },
+    })
+    const unknown = makeThread({ source: "slack", hasEdits: null })
+    const dashboard = makeThread({ hasEdits: false })
+    const threads = [question, edited, pr, unknown, dashboard]
+    const lists: Array<Array<AgentThread | SidebarThreadItem>> = [
+      threads,
+      threads.map(cloudSidebarThread),
+    ]
+    for (const items of lists) {
+      expect(filterThreads(items, filters()).map((item) => item.id)).toEqual(
+        [edited, pr, unknown, dashboard].map((thread) => thread.id)
+      )
+      expect(
+        filterThreads(items, filters({ includeSlackQuestions: true }))
+      ).toEqual(items)
+      expect(filterThreads(items, filters(), question.id)).toEqual(items)
+    }
+  })
+
   it("returns ordinary threads with default filters", () => {
     const threads = [
       makeThread(),

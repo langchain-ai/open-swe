@@ -563,6 +563,14 @@ export function AgentsSidebar({
           Show Claude Code
         </MenuCheckItem>
         <MenuCheckItem
+          checked={prefs.filters.includeSlackQuestions}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeSlackQuestions: checked })
+          }
+        >
+          Show Slack questions
+        </MenuCheckItem>
+        <MenuCheckItem
           checked={prefs.filters.ownedOnly}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, ownedOnly: checked })
@@ -690,7 +698,7 @@ export function AgentsSidebar({
 
       {agentWorkspaceEnabled && (
         <AgentWorkspaceThreadList
-          items={allItems}
+          items={[...filteredPinnedItems, ...recents]}
           activeThreadId={activeThreadId}
           compact={prefs.compact}
           onNavigate={layout.closeOnMobile}

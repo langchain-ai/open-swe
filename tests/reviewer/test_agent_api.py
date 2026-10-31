@@ -754,8 +754,10 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     await REVIEWER.api(
         run, "model_result", {"run_id": run_id, "response": messages_to_dict([reply])}
     )
+    await REVIEWER.api(run, "thread_edited", {"run_id": run_id})
     await REVIEWER.api(run, "run_ended", {"run_id": run_id})
 
+    assert metadata["has_edits"] is True
     assert metadata["agent_kind"] == "reviewer" and metadata["model"]
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None and snapshot.turns[0].state == "completed"

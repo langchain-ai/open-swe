@@ -544,6 +544,7 @@ async def _thread_summary(
         "workspace": metadata.get("workspace") or metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),
+        "hasEdits": metadata.get("has_edits") is True,
         "origin": origin,
         "threadCategory": thread_category,
         "triggerKind": trigger_kind,

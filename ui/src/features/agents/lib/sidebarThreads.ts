@@ -21,6 +21,10 @@ export interface SidebarThreadItem {
   createdAt: number
   updatedAt: number
   planStatus?: string | null
+  hasEdits?: boolean | null
+  pullRequests?: AgentThread["pullRequests"]
+  diffStats?: AgentThread["diffStats"]
+  changedFiles?: AgentThread["changedFiles"]
   pr?: AgentThread["pr"]
   /** `owner/repo` + number of `pr`, when the thread carries a full PR record. */
   prRef?: { repoFullName: string; number: number }
@@ -101,6 +105,10 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
       ...(thread.taskWorkers ?? []).map((worker) => worker.updatedAt)
     ),
     planStatus: thread.planStatus,
+    hasEdits: thread.hasEdits,
+    pullRequests: thread.pullRequests,
+    diffStats: thread.diffStats,
+    changedFiles: thread.changedFiles,
     pr: thread.pr,
     prRef: pullRequestRef(thread),
     reviewPage: thread.reviewPage,

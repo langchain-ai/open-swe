@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from openswe.database import postgres
 from openswe.transcript import tool_output
+from openswe.transcript.edits import attach_edit_evidence
 from openswe.transcript.engine import Command, ThreadNotTranscribed, append
 from openswe.transcript.events import (
     MessageAppended,
@@ -271,6 +272,37 @@ async def test_an_untranscribed_thread_rejects_everything_but_creation(
                 )
             ],
         )
+
+
+@pytest.mark.parametrize("status,edited", [("completed", True), ("error", False)])
+async def test_sidebar_recovers_historical_edits(
+    registry_db: None, status: str, edited: bool
+) -> None:
+    thread_id = str(uuid7())
+    turn_id = uuid7()
+    await _create(thread_id)
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id="edit:started",
+                event=ToolStarted(turn_id=turn_id, tool_call_id="edit", name="edit_file"),
+                actor_kind="agent",
+            ),
+            Command(
+                command_id="edit:completed",
+                event=ToolCompleted(turn_id=turn_id, tool_call_id="edit", status=status),
+                actor_kind="agent",
+            ),
+        ],
+    )
+    summaries: list[dict[str, object]] = [
+        {"id": thread_id, "source": "slack", "hasEdits": False},
+        {"id": "question", "source": "slack", "hasEdits": False},
+    ]
+    await attach_edit_evidence(summaries)
+    assert summaries[0]["hasEdits"] is edited
+    assert summaries[1]["hasEdits"] is False
 
 
 async def test_an_output_cut_at_the_cap_is_recorded_as_truncated(registry_db: None) -> None:
