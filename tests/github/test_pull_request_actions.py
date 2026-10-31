@@ -374,4 +374,6 @@ async def test_description_review_starts_blocked_and_reuses_a_standing_block(
     assert len(posted) == (0 if already_blocked else 1)
     if posted:
         assert posted[0]["event"] == "REQUEST_CHANGES"
-        assert DESCRIPTION_REVIEW_MARKER in posted[0]["body"]
+        body = posted[0]["body"]
+        assert isinstance(body, str)
+        assert DESCRIPTION_REVIEW_MARKER in body

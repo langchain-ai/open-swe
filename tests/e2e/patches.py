@@ -275,6 +275,9 @@ def apply() -> None:
     from openswe.schedules import store as schedules_store
     from openswe.webhooks import common as webhook_common
 
+    webhook_common.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
+    webhook_common.get_github_app_installation_token = _dummy_install_token
+
     for module in (
         profiles,
         thread_access,
