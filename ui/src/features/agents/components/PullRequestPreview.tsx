@@ -138,8 +138,14 @@ export function PreviewablePullRequestLink({
       previews?.pullRequests.get(
         pullRequestKey(parsed.repoFullName, parsed.number)
       ))
-  const link = parsed ? (
-    <PullRequestLinkChip href={href} {...parsed} {...props}>
+  const ref = parsed ?? (pullRequest && previews ? pullRequest : null)
+  const link = ref ? (
+    <PullRequestLinkChip
+      href={href}
+      repoFullName={ref.repoFullName}
+      number={ref.number}
+      {...props}
+    >
       {children}
     </PullRequestLinkChip>
   ) : (
