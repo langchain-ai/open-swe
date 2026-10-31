@@ -1,3 +1,4 @@
+import importlib
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -18,8 +19,7 @@ from openswe.workspaces.store import WorkspaceStore
 async def test_report_is_logged_but_private_details_never_reach_curator(
     monkeypatch: pytest.MonkeyPatch, visibility: str | None
 ) -> None:
-    from openswe.threads.store import ThreadStore
-
+    module = importlib.import_module("openswe.tools.report_platform_issue")
     now = datetime.now(UTC)
     thread = IndexedThread(
         thread_id="thread-1",
@@ -29,7 +29,7 @@ async def test_report_is_logged_but_private_details_never_reach_curator(
         created_at=now,
         updated_at=now,
     )
-    monkeypatch.setattr(ThreadStore, "get", AsyncMock(return_value=thread))
+    monkeypatch.setattr(module.THREADS, "get", AsyncMock(return_value=thread))
     monkeypatch.setattr(WorkspaceStore, "id_for_slug", AsyncMock(return_value=None))
     recorded = AsyncMock(return_value=True)
     monkeypatch.setattr(EventLog, "append", recorded)
@@ -48,18 +48,23 @@ async def test_report_is_logged_but_private_details_never_reach_curator(
     assert result["event_log_status"] == "recorded"
     assert result["export_status"] == "exported"
     assert result["curator_status"] == (
-        "forwarded" if visibility == "public" else "private_notice_only"
+        "forwarded" if visibility == "public" else "private_report_withheld"
     )
     source, payload = recorded.call_args.args
     assert source == "platform_issue"
     assert payload["description"] == "The sandbox timed out"
     assert payload["thread_details"]["thread"]["metadata"]["github_token"] == "[REDACTED]"
     assert recorded.call_args.kwargs["delivery_id"] == result["report_id"]
-    assert forwarded.call_args.kwargs == {
-        "report_id": result["report_id"],
-        "description": "The sandbox timed out" if visibility == "public" else None,
-        "keywords": ["sandbox", "timeout"] if visibility == "public" else [],
-    }
+    assert payload["thread_id"] == "thread-1"
+    if visibility == "public":
+        assert forwarded.call_args.kwargs == {
+            "report_id": result["report_id"],
+            "description": "The sandbox timed out",
+            "keywords": ["sandbox", "timeout"],
+            "thread_id": "thread-1",
+        }
+    else:
+        forwarded.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -83,3 +88,7 @@ async def test_report_delivery_failures_are_independent(
 async def test_report_platform_issue_requires_description() -> None:
     with pytest.raises(ValueError, match="Describe the platform issue"):
         await report_platform_issue("   ", ["sandbox"])
+    with pytest.raises(ValueError, match="requires a description"):
+        await WorkspaceCurator("default").report_problem(
+            report_id="report-1", description="   ", keywords=[], thread_id="thread-1"
+        )

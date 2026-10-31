@@ -54,9 +54,12 @@ class WorkspaceCurator:
         return await self._start(prompt("curator/wake", workspace=self.slug))
 
     async def report_problem(
-        self, *, report_id: str, description: str | None, keywords: list[str]
+        self, *, report_id: str, description: str, keywords: list[str], thread_id: str | None
     ) -> str:
         """Send a problem report without saving it as a memory."""
+        description = description.strip()
+        if not description:
+            raise ValueError("A problem report requires a description.")
         return await self._start(
             prompt("curator/wake", workspace=self.slug)
             + "\n\n"
@@ -65,6 +68,7 @@ class WorkspaceCurator:
                 report_id=report_id,
                 description=description,
                 keywords=keywords,
+                thread_id=thread_id,
             )
         )
 

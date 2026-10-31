@@ -59,6 +59,7 @@ class PlatformIssue:
             "platform_issue",
             {
                 "report_id": self.report_id,
+                "thread_id": self.cfg.thread_id if self.cfg else None,
                 "description": self.description,
                 "keywords": list(self.keywords),
                 "thread_details": self.details,
@@ -74,12 +75,15 @@ class PlatformIssue:
     async def forward(self) -> str:
         if self.cfg is None or not self.cfg.workspace_slug:
             return "no_workspace"
+        if not self.public:
+            return "private_report_withheld"
         await WorkspaceCurator(self.cfg.workspace_slug).report_problem(
             report_id=self.report_id,
-            description=self.description if self.public else None,
-            keywords=self.keywords if self.public else [],
+            description=self.description,
+            keywords=self.keywords,
+            thread_id=self.cfg.thread_id,
         )
-        return "forwarded" if self.public else "private_notice_only"
+        return "forwarded"
 
     async def export(self) -> bool:
         if self.cfg is None or not self.cfg.thread_id:

@@ -484,6 +484,34 @@ async def test_automation_reader_requires_the_automations_own_thread(
     page.assert_not_awaited()
 
 
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_curator_reader_requires_verified_curator_access(
+    monkeypatch: pytest.MonkeyPatch, authorized: bool
+) -> None:
+    from openswe.tools.access import Access
+
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        threads_tool,
+        "_config",
+        lambda: {"configurable": {"source": "curator", "workspace": "acme"}},
+    )
+    monkeypatch.setattr(
+        threads_tool, "resolve_access", AsyncMock(return_value=Access(curator=authorized))
+    )
+    monkeypatch.setattr(
+        threads_tool.schedules, "authorized_schedule_run", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(threads_tool, "authorized_slack_bot_run", AsyncMock(return_value=None))
+    actor = await threads_tool._reader()
+    if authorized:
+        assert actor is not None
+        assert actor.automation
+        assert not actor.admin
+    else:
+        assert actor is None
+
+
 _SLACK_BOT = {
     "channel_id": "C123",
     "thread_ts": "123.456",
