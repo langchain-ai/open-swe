@@ -48,6 +48,43 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
     assert await target.start() == (active or "new-run")
 
 
+@pytest.mark.parametrize(
+    ("run_status", "run_head", "expected"),
+    [
+        ("running", "head", "running"),
+        ("running", "older", "outdated"),
+        ("success", "head", "finished"),
+        ("success", "older", "idle"),
+        ("timeout", "head", "failed"),
+    ],
+)
+async def test_scout_status_reads_the_latest_run_against_the_current_head(
+    monkeypatch: pytest.MonkeyPatch, run_status: str, run_head: str, expected: str
+) -> None:
+    runs = SimpleNamespace(
+        list=AsyncMock(
+            return_value=[
+                {"run_id": "run", "status": run_status, "metadata": {"scout_head_sha": run_head}}
+            ]
+        )
+    )
+    monkeypatch.setattr(launch, "dispatch_client", lambda: SimpleNamespace(runs=runs))
+    target = launch.ReviewScoutTarget(
+        owner="acme",
+        repo="api",
+        pr_number=7,
+        pr_title="Change",
+        base_sha="base",
+        head_sha="head",
+        workspace_slug=None,
+    )
+
+    status = await target.status()
+
+    assert status.state == expected
+    assert status.head_sha == run_head
+
+
 async def test_scout_run_context_preserves_history_and_system_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
