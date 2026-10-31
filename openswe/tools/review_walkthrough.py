@@ -95,7 +95,7 @@ class _State:
         return bool(run_id) and self.walk.shown_by_run == run_id
 
     async def save(self, stage: Stage | None = None) -> None:
-        await self.ctx.session.save_walk(self.walk)
+        await self.ctx.session.save_walk(self.walk, finished=stage == "finished")
         if stage is not None:
             await refresh_progress(self.ctx.session, self.reader, stage=stage)
 
