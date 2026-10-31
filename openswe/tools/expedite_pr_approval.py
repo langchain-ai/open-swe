@@ -17,10 +17,10 @@ from openswe.expedited_review.eligibility import (
     FILE_PAGES,
     MAX_CHANGED_LINES,
     MAX_FILES,
+    ApprovalCondition,
     ChangedFile,
     ExcludedHunk,
     Exclusion,
-    Idea,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -250,13 +250,15 @@ async def expedite_pr_approval(
         except ValueError as exc:
             return _failure(str(exc))
     assessment = await PublishedAssessment.latest(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    idea = (
-        Idea(assessment.idea or "", assessment.auto_approved or "", head_sha)
-        if assessment is not None and assessment.conditional_on_idea(head_sha)
+    approval_condition = (
+        ApprovalCondition(
+            assessment.approval_condition or "", assessment.auto_approved or "", head_sha
+        )
+        if assessment is not None and assessment.conditional_for_head(head_sha)
         else None
     )
-    if idea is not None:
-        exclusions = [*exclusions, *idea.cover(files, exclusions)]
+    if approval_condition is not None:
+        exclusions = [*exclusions, *approval_condition.cover(files, exclusions)]
     verdict = assess_eligibility(files, exclusions)
     if isinstance(verdict, Ineligible):
         return _failure(
@@ -265,7 +267,7 @@ async def expedite_pr_approval(
             "exclusions, and every one of those files has to have a readable text diff. Test "
             f"files are not counted, and `excluded` leaves out hunks that qualify under the "
             f"target repository's `{APPROVALS_PATH}`. When Open SWE's review of the current "
-            "head would approve once a person okays the PR's idea, the card shows that idea "
+            "head would approve subject to human approval of the PR's condition, the card shows that condition "
             "instead of the diff. Otherwise ask for a normal review."
         )
 
@@ -295,7 +297,8 @@ async def expedite_pr_approval(
         and fingerprint_matches(files, active.diff_fingerprint)
         and {(e["path"], e["digest"]) for e in active.excluded_hunks}
         == {(e["path"], e["digest"]) for e in exclusions}
-        and active.idea == (idea.text if idea is not None else "")
+        and active.approval_condition
+        == (approval_condition.text if approval_condition is not None else "")
     ):
         _audit_pull_request(active.pull_request_id)
         if active.awaiting_ready and not payload.draft:

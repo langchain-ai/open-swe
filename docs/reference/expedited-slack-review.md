@@ -43,13 +43,13 @@ The reviewers are already in the Slack thread.
   The card lists exclusions by guideline with line counts, and a PR whose drawn, excluded and test lines do not add up to its total is refused, so no change is ever neither drawn nor listed.
   Each exclusion hides exactly one hunk, so identical hunk bodies elsewhere in the file stay drawn.
   Exclusions stay in the fingerprint: a commit that changes an excluded hunk is a diff change, and the changed hunk no longer matches its exclusion, so the card draws it.
-- Conditional auto-approval: when Open SWE's review of the current head decides `would_approve_conditionally`, it would approve the pull request once a person okays one succinct idea it names, such as "Remove the legacy `foo` exporter" or "Rename `Workspace` to `Project`".
-  The reviewer uses it only when that idea entirely, completely and unambiguously captures every part of the change the approval criteria do not already cover.
+- Conditional auto-approval: when Open SWE's review of the current head decides `would_approve_conditionally`, it would approve the pull request once a person approves one succinct condition it names, such as "Remove the legacy `foo` exporter" or "Rename `Workspace` to `Project`".
+  The reviewer uses it only when that condition entirely, completely and unambiguously captures every part of the change the approval criteria do not already cover.
   Alongside the decision it records `auto_approved`: the rest of the change it believes those criteria already cover, naming each criterion and what it covers.
-  The review comment, the dashboard and the card all show it next to the idea.
+  The review comment, the dashboard and the card all show it next to the condition.
   Only a review published with the repository's approval mode set to `approve` counts, the same switch that lets Open SWE approve on its own, and only for the head it reviewed.
-  The card then shows the idea as what voters okay and hides every remaining hunk except paths the exclusion deny-list covers, which are drawn and must fit the line limit, so a pull request of any size qualifies.
-  The idea comes from the review, not the agent asking for the card, and the hidden hunks are stored as exclusions, so they stay in the fingerprint and a commit that changes one draws it again.
+  The card then shows the condition as what voters approve and hides every remaining hunk except paths the exclusion deny-list covers, which are drawn and must fit the line limit, so a pull request of any size qualifies.
+  The condition comes from the review, not the agent asking for the card, and the hidden hunks are stored as exclusions, so they stay in the fingerprint and a commit that changes one draws it again.
   Expedited reads list up to GitHub's 3000 changed files.
 - The card draws the source diff.
   It draws the test diff too when the change is test-only or test lines are the majority, because otherwise there would be nothing to look at; when tests are the minority of a mostly-source change it names them instead, so the thing being voted on stays readable.

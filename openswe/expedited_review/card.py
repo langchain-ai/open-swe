@@ -44,8 +44,8 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
     pr = approval.pull_request
     label = pr.label
     blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
-    if approval.idea:
-        blocks.append(section(f"*Approving this idea:* {escape(approval.idea)}"))
+    if approval.approval_condition:
+        blocks.append(section(f"*Approval condition:* {escape(approval.approval_condition)}"))
         blocks.append(
             context(f"Already covered by auto-approval: {escape(approval.auto_approved)}")
         )
@@ -63,7 +63,7 @@ def _diff_sections(
         *_overflow_note(shown),
         *_diffstat("Tests", "test files", diff.tests),
         *_diffstat("Generated", "generated files", diff.generated),
-        *_idea_summary(diff),
+        *_condition_summary(diff),
         *_excluded_summary(diff),
     ]
     if diff_image_id:
@@ -109,21 +109,21 @@ def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
-def _idea_summary(diff: ExpeditedDiff) -> list[Block]:
-    """The diffstat of what the idea covers, which the card never draws."""
-    if not diff.by_idea:
+def _condition_summary(diff: ExpeditedDiff) -> list[Block]:
+    """The diffstat of what the condition covers, which the card never draws."""
+    if not diff.by_condition:
         return []
     stats: dict[str, list[int]] = {}
-    for entry in diff.by_idea:
+    for entry in diff.by_condition:
         counts = stats.setdefault(entry["path"], [0, 0])
         counts[0] += entry["additions"]
         counts[1] += entry["deletions"]
     added = sum(counts[0] for counts in stats.values())
     deleted = sum(counts[1] for counts in stats.values())
     heading = (
-        f"*Covered by the idea above (not shown):* {len(stats)} "
+        f"*Covered by the condition above (not shown):* {len(stats)} "
         f"{'file' if len(stats) == 1 else 'files'} +{added} −{deleted}. Open SWE's review "
-        "would approve these once the idea is okayed.\n"
+        "would approve these subject to human approval of the stated condition.\n"
     )
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []

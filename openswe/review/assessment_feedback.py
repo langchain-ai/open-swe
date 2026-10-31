@@ -80,8 +80,8 @@ class PublishedAssessment(ReviewAssessment):
             )
         return None if latest is None else cls.model_validate(latest)
 
-    def conditional_on_idea(self, head_sha: str) -> bool:
-        """Whether Open SWE would approve ``head_sha`` once a person okays the idea."""
+    def conditional_for_head(self, head_sha: str) -> bool:
+        """Whether Open SWE would approve ``head_sha`` subject to human approval of the condition."""
         return (
             not self.dry_run
             and self.head_sha == head_sha

@@ -2158,6 +2158,10 @@
             "title": "Additions",
             "type": "integer"
           },
+          "approval_condition": {
+            "title": "Approval Condition",
+            "type": "boolean"
+          },
           "deletions": {
             "title": "Deletions",
             "type": "integer"
@@ -2173,10 +2177,6 @@
           "header": {
             "title": "Header",
             "type": "string"
-          },
-          "idea": {
-            "title": "Idea",
-            "type": "boolean"
           },
           "path": {
             "title": "Path",

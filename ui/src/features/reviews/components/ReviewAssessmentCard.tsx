@@ -99,7 +99,7 @@ function AssessmentCard({
               : assessment.decision === "would_approve"
                 ? "Would approve"
                 : assessment.decision === "would_approve_conditionally"
-                  ? "Would approve once the idea is okayed"
+                  ? "Would approve subject to human approval"
                   : "Needs human review"}
           </span>
           <span
@@ -144,9 +144,10 @@ function AssessmentCard({
           </div>
         )}
       </div>
-      {assessment.idea && (
+      {assessment.approval_condition && (
         <p className="mt-space-2">
-          <span className="font-medium">Idea to okay:</span> {assessment.idea}
+          <span className="font-medium">Approval condition:</span>{" "}
+          {assessment.approval_condition}
         </p>
       )}
       {assessment.auto_approved && (

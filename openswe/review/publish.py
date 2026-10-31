@@ -273,7 +273,7 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
     )
 
 
-IDEA_MAX_CHARS = 200
+APPROVAL_CONDITION_MAX_CHARS = 200
 AUTO_APPROVED_MAX_CHARS = 500
 
 
@@ -284,17 +284,19 @@ class ReviewAssessment(BaseModel):
     risk_score: int = Field(ge=1, le=5, strict=True)
     decision: Literal["would_approve", "would_approve_conditionally", "needs_human_review"]
     explanation: str = Field(min_length=1, max_length=1500)
-    idea: str | None = Field(default=None, min_length=1, max_length=IDEA_MAX_CHARS)
+    approval_condition: str | None = Field(
+        default=None, min_length=1, max_length=APPROVAL_CONDITION_MAX_CHARS
+    )
     auto_approved: str | None = Field(
         default=None, min_length=1, max_length=AUTO_APPROVED_MAX_CHARS
     )
 
     @model_validator(mode="after")
-    def _idea_only_when_conditional(self) -> ReviewAssessment:
+    def _condition_only_when_conditional(self) -> ReviewAssessment:
         conditional = self.decision == "would_approve_conditionally"
-        if conditional != bool(self.idea) or conditional != bool(self.auto_approved):
+        if conditional != bool(self.approval_condition) or conditional != bool(self.auto_approved):
             raise ValueError(
-                "Give an `idea` and `auto_approved` exactly when the decision is "
+                "Give an `approval_condition` and `auto_approved` exactly when the decision is "
                 "would_approve_conditionally"
             )
         return self
@@ -304,7 +306,7 @@ class ReviewAssessment(BaseModel):
         if self.decision == "would_approve":
             return "Would approve"
         if self.decision == "would_approve_conditionally":
-            return "Would approve once a person okays the idea"
+            return "Would approve subject to human approval of the stated condition"
         return "Needs human review"
 
 
@@ -351,8 +353,8 @@ def render_review_body(
             decision = "Approved"
         suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
-        if assessment.idea:
-            parts.append(f"**Idea to okay:** {escape(assessment.idea)}")
+        if assessment.approval_condition:
+            parts.append(f"**Approval condition:** {escape(assessment.approval_condition)}")
         if assessment.auto_approved:
             parts.append(
                 f"**Already covered by auto-approval:** {escape(assessment.auto_approved)}"

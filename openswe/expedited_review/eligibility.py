@@ -6,8 +6,8 @@ to arrive as a readable text diff, and those files together have to fit in
 gates — CI judges them — which is what lets a two-line fix arrive with the
 tests that prove it. So are hunks the agent excludes as qualifying under the
 target repository's ``.open-swe/APPROVALS.md``; the card summarizes them. When
-Open SWE's review would approve the PR once a person okays its high-level idea,
-the card shows that idea instead of the diff, so a PR of any size qualifies.
+Open SWE's review would approve the PR subject to human approval of a stated condition,
+the card shows that condition instead of the diff, so a PR of any size qualifies.
 """
 
 import hashlib
@@ -209,7 +209,7 @@ class ExcludedHunk(TypedDict):
     deletions: int
     guideline: str
     reason: str
-    idea: NotRequired[bool]
+    approval_condition: NotRequired[bool]
 
 
 class Exclusion(BaseModel):
@@ -261,8 +261,8 @@ class Exclusion(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
-class Idea:
-    """The one statement a person okays when Open SWE's review would approve everything else.
+class ApprovalCondition:
+    """The one statement a person approves when Open SWE's review would approve everything else.
 
     It comes from the reviewer's conditional assessment of ``head_sha``, never from the
     agent asking for the card, so the agent cannot widen what the card hides.
@@ -282,7 +282,7 @@ class Idea:
             deletions=file.deletions if hunk is None else hunk.deletions,
             guideline=self.text,
             reason=self.auto_approved,
-            idea=True,
+            approval_condition=True,
         )
 
     def cover(
@@ -360,12 +360,12 @@ class ExpeditedDiff:
         return hits
 
     @property
-    def by_idea(self) -> list[ExcludedHunk]:
-        return [entry for entry in self.excluded if entry.get("idea")]
+    def by_condition(self) -> list[ExcludedHunk]:
+        return [entry for entry in self.excluded if entry.get("approval_condition")]
 
     @property
     def by_guideline(self) -> list[ExcludedHunk]:
-        return [entry for entry in self.excluded if not entry.get("idea")]
+        return [entry for entry in self.excluded if not entry.get("approval_condition")]
 
     @property
     def excluded_lines(self) -> int:

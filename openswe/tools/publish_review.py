@@ -337,7 +337,7 @@ async def _publish_review_async(
         assessment = assessment.model_copy(
             update={
                 "decision": "needs_human_review",
-                "idea": None,
+                "approval_condition": None,
                 "auto_approved": None,
                 "explanation": f"Unresolved findings remain. {assessment.explanation}",
             }

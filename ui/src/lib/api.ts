@@ -1253,7 +1253,7 @@ export interface PublishedReviewAssessment {
     | "would_approve_conditionally"
     | "needs_human_review"
   explanation: string
-  idea?: string | null
+  approval_condition?: string | null
   auto_approved?: string | null
 }
 
