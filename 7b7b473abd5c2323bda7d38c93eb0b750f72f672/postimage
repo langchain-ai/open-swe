@@ -1,0 +1,466 @@
+"""MCP discovery and execution over ordered, caller-authorized connection sources."""
+
+import asyncio
+import hashlib
+import json
+import logging
+import re
+import weakref
+from collections import Counter
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import timedelta
+from functools import partial
+from time import time
+from typing import TYPE_CHECKING, Any, Literal, get_args
+
+import httpx2
+from fastmcp import Client
+from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from langchain.mcp import as_langchain_tool
+from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from runtime_api.catalog import McpServerSpec
+
+from mcp.shared.exceptions import MCPError
+from mcp.types import Tool
+from openswe.analytics.posthog import record_mcp_tool
+from openswe.mcp.models import CONNECTION_OWNERS, MCPConnection, MCPScope, MCPToolProvenance
+from openswe.mcp.oauth import MCPOAuthError, connection_auth
+from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client
+from openswe.prompts import prompt
+from openswe.utils.startup_trace import asubphase
+
+if TYPE_CHECKING:
+    from langgraph_api.cache import SWRResult
+
+logger = logging.getLogger(__name__)
+_TIMEOUT_SECONDS = 30
+_DISCOVERY_CONCURRENCY = 8
+_DISCOVERY_SLOTS: weakref.WeakValueDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakValueDictionary()
+)
+
+type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
+
+_CATALOG_TTL = timedelta(minutes=10)
+_CATALOG_MAX_AGE = timedelta(hours=24)
+_MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
+
+
+class MCPTools(list[BaseTool]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures: list[str] = []
+
+    @property
+    def catalog_note(self) -> str:
+        return (
+            "\n\n" + prompt("tools/mcp-catalog-note", failures=list(dict.fromkeys(self.failures)))
+            if self.failures
+            else ""
+        )
+
+
+def _backoff_failure(error: BaseException) -> bool:
+    if isinstance(error, BaseExceptionGroup):
+        return any(_backoff_failure(child) for child in error.exceptions)
+    return (
+        isinstance(error, MCPError)
+        and error.code == -32601
+        or isinstance(error, httpx2.HTTPStatusError)
+        and error.response.status_code == 404
+    )
+
+
+@dataclass(frozen=True)
+class MCPSource:
+    """An authorized scope with an owner-specific namespace for cache isolation.
+
+    Callers enforce access before supplying a source. Lookups must raise on errors;
+    only a genuinely absent connection may return None.
+    """
+
+    scope: MCPScope = field(kw_only=True)
+    namespace: tuple[str, ...]
+    list_connections: Callable[[], Awaitable[list[MCPConnection]]]
+    get_connection: Callable[[str], Awaitable[MCPConnection | None]]
+    authorize: Callable[[], Awaitable[None]] | None = None
+
+
+async def _resolve_connection(
+    name: str, sources: tuple[MCPSource, ...]
+) -> tuple[MCPSource, MCPConnection] | None:
+    for source in reversed(sources):
+        if record := await source.get_connection(name):
+            return source, record
+    return None
+
+
+class _MCPTool(StructuredTool):
+    """Forward remote properties without consuming LangChain's reserved keywords."""
+
+    def _run(self, /, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("MCP tools require async invocation")
+
+    async def _arun(self, /, *args: Any, **kwargs: Any) -> Any:
+        if self.coroutine is None:
+            raise ToolException("MCP tool has no async implementation")
+        return await self.coroutine(*args, **kwargs)
+
+
+def _client(
+    record: MCPConnection, namespace: tuple[str, ...]
+) -> Client[SSETransport | StreamableHttpTransport]:
+    headers = record.connection_headers()
+    auth = connection_auth(record, namespace)
+    factory = partial(mcp_http_client, record.url)
+    transport: SSETransport | StreamableHttpTransport
+    if record.transport == "sse":
+        transport = SSETransport(
+            record.url,
+            headers=headers,
+            auth=auth,
+            sse_read_timeout=_TIMEOUT_SECONDS,
+            httpx_client_factory=factory,
+        )
+    else:
+        transport = StreamableHttpTransport(
+            record.url, headers=headers, auth=auth, httpx_client_factory=factory
+        )
+    return Client(transport, timeout=_TIMEOUT_SECONDS)
+
+
+async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+    async with _client(record, namespace) as client:
+        tools = await client.list_tools(cache_mode="bypass")
+    if len({tool.name for tool in tools}) != len(tools):
+        raise MCPDiscoveryError("MCP server returned duplicate tool names")
+    return tools
+
+
+def _discovery_error(error: Exception) -> str:
+    """Name the failure without echoing anything the request carried, such as credentials."""
+    pending: list[BaseException] = [error]
+    unknown: list[str] = []
+    while pending:
+        current = pending.pop()
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(reversed(current.exceptions))
+        elif isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
+            return str(current)
+        elif isinstance(current, MCPError):
+            return f"MCP server returned error {current.code} while listing tools"
+        elif isinstance(current, httpx2.HTTPStatusError):
+            status = current.response.status_code
+            hint = {
+                401: "Check the authentication headers",
+                403: "Check credentials, permissions, the server region, and MCP access settings",
+                404: "Check the MCP server URL",
+                429: "Wait before retrying; the MCP server is rate limiting requests",
+            }.get(status, "Check the MCP server availability")
+            return f"MCP tool discovery failed (HTTP {status}). {hint}"
+        elif isinstance(current, (TimeoutError, httpx2.TimeoutException)):
+            return "MCP tool discovery timed out; check the server and try again"
+        # OS and TLS errors name the host at most, never the path, query, or headers.
+        elif isinstance(current, httpx2.NetworkError):
+            return f"Could not reach the MCP server: {current}"
+        elif isinstance(current, httpx2.RemoteProtocolError):
+            return "The MCP server sent an invalid HTTP response; check the URL"
+        else:
+            unknown.append(type(current).__name__)
+    return f"Could not discover MCP tools ({unknown[0]}); check the URL and authentication headers"
+
+
+def _discovery_slots() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    slots = _DISCOVERY_SLOTS.get(loop)
+    if slots is None:
+        slots = _DISCOVERY_SLOTS[loop] = asyncio.Semaphore(_DISCOVERY_CONCURRENCY)
+    return slots
+
+
+async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+    from langgraph_api.cache import cache_get, cache_set
+
+    key: str | None = None
+    if namespace[0:1] == ("managed_tools",):
+        key = (
+            "mcp-failure:"
+            + hashlib.sha256(
+                json.dumps((namespace, record.name, record.revision)).encode()
+            ).hexdigest()
+        )
+        failure: object = await cache_get(key)
+        if (
+            isinstance(failure, list)
+            and len(failure) == 2
+            and isinstance(failure[0], str)
+            and isinstance(failure[1], (int, float))
+            and time() < failure[1]
+        ):
+            raise MCPDiscoveryError(failure[0])
+    if record.connection is not None:
+        raise MCPDiscoveryError(
+            "Only an MDA run reads this server's connection, so Open SWE cannot list its "
+            "tools; enter the names of the tools to allow"
+        )
+    try:
+        async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
+            tools = await _discover_tools(record, namespace)
+    except Exception as exc:
+        reason = _discovery_error(exc)
+        if key is not None and _backoff_failure(exc):
+            await cache_set(
+                key,
+                [reason, time() + _MANAGED_FAILURE_BACKOFF.total_seconds()],
+                ttl=_MANAGED_FAILURE_BACKOFF,
+            )
+        raise MCPDiscoveryError(reason) from None
+    return tools
+
+
+def _tool_name(connection_name: str, tool_name: str) -> str:
+    full_name = f"mcp_{connection_name}_{tool_name}"
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name)
+    # Without "_" in the connection name, the first "_" after "mcp_" splits the pair unambiguously;
+    # a plain name never ends like a hashed one, so it can't take another pair's hashed name.
+    if (
+        safe == full_name
+        and len(safe) <= 64
+        and "_" not in connection_name
+        and not re.search(r"_[0-9a-f]{10}$", safe)
+    ):
+        return safe
+    suffix = hashlib.sha256(json.dumps((connection_name, tool_name)).encode()).hexdigest()[:10]
+    return f"{safe[:53]}_{suffix}"
+
+
+def _wrap_tool(
+    name: str,
+    url: str,
+    transport: str,
+    definition: Tool,
+    namespace: tuple[str, ...],
+    sources: tuple[MCPSource, ...],
+    provenance: MCPToolProvenance,
+) -> BaseTool:
+    async def invoke(**arguments: Any) -> Any:
+        is_error = True
+        try:
+            for bound_source in sources:
+                if bound_source.namespace == namespace and bound_source.authorize is not None:
+                    await bound_source.authorize()
+            resolved = await _resolve_connection(name, sources)
+            if resolved is None:
+                raise ToolException("MCP is disabled or disconnected")
+            source, record = resolved
+            if source.namespace != namespace:
+                raise ToolException("MCP connection scope changed; start a new run")
+            if not record.enabled:
+                raise ToolException("MCP is disabled or disconnected")
+            if record.url != url or record.transport != transport or record.connection is not None:
+                raise ToolException("MCP connection changed; start a new run")
+            if not record.allows_tool(definition.name):
+                raise ToolException("This tool is no longer allowed by the MCP connection settings")
+            fresh = await as_langchain_tool(definition, _client(record, namespace))
+            if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
+                raise ToolException("MCP tool has no async implementation")
+            # Call the coroutine directly so remote arguments LangChain reserves pass through.
+            result = await asyncio.wait_for(fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS)
+            is_error = False
+            return result
+        except ToolException:
+            is_error = True
+            raise
+        except Exception:
+            is_error = True
+            logger.warning("MCP call failed", extra={"mcp_name": name})
+            raise ToolException("MCP call failed; check its connection and credentials") from None
+        finally:
+            await record_mcp_tool(definition.name, is_error)
+
+    return _MCPTool.from_function(
+        coroutine=invoke,
+        name=_tool_name(name, definition.name),
+        description=definition.description or definition.name,
+        args_schema=definition.input_schema,
+        response_format="content_and_artifact",
+        handle_tool_error=True,
+        metadata={"mcp_tool_name": definition.name, "mcp_provenance": provenance},
+    )
+
+
+async def _catalog(source: MCPSource, record: MCPConnection) -> SWRResult[list[dict[str, Any]]]:
+    key = (
+        "mcp:"
+        + hashlib.sha256(
+            json.dumps((source.namespace, record.name, record.revision)).encode()
+        ).hexdigest()
+    )
+    caller = asyncio.current_task()
+
+    async def discover() -> list[dict[str, Any]]:
+        async with asubphase(
+            "mcp.discover", mcp_name=record.name, background=asyncio.current_task() is not caller
+        ):
+            definitions = await discover_tools(record, source.namespace)
+        return [tool.model_dump(mode="json", exclude_none=True) for tool in definitions]
+
+    from langgraph_api.cache import swr
+
+    return await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
+
+
+async def _cached_definitions(
+    source: MCPSource, record: MCPConnection
+) -> tuple[list[Tool], CatalogOutcome]:
+    result = await _catalog(source, record)
+    return [Tool.model_validate(tool) for tool in result.value], (
+        "hit" if result.status == "fresh" else result.status
+    )
+
+
+async def refresh_mcp_catalog(source: MCPSource, name: str) -> None:
+    """Re-list one connection's tools now, for a change its server made that runs must see."""
+    record = await source.get_connection(name)
+    if record is None:
+        return
+    result = await _catalog(source, record)
+    if result.status != "miss":
+        await result.mutate()
+
+
+async def _load_tools(
+    source: MCPSource,
+    record: MCPConnection,
+    sources: tuple[MCPSource, ...],
+    overridden_scopes: list[MCPScope],
+    failures: list[str],
+) -> tuple[list[BaseTool], CatalogOutcome]:
+    try:
+        definitions, outcome = await _cached_definitions(source, record)
+        tools = [
+            _wrap_tool(
+                record.name,
+                record.url,
+                record.transport,
+                definition,
+                source.namespace,
+                sources,
+                MCPToolProvenance(
+                    connection_name=record.name,
+                    scope=source.scope,
+                    overridden_scopes=overridden_scopes,
+                ),
+            )
+            for definition in definitions
+            if record.allows_tool(definition.name)
+        ]
+        return tools, outcome
+    except Exception as exc:
+        if source.scope == "managed":
+            failures.append(_discovery_error(exc))
+        logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
+        return [], "failed"
+
+
+@dataclass(frozen=True)
+class LoadedMCPs:
+    """The tools of the MCP servers the backend serves, and the servers only an MDA run reaches."""
+
+    tools: MCPTools = field(default_factory=MCPTools)
+    # Servers whose credential is an MDA connection, which the run reads and connects with.
+    runtime_servers: list[McpServerSpec] = field(default_factory=list)
+
+
+def _runtime_server(
+    source: MCPSource, record: MCPConnection, overridden_scopes: list[MCPScope]
+) -> McpServerSpec | None:
+    """``record`` as the MDA run connects to it, if its tier may read its connection."""
+    connection = record.connection
+    if (
+        connection is None
+        or not connection.for_mcp_server
+        or connection.owner != CONNECTION_OWNERS.get(source.scope)
+    ):
+        logger.warning(
+            "Skipping an MCP server whose connection its tier may not read",
+            extra={"mcp_name": record.name, "mcp_scope": source.scope},
+        )
+        return None
+    return McpServerSpec(
+        name=record.name,
+        url=record.url,
+        transport=record.transport,
+        tools={tool: _tool_name(record.name, tool) for tool in record.allowed_tools},
+        connection=connection,
+        header=record.connection_header,
+        provenance=MCPToolProvenance(
+            connection_name=record.name, scope=source.scope, overridden_scopes=overridden_scopes
+        ).note(),
+    )
+
+
+async def load_mcps(*sources: MCPSource, connection_name: str | None = None) -> LoadedMCPs:
+    """Combine sources in precedence order; later connections replace earlier names entirely."""
+    result = MCPTools()
+    try:
+        catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
+        resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
+        scopes: dict[str, list[MCPScope]] = {}
+        for source, records in zip(sources, catalogs, strict=True):
+            for record in records:
+                resolved[record.name] = (source, record)
+                scopes.setdefault(record.name, []).append(source.scope)
+    except Exception:
+        # Missing scope data must not silently expose a lower-precedence connection.
+        logger.warning("MCP settings unavailable")
+        return LoadedMCPs()
+    connections = [
+        (source, record)
+        for _, (source, record) in sorted(resolved.items())
+        if record.enabled
+        and record.offers_tools
+        and (connection_name is None or record.name == connection_name)
+    ]
+    groups = await asyncio.gather(
+        *(
+            _load_tools(
+                source,
+                record,
+                sources,
+                scopes[record.name][:-1],
+                result.failures,
+            )
+            for source, record in connections
+            if record.connection is None
+        )
+    )
+    outcomes = Counter(outcome for _, outcome in groups)
+    logger.info(
+        "MCP catalogs resolved",
+        extra={
+            f"mcp_catalog_{outcome}": outcomes[outcome]
+            for outcome in get_args(CatalogOutcome.__value__)
+        },
+    )
+    result.extend(tool for tools, _ in groups for tool in tools)
+    runtime_servers = [
+        _runtime_server(source, record, scopes[record.name][:-1])
+        for source, record in connections
+        if record.connection is not None
+    ]
+    return LoadedMCPs(
+        tools=result,
+        runtime_servers=[server for server in runtime_servers if server is not None],
+    )
+
+
+async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> MCPTools:
+    """The tools of the MCP servers the backend serves itself, by precedence as ``load_mcps``."""
+    loaded = await load_mcps(*sources, connection_name=connection_name)
+    for server in loaded.runtime_servers:
+        logger.info(
+            "Leaving out an MCP server only an MDA run can reach", extra={"mcp_name": server.name}
+        )
+    return loaded.tools

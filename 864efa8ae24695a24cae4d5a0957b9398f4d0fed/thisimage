@@ -1,0 +1,10 @@
+<<<<<<<
+1059 f1906351c3b26275bd698819171fbcc9824ed51e fix(channels): verify the Slack actor against the signed principal
+1061 df08ea6a0d3aee010d19f662b124b42511741cb7 feat(channels): map channel senders to app users with resolveUser
+1073 17c2e4c9deac10088c09d5cfd656c65ff43d56a6 feat(linear): let an endpoint tell a declined session why
+1080 a3db66cc83d37cc086116f955e4edcc97b39cca9 feat(channels): let resolveUser be an endpoint
+1081 0d381ee1428dc28ab6d83a02bc45f6fb9e9ab253 feat(channels): run an unmapped channel sender as their own principal
+1094 a20fb81261fc737caa6ef9c9a7bddd775d913c35 fix(channels): leave reasoning blocks out of channel replies
+=======
+1073 17c2e4c9deac10088c09d5cfd656c65ff43d56a6 feat(linear): let an endpoint tell a declined session why
+>>>>>>>

@@ -1,0 +1,150 @@
+"""The coding agent, as Managed Deep Agents runs play it."""
+
+import logging
+from typing import Final, cast
+
+from deepagents.backends.protocol import BackendProtocol
+from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
+from runtime_api.loop import RunStarted
+
+from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.preparation import AgentPreparation
+from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.tokens import RunSettings
+from openswe.github.thread_token import get_github_token
+from openswe.github.token import resolve_github_token
+from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
+from openswe.middleware.record_run_usage import record_run_usage
+from openswe.middleware.transcript import TranscriptMiddleware
+from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+from openswe.review_guide.middleware import ReviewGuideMiddleware
+from openswe.run_config import RunConfig
+<<<<<<<
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import (
+    PrepareAgentRunMiddleware,
+    ThreadFiles,
+    agent_preparation,
+    agent_tools_by_name,
+    integration_tools,
+    plan_agent,
+=======
+from openswe.server import (
+    PrepareAgentRunMiddleware,
+    ThreadFiles,
+    agent_tools_by_name,
+    client,
+    integration_tools,
+    plan_agent,
+    record_agent_run,
+>>>>>>>
+)
+from openswe.skill_store.run_skills import RunSkillStores
+from openswe.utils.thread_settings import load_thread_settings
+
+logger = logging.getLogger(__name__)
+
+ASSISTANT_ID: Final = "agent"
+_TRANSCRIPT: Final = TranscriptMiddleware()
+
+
+class AgentParts(RunParts):
+    """The agent's pieces, as its plan builds them, for a call answered without it."""
+
+    reporters = (_TRANSCRIPT, record_run_usage)
+    shell_guards = (PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware())
+
+    def preparation_plan(self, surface: ToolSurface) -> AgentPreparation | None:
+        return next(
+            (
+                middleware.planning.bounded()
+                for middleware in surface.middleware
+                if isinstance(middleware, PrepareAgentRunMiddleware)
+                and middleware.planning is not None
+            ),
+            None,
+        )
+
+    async def preparation(self, config: RunnableConfig, plan: AgentPreparation) -> ToolSurface:
+        return await agent_preparation(config, plan)
+
+    def legacy(self, cfg: RunConfig) -> bool:
+        # A requested offload needs the conversation's model, and an incident the
+        # evidence its plan collects in memory.
+        return (
+            cfg.offload_conversation
+            or cfg.source == "incidents_agent"
+            or cfg.plugin_chat is not None
+        )
+
+    async def preparation(
+        self, config: RunnableConfig, settings: RunSettings, *, box: str | None
+    ) -> list[AgentMiddleware] | None:
+        turn = settings.agent
+        if turn is None:
+            # A token from before turns were prepared from it.
+            return None
+        thread_id = RunConfig.from_config(config).thread_id
+        if thread_id is None:
+            raise ValueError("An agent run needs a thread")
+        stored = await load_thread_settings(client, thread_id)
+        repo_instructions = stored.get("repo_instructions")
+        prepare = PrepareAgentRunMiddleware(
+            config,
+            turn,
+            repo_instructions=repo_instructions if isinstance(repo_instructions, str) else None,
+            box=None if turn.reaches_box else box,
+        )
+        if not turn.review_guide:
+            return [prepare]
+        cfg = RunConfig.from_config(config)
+        guide = ReviewGuideMiddleware(thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts)
+        # Middleware types are invariant in the state they extend; a graph merges them all.
+        return cast(list[AgentMiddleware], [prepare, guide])
+
+    async def started(
+        self, config: RunnableConfig, settings: RunSettings, started: RunStarted
+    ) -> None:
+        cfg = RunConfig.from_config(config)
+        if settings.agent is None or cfg.thread_id is None:
+            return
+        try:
+            await record_agent_run(
+                config,
+                settings.agent,
+                model_id=started.model_id,
+                effort=started.effort,
+                route=started.model_route,
+            )
+        except Exception:
+            # Bookkeeping: the turn goes on, and the reports behind this one with it.
+            logger.warning(
+                "Recording an agent turn's start failed",
+                extra={"agent_thread_id": cfg.thread_id},
+                exc_info=True,
+            )
+
+    async def credentials(self, config: RunnableConfig) -> None:
+        thread_id = RunConfig.from_config(config).thread_id
+        if thread_id is None or get_github_token(config) is not None:
+            return
+        try:
+            await resolve_github_token(config, thread_id)
+        except Exception:
+            # A tool that needs the token says so itself.
+            logger.warning("Resolving the run's GitHub token failed", exc_info=True)
+
+    async def skills(self, config: RunnableConfig) -> RunSkillStores:
+        return await RunSkillStores.for_run(config)
+
+    async def files(self, config: RunnableConfig) -> BackendProtocol:
+        return (await ThreadFiles.for_run(config)).backend
+
+    async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
+        static = agent_tools_by_name().get(name)
+        return static if static is not None else (await integration_tools(config)).get(name)
+
+
+AGENT: Final = RemoteGraph(ASSISTANT_ID, plan_agent, AgentParts())

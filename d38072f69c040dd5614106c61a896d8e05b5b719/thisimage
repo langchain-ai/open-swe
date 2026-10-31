@@ -1,0 +1,9 @@
+<<<<<<<
+897 1aa4e62bd39050f986343c68d0beb69805828363 feat(browser): browser use via define_browser
+959 89bfff3ea118ec80da1044da9099e469759ff032 feat(browser): share the thread's sandbox's localhost with its browser
+1039 27fa5d3cf88f5d6a005d561d1b978d40f6e14c0e perf(sdk): load the Python package's exports on first use
+=======
+967 0a0aa1f2a225b86f3554ed6847d39375e679ba8c feat(browser): browser use on Stagehand's facade tools, with simple sessions
+1010 6d82d326d847f5ab2997f58014fd41fd06319b39 feat(browser): record the browser tab as a video
+1016 7ae171adb484fea7f9137b08abc7f9f957ecaa4f feat(browser): browser_handoff hands the browser to the user and notifies the thread when it's back, in Python and TypeScript
+>>>>>>>
