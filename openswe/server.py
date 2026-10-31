@@ -91,6 +91,7 @@ from openswe.input_messages import (
     dynamic_context_hash,
     message_sender_id,
     person_introduction,
+    run_context,
     visible_dynamic_context_hashes,
 )
 from openswe.mcp import load_mcp_tools
@@ -1364,30 +1365,30 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ):
                         decision.outcome = "unavailable_request"
                         decision.reason = "model_unavailable"
-                        raise ValueError(
-                            "The requested runtime model is unavailable; select an available model."
-                        )
-                if handoff is not None and handoff.unavailable_effort:
+                if (
+                    decision.outcome != "unavailable_request"
+                    and handoff is not None
+                    and handoff.unavailable_effort
+                ):
                     decision.outcome = "unavailable_request"
                     decision.reason = "effort_unavailable"
-                    raise ValueError("The requested reasoning effort is unavailable.")
-                if requested_effort is not None:
+                if decision.outcome != "unavailable_request" and requested_effort is not None:
                     requested_model = requested_model or self._model_id
                     decision.requested_model = requested_model
                     option = self._requested_models.get(requested_model)
                     if option is None:
                         decision.outcome = "unavailable_request"
                         decision.reason = "model_unavailable"
-                        raise ValueError(
-                            "Choose an available runtime model to set its reasoning effort."
-                        )
-                    if requested_effort not in option["efforts"]:
+                    elif requested_effort not in option["efforts"]:
                         decision.outcome = "incompatible_request"
                         decision.reason = "effort_unsupported"
                         raise ValueError(
                             f"The requested reasoning effort {requested_effort!r} is not supported "
                             f"by {option['label']}; choose from {', '.join(option['efforts'])}."
                         )
+                if decision.outcome == "unavailable_request":
+                    requested_model = None
+                    requested_effort = None
                 settings["model_handoff_complete"] = True
                 settings["requested_model"] = requested_model
                 if requested_model:
@@ -1549,6 +1550,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             recent_threads=await recent_threads,
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
+        if decision.outcome == "unavailable_request":
+            added.append(
+                {
+                    "role": "user",
+                    "content": run_context("model-request", prompt("model-request/fallback")),
+                }
+            )
         system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
         return {
             "work_dir": work_dir,

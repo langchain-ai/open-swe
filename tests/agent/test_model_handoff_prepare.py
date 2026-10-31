@@ -272,8 +272,6 @@ async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
         ("fireworks:accounts/fireworks/models/kimi-k3", "image_url", "image"),
         ("fireworks:accounts/fireworks/models/kimi-k3", None, None),
         ("anthropic:claude-opus-5-5", "image", None),
-        ("anthropic:claude-fable-5-1", None, "unavailable"),
-        ("openai:gpt-6.1-sol", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "persistence"),
     ],
 )
@@ -287,12 +285,7 @@ async def test_handoff_validates_and_persists_before_selecting_model(
     monkeypatch.setattr(
         server,
         "infer_requested_model",
-        AsyncMock(
-            return_value=ModelRequestIntent(
-                requested_model=model,
-                unavailable_model=failure == "unavailable" and model == "openai:gpt-6.1-sol",
-            )
-        ),
+        AsyncMock(return_value=ModelRequestIntent(requested_model=model)),
     )
     if failure == "persistence":
         handoff.store.side_effect = RuntimeError("write failed")
@@ -311,7 +304,6 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         match = {
             "persistence": "write failed",
             "image": "does not support image input",
-            "unavailable": "unavailable",
         }[failure]
         with tracing_context(enabled="local"), trace("agent", inputs={}) as parent:
             with pytest.raises(error, match=match):
@@ -324,7 +316,6 @@ async def test_handoff_validates_and_persists_before_selecting_model(
             decision_span.outputs["outcome"]
             == {
                 "image": "incompatible_request",
-                "unavailable": "unavailable_request",
                 "persistence": "persistence_failure",
             }[failure]
         )
@@ -449,3 +440,56 @@ async def test_requested_effort_is_validated_persisted_and_reused(
     assert handoff.settings["effort"] == effort
     assert handoff.settings["model_routing_enabled"] is False
     handoff.store.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("intent", "reason"),
+    [
+        (ModelRequestIntent(unavailable_model=True, requested_effort="high"), "model_unavailable"),
+        (ModelRequestIntent(requested_model="missing-model"), "model_unavailable"),
+        (
+            ModelRequestIntent(
+                requested_model="anthropic:claude-opus-5-5", unavailable_effort=True
+            ),
+            "effort_unavailable",
+        ),
+        (ModelRequestIntent(requested_effort="high"), "model_unavailable"),
+    ],
+)
+async def test_unavailable_handoff_continues_without_pinning_and_explains_fallback(
+    handoff: Handoff,
+    monkeypatch: pytest.MonkeyPatch,
+    intent: ModelRequestIntent,
+    reason: str,
+) -> None:
+    if intent == ModelRequestIntent(requested_effort="high"):
+        handoff.middleware._model_id = "missing-default"
+    infer = AsyncMock(return_value=intent)
+    monkeypatch.setattr(server, "infer_requested_model", infer)
+    with tracing_context(enabled="local"), trace("agent", inputs={}) as parent:
+        prepared = await handoff.prepare()
+    (span,) = parent.child_runs
+    assert span.error is None
+    assert span.outputs is not None
+    assert span.outputs["outcome"] == "unavailable_request"
+    assert span.outputs["reason"] == reason
+    assert span.outputs["pin_persisted"] is False
+    assert prepared["requested_model"] is None
+    assert prepared["requested_effort"] is None
+    assert prepared["selected_model_id"] == "openai:gpt-6-luna"
+    assert prepared["selected_effort"] == "low"
+    assert handoff.settings == {
+        "model_id": "openai:gpt-6.1-sol",
+        "repo_instructions": "retain",
+        "model_handoff_complete": True,
+        "requested_model": None,
+    }
+    messages = str(prepared["messages"])
+    assert 'id="model-request"' in messages
+    assert "unavailable" in messages
+    assert "default" in messages
+    assert "Tell the user" in messages
+    later = await handoff.prepare()
+    assert later["selected_model_id"] == prepared["selected_model_id"]
+    assert 'id="model-request"' not in str(later["messages"])
+    infer.assert_awaited_once()
