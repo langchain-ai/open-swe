@@ -101,8 +101,8 @@ class ThreadParticipant:
     workspace_admin: bool = False
     draft_prs: bool = True
     instructions: str = ""
-    # What the person asked their runs to remember (``remember``), newest first.
-    memories: tuple[str, ...] = ()
+    # The engrams that apply to the person's runs (``remember``), newest first.
+    engrams: tuple[str, ...] = ()
     email: str = ""
     timezone: str = ""
     linked: bool = False
@@ -128,8 +128,8 @@ class ThreadParticipant:
         person["new_prs"] = "as drafts" if self.draft_prs else "ready for review"
         if self.instructions.strip():
             person["standing_instructions"] = self.instructions.strip()
-        if self.memories:
-            person["personal_memories"] = "\n".join(f"- {memory}" for memory in self.memories)
+        if self.engrams:
+            person["engrams"] = "\n".join(f"- {engram}" for engram in self.engrams)
         return person
 
 

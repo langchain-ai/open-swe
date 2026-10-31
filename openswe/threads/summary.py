@@ -11,8 +11,8 @@ from fastapi import HTTPException
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
+from openswe.engrams.store import CURATOR_THREAD_KEY
 from openswe.github.pull_requests import PullRequest
-from openswe.memories.store import CURATOR_THREAD_KEY
 from openswe.review.findings import (
     REVIEWER_THREAD_KIND,
     REVIEWER_UNTITLED,
@@ -184,7 +184,7 @@ def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) ->
         raise HTTPException(403, BOT_THREAD_READ_ONLY)
     # Its wake run must take direction from nobody, and a message would join that run.
     if metadata.get(CURATOR_THREAD_KEY):
-        raise HTTPException(403, "The memory curator's thread is read-only.")
+        raise HTTPException(403, "The engram curator's thread is read-only.")
 
 
 def _assert_thread_postable(

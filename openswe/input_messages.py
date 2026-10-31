@@ -40,7 +40,7 @@ class PersonIdentity(TypedDict):
     workspace_admin: NotRequired[Literal["yes", "no"]]
     new_prs: NotRequired[Literal["as drafts", "ready for review"]]
     standing_instructions: NotRequired[str]
-    personal_memories: NotRequired[str]
+    engrams: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):

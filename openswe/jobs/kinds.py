@@ -23,6 +23,9 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
+from openswe.engrams.curator import WAKE_JOB as CURATOR_WAKE
+from openswe.engrams.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
+from openswe.engrams.curator import WorkspaceCurator
 from openswe.github.forwarding import FORWARD_JOB as GITHUB_CHANNEL_FORWARD
 from openswe.github.forwarding import ForwardJob
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
@@ -31,9 +34,6 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
-from openswe.memories.curator import WAKE_JOB as CURATOR_WAKE
-from openswe.memories.curator import WAKE_SCHEDULE as CURATOR_SCHEDULE
-from openswe.memories.curator import WorkspaceCurator
 from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue

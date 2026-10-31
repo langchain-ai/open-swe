@@ -86,6 +86,7 @@ from openswe.dashboard.options import (
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.engrams.store import ENGRAMS
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
@@ -99,7 +100,6 @@ from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.runtime import MCPTools, catalog_note
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
-from openswe.memories.store import MEMORIES
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -194,7 +194,7 @@ from openswe.tools import (
     connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
-    decide_memory,
+    decide_engram,
     delete_automation,
     delete_organization_skill,
     delete_user_skill,
@@ -210,8 +210,8 @@ from openswe.tools import (
     http_request,
     link_pull_request,
     list_automations,
+    list_engrams,
     list_event_types,
-    list_memories,
     list_threads,
     list_workspaces,
     listen_events,
@@ -481,13 +481,13 @@ async def _thread_participant(
             slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
-    profile, workspace_admin, instructions, memories = await asyncio.gather(
+    profile, workspace_admin, instructions, engrams = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
-        MEMORIES.personal(
+        ENGRAMS.personal(
             user.id if user else None,
-            unprocessed_in=(
+            curated_in=(
                 RunConfig.from_config(config).workspace_slug
                 if user is not None and user.typed_preferences.experimental_memory
                 else None
@@ -506,7 +506,7 @@ async def _thread_participant(
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
-        memories=tuple(memory.line for memory in memories),
+        engrams=tuple(engram.line for engram in engrams),
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
@@ -656,9 +656,9 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "save_user_settings",
         "remember",
         "forget",
-        "list_memories",
+        "list_engrams",
         "read_workspace_prompt",
-        "decide_memory",
+        "decide_engram",
         "publish_workspace_prompt",
         "record_incident_report",
         "search_incidents",
@@ -718,9 +718,9 @@ AGENT_TOOLS: Final = (
     publish_artifact,
     remember,
     forget,
-    list_memories,
+    list_engrams,
     read_workspace_prompt,
-    decide_memory,
+    decide_engram,
     publish_workspace_prompt,
     save_user_settings,
     save_user_skill,
@@ -1581,8 +1581,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             default_repo = await _resolve_prompt_default_repo(cfg)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-            memory = (
-                await MEMORIES.workspace_prompt(workspace.slug)
+            curated = (
+                await ENGRAMS.workspace_prompt(workspace.slug)
                 if workspace
                 and self._profile_login
                 and (await User.preferences_for_login(self._profile_login)).experimental_memory
@@ -1597,7 +1597,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             workspace_name=workspace.name if workspace else None,
             workspace_instructions=workspace.instructions if workspace else None,
             workspace_repos=workspace.repos if workspace else None,
-            workspace_memory=memory,
+            workspace_engrams=curated,
             admin_workspaces=self._admin_workspaces,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
