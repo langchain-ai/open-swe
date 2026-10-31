@@ -53,7 +53,7 @@ function GeneralSection({
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
-  channelLabel: (id: string) => string
+  channelLabel: (id: string, channelIds: ReadonlyArray<string>) => string
   onSaved: (saved: WorkspaceRecord) => void
   rebuildStatus: ReactNode
 }) {
@@ -97,7 +97,7 @@ function GeneralSection({
         promptHint="Instructions appended to every run in this workspace"
         workspaceSlug={record.slug}
         workspaces={workspaces}
-        channelLabel={channelLabel}
+        channelLabel={(id) => channelLabel(id, draft.slackChannelIds)}
       />
       <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-space-3">
         {rebuildStatus}
@@ -180,9 +180,9 @@ export function WorkspaceSettingsPanel({
   // them is one of its settings.
   const modelOptions = useOptions(slug)
   const scope: SettingsScope = { kind: "workspace", slug }
-  const channelDirectory = useSlackChannelDirectory(canEdit)
-  const channelLabel = (id: string) =>
-    slackChannelLabel(channelDirectory.data, id)
+  const channelDirectory = useSlackChannelDirectory(true)
+  const channelLabel = (id: string, channelIds: ReadonlyArray<string>) =>
+    slackChannelLabel(channelDirectory.data, id, channelIds)
 
   if (record.isLoading) return <Skeleton className="h-64 w-full" />
   if (record.isError || !record.data) {

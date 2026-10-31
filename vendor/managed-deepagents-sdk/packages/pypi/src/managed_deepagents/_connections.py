@@ -46,6 +46,11 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
+from managed_deepagents._langsmith_env import (
+    resolve_langsmith_endpoint,
+    resolve_server_api_key,
+    resolve_workspace_id,
+)
 from managed_deepagents._managed_thread import on_channel_thread
 
 if TYPE_CHECKING:
@@ -122,21 +127,14 @@ class ConnectionNotFoundError(LookupError):
 _SLUG_PATTERN = re.compile(r"[a-z0-9]+(?:[-/][a-z0-9]+)*")
 _MAX_SLUG_LENGTH = 64
 _DEV_CREDENTIAL_PREFIX = "MDA_DEV_"
-_TRUSTED_BACKEND_PROVIDER = "trusted_backend"
+TRUSTED_BACKEND_PROVIDER = "trusted_backend"
 
 
 #: Env var naming the LangSmith platform API that serves Agent Auth.
 PLATFORM_API_URL_ENV = "LANGSMITH_ENDPOINT"
-_DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 
 #: Env var holding the deployment id, which is the agent owner's ``owner_id``.
 DEPLOYMENT_ID_ENV = "LANGSMITH_HOST_PROJECT_ID"
-_API_KEY_ENV = "LANGSMITH_API_KEY"
-_LANGCHAIN_API_KEY_ENV = "LANGCHAIN_API_KEY"
-_WORKSPACE_ID_ENV = "LANGSMITH_WORKSPACE_ID"
-#: The workspace a hosted LangSmith deployment runs in. The platform sets it on
-#: every revision; ``LANGSMITH_WORKSPACE_ID`` is what users should set.
-_TENANT_ID_ENV = "LANGSMITH_TENANT_ID"
 _LOCAL_DEV_USER = "mda:local-dev"
 _LOCAL_DEV_PRINCIPAL_ENV = "MDA_AGENT_AUTH_PRINCIPAL_ID"
 
@@ -461,6 +459,20 @@ def resolve_agent_auth_context(
     )
 
 
+def resolve_external_principal_id(identity: ResolvePrincipalIdentity) -> str:
+    """Resolve an external identity to its Agent Auth principal with the deployment's key."""
+    config = _resolve_agent_auth_config(None)
+    agent_auth = AgentAuth(
+        AgentAuthContext(
+            base_url=config.base_url,
+            principal_id="",
+            api_key=config.api_key,
+            workspace_id=config.workspace_id,
+        )
+    )
+    return agent_auth.resolve_principal(identity)
+
+
 CHANNEL_THREAD_USER_CONNECTION_ERROR = (
     "user-owned connections are unavailable when resuming a channel's "
     "conversation from outside that channel: it holds content from outside "
@@ -486,12 +498,12 @@ def outside_caller_on_channel_thread(identity: RuntimeIdentity | None) -> bool:
     return not (isinstance(provider, str) and is_trusted_source_provider(provider))
 
 
-_UNMAPPED_SENDER_PROVIDERS = frozenset({"github"})
-"""Channels whose senders a delivery verifies but who cannot be mapped to a
-user of the agent's identity: the principal ``identity.py`` resolves, from
-LangSmith, Supabase or another provider. They cannot use tools that act on a
-user's behalf or own user grants, and asking them to connect an account would
-mean posting the link where everyone sees it."""
+_UNMAPPED_SENDER_PROVIDERS = frozenset({"github", "linear"})
+"""Channels whose senders a delivery verifies, but who run as their own
+provider principal unless ``resolve_user`` maps them to a user of the agent's
+identity. Unmapped, they cannot use tools that act on a user's behalf or own
+user grants: asking them to connect an account would mean posting the link
+where everyone sees it."""
 
 
 def unmapped_channel_provider(identity: RuntimeIdentity | None) -> str | None:
@@ -550,8 +562,8 @@ def resolve_credential_principal_id(
     unmapped = unmapped_channel_provider(identity)
     if unmapped is not None:
         raise CredentialStoreError(
-            f"user-owned connections are unavailable to {unmapped} senders: a "
-            f"{unmapped} account cannot be mapped to a user of this agent's identity"
+            f"user-owned connections are unavailable to {unmapped} senders that "
+            "resolve_user does not map to a user of this agent's identity"
         )
     kind = user.get("kind") if isinstance(user, Mapping) else None
     if kind == "service":
@@ -633,7 +645,7 @@ def _external_identity_for_resolve(
     workspace = (workspace_id or "").strip()
     return (
         {
-            "provider": _TRUSTED_BACKEND_PROVIDER,
+            "provider": TRUSTED_BACKEND_PROVIDER,
             "issuer": workspace,
             "subject": trusted_subject.strip(),
         }
@@ -644,11 +656,9 @@ def _external_identity_for_resolve(
 
 def _resolve_agent_auth_config(env: Mapping[str, str] | None) -> _AgentAuthConfig:
     resolved = os.environ if env is None else env
-    api_key = (resolved.get(_API_KEY_ENV) or "").strip() or (
-        resolved.get(_LANGCHAIN_API_KEY_ENV) or ""
-    ).strip()
+    api_key = resolve_server_api_key(resolved)
     if not api_key:
-        raise ConnectionsNotConfiguredError(f"{_API_KEY_ENV} or {_LANGCHAIN_API_KEY_ENV}")
+        raise ConnectionsNotConfiguredError("LANGSMITH_API_KEY or LANGCHAIN_API_KEY")
     workspace_id = resolve_workspace_id(resolved)
     if workspace_id is None:
         raise ConnectionsNotConfiguredError(WORKSPACE_SETTING)
@@ -665,34 +675,9 @@ def _resolve_agent_auth_config(env: Mapping[str, str] | None) -> _AgentAuthConfi
     )
 
 
-def resolve_workspace_id(env: Mapping[str, str] | None = None) -> str | None:
-    """The LangSmith workspace Agent Auth calls are scoped to.
-
-    Users set ``LANGSMITH_WORKSPACE_ID``, which wins. A hosted deployment
-    always runs with ``LANGSMITH_TENANT_ID``, which the platform sets, so a
-    deploy that never named a workspace still has one.
-    """
-    resolved = os.environ if env is None else env
-    for name in (_WORKSPACE_ID_ENV, _TENANT_ID_ENV):
-        value = (resolved.get(name) or "").strip()
-        if value:
-            return value
-    return None
-
-
 def resolve_agent_auth_base_url(env: Mapping[str, str] | None = None) -> str:
-    """Origin for Agent Auth HTTP calls from ``LANGSMITH_ENDPOINT``.
-
-    Cloud SaaS revisions omit that reserved name and inject
-    ``LANGCHAIN_ENDPOINT`` instead; read it as the same setting so we do not
-    default to production.
-    """
-    resolved = os.environ if env is None else env
-    raw = (
-        (resolved.get(PLATFORM_API_URL_ENV) or "").strip()
-        or (resolved.get("LANGCHAIN_ENDPOINT") or "").strip()
-        or _DEFAULT_LANGSMITH_ENDPOINT
-    )
+    """Origin for Agent Auth HTTP calls from the LangSmith endpoint."""
+    raw = resolve_langsmith_endpoint(env)
     try:
         parsed = urllib.parse.urlsplit(raw.rstrip("/"))
         _ = parsed.port

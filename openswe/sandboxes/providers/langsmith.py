@@ -1,12 +1,12 @@
 """LangSmith sandbox backend integration."""
 
 import asyncio
-import base64
 import json
 import logging
 import secrets
 import shlex
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
@@ -31,6 +31,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.sandbox_proxy import GITHUB_PROXY_RULES
 
 from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
@@ -55,16 +56,18 @@ DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES = 128 * 1024**3
 DEFAULT_SANDBOX_VCPUS = 4
 DEFAULT_SANDBOX_MEM_BYTES = 16 * 1024**3
 DEFAULT_SANDBOX_IDLE_TTL_SECONDS = 2 * 60 * 60  # 2 hours
-DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
+DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 7 * 24 * 60 * 60  # 7 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+# How long connecting to a sandbox still booting waits for it: as long as MDA's own first use
+# waits, retries included.
+SANDBOX_BOOT_TIMEOUT_SECONDS = 90
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
-# The API cannot push a proxy config while the host suspends an idle box, which
+# The API cannot push a proxy config while the host suspends an idle sandbox, which
 # takes up to about three minutes; outlast that rather than fail the run.
 PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
 # The most entries the sandbox file API returns for one listing.
@@ -239,35 +242,23 @@ class GitHubProxyRule(TypedDict):
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
     if not github_token:
         return []
-    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
-    return [
-        {
-            "name": "github-api",
-            "match_hosts": ["api.github.com"],
-            "headers": [
-                {
-                    "name": "Authorization",
-                    "type": "opaque",
-                    "value": f"Bearer {github_token}",
-                }
-            ],
-            # `gh` refuses to run without a token in its environment even though the
-            # proxy injects the real one on the wire.
-            "env_vars": {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER},
-        },
-        {
-            "name": "github",
-            "match_hosts": ["github.com", "*.github.com"],
-            "headers": [
-                {
-                    "name": "Authorization",
-                    "type": "opaque",
-                    "value": f"Basic {basic_auth}",
-                }
-            ],
-        },
-    ]
+    rules: list[GitHubProxyRule] = []
+    for rule in GITHUB_PROXY_RULES:
+        header: GitHubProxyHeader = {
+            "name": "Authorization",
+            "type": "opaque",
+            "value": rule.authorization(github_token),
+        }
+        written: GitHubProxyRule = {
+            "name": rule.name,
+            "match_hosts": list(rule.hosts),
+            "headers": [header],
+        }
+        if rule.env_vars:
+            written["env_vars"] = dict(rule.env_vars)
+        rules.append(written)
+    return rules
 
 
 def _proxy_config_retry_after(exc: BaseException) -> float | None:
@@ -305,9 +296,19 @@ def _is_retryable_sandbox_create_error(exc: BaseException) -> bool:
     }
 
 
+async def _booted_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
+    """The sandbox once it has booted: MDA asks for a thread's sandbox without waiting for it."""
+    sandbox = await client.get_sandbox(name=sandbox_id)
+    if sandbox.status != "provisioning":
+        return sandbox
+    return await client.wait_for_sandbox(
+        sandbox_id, timeout=SANDBOX_BOOT_TIMEOUT_SECONDS, poll_interval=0.5
+    )
+
+
 async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -> Any:
     try:
-        return await client.get_sandbox(name=sandbox_id)
+        return await _booted_sandbox(client, sandbox_id)
     except ResourceNotFoundError as e:
         msg = f"Failed to connect to existing sandbox '{sandbox_id}': {e}"
         raise SandboxGoneError(msg) from e
@@ -398,6 +399,58 @@ async def _federated_proxy_rules(
     ]
 
 
+async def sandbox_proxy_config(
+    sandbox_name: str,
+    github_token: str | None,
+    *,
+    base_proxy_config: Mapping[str, object] | None = None,
+    thread_id: str | None = None,
+    federated_rules: Sequence[dict[str, JsonValue]] | None = None,
+) -> dict[str, JsonValue]:
+    """The sandbox's proxy config: GitHub's rules with ``github_token``, none without one, the
+    thread's tool channel, and the custom settings of ``base_proxy_config``.
+
+    ``federated_rules`` are the cloud identity rules read from the live sandbox, which replace
+    any in ``base_proxy_config``; without them, the base config's are kept."""
+    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    proxy_config = dict(base_proxy_config or {})
+    custom_rules = proxy_config.get("rules")
+    # Written afresh below, or credentials saved by built-in integrations since removed.
+    replaced = {
+        *(rule.name for rule in GITHUB_PROXY_RULES),
+        TOOLS_RULE,
+        "github-public",
+        "open-swe-langsmith",
+        "stagehand-model",
+    }
+    preserved_rules = [
+        rule
+        for rule in (custom_rules if isinstance(custom_rules, list) else [])
+        if not isinstance(rule, dict) or rule.get("name") not in replaced
+    ]
+    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
+    if federated_rules is not None:
+        # Federation is fixed at creation, including its absence on older sandboxes, and
+        # LangSmith allows one rule per cloud.
+        federated_clouds = {rule.get("type") for rule in federated_rules}
+        preserved_rules = [
+            *(
+                rule
+                for rule in preserved_rules
+                if not federated_cloud(rule)
+                and not (isinstance(rule, dict) and rule.get("type") in federated_clouds)
+            ),
+            *federated_rules,
+        ]
+    proxy_config["rules"] = [
+        *_github_proxy_rules(github_token),
+        *([tools_rule] if tools_rule else []),
+        *preserved_rules,
+    ]
+    return _json_object.validate_python(proxy_config)
+
+
 async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
@@ -411,42 +464,16 @@ async def configure_sandbox_proxy(
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     url = f"{api.endpoint}/boxes/{sandbox_name}"
-    proxy_config = dict(base_proxy_config or {})
-    custom_rules = proxy_config.get("rules")
-    # Retire credentials saved by removed built-in integrations.
-    preserved_rules = [
-        rule
-        for rule in (custom_rules if isinstance(custom_rules, list) else [])
-        if not isinstance(rule, dict)
-        or rule.get("name")
-        not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
-    ]
-    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
-
-    preserved_rules = [
-        rule
-        for rule in preserved_rules
-        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
-    ]
-    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        # Federation is fixed at creation, including its absence on older boxes, and
-        # LangSmith allows one rule per cloud.
-        federated_rules = await _federated_proxy_rules(client, url, api, sandbox_name)
-        federated_clouds = {rule.get("type") for rule in federated_rules}
-        proxy_config["rules"] = [
-            *_github_proxy_rules(github_token),
-            *([tools_rule] if tools_rule else []),
-            *(
-                rule
-                for rule in preserved_rules
-                if not federated_cloud(rule)
-                and not (isinstance(rule, dict) and rule.get("type") in federated_clouds)
-            ),
-            *federated_rules,
-        ]
+        proxy_config = await sandbox_proxy_config(
+            sandbox_name,
+            github_token,
+            base_proxy_config=base_proxy_config,
+            thread_id=thread_id,
+            federated_rules=await _federated_proxy_rules(client, url, api, sandbox_name),
+        )
         await _patch_proxy_config(client, url, {"proxy_config": proxy_config}, api, sandbox_name)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
@@ -529,7 +556,7 @@ async def sandbox_exists(sandbox_id: str) -> bool:
 async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
     client = get_async_sandbox_client()
     try:
-        return client, await client.get_sandbox(name=sandbox_id)
+        return client, await _booted_sandbox(client, sandbox_id)
     except Exception:
         await client.aclose()
         raise
@@ -911,7 +938,7 @@ class SandboxProvider(ABC):
 
     Intentionally has no delete. A sandbox holds the agent's only copy of its
     working tree, and the thread metadata read fails open to "no sandbox", so a
-    delete keyed off it can destroy a live box. Reclamation is the platform's
+    delete keyed off it can destroy a live sandbox. Reclamation is the platform's
     job, via the idle TTL and delete-after-stop set at create time.
     """
 

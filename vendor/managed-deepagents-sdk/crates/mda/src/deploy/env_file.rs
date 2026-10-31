@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::error::{categorized, ErrorCategory};
+
 /// Parse a `.env` file into a map of `KEY=VALUE` pairs.
 ///
 /// Uses [`dotenvy`] for standard dotenv semantics (quotes, `export`, full-line
@@ -59,11 +61,43 @@ pub fn set_env_key(path: &Path, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// The env file a deployment-targeting command reads (and writes prompted
+/// credentials back to): `--env-file` when given, else the project `.env`.
+pub(crate) fn project_env_path(project_root: &Path, env_file: Option<&Path>) -> PathBuf {
+    env_file.map_or_else(|| project_root.join(".env"), Path::to_path_buf)
+}
+
+/// Resolve an `--env-file` flag against the current directory.
+///
+/// The file must already exist: a mistyped name would otherwise deploy with
+/// none of its secrets, or have a pasted API key written into a new file.
+pub fn resolve_env_file_flag(path: Option<PathBuf>) -> Result<Option<PathBuf>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let absolute = std::path::absolute(&path)
+        .with_context(|| format!("failed to resolve --env-file {}", path.display()))?;
+    if !absolute.is_file() {
+        return Err(categorized(
+            ErrorCategory::UserInput,
+            format!(
+                "--env-file {} does not exist or is not a file",
+                path.display()
+            ),
+        ));
+    }
+    Ok(Some(absolute))
+}
+
 /// Project env file to update when recovering LangSmith credentials.
 ///
-/// Prefers an existing `.env`, then `.env.local`, then creates `.env` — the same
-/// order [`crate::dev`] uses when staging env for local runs.
-pub fn project_env_persist_path(project_root: &Path) -> PathBuf {
+/// `--env-file` when given; otherwise prefers an existing `.env`, then
+/// `.env.local`, then creates `.env` — the same file [`crate::dev`] stages for
+/// local runs.
+pub fn project_env_persist_path(project_root: &Path, env_file: Option<&Path>) -> PathBuf {
+    if env_file.is_some() {
+        return project_env_path(project_root, env_file);
+    }
     let env = project_root.join(".env");
     if env.is_file() {
         return env;
@@ -110,6 +144,62 @@ pub fn remove_env_key(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_env_path_prefers_the_env_file_flag() {
+        let root = Path::new("/proj");
+        assert_eq!(project_env_path(root, None), root.join(".env"));
+        assert_eq!(
+            project_env_path(root, Some(Path::new("/secrets/.env.staging"))),
+            PathBuf::from("/secrets/.env.staging")
+        );
+    }
+
+    #[test]
+    fn project_env_persist_path_prefers_the_env_file_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".env"), "OPENAI_API_KEY=test\n").unwrap();
+        let staging = dir.path().join("config").join(".env.staging");
+        assert_eq!(
+            project_env_persist_path(dir.path(), None),
+            dir.path().join(".env")
+        );
+        assert_eq!(
+            project_env_persist_path(dir.path(), Some(&staging)),
+            staging
+        );
+    }
+
+    #[test]
+    fn resolve_env_file_flag_requires_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join(".env.staging");
+        fs::write(&staging, "OPENAI_API_KEY=test\n").unwrap();
+
+        assert_eq!(resolve_env_file_flag(None).unwrap(), None);
+        assert_eq!(
+            resolve_env_file_flag(Some(staging.clone())).unwrap(),
+            Some(staging)
+        );
+        let missing = resolve_env_file_flag(Some(dir.path().join(".env.stagign")))
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains(".env.stagign"), "{missing}");
+        let directory = resolve_env_file_flag(Some(dir.path().to_path_buf()))
+            .unwrap_err()
+            .to_string();
+        assert!(directory.contains("not a file"), "{directory}");
+    }
+
+    #[test]
+    fn resolve_env_file_flag_makes_relative_paths_absolute() {
+        let cwd = std::env::current_dir().unwrap();
+        let resolved = resolve_env_file_flag(Some(PathBuf::from("Cargo.toml")))
+            .unwrap()
+            .unwrap();
+        assert!(resolved.is_absolute());
+        assert_eq!(resolved, cwd.join("Cargo.toml"));
+    }
 
     #[test]
     fn parse_handles_comments_quotes_and_export() {

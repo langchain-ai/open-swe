@@ -747,7 +747,7 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
             raise RuntimeError("Sandbox metadata unavailable")
         return backend.id
 
-    async def connect_box(
+    async def connect_to_sandbox(
         sandbox_id: str, *, thread_id: str | None = None
     ) -> SandboxBackendProtocol:
         assert sandbox_id == backend.id
@@ -755,7 +755,7 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
         return cast(SandboxBackendProtocol, backend)
 
     monkeypatch.setattr(state, "get_sandbox_id_from_metadata", sandbox_id)
-    monkeypatch.setattr(connect, "connect_sandbox", connect_box)
+    monkeypatch.setattr(connect, "connect_sandbox", connect_to_sandbox)
     monkeypatch.setattr(guard, "workflow_push_approved", AsyncMock(return_value=approved))
     monkeypatch.setattr(
         guard, "ensure_workflow_push_pending", AsyncMock(return_value=({"status": "pending"}, True))

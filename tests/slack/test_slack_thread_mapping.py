@@ -8,6 +8,7 @@ import pytest
 from openswe import event_claims
 from openswe.database import postgres
 from openswe.slack import client as slack_client
+from openswe.slack import records as slack_records
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, slack_thread_mutation_lock
 from openswe.slack.records import (
@@ -23,6 +24,27 @@ from openswe.slack.records import (
 )
 from openswe.thread_ids import mda_successor_thread_id
 from openswe.threads import index
+
+
+@pytest.mark.parametrize("root_field", ["ts", "thread_ts"])
+async def test_reply_permalink_without_thread_timestamp(monkeypatch, root_field: str) -> None:
+    lookup = AsyncMock(
+        side_effect=lambda channel, ts: "thread-1" if ts == "1788425314.774339" else None
+    )
+    monkeypatch.setattr(slack_records, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(slack_records, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    client = AsyncMock()
+    client.conversations_replies.return_value = {"messages": [{root_field: "1788425314.774339"}]}
+    context = AsyncMock()
+    context.__aenter__.return_value = client
+    monkeypatch.setattr(slack_records.SlackClient, "bot", lambda: context)
+
+    assert (
+        await slack_records.lookup_slack_link_thread_id(
+            "https://example.slack.com/archives/C123/p1788431248678809"
+        )
+        == "thread-1"
+    )
 
 
 class _Threads:

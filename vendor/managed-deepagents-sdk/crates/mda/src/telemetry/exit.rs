@@ -69,7 +69,9 @@ pub fn report_panics() {
             EXIT_DELIVERY_DEADLINE,
             vec![Box::new(move || {
                 otel_logger::panic(&message);
-                deliver_at_exit(CommandCompletion::Failed(ErrorCategory::Unclassified));
+                deliver_at_exit(CommandCompletion::Failed(
+                    ErrorCategory::Unclassified.into(),
+                ));
             })],
         );
     }));

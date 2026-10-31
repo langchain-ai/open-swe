@@ -9,10 +9,18 @@ This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
 manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
+
+Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
+the backend hands the channel with the run. A channel that answers failures in its
+own conversation gets no failure reply from here. Follow-ups steered into it,
+task messages and event wakes that arrived during it are picked up as after any
+run: the backend starts those runs on the channel's thread through MDA's trusted
+ingress.
 """
 
 import hmac
 import logging
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -22,7 +30,7 @@ from langgraph_sdk.client import LangGraphClient
 from openswe import event_claims
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
-from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata
+from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
@@ -30,7 +38,11 @@ from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
 from openswe.session_cost import schedule_session_cost_refresh
-from openswe.slack.client import post_slack_thread_reply
+from openswe.slack.client import (
+    SANDBOX_UNREACHABLE_NOTICE,
+    SlackNotice,
+    post_slack_thread_reply,
+)
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
@@ -59,6 +71,7 @@ _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
 _CONSECUTIVE_FAILURES = "consecutive_failed_runs"
+_RUN_FAILED_NOTICE = "run_failed"
 # A thread that keeps failing would otherwise post one notice per run, forever.
 _MAX_CONSECUTIVE_FAILURE_REPLIES = 3
 # One failure reply per run, however many of its webhook and the stalled-run sweep race.
@@ -169,12 +182,49 @@ async def _post_failure_reply(
         location = ctx.slack_location
         if location is not None:
             trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
+            from openswe.slack.retry import SlackRetry
+
             slack_text = _failure_text(status, trace_url, reason_code)
+            blocks = None
+            slack_thread = ctx.slack_thread
+            if (
+                slack_thread is not None
+                and not slack_thread.triggering_bot_id
+                and reason_code not in {"context_too_long", "model_unavailable"}
+            ):
+                retry_text = warning(
+                    f"Open SWE wasn't able to finish that — {_failure_reason(status, reason_code)}. "
+                    "Click Retry to pick this back up."
+                )
+                if trace_url:
+                    retry_text += f" View the error in <{trace_url}|LangSmith>."
+                blocks = SlackRetry(
+                    channel_id=location[0],
+                    thread_ts=slack_thread.thread_ts,
+                    user_id=slack_thread.triggering_user_id,
+                    reply_thread_ts=slack_thread.reply_thread_ts,
+                    nonce=invocation_id or str(uuid.uuid7()),
+                ).blocks(retry_text)
+                if blocks is not None:
+                    slack_text = retry_text
+            notice = SlackNotice(
+                _RUN_FAILED_NOTICE,
+                _failure_text(status, reason_code=reason_code),
+                quiet_after=(
+                    frozenset({SANDBOX_UNREACHABLE_NOTICE})
+                    if reason_code == "sandbox_unreachable"
+                    else frozenset()
+                ),
+            )
+            if blocks is not None:
+                blocks[0]["block_id"] = notice.block_id
             return await post_slack_thread_reply(
                 location[0],
                 location[1],
                 slack_text,
+                blocks=blocks,
                 agent_thread_id=thread_id,
+                notice=notice,
             )
         return False
 
@@ -463,6 +513,11 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
     )
 
 
+# MDA channels that report a run's failure in their conversation themselves. The
+# GitHub channel doesn't, so its issues still get Open SWE's failure reply.
+_CHANNELS_REPORTING_FAILURES = frozenset({"linear"})
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Settle a completed run, enqueue cost refreshes, and post failure replies."""
     status = payload.get("status")
@@ -493,6 +548,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
+    channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
@@ -568,6 +624,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if review_failure is not None:
         review_failure.log()
         reported = await review_failure.report()
+
+    if channel in _CHANNELS_REPORTING_FAILURES:
+        return {"status": "ignored", "reason": "the channel reports the failure"}
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.

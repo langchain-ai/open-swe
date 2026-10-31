@@ -12,18 +12,20 @@ import (``runtime_api``):
   lists every tool but the run's integrations, and the context names them only:
   every tool is kept by digest (``run_tool_sets``), which
   ``tool_specs``, ``search_tools`` and ``resolve_tool`` read
-- ``prepare`` readies the run: the thread's sandbox, checkout and prompt, the
-  transcript turn, skills and reply bookkeeping. Agent runs carry immutable
-  preparation inputs in their signed settings; older runs rebuild their plan
+- ``prepare`` readies the run's turn: its prompt, model and route, from what the
+  token says starting the run decided (``RunSettings.agent``), without reaching the
+  sandbox MDA keeps. The reviewer and the scout still prepare from their plan, the one
+  call that plans the run again. What the turn's start records (its transcript turn,
+  the thread's model and usage) is the ``run_started`` report, off the run's path
 - every other call is a ``TokenRun``, answered from the token and the request with
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
   named calls MDA's middleware makes around a model call (``route_model``,
-  ``model_choice``, ``task_context``, ``refresh_github_proxy``, ``git_baseline``,
+  ``model_choice``, ``task_context``, ``refresh_github_proxy``,
   ``reply_on_behalf``) and at the run's end (``run_ended``,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
   reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key, the work of the run's tools (``operation``,
-  ``check_shell``, the ``files`` calls), and the box MDA keeps
+  ``check_shell``, the ``files`` calls), and the sandbox MDA keeps
 - a run still served from its plan (``RunParts.legacy``: a requested offload, an
   incident; or a token from before operations were granted) has its phases (``before_model``, ``after_model``, ``after_agent``) and
   tool calls answered by ``RunSession``, as is ``record_evidence``
@@ -105,7 +107,6 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     BROWSER,
     FINISH_SCOUT_PLAN,
-    GIT_BASELINE,
     INBOX,
     INBOX_RECEIVED,
     MODEL_CHOICE,
@@ -115,6 +116,7 @@ from runtime_api.loop import (
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
+    RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
@@ -122,12 +124,10 @@ from runtime_api.loop import (
     TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
-    AfterAgent,
     BeforeModel,
     BrowserReport,
     ChosenModel,
     Done,
-    GitBaseline,
     GitHubProxyRefreshed,
     Inbox,
     InboxItems,
@@ -143,11 +143,12 @@ from runtime_api.loop import (
     Routed,
     RunCall,
     RunEnded,
+    RunNotice,
+    RunStarted,
     SandboxGone,
     ScoutPlanEnd,
     TaskContext,
     ToolCallReport,
-    ToolResultReply,
     ToolResultReport,
 )
 from runtime_api.operations import (
@@ -163,6 +164,7 @@ from runtime_api.operations import (
     ToolEvidence,
 )
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
+from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxy, SandboxProxyRequest
 from runtime_api.skills import SKILLS, RunSkills
 from runtime_api.tool_search import (
     RESOLVE,
@@ -178,13 +180,9 @@ from runtime_api.tool_search import (
 )
 
 from openswe.agent_api.caller_trace import traced_under
+from openswe.agent_api.connections import carrying, operation_connections
 from openswe.agent_api.failures import OperationFailure
-from openswe.agent_api.git_metadata import (
-    BASELINE,
-    OBSERVED_TOOLS,
-    TurnGitMetadata,
-    collect_pr_targets,
-)
+from openswe.agent_api.git_metadata import collect_pr_targets, trace_actor
 from openswe.agent_api.loop import (
     Phase,
     RunLoop,
@@ -203,11 +201,19 @@ from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
+from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.shell_guards import ShellGuards
-from openswe.agent_api.tokens import RemoteRun, RunSettings
+from openswe.agent_api.tokens import (
+    AGENT_TURN_KEY,
+    AgentTurnSettings,
+    RemoteRun,
+    RunSettings,
+)
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
+from openswe.config import ENV
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
-from openswe.github.proxy import proxy_token_set_since
+from openswe.github.app import PermissionMap
+from openswe.github.proxy import proxy_token_recorded, proxy_token_set_since
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
@@ -217,16 +223,19 @@ from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.settle_review_check import settle_review_check
+from openswe.middleware.stale_workspace import stale_workspace_notice
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
 from openswe.prompts import common_prompt, prompt
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import (
     bind_mda_sandbox,
+    mda_proxy_config,
     reconnect_replaced_sandbox,
     refresh_thread_github_proxy,
+    take_stale_boot,
 )
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
@@ -248,7 +257,6 @@ from openswe.server import (
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.access import agent_version_metadata
 from openswe.threads.inbox import ThreadInbox
-from openswe.utils.startup_trace import apm_span
 from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
@@ -275,6 +283,22 @@ _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 _FILE_TOOLS: Final = frozenset(DEEP_AGENT_TOOL_NAMES) - _MDA_TOOLS
 _SESSION_TTL_SECONDS: Final = 6 * 60 * 60
 _SESSION_LIMIT: Final = 512
+# The graphs that review a pull request, which reach only its repository, read-only.
+_REVIEW_GRAPHS: Final = frozenset({"reviewer", "review-scout"})
+
+
+async def _tell_sandbox_gone(
+    config: RunnableConfig,
+    assistant_id: str | None,
+    *,
+    sandbox_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """Tell the person the run's sandbox is gone, unless a review's own notice tells its PR."""
+    if assistant_id in _REVIEW_GRAPHS:
+        return
+    await post_sandbox_unreachable_notification(config, sandbox_id=sandbox_id, reason=reason)
+
 
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
@@ -326,6 +350,15 @@ class RecordsRemoteTools(Protocol):
     async def atool_finished(self, result: ToolMessage) -> None: ...
 
 
+async def _finish_git_identity(thread_id: str | None) -> None:
+    """Write the bot's git identity a sandbox preparation connected to still has pending."""
+    sandbox = SANDBOX_BACKENDS.get(thread_id or "")
+    if sandbox is not None and sandbox.has_backend:
+        backend = sandbox.current
+        if isinstance(backend, TimeoutLangSmithSandbox):
+            await backend.ensure_git_identity()
+
+
 class RunSession:
     """One run as its graph factory planned it: its tools, middleware and models."""
 
@@ -343,7 +376,7 @@ class RunSession:
         self.config = config
         # The run as its token names it, whose catalog grants it its operations.
         self.run = run
-        # The graph the run plays, which decides what a replaced box may reach.
+        # The graph the run plays, which decides what a replaced sandbox may reach.
         self.assistant_id = assistant_id
         self._restore = restore
         self._joined = self._prepared = started_here
@@ -407,6 +440,7 @@ class RunSession:
                 reads_all=injections.reads_all,
                 code_name=code_name(described.name),
                 seconds=call_seconds(described.name),
+                connections=operation_connections(described.name, self.config),
             )
             for described in self.surface.catalog()
             if described.name in tools
@@ -436,6 +470,7 @@ class RunSession:
         from_code = offered - excluded if self.surface.code_mode else frozenset()
         return Catalog(
             operations=[spec for spec in self._specs() if spec.name not in withheld],
+            mcp_servers=list(self.surface.mcp_servers),
             subagents=[
                 SubagentSpec(
                     name=subagent.name,
@@ -480,20 +515,26 @@ class RunSession:
         )
 
     async def plan(self) -> Catalog:
-        """The catalog, with who the run acts for, the box MDA creates for it, and the grant
+        """The catalog, with who the run acts for, the sandbox MDA creates for it, and the grant
         of each operation to the run this session serves."""
         sandbox = await self.sandbox()
+        spec = (
+            None if sandbox is None else SandboxSpec.model_validate(sandbox.model_dump(mode="json"))
+        )
         catalog = self.catalog()
+        loop = catalog.loop
+        if loop is not None and spec is not None and spec.github_proxy is not None:
+            # MDA puts a fresh token in this sandbox's proxy config itself, before each command.
+            loop = loop.model_copy(update={"refresh_github_proxy": False})
         run = self.run
         return catalog.model_copy(
             update={
                 "trace_metadata": {
-                    **TurnGitMetadata(self.config).actor,
+                    **trace_actor(self.config),
                     **agent_version_metadata(),
                 },
-                "sandbox": None
-                if sandbox is None
-                else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
+                "sandbox": spec,
+                "loop": loop,
                 "operations": catalog.operations
                 if run is None
                 else [
@@ -506,24 +547,23 @@ class RunSession:
     def settings(self) -> RunSettings:
         """What planning decided for the run, which its later calls read from its token."""
         cfg = RunConfig.from_config(self.config)
+        turn = (self.config.get("configurable") or {}).get(AGENT_TURN_KEY)
         return RunSettings(
             source=cfg.source,
             draft_prs=cfg.draft_prs,
             model_id=cfg.resolved_agent_model_id,
             effort=cfg.resolved_agent_effort,
+            agent=None if turn is None else AgentTurnSettings.model_validate(turn),
         )
 
     async def sandbox(self) -> ManagedSandbox | None:
-        """The thread's box as MDA creates it, when MDA owns it."""
-        cfg = RunConfig.from_config(self.config)
-        if cfg.thread_id is None:
-            return None
-        return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
+        """The thread's sandbox as MDA creates it, when MDA owns it."""
+        return await managed_sandbox(self.config, self.assistant_id)
 
     async def bind_sandbox(self, request: Prepare) -> None:
-        """Bind the thread to the box MDA opened before preparing, if MDA owns it.
+        """Bind the thread to the sandbox MDA opened before preparing, if MDA owns it.
 
-        A thread with no box to work in ends the run once the person knows why.
+        A thread with no sandbox to work in ends the run once the person knows why.
         """
         cfg = RunConfig.from_config(self.config)
         if cfg.thread_id is None or await self.sandbox() is None:
@@ -536,11 +576,23 @@ class RunSession:
                 workspace_slug=cfg.workspace_slug,
             )
         except SandboxUnreachableError as exc:
-            await post_sandbox_unreachable_notification(self.config, reason=exc.reason)
+            await _tell_sandbox_gone(self.config, self.assistant_id, reason=exc.reason)
             raise
+        if request.sandbox_id is not None and not proxy_token_recorded(cfg.thread_id):
+            # MDA runs the agent's commands in the sandbox itself, so nothing here connects
+            # to it before its first GitHub call: connect now, which sets its git
+            # identity, and its proxy unless MDA writes that.
+            try:
+                await reconnect_sandbox(self.config, self.assistant_id)
+            except Exception:
+                logger.warning(
+                    "Could not connect to the sandbox MDA opened",
+                    extra={"agent_thread_id": cfg.thread_id, "sandbox_id": request.sandbox_id},
+                    exc_info=True,
+                )
 
     async def sandbox_replaced(self, _request: RunRequest) -> Done:
-        """Connect again to the thread's box, which MDA replaced with a fresh one."""
+        """Connect again to the thread's sandbox, which MDA replaced with a fresh one."""
         await reconnect_sandbox(self.config, self.assistant_id)
         return Done()
 
@@ -609,6 +661,7 @@ class RunSession:
             guards=self._shell_guards,
             client=self._client_tools,
             ready=self.rejoin_preparation,
+            assistant_id=self.assistant_id,
         )
 
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
@@ -653,7 +706,7 @@ class RunSession:
 
     async def prepare(self, request: Prepare) -> Prepared:
         started = datetime.now(UTC)
-        # MDA opened the box before preparing; preparation connects to it as to any other.
+        # MDA opened the sandbox before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request)
         cfg = RunConfig.from_config(self.config)
         if self.surface.inbox is not None and cfg.thread_id is not None:
@@ -662,15 +715,11 @@ class RunSession:
 
         async def begun(state: dict[str, object], runtime: Runtime) -> Prepared:
             result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
-            sandbox = SANDBOX_BACKENDS.get(cfg.thread_id or "")
-            if sandbox is not None and sandbox.has_backend:
-                backend = sandbox.current
-                if isinstance(backend, TimeoutLangSmithSandbox):
-                    await backend.ensure_git_identity()
+            await _finish_git_identity(cfg.thread_id)
             expires_at = proxy_token_set_since(cfg.thread_id, started)
             return Prepared(
                 **result.model_dump(exclude={"update"}),
-                update={**result.update, BASELINE: None},
+                update=result.update,
                 github_proxy=None
                 if expires_at is None
                 else GitHubProxyRefreshed(expires_at=expires_at),
@@ -684,21 +733,17 @@ class RunSession:
     async def after_model(self, request: RunCall) -> PhaseResult:
         return await self._answer_phase("after_model", request, self.loop.after_model)
 
-    async def after_agent(self, request: RunCall) -> AfterAgent:
-        async def reconciled(state: dict[str, object], runtime: Runtime) -> AfterAgent:
-            result = await run_hooks(self.surface.middleware, "after_agent", state, runtime)
-            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
-            return AfterAgent(
-                **result.model_dump(exclude={"update"}),
-                update={**result.update, BASELINE: None},
-                trace_metadata=trace_metadata,
-            )
+    async def after_agent(self, request: RunCall) -> PhaseResult:
+        async def ended(state: dict[str, object], runtime: Runtime) -> PhaseResult:
+            return await run_hooks(self.surface.middleware, "after_agent", state, runtime)
 
-        return await self._answer_phase("after_agent", request, reconciled)
+        return await self._answer_phase("after_agent", request, ended)
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
-        """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
+        await _tell_sandbox_gone(
+            self.config, self.assistant_id, sandbox_id=request.sandbox_id, reason=request.reason
+        )
         return Done()
 
     def _offered(self) -> list[BaseTool]:
@@ -764,6 +809,7 @@ async def run_operation(
     guards: ShellGuards,
     client: ClientToolsMiddleware | None,
     ready: Callable[[Runtime], Awaitable[None]],
+    assistant_id: str | None = None,
 ) -> OperationResult:
     """Do the work of ``tool`` for ``request``, as the run ``config`` names, once ``ready``."""
     if tool is None or request.name in _MDA_TOOLS:
@@ -781,25 +827,26 @@ async def run_operation(
         decision = await guards.decide(request.name, request.arguments)
         if decision.arguments is None:
             return OperationResult(content=decision.refusal or "", status="error")
-        observed_at = time.time_ns()
-        with collect_pr_targets() as pr_targets:
+        with collect_pr_targets() as pull_requests, carrying(request.credentials):
             try:
                 outcome = await invoke(tool, decision.arguments, state, request.request_id)
             except NodeCancelledError:
                 # The run is being cancelled: that ends the call, not just its result.
                 raise
             except Exception as exc:
-                failure = await OperationFailure.of(exc, operation=request.name, config=config)
+                failure = await OperationFailure.of(
+                    exc,
+                    operation=request.name,
+                    config=config,
+                    notify=assistant_id not in _REVIEW_GRAPHS,
+                )
                 return OperationResult(
                     content=failure.content,
                     status="error",
                     sandbox_unreachable=failure.sandbox_unreachable,
                 )
         result = _operation_result(outcome, request.request_id)
-        evidence = TurnGitMetadata(config).evidence(
-            pr_targets, request.request_id, pr=True, observed_at=observed_at
-        )
-        return result.model_copy(update={"evidence": evidence})
+        return result.model_copy(update={"pull_requests": pull_requests})
 
     result = await in_graph_context({**config, "run_name": request.name}, run, events=events)
     return result.model_copy(update={"events": [_json_or_text(e) for e in events]})
@@ -817,20 +864,45 @@ async def check_shell(guards: ShellGuards, request: ShellCheck) -> ShellVerdict:
     )
 
 
+def _run_github_scope(
+    cfg: RunConfig, assistant_id: str | None
+) -> tuple[list[str] | None, PermissionMap | None]:
+    """How a run narrows its sandbox's GitHub token beyond its thread's own scope: a review
+    reads only its pull request's repository."""
+    if assistant_id not in _REVIEW_GRAPHS:
+        return None, None
+    return [cfg.repo.full_name] if cfg.repo else [], READ_ONLY_REVIEW_PERMISSIONS
+
+
+async def managed_sandbox(
+    config: RunnableConfig, assistant_id: str | None
+) -> ManagedSandbox | None:
+    """The run's thread's sandbox as MDA creates it, when MDA owns it."""
+    cfg = RunConfig.from_config(config)
+    if cfg.thread_id is None:
+        return None
+    repositories, permissions = _run_github_scope(cfg, assistant_id)
+    return await ManagedSandbox.for_thread(
+        cfg.thread_id,
+        cfg.workspace_slug,
+        github_repositories=repositories,
+        github_permissions=permissions,
+    )
+
+
 async def reconnect_sandbox(config: RunnableConfig, assistant_id: str | None) -> None:
-    """Connect again to the thread's box, which MDA replaced with a fresh one."""
+    """Connect again to the thread's sandbox, which MDA replaced with a fresh one."""
 
     async def reconnect(_runtime: Runtime) -> None:
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
             raise ValueError("This run has no thread")
-        reviewing = assistant_id in {"reviewer", "review-scout"}
-        repositories = [cfg.repo.full_name] if cfg.repo else []
+        repositories, permissions = _run_github_scope(cfg, assistant_id)
         await reconnect_replaced_sandbox(
             cfg.thread_id,
             workspace_slug=cfg.workspace_slug,
-            github_proxy_repositories=repositories if reviewing else None,
-            github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
+            github_proxy_repositories=repositories,
+            github_proxy_permissions=permissions,
         )
 
     await in_graph_context({**config, "run_name": "sandbox"}, reconnect)
@@ -926,11 +998,10 @@ class TokenRun:
         """``record`` the report as the run, inside the calling subagent, with its turn rejoined.
 
         A report carries only what it is about: the ``messages`` it adds and the run
-        state (``held``, and the turn's git trace) its recorders read. What a recorder
-        queued is written before the call answers, so the next call may reach another
-        process.
+        state (``held``) its recorders read. What a recorder queued is written before the
+        call answers, so the next call may reach another process.
         """
-        state: dict[str, object] = {**report.git, **held, "messages": list(messages)}
+        state: dict[str, object] = {**held, "messages": list(messages)}
         carried = [m for m in self.parts.reporters if isinstance(m, CarriedAcrossProcesses)]
 
         async def reported(runtime: Runtime) -> T:
@@ -966,6 +1037,89 @@ class TokenRun:
         )
         return Done()
 
+    async def prepare(self, request: Prepare) -> Prepared | None:
+        """Ready the run's turn from its token and the conversation; None where the graph
+        still prepares from its plan.
+
+        Nothing here waits on the sandbox MDA keeps: the run readies the sandbox it opened, and
+        its loop keeps the sandbox's GitHub token fresh (``refresh_github_proxy``).
+        """
+        started = datetime.now(UTC)
+        preparation = await self.parts.preparation(
+            self.config, self.run.settings, sandbox_id=request.sandbox_id
+        )
+        if preparation is None:
+            return None
+        if request.in_sandbox:
+            # MDA opened the sandbox before preparing; the thread is bound to it from here on.
+            # A thread with no sandbox to work in ends the run once the person knows why.
+            try:
+                await bind_mda_sandbox(
+                    self.run.thread_id,
+                    request.sandbox_id,
+                    open_error=request.sandbox_error,
+                    workspace_slug=RunConfig.from_config(self.config).workspace_slug,
+                )
+            except SandboxUnreachableError as exc:
+                await _tell_sandbox_gone(self.config, self.graph.assistant_id, reason=exc.reason)
+                raise
+        notices = self._turn_notices()
+        if events := _carried_events(self.config):
+            # The events this run was started to carry are its input: it holds them now.
+            await ThreadInbox(self.run.thread_id).receive(events=events)
+        state = call_state(request, self.parts.restore)
+
+        async def prepared(runtime: Runtime) -> Prepared:
+            result = await run_hooks(preparation, "before_agent", state, runtime)
+            await _finish_git_identity(self.run.thread_id)
+            # A sandbox the backend connected to, such as a bridged machine, got a fresh token.
+            expires_at = proxy_token_set_since(self.run.thread_id, started)
+            return Prepared(
+                **result.model_dump(),
+                github_proxy=None
+                if expires_at is None
+                else GitHubProxyRefreshed(expires_at=expires_at),
+                notices=notices,
+                sender=self.parts.sender(self.config, self.run.settings),
+            )
+
+        emitted: list[object] = []
+        result = await in_graph_context(
+            {**self.config, "run_name": "before_agent"}, prepared, events=emitted
+        )
+        return result.model_copy(update={"events": [_json_or_text(e) for e in emitted]})
+
+    def _turn_notices(self) -> list[RunNotice]:
+        """What the turn's transcript shows from binding its sandbox: a stale workspace image."""
+        stale = take_stale_boot(self.run.thread_id)
+        data = None if stale is None else stale_workspace_notice(self.run.thread_id, stale)
+        return [] if data is None else [RunNotice(kind="workspace_stale", data=data)]
+
+    def _as_invocation(self, invocation_id: str | None) -> None:
+        """Record as the invocation a report names, which need not be this token's."""
+        if invocation_id is not None:
+            self.config = self.graph.config_for(self.run, self.run_id, invocation_id=invocation_id)
+
+    async def run_started(self, request: RunStarted) -> Done:
+        """Record the run's start: its transcript turn, and what it runs as."""
+        # A later run sends what an earlier one left undelivered, with its own token, whose
+        # sender is not the earlier invocation's: the report names that one's.
+        carried = request.invocation_id not in (
+            None,
+            RunConfig.from_config(self.config).invocation_id,
+        )
+        self._as_invocation(request.invocation_id)
+        for notice in request.notices:
+            queue_run_notice(self.run.thread_id, notice.kind, notice.data)
+
+        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
+            await self.parts.started(self.config, self.run.settings, request, carried=carried)
+
+        await self._reporting(
+            request, "run_started", record, messages=messages_from_dict(request.humans)
+        )
+        return Done()
+
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
         return [m for m in self.parts.reporters if isinstance(m, RecordsRemoteTools)]
 
@@ -981,22 +1135,17 @@ class TokenRun:
         await self._reporting(request, "tool_started", record)
         return Done()
 
-    async def tool_result(self, request: ToolResultReport) -> ToolResultReply:
+    async def tool_result(self, request: ToolResultReport) -> Done:
         [result] = messages_from_dict([request.result])
         if not isinstance(result, ToolMessage):
             raise ValueError("A tool result must be a tool message")
 
-        async def record(state: dict[str, object], _runtime: Runtime) -> dict[str, JsonValue]:
+        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
             for recorder in self._tool_recorders():
                 await recorder.atool_finished(result)
-            # A file or shell tool may have started the turn's work; the snapshot is taken
-            # now, off the call's path, as the run, which a bridged machine checks.
-            git = TurnGitMetadata(self.config)
-            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
-            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
 
-        update = await self._reporting(request, "tool_result", record)
-        return ToolResultReply(update=update)
+        await self._reporting(request, "tool_result", record)
+        return Done()
 
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
@@ -1017,6 +1166,7 @@ class TokenRun:
             guards=ShellGuards(self.parts.shell_guards),
             client=client,
             ready=self._ready,
+            assistant_id=self.graph.assistant_id,
         )
 
     async def _tool_set(self) -> ToolSet:
@@ -1063,8 +1213,13 @@ class TokenRun:
         return Done()
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
-        """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
+        await _tell_sandbox_gone(
+            self.config,
+            self.graph.assistant_id,
+            sandbox_id=request.sandbox_id,
+            reason=request.reason,
+        )
         return Done()
 
     async def route_model(self, request: Routed) -> Route:
@@ -1093,21 +1248,34 @@ class TokenRun:
 
     async def refresh_github_proxy(self, _request: RunRequest) -> GitHubProxyRefreshed:
         cfg = RunConfig.from_config(self.config)
+        # Where MDA may write the sandbox's proxy, a review's narrowing decides that it does
+        # not, as it does for the catalog. Otherwise it keeps the thread's own scope.
+        repositories, permissions = (
+            _run_github_scope(cfg, self.graph.assistant_id)
+            if ENV.MDA_GITHUB_PROXY_CONNECTION.is_set()
+            else (None, None)
+        )
         expires_at = await refresh_thread_github_proxy(
-            self.run.thread_id, workspace_slug=cfg.workspace_slug
+            self.run.thread_id,
+            workspace_slug=cfg.workspace_slug,
+            github_proxy_repositories=repositories,
+            github_proxy_permissions=permissions,
         )
         return GitHubProxyRefreshed(expires_at=expires_at)
 
-    async def git_baseline(self, _request: RunRequest) -> GitBaseline:
-        """The thread's checkouts as the turn starts, snapshotted as the run, which a
-        bridged machine checks."""
-
-        async def begin(_runtime: Runtime) -> dict[str, JsonValue]:
-            return await TurnGitMetadata(self.config).begin()
-
-        with apm_span("agent.git_baseline", {"thread_id": self.run.thread_id}):
-            update = await in_graph_context({**self.config, "run_name": "git_baseline"}, begin)
-        return GitBaseline(update=update)
+    async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
+        """The backend's part of the proxy config MDA writes on the run's sandbox."""
+        cfg = RunConfig.from_config(self.config)
+        managed = await managed_sandbox(self.config, self.graph.assistant_id)
+        if managed is None or managed.github_proxy is None:
+            # The sandbox's capability goes only to a run that writes its proxy config.
+            raise RefusedCallError("The backend writes this thread's sandbox proxy config")
+        config = await mda_proxy_config(
+            managed.thread_id or self.run.thread_id,
+            request.sandbox_id,
+            workspace_slug=cfg.workspace_slug,
+        )
+        return SandboxProxy(config=config)
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
@@ -1123,25 +1291,21 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
-    async def run_ended(self, request: RunEnded) -> AfterAgent:
-        """Record the run's end: its transcript turn and usage, and its git work reconciled."""
+    async def run_ended(self, request: RunEnded) -> Done:
+        """Record the run's end: its transcript turn and its usage."""
+        self._as_invocation(request.invocation_id)
         reporters = self.parts.reporters
 
-        async def ended(state: dict[str, object], runtime: Runtime) -> AfterAgent:
-            result = await run_hooks(reporters, "after_agent", state, runtime)
-            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
-            return AfterAgent(
-                **result.model_dump(exclude={"update"}),
-                update={**result.update, BASELINE: None},
-                trace_metadata=trace_metadata,
-            )
+        async def ended(state: dict[str, object], runtime: Runtime) -> None:
+            await run_hooks(reporters, "after_agent", state, runtime)
 
         try:
-            return await self._reporting(
+            await self._reporting(
                 request, "run_ended", ended, messages=messages_from_dict(request.replies)
             )
         finally:
             self.graph.end(self.run, self.run_id)
+        return Done()
 
     async def step_limit_reached(self, _request: RunRequest) -> Done:
         await self.in_run("step_limit_reached", notify_step_limit)
@@ -1213,13 +1377,25 @@ class RemoteGraph:
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
 
     def config_for(
-        self, run: RemoteRun, run_id: str | None, *, settled: bool = True
+        self,
+        run: RemoteRun,
+        run_id: str | None,
+        *,
+        settled: bool = True,
+        invocation_id: str | None = None,
     ) -> RunnableConfig:
+        """The run's config, as the run ``run_id`` and invocation ``invocation_id`` when
+        given: a report a later run on the thread sends belongs to the run that made it."""
         config = run_config(run, settled=settled)
         configurable = dict(config.get("configurable") or {})
         if run_id:
             # The transcript keys a run's turn by it; never the tracer's run id.
             configurable["run_id"] = run_id
+        if invocation_id is not None and configurable.get("invocation_id") != invocation_id:
+            # Usage keys an invocation by it; when that one started is not this token's.
+            configurable.pop("prepare_run_id", None)
+            configurable.pop("invocation_started_at", None)
+            configurable["invocation_id"] = invocation_id
         return {**config, "configurable": configurable}
 
     async def _planned(self, run: RemoteRun, run_id: str | None, *, fresh: bool) -> RunSession:
@@ -1241,13 +1417,7 @@ class RemoteGraph:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
         tools, catalog = await asyncio.gather(session.tool_set().keep(), session.plan())
-        cfg = RunConfig.from_config(session.config)
-        preparation = (
-            None if self.parts.legacy(cfg) else self.parts.preparation_plan(session.surface)
-        )
-        settings = session.settings().model_copy(
-            update={"tools": tools, "preparation": preparation}
-        )
+        settings = session.settings().model_copy(update={"tools": tools})
         return RunStart(catalog=catalog, settings=settings)
 
     async def session(
@@ -1284,23 +1454,17 @@ class RemoteGraph:
             call = TokenRun(self, run, run_id)
             if not call.legacy:
                 return await TOOL_CALLS.dispatch(endpoint, call, raw)
+        if endpoint == PREPARE.name:
+            call = TokenRun(self, run, run_id)
+            # A run its plan still answers prepares from the plan, whose hooks its loop needs.
+            if not call.legacy:
+                prepared = await call.prepare(Prepare.model_validate(raw))
+                if prepared is not None:
+                    return prepared.model_dump(mode="json")
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
-        if endpoint == PREPARE.name and run.settings.preparation is not None:
-            call = TokenRun(self, run, run_id)
-            if not call.legacy:
-                surface = await self.parts.preparation(call.config, run.settings.preparation)
-                if surface is not None:
-                    session = RunSession(
-                        surface,
-                        call.config,
-                        self.parts.restore,
-                        started_here=True,
-                        assistant_id=self.assistant_id,
-                        run=run,
-                    )
-                    return await API.dispatch(endpoint, session, raw)
-        # Preparation starts the run's session; the end of the run closes it.
+        # The reviewer's and the scout's preparation start the run's session; the end of
+        # the run closes it.
         session = await self.session(run, run_id, fresh=endpoint == PREPARE.name)
         try:
             return await API.dispatch(endpoint, session, raw)
@@ -1487,8 +1651,9 @@ RUN_CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 RUN_CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
-RUN_CALLS.serve(GIT_BASELINE, TokenRun.git_baseline)
+RUN_CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
+RUN_CALLS.serve(RUN_STARTED, TokenRun.run_started)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)

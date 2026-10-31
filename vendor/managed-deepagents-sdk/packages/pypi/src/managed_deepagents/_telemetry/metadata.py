@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING, TypedDict
 import httpx
 
 from managed_deepagents._agent_auth_http import agent_auth_headers, request_agent_auth_json
+from managed_deepagents._langsmith_env import (
+    resolve_platform_injected_api_key,
+    resolve_server_api_key,
+    resolve_tenant_workspace_id,
+)
 from managed_deepagents._telemetry.gates import is_telemetry_disabled
 from managed_deepagents._telemetry.run import RunIdentity
 
@@ -42,6 +47,7 @@ def detect_run_identity(
     caller: RuntimeIdentity | None = None,
     is_run: bool = True,
 ) -> RunIdentity:
+    # ``_connections`` reaches the channel modules, which log through telemetry.
     from managed_deepagents._connections import (  # noqa: PLC0415
         InvalidAgentAuthEndpointError,
         resolve_agent_auth_base_url,
@@ -49,9 +55,7 @@ def detect_run_identity(
 
     global _auth_metadata, _auth_resolved  # noqa: PLW0603 - one lookup per process
     resolved = os.environ if env is None else env
-    workspace = _nonempty(resolved.get("LANGSMITH_TENANT_ID")) or _nonempty(
-        resolved.get("LANGSMITH_WORKSPACE_ID")
-    )
+    workspace = resolve_tenant_workspace_id(resolved)
     origin = None
     with suppress(ValueError, InvalidAgentAuthEndpointError, httpx.InvalidURL):
         origin = str(
@@ -101,10 +105,9 @@ def _lookup_auth(
 ) -> _AuthMetadata | None:
     api_key = (
         _nonempty(env.get("LANGSMITH_CONTROL_PLANE_API_KEY"))
-        or _nonempty(env.get("LANGCHAIN_API_KEY"))
-        or _nonempty(env.get("LANGSMITH_API_KEY"))
+        or resolve_platform_injected_api_key(env)
         if _nonempty(env.get("LANGSMITH_AUTH_ENDPOINT"))
-        else _nonempty(env.get("LANGSMITH_API_KEY")) or _nonempty(env.get("LANGCHAIN_API_KEY"))
+        else resolve_server_api_key(env)
     )
     if not api_key or not origin:
         return None

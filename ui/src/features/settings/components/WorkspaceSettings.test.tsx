@@ -254,6 +254,36 @@ describe("WorkspaceSettingsPanel", () => {
     expect(channel.getAttribute("target")).toBe("_blank")
   })
 
+  it("never exposes channel IDs while names load or cannot be resolved", async () => {
+    mockApis({ ...RECORD, slack_channel_ids: ["C1", "C2"] })
+    let finish!: (directory: { channels: []; refreshing: boolean }) => void
+    vi.mocked(api.listSlackChannels).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    renderPage()
+
+    const channel = await screen.findByRole("link", { name: "Slack channel 1" })
+    expect(channel.textContent).not.toContain("C1")
+    expect(
+      screen.getByRole("link", { name: "Slack channel 2" }).getAttribute("href")
+    ).toContain("C2")
+    const secondKitchen = screen.getByRole("switch", {
+      name: "Kitchen mode for Slack channel 2",
+    })
+    fireEvent.click(secondKitchen)
+    expect(secondKitchen.getAttribute("aria-checked")).toBe("true")
+    expect(
+      screen
+        .getByRole("switch", { name: "Kitchen mode for Slack channel 1" })
+        .getAttribute("aria-checked")
+    ).toBe("false")
+    await act(async () => finish({ channels: [], refreshing: false }))
+    expect(channel.textContent).toBe("Slack channel 1")
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
@@ -313,6 +343,7 @@ describe("WorkspaceSettingsPanel", () => {
     mockApis()
     renderPage(false)
     await screen.findByLabelText("Workspace name")
+    expect(await screen.findByRole("link", { name: "#oss-help" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
 

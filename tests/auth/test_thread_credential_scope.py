@@ -6,9 +6,11 @@ import langgraph_sdk
 import pytest
 
 from openswe import credential_scope
+from openswe.agent_api.connections import ACTING_USER_KEY, carrying, operation_connections
 from openswe.dashboard import profiles
 from openswe.github import thread_token
 from openswe.github import token as auth
+from openswe.github.http import GitHubClient
 
 
 @pytest.fixture
@@ -120,6 +122,54 @@ async def test_public_pr_does_not_fall_back_to_owner_or_bot(
     with pytest.raises(auth.GitHubUserAuthRequired):
         await opr._resolve_pr_author_token()
     bot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("author", "granted_login", "expected"),
+    [
+        (None, "Bob", "granted-token"),
+        ("alice", "bob", "alice-token"),
+        (None, "mallory", "bob-token"),
+    ],
+)
+async def test_the_runs_github_grant_opens_only_its_requesters_own_pr(
+    monkeypatch, thread_metadata, credentials, author, granted_login, expected
+):
+    opr = importlib.import_module("openswe.tools.open_pull_request")
+    monkeypatch.setenv("MDA_GITHUB_USER_CONNECTION", "open-swe-github-test")
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config(login="bob"))
+    thread_metadata["participant_logins"] = ["alice", "bob"]
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    monkeypatch.setattr(GitHubClient, "viewer_login", AsyncMock(return_value=granted_login))
+    with carrying({"open-swe-github-test": "granted-token"}):
+        assert await opr._resolve_pr_author_token(author) == (expected, "user")
+
+
+@pytest.mark.parametrize(
+    ("slug", "metadata", "named"),
+    [
+        ("open-swe-github-test", {ACTING_USER_KEY: "user-1"}, ["open-swe-github-test"]),
+        # A run that acts as no one, such as a background task's completion or a wakeup
+        # attributed to a person, is MDA's channel service on a channel's thread, which
+        # reads no user connections, and elsewhere the backend's own key, one principal
+        # all such runs share.
+        ("open-swe-github-test", {}, []),
+        ("open-swe-github-test", {"user_id": "user-1"}, []),
+        # A setting MDA would refuse leaves the operation as it was without it.
+        ("mda/github-token", {ACTING_USER_KEY: "user-1"}, []),
+        ("Open-Swe-GitHub", {ACTING_USER_KEY: "user-1"}, []),
+    ],
+)
+def test_a_run_names_a_persons_connection_only_when_it_acts_for_one(
+    monkeypatch, slug, metadata, named
+):
+    monkeypatch.setenv("MDA_GITHUB_USER_CONNECTION", slug)
+    monkeypatch.setenv("MDA_EXA_CONNECTION", "open-swe-exa")
+    run = {"configurable": {}, "metadata": metadata}
+
+    assert [ref.slug for ref in operation_connections("open_pull_request", run)] == named
+    assert [ref.slug for ref in operation_connections("web_search", run)] == ["open-swe-exa"]
 
 
 @pytest.mark.asyncio

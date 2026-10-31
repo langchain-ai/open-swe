@@ -36,8 +36,8 @@ def _button_value(action: str, approval: HumanReviewRequest) -> str:
 
 
 def _vote_summary(approval: HumanReviewRequest) -> str:
-    """Approvers are Slack mentions, so none of this is escaped."""
-    return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
+    names = (escape(vote.user.display_name or vote.github_login) for vote in approval.approvals)
+    return f"Approved by {', '.join(names)}."
 
 
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
@@ -168,7 +168,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
         initial=options[0],
     )
     send = button(
-        "Send",
+        "Broadcast",
         action_id="open_swe_option_select_send",
         value=_button_value("send", approval),
     )

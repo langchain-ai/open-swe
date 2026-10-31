@@ -19,6 +19,7 @@ from managed_deepagents._memory.policy import is_slack_direct_message, resolve_u
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import (
+        DeleteResult,
         EditResult,
         FileDownloadResponse,
         FileUploadResponse,
@@ -54,11 +55,7 @@ def can_mount_user_memory(run_config: Mapping[str, object] | None, context: obje
 
 
 class UserMemoryBackend(BackendProtocol):
-    """Bind each backend operation to the active caller's memory repo.
-
-    ``delete`` keeps the inherited ``NotImplementedError`` default; the
-    ``/memories/user/`` mount never deletes memory (see ``MountedPathBackend``).
-    """
+    """Bind each backend operation to the active caller's memory repo."""
 
     def __init__(
         self,
@@ -145,6 +142,12 @@ class UserMemoryBackend(BackendProtocol):
         return await self._backend().aedit(
             file_path, old_string, new_string, replace_all=replace_all
         )
+
+    def delete(self, file_path: str) -> DeleteResult:
+        return self._backend().delete(file_path)
+
+    async def adelete(self, file_path: str) -> DeleteResult:
+        return await self._backend().adelete(file_path)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return self._backend().upload_files(files)

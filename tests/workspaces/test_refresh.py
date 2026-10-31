@@ -3,7 +3,10 @@ import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import text
 
+from openswe.database import transaction
+from openswe.webhooks import event_log
 from openswe.workspaces import refresh
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -28,9 +31,6 @@ def _scripts_run(backend: MagicMock) -> list[str]:
         encoded = str(call.args[0]).split("printf %s ")[1].split(" |")[0].strip("'")
         bodies.append(base64.b64decode(encoded).decode())
     return bodies
-
-
-# --- script command (sync) ---
 
 
 # --- refresh ---
@@ -138,6 +138,60 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
     release.assert_not_awaited()
     assert record is not None
     assert record.refresh_error == "no capacity"
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "capture_error",
+    [None, TimeoutError(), RuntimeError("capture failed with opaque-build-credential")],
+)
+async def test_refresh_history_keeps_outcomes_without_raw_diagnostics(
+    capture_error: Exception | None,
+) -> None:
+    """Historical events must not copy arbitrary credentials from logs or exception messages."""
+    backend = _backend(_Result("Updating repo with opaque-build-credential", 0))
+    with (
+        patch.object(refresh, "_create_builder_sandbox", AsyncMock(return_value=backend)),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock(side_effect=capture_error)),
+        patch.object(event_log, "_ROTATED_AT", None),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
+        )
+        await refresh.refresh_workspace("base")
+        record = await WORKSPACES.get("base")
+
+    assert record is not None
+    status = "failed" if capture_error is not None else "success"
+    expected_error = (str(capture_error) or type(capture_error).__name__) if capture_error else None
+    assert record.refresh_error == expected_error
+    assert record.refresh_log is not None
+    assert "opaque-build-credential" in record.refresh_log
+    async with transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT event_type, payload, workspace_id FROM event_log WHERE source = 'workspace'"
+            )
+        )
+        [(event_type, payload, workspace_id)] = rows.tuples().all()
+    assert event_type == f"refresh.{status}"
+    assert workspace_id == await WORKSPACES.id_for_slug("base")
+    assert "error" not in payload
+    assert "log_tail" not in payload
+    assert "opaque-build-credential" not in str(payload)
+    assert [(step["label"], step["status"]) for step in payload["steps"]] == [
+        ("boot", "success"),
+        ("setup", "success"),
+        ("capture", status),
+    ]
 
 
 @pytest.mark.usefixtures("registry_db")

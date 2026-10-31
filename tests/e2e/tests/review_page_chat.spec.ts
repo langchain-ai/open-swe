@@ -172,7 +172,7 @@ test.describe("review page", () => {
     const title = page
       .locator("h1")
       .filter({ hasText: "Add constant modules" });
-    const menu = title.getByRole("button");
+    const menu = title.getByRole("link", { name: /Add constant modules/ });
     await expect(menu).toContainText("Add constant modules");
     await expect(menu).toContainText(`#${pr.number}`);
     const link = title.getByRole("link", { name: "Open on GitHub" });

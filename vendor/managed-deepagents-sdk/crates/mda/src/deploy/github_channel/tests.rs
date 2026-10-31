@@ -1837,3 +1837,75 @@ fn app_taken_reads_the_conflict_status() {
     assert!(app_taken(&conflict));
     assert!(!app_taken(&invalid));
 }
+
+#[test]
+fn app_status_is_ready_only_once_the_app_is_installed_with_its_values() {
+    let needs = |status: ChannelStatus| matches!(status, ChannelStatus::NeedsSetup(_));
+
+    assert!(needs(app_status(None)));
+    assert!(needs(app_status(Some(&connection(
+        GitHubAppState::Pending,
+        false
+    )))));
+    assert!(needs(app_status(Some(&connection(
+        GitHubAppState::Created,
+        false
+    )))));
+    assert!(needs(app_status(Some(&brought(true)))));
+    assert!(needs(app_status(Some(&AppConnection {
+        bot_id_stored: false,
+        ..connection(GitHubAppState::Created, true)
+    }))));
+    assert_eq!(
+        app_status(Some(&connection(GitHubAppState::Created, true))),
+        ChannelStatus::Ready
+    );
+    // Agent Auth keeps the webhook secret of an App it created.
+    assert_eq!(
+        app_status(Some(&AppConnection {
+            webhook_secret_stored: false,
+            ..connection(GitHubAppState::Created, true)
+        })),
+        ChannelStatus::Ready
+    );
+}
+
+#[test]
+fn installation_status_needs_an_installation_that_is_not_suspended() {
+    let synced = |status: GitHubChannelStatus| GitHubSyncOutcome::Synced(Box::new(status));
+    let mut suspended = status(true);
+    suspended.installations[0].suspended_at = Some("2026-10-01T00:00:00Z".to_string());
+
+    assert_eq!(
+        installation_status(synced(status(true))).unwrap(),
+        ChannelStatus::Ready
+    );
+    assert_eq!(
+        installation_status(synced(suspended)).unwrap(),
+        ChannelStatus::NeedsSetup(
+            "The installation of GitHub App acme-triage on acme is suspended, so it receives no events. An owner unsuspends it in the installation's settings on GitHub.".to_string()
+        )
+    );
+    assert_eq!(
+        installation_status(synced(status(false))).unwrap(),
+        ChannelStatus::NeedsSetup("GitHub App acme-triage is not installed.".to_string())
+    );
+    assert!(matches!(
+        installation_status(GitHubSyncOutcome::InvalidCredentials).unwrap(),
+        ChannelStatus::NeedsSetup(_)
+    ));
+    assert!(installation_status(GitHubSyncOutcome::Unavailable("timeout".into())).is_err());
+}
+
+#[test]
+fn app_held_elsewhere_names_the_app_the_holder_and_how_to_move_it() {
+    let message = app_held_elsewhere("123456", DEPLOYMENT);
+
+    assert!(message.contains("GitHub App 123456"), "{message}");
+    assert!(message.contains(DEPLOYMENT), "{message}");
+    assert!(
+        message.contains("`mda channels setup github` or `mda deploy` in a terminal"),
+        "{message}"
+    );
+    assert!(message.contains("use another GitHub App"), "{message}");
+}

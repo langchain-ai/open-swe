@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "managed-deepagents"
-version = "0.9.5"
+version = "0.10.0"
 description = "Managed Deep Agents — the define_deep_agent authoring interface plus the CLI that compiles and deploys a code-first Deep Agent repository to a managed LangGraph runtime."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -142,7 +142,7 @@ lint = [
     "ruff>=0.16.7,<0.18.0",
 ]
 typing = [
-    "ty>=0.0.80,<0.0.88",
+    "ty>=0.0.80,<0.0.91",
     "basedpyright>=1.40.1,<2.0.0",
     "langchain[mcp]>=1.4.6,<2",
     "fastmcp>=4.0.10,<5",
@@ -150,6 +150,10 @@ typing = [
     # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
     "stagehand-middleware==0.1.0",
+    # The browser's `record` tool runs its recorder in the browser's sandbox and installs
+    # these there (browser._RECORDER_PACKAGES); here they type-check and test it.
+    "av>=15,<20",
+    "pillow>=11",
 ]
 
 # Dead-code pass. ``ruff`` (F841/F401) catches unused variables and imports and

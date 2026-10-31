@@ -12,6 +12,8 @@ const { randomUUID } = require("node:crypto");
  */
 
 const BRIDGE_ID = /^[0-9a-f]{32}$/;
+const THREAD_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -61,6 +63,7 @@ function normalizeThread(value) {
   return {
     id: value.id,
     cwd: path.normalize(value.cwd),
+    managedTaskFolder: value.managedTaskFolder === true,
     worktreePath:
       worktreePath && path.isAbsolute(worktreePath)
         ? path.normalize(worktreePath)
@@ -130,14 +133,53 @@ class LocalThreadStore {
     return thread ? structuredClone(thread) : null;
   }
 
+  createTask(id) {
+    if (typeof id !== "string" || !THREAD_ID.test(id) || this.threads.has(id))
+      throw new Error("Invalid task thread id");
+    const root = path.join(path.dirname(this.filePath), "tasks");
+    this.fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    const canonicalRoot = path.join(
+      this.fs.realpathSync(path.dirname(this.filePath)),
+      "tasks",
+    );
+    if (this.fs.realpathSync(root) !== canonicalRoot)
+      throw new Error("Task folder root must not be a symbolic link");
+    const cwd = path.join(canonicalRoot, id);
+    this.fs.mkdirSync(cwd, { mode: 0o700 });
+    return this.create({ id, cwd, managedTaskFolder: true });
+  }
+
+  taskRoot(thread) {
+    if (!thread?.managedTaskFolder || !THREAD_ID.test(thread.id)) return null;
+    try {
+      const root = this.fs.realpathSync(
+        path.join(path.dirname(this.filePath), "tasks"),
+      );
+      if (
+        root !==
+        path.join(this.fs.realpathSync(path.dirname(this.filePath)), "tasks")
+      )
+        return null;
+      const expected = path.join(root, thread.id);
+      return thread.cwd === expected &&
+        this.fs.realpathSync(expected) === expected &&
+        this.fs.statSync(expected).isDirectory()
+        ? expected
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Record a thread the renderer is about to create in the cloud under `id`. */
-  create({ id, cwd }) {
+  create({ id, cwd, managedTaskFolder = false }) {
     if (typeof id !== "string" || !id || this.threads.has(id))
       throw new Error("Invalid local thread id");
     const now = this.now();
     this.threads.set(id, {
       id,
       cwd,
+      managedTaskFolder,
       worktreePath: null,
       ownedWorktrees: [],
       bridgeId: null,

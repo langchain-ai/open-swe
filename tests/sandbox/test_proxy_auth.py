@@ -165,7 +165,7 @@ class TestConfigureSandboxProxy:
     async def test_outlasts_a_host_suspend_within_the_retry_window(
         self, suspend_seconds: float
     ) -> None:
-        """While the host suspends an idle box the API fails the push with a 500."""
+        """While the host suspends an idle sandbox the API fails the push with a 500."""
         request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
@@ -269,10 +269,29 @@ class TestRefreshProxyOnSandboxReuse:
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
 
+    @pytest.mark.asyncio
+    async def test_a_sandbox_mda_writes_the_proxy_of_fails_unreachable_when_it_cannot_be_reached(
+        self,
+    ) -> None:
+        """Writing the git identity is all that reaches such a sandbox, so its failure is the
+        unreachable error the run's callers notify on, not the sandbox client's own."""
+        from openswe.sandboxes.lifecycle import SandboxUnreachableError, _connect_existing_sandbox
+
+        dead = MagicMock(id="sandbox-stale", aexecute=AsyncMock(side_effect=RuntimeError("gone")))
+
+        with pytest.raises(SandboxUnreachableError) as excinfo:
+            await _connect_existing_sandbox(
+                "thread-123", cached=dead, sandbox_id="sandbox-stale", mda_writes_proxy=True
+            )
+
+        assert excinfo.value.sandbox_id == "sandbox-stale"
+
 
 class TestRefreshThreadGithubProxy:
-    async def test_a_replica_that_never_connected_still_gives_the_box_a_fresh_token(self) -> None:
-        """Nothing is read from this process: the box and its rules come from the thread."""
+    async def test_a_replica_that_never_connected_still_gives_the_sandbox_a_fresh_token(
+        self,
+    ) -> None:
+        """Nothing is read from this process: the sandbox and its rules come from the thread."""
         proxy_config = {"rules": [{"name": "public-api"}]}
         metadata = {"sandbox_id": "sandbox-abc", SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config}
         with (
@@ -306,3 +325,71 @@ class TestRefreshThreadGithubProxy:
         )
         assert expires_at is not None
         assert expires_at.isoformat() == "2026-10-27T20:00:00+00:00"
+
+
+_TAG = "00000000-0000-0000-0000-000000000001"
+# The cloud identity rule of the workspace a replacement asked for.
+_AWS_RULE = {
+    "name": "aws",
+    "type": "aws",
+    "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly", "subject_scope": f"tag:{_TAG}"},
+}
+# The egress rule of the workspace the thread's sandbox was last bound in.
+_RECORDED_RULE = {"name": "mine-egress", "match_hosts": ["internal.mine.invalid"]}
+_REPLACEMENT = {"workspace": "other", "source": "workspace"}
+
+
+class TestMdaProxyConfig:
+    @pytest.mark.parametrize(
+        ("metadata", "expected"),
+        [
+            # Before binding records the replacement's rules.
+            ({"sandbox_replacement": _REPLACEMENT}, _AWS_RULE),
+            # A replacement whose create failed after the old sandbox was renamed: the next
+            # run creates the sandbox from the record, so the old sandbox's recorded rules are stale.
+            (
+                {
+                    "sandbox_replacement": _REPLACEMENT,
+                    SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
+                },
+                _AWS_RULE,
+            ),
+            # With no replacement pending, the rules recorded for the bound sandbox.
+            ({SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]}}, _RECORDED_RULE),
+        ],
+    )
+    async def test_the_backends_part_keeps_the_cloud_identity_the_sandbox_was_created_with(
+        self, metadata: dict[str, object], expected: dict[str, object]
+    ) -> None:
+        """MDA writes the whole proxy config of its sandbox, so the backend's part must carry the
+        workspace's cloud identity rule, the one the sandbox was created with: that of the
+        replacement ``recreate_sandbox`` asked for until the backend reconnects to it, never
+        the old sandbox's."""
+        from openswe.sandboxes.lifecycle import mda_proxy_config
+        from openswe.workspaces.store import Workspace
+
+        other = Workspace(
+            slug="other",
+            create_params={"proxy_config": {"rules": [_AWS_RULE]}, "tag_value_ids": [_TAG]},
+        )
+        tools_rule = {"name": "open-swe-thread-tools", "match_hosts": ["backend.invalid"]}
+        with (
+            patch(
+                "openswe.sandboxes.lifecycle.get_sandbox_metadata",
+                new_callable=AsyncMock,
+                return_value=metadata,
+            ),
+            patch(
+                "openswe.sandboxes.lifecycle.load_workspace",
+                new_callable=AsyncMock,
+                side_effect=lambda slug: other if slug == "other" else None,
+            ),
+            patch(
+                "openswe.sandboxes.tool_access.tool_proxy_rule",
+                new_callable=AsyncMock,
+                return_value=tools_rule,
+            ),
+        ):
+            config = await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="mine")
+
+        assert config["rules"] == [tools_rule, expected]
